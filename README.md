@@ -83,6 +83,7 @@ A formatted preview, spell checking, and export are not included yet.
 ```sh
 bin/build     # Build into build/parch
 bin/test      # Run the tests without opening a window
+bin/fetch-helpers  # Fetch the pinned math and diagram helpers into build/helpers
 ```
 
 See the [full guide](docs/guide.md) for every shortcut and for how saving,

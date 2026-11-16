@@ -32,6 +32,11 @@
 #include "recentfiles.h"
 #include "recovery.h"
 #include "references.h"
+#include "diagramrender.h"
+#include "mathrender.h"
+#include "rendercache.h"
+#include "renderservice.h"
+#include "rendertesting.h"
 #include "session.h"
 #include "settings.h"
 #include "sourceboundaries.h"
@@ -92,6 +97,11 @@
 #include <QTimeZone>
 #include <QtEndian>
 #include <QtTest>
+#include <QBuffer>
+#include <QImageReader>
+#include <QPainter>
+#include <QPdfWriter>
+#include <QSvgRenderer>
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -699,6 +709,32 @@ private slots:
     void windowDropsCopyAndAsk();
     void missingTargetsAreListed();
     void checkLinksShowsWhatIsMissing();
+    // Math and diagram helpers, with stand-ins.
+    void helpersAreFoundWhereTheyAreInstalled();
+    void helpersRunWithoutNetworkEnvironmentOrHome();
+    void helperThatRunsTooLongIsStopped();
+    void helperThatWritesTooMuchIsStopped();
+    void cancelledRenderStopsItsHelper();
+    void noMoreThanTwoHelpersRunAtOnce();
+    void sameRenderIsDrawnOnce();
+    void renderCacheKeysOnColourScaleAndHelper();
+    void renderCacheLetsTheLeastRecentlyUsedGo();
+    void supersededRendersAreNeverDelivered();
+    void helperErrorsBecomeDiagnostics();
+    void formulasReachTheHelperAsOneLine();
+    void formulaBaselineComesFromTheRuledPicture();
+    void diagramDescriptionsComeFromTheirWords();
+    void diagramThemeFollowsThePalette();
+    void diagramFontsStayWithinMermansLimits();
+    // Math and diagram helpers, the real ones, when bin/fetch-helpers has run.
+    void everyMathFixtureDrawsWithRaTeX();
+    void inlineMathSitsOnTheBaseline();
+    void unicodeInsideFormulasIsMeasured();
+    void everyMermaidFamilyDrawsWithMerman();
+    void diagramColoursFollowLightAndDarkThemes();
+    void diagramsDescribeThemselves();
+    void diagramPrintRouteIsReported();
+    void helperTimeAndMemoryAreReported();
 };
 
 void ParchTests::initMain()
@@ -19617,6 +19653,1251 @@ void ParchTests::checkLinksShowsWhatIsMissing()
     QTRY_VERIFY(dialog->property("opened").toBool());
     QTRY_COMPARE(dialog->property("summary").toString(),
                  QStringLiteral("All 2 local links and images lead to files that are there."));
+}
+
+namespace {
+
+// Run lines in a stand-in's log: each "start" line is one helper run.
+int helperStarts(const QString &log)
+{
+    return int(QString::fromUtf8(readFile(log)).split(u'\n').filter(QRegularExpression(QStringLiteral("^start "))).size());
+}
+
+bool processGone(qint64 pid)
+{
+    if (pid <= 0) return true;
+    if (::kill(pid_t(pid), 0) != 0) return true;
+    // A zombie waiting for its reaper is gone too.
+    const QByteArray status = readFile(QStringLiteral("/proc/%1/stat").arg(pid));
+    const qsizetype close = status.lastIndexOf(')');
+    return close > 0 && status.mid(close + 2, 1) == "Z";
+}
+
+RenderColors darkColors()
+{
+    RenderColors colors;
+    colors.dark = true;
+    colors.background = QColor("#1a1b26");
+    colors.foreground = QColor("#c0caf5");
+    colors.accent = QColor("#7aa2f7");
+    colors.muted = QColor("#565f89");
+    colors.surface = QColor("#24283b");
+    colors.series = {QColor("#7aa2f7"), QColor("#9ece6a"), QColor("#e0af68"), QColor("#f7768e"),
+                     QColor("#bb9af7"), QColor("#7dcfff"), QColor("#ff9e64"), QColor("#73daca")};
+    return colors;
+}
+
+RenderColors lightColors()
+{
+    RenderColors colors;
+    colors.dark = false;
+    colors.background = QColor("#f8f1e3");
+    colors.foreground = QColor("#342b27");
+    colors.accent = QColor("#a7353a");
+    colors.muted = QColor("#9a8c7e");
+    colors.surface = QColor("#ede3d1");
+    colors.series = {QColor("#a7353a"), QColor("#4f7a28"), QColor("#a8741a"), QColor("#2f5f8a"),
+                     QColor("#7a4f8a"), QColor("#2a7a7a"), QColor("#b0582a"), QColor("#5a6b2a")};
+    return colors;
+}
+
+#define REQUIRE_REAL_HELPERS(helpers)                                                                                  \
+    do {                                                                                                               \
+        if ((helpers).ratex.isEmpty())                                                                                 \
+            QSKIP("The real math and diagram helpers are not in build/helpers: run bin/fetch-helpers to test them");  \
+    } while (false)
+
+// Draws an SVG at the scale given onto a transparent image.
+QImage drawSvg(const QByteArray &svg, qreal scale)
+{
+    QSvgRenderer renderer(svg);
+    const QSize size = (QSizeF(renderer.defaultSize()) * scale).toSize().expandedTo(QSize(1, 1));
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    renderer.render(&painter, QRectF(QPointF(0, 0), QSizeF(size)));
+    painter.end();
+    return image;
+}
+
+// Whether any pixel in the rectangle has ink.
+bool inked(const QImage &image, const QRect &area)
+{
+    const QRect inside = area.intersected(image.rect());
+    for (int y = inside.top(); y <= inside.bottom(); ++y)
+        for (int x = inside.left(); x <= inside.right(); ++x)
+            if (qAlpha(image.pixel(x, y)) > 40) return true;
+    return false;
+}
+
+// The share of 4 × 4 pixel cells in which two images of one size differ
+// clearly, which overlooks differences in anti-aliasing.
+double differingShare(const QImage &one, const QImage &two)
+{
+    const QImage a = one.convertToFormat(QImage::Format_ARGB32), b = two.convertToFormat(QImage::Format_ARGB32);
+    if (a.size() != b.size()) return 1;
+    const int cell = 4;
+    int cells = 0, differing = 0;
+    for (int y = 0; y + cell <= a.height(); y += cell)
+        for (int x = 0; x + cell <= a.width(); x += cell) {
+            int sum = 0;
+            for (int dy = 0; dy < cell; ++dy)
+                for (int dx = 0; dx < cell; ++dx) {
+                    const QRgb p = a.pixel(x + dx, y + dy), q = b.pixel(x + dx, y + dy);
+                    sum += std::abs(qRed(p) - qRed(q)) + std::abs(qGreen(p) - qGreen(q)) + std::abs(qBlue(p) - qBlue(q));
+                }
+            ++cells;
+            differing += sum > 24 * 3 * cell * cell;
+        }
+    return cells ? double(differing) / cells : 0;
+}
+
+// Runs one helper run to its end, as the service would.
+HelperOutcome runHelper(const HelperRun &run, const QString &temporary)
+{
+    HelperProcess process(run, RenderLimits{}, temporary);
+    HelperOutcome outcome;
+    bool done = false;
+    QObject::connect(&process, &HelperProcess::finished, &process, [&](const HelperOutcome &result) {
+        outcome = result;
+        done = true;
+    });
+    process.start();
+    (void)QTest::qWaitFor([&] { return done; }, QDeadlineTimer(30000));
+    return outcome;
+}
+
+} // namespace
+
+void ParchTests::helpersAreFoundWhereTheyAreInstalled()
+{
+    const QByteArray chosen = qgetenv("PARCH_HELPERS");
+    const auto restore = qScopeGuard([chosen] {
+        if (chosen.isNull())
+            qunsetenv("PARCH_HELPERS");
+        else
+            qputenv("PARCH_HELPERS", chosen);
+    });
+    qunsetenv("PARCH_HELPERS");
+    const QString arch = HelperSet::architecture();
+    QVERIFY(arch == QLatin1String("aarch64") || arch == QLatin1String("x86_64"));
+    // Beside the executable, then the package's folder, then a development build's.
+    const QString application = QCoreApplication::applicationDirPath();
+    QCOMPARE(HelperSet::searchFolders(),
+             (QStringList{application, QStringLiteral("/usr/lib/parch"),
+                          QDir::cleanPath(application + QStringLiteral("/helpers/") + arch),
+                          QDir::cleanPath(application + QStringLiteral("/../helpers/") + arch)}));
+    // PARCH_HELPERS takes the place of all of them.
+    QTemporaryDir folder;
+    writeFakeHelpers(folder.path(), folder.filePath(QStringLiteral("log")));
+    qputenv("PARCH_HELPERS", QFile::encodeName(folder.path()));
+    QCOMPARE(HelperSet::searchFolders(), QStringList{folder.path()});
+    const HelperSet found = HelperSet::find();
+    QCOMPARE(found.ratex, folder.filePath(QStringLiteral("render-svg")));
+    QCOMPARE(found.merman, folder.filePath(QStringLiteral("merman-cli")));
+    // A file that cannot be run is not a helper.
+    QVERIFY(QFile::setPermissions(found.merman, QFile::ReadOwner | QFile::WriteOwner));
+    QCOMPARE(HelperSet::find().merman, QString());
+    // A service finds them itself unless told where they are.
+    RenderService::Options options;
+    options.diskCache = false;
+    options.temporaryFolder = folder.filePath(QStringLiteral("tmp"));
+    RenderService service(options);
+    QCOMPARE(service.helpers().ratex, found.ratex);
+    RenderResults results(service);
+    RenderRequest request;
+    request.source = QStringLiteral("found");
+    const quint64 ticket = service.render(request);
+    QVERIFY(results.wait(ticket));
+    QCOMPARE(results[ticket].status, RenderResult::Rendered);
+    QVERIFY(!QDir(RenderCache::standardFolder()).exists() || QDir(RenderCache::standardFolder()).isEmpty());
+}
+
+void ParchTests::helpersRunWithoutNetworkEnvironmentOrHome()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    RenderResults results(service);
+    RenderRequest request;
+    request.source = QStringLiteral("environ");
+    const quint64 ticket = service.render(request);
+    QVERIFY(results.wait(ticket));
+    QCOMPARE(results[ticket].status, RenderResult::Rendered);
+    // Nothing of parch's own environment reaches the helper: only a home of
+    // its own, a temporary folder inside it, and a UTF-8 locale.
+    QHash<QString, QString> environment;
+    for (const QString &line : QString::fromUtf8(readFile(log + QStringLiteral(".environ"))).split(u'\n', Qt::SkipEmptyParts))
+        environment.insert(line.section(u'=', 0, 0), line.section(u'=', 1));
+    QStringList names = environment.keys();
+    names.sort();
+    QCOMPARE(names, (QStringList{QStringLiteral("HOME"), QStringLiteral("LANG"), QStringLiteral("TMPDIR")}));
+    const QString home = environment.value(QStringLiteral("HOME"));
+    QVERIFY2(home.startsWith(folder.filePath(QStringLiteral("tmp/parch-helper-"))), qPrintable(home));
+    QCOMPARE(environment.value(QStringLiteral("TMPDIR")), home + QStringLiteral("/tmp"));
+    QCOMPARE(environment.value(QStringLiteral("LANG")), QStringLiteral("C.UTF-8"));
+    QCOMPARE(QString::fromUtf8(readFile(log + QStringLiteral(".folder"))).trimmed(), home);
+    // The home goes with the helper.
+    QVERIFY(!QFileInfo::exists(home));
+    QVERIFY(QDir(folder.filePath(QStringLiteral("tmp"))).isEmpty());
+    if (!results[ticket].networkIsolated)
+        QSKIP("This kernel gives no unprivileged network namespace, so helpers run with the network");
+    // In a network namespace of its own the helper has a loopback device and nothing else.
+    QStringList devices;
+    for (const QString &line : QString::fromUtf8(readFile(log + QStringLiteral(".net"))).split(u'\n', Qt::SkipEmptyParts))
+        if (line.contains(u':')) devices << line.section(u':', 0, 0).trimmed();
+    QCOMPARE(devices, QStringList{QStringLiteral("lo")});
+}
+
+void ParchTests::helperThatRunsTooLongIsStopped()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService::Options options = renderOptions(HelperSet::in(folder.path()), folder.path());
+    options.limits.timeoutMs = 500;
+    RenderService service(options);
+    RenderResults results(service);
+    RenderRequest request;
+    request.source = QStringLiteral("sleep");
+    QElapsedTimer clock;
+    clock.start();
+    const quint64 ticket = service.render(request);
+    QVERIFY(results.wait(ticket));
+    QVERIFY2(clock.elapsed() < 5000, qPrintable(QString::number(clock.elapsed())));
+    const RenderResult result = results[ticket];
+    QCOMPARE(result.status, RenderResult::Failed);
+    QVERIFY2(result.diagnostic.contains(QStringLiteral("took longer than 0.5 seconds")), qPrintable(result.diagnostic));
+    QCOMPARE(result.description, QStringLiteral("sleep"));
+    // What the helper started went with it.
+    const qint64 child = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
+    QVERIFY(child > 0);
+    QTRY_VERIFY(processGone(child));
+    // A timeout may not happen again, so it is not kept.
+    const quint64 again = service.render(request);
+    QVERIFY(results.wait(again));
+    QVERIFY(!results[again].cached);
+    QCOMPARE(helperStarts(log), 2);
+}
+
+void ParchTests::helperThatWritesTooMuchIsStopped()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService::Options options = renderOptions(HelperSet::in(folder.path()), folder.path());
+    options.limits.maxOutputBytes = 64 * 1024;
+    RenderService service(options);
+    RenderResults results(service);
+    RenderRequest request;
+    request.source = QStringLiteral("flood");
+    const quint64 ticket = service.render(request);
+    QVERIFY(results.wait(ticket));
+    const RenderResult result = results[ticket];
+    QCOMPARE(result.status, RenderResult::Failed);
+    QVERIFY2(result.diagnostic.contains(QStringLiteral("wrote more than 64 KiB")), qPrintable(result.diagnostic));
+    QVERIFY(result.data.isEmpty());
+}
+
+void ParchTests::cancelledRenderStopsItsHelper()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    RenderResults results(service);
+    RenderRequest request;
+    request.source = QStringLiteral("sleep");
+    const quint64 ticket = service.render(request);
+    QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+    const qint64 child = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
+    const qint64 helper = QString::fromUtf8(readFile(log)).section(u'\n', 0, 0).section(u' ', 1).toLongLong();
+    QVERIFY(child > 0 && helper > 0);
+    service.cancel(ticket);
+    QTRY_VERIFY(processGone(helper));
+    QTRY_VERIFY(processGone(child));
+    QTest::qWait(200);
+    QVERIFY(!results.has(ticket));
+    QTRY_COMPARE(service.statistics().cancelled, 1);
+    // The service is free for the next one.
+    request.source = QStringLiteral("after");
+    const quint64 next = service.render(request);
+    QVERIFY(results.wait(next));
+    QCOMPARE(results[next].status, RenderResult::Rendered);
+
+    // A service that goes away takes its helpers with it.
+    QVERIFY(QFile::remove(log + QStringLiteral(".child")));
+    qint64 orphan = 0, leader = 0;
+    {
+        RenderService closing(renderOptions(HelperSet::in(folder.path()), folder.path()));
+        request.source = QStringLiteral("sleep again");
+        closing.render(request);
+        QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+        orphan = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
+        leader = QString::fromUtf8(readFile(log)).split(u'\n', Qt::SkipEmptyParts).last().section(u' ', 1).toLongLong();
+        QVERIFY(orphan > 0 && leader > 0);
+    }
+    QVERIFY(processGone(leader));
+    QTRY_VERIFY(processGone(orphan));
+    QVERIFY(QDir(folder.filePath(QStringLiteral("tmp"))).isEmpty());
+}
+
+void ParchTests::noMoreThanTwoHelpersRunAtOnce()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    RenderResults results(service);
+    QList<quint64> tickets;
+    for (int i = 0; i < 5; ++i) {
+        RenderRequest request;
+        request.source = QStringLiteral("slow %1").arg(i);
+        tickets << service.render(request);
+    }
+    for (const quint64 ticket : std::as_const(tickets)) {
+        QVERIFY(results.wait(ticket));
+        QCOMPARE(results[ticket].status, RenderResult::Rendered);
+    }
+    QCOMPARE(service.statistics().helperRuns, 5);
+    QCOMPARE(service.statistics().mostAtOnce, 2);
+    // The helpers' own record agrees.
+    int running = 0, most = 0;
+    for (const QString &line : QString::fromUtf8(readFile(log)).split(u'\n', Qt::SkipEmptyParts)) {
+        running += line.startsWith(QLatin1String("start")) ? 1 : line.startsWith(QLatin1String("end")) ? -1 : 0;
+        most = std::max(most, running);
+    }
+    QCOMPARE(most, 2);
+}
+
+void ParchTests::sameRenderIsDrawnOnce()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    const RenderService::Options options = renderOptions(HelperSet::in(folder.path()), folder.path());
+    RenderRequest request;
+    request.source = QStringLiteral("x+y");
+    {
+        RenderService service(options);
+        RenderResults results(service);
+        const quint64 first = service.render(request);
+        QVERIFY(results.wait(first));
+        QVERIFY(!results[first].cached);
+        const quint64 second = service.render(request);
+        QVERIFY(results.wait(second));
+        QVERIFY(results[second].cached);
+        QCOMPARE(results[second].data, results[first].data);
+        QCOMPARE(results[second].baseline, results[first].baseline);
+        QCOMPARE(service.statistics().memoryHits, 1);
+        QCOMPARE(helperStarts(log), 1);
+        // Two asking at once wait for one drawing.
+        RenderRequest slow;
+        slow.source = QStringLiteral("slow twice");
+        const quint64 one = service.render(slow), two = service.render(slow);
+        QVERIFY(results.wait(one));
+        QVERIFY(results.wait(two));
+        QCOMPARE(results[one].data, results[two].data);
+        QCOMPARE(service.statistics().joined, 1);
+        QCOMPARE(helperStarts(log), 2);
+    }
+    // The next session finds it on disk.
+    RenderService later(options);
+    RenderResults results(later);
+    const quint64 ticket = later.render(request);
+    QVERIFY(results.wait(ticket));
+    QVERIFY(results[ticket].cached);
+    QCOMPARE(results[ticket].status, RenderResult::Rendered);
+    QCOMPARE(results[ticket].baseline, 14.0);
+    QCOMPARE(later.statistics().diskHits, 1);
+    QCOMPARE(helperStarts(log), 2);
+}
+
+void ParchTests::renderCacheKeysOnColourScaleAndHelper()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    RenderResults results(service);
+    auto draw = [&](const RenderRequest &request) {
+        const quint64 ticket = service.render(request);
+        return results.wait(ticket) ? results[ticket] : RenderResult{};
+    };
+    RenderRequest math;
+    math.source = QStringLiteral("a+b");
+    QVERIFY(!draw(math).cached);
+    QVERIFY(draw(math).cached);
+    QCOMPARE(helperStarts(log), 1);
+    RenderRequest recoloured = math;
+    recoloured.colors.foreground = QColor("#342b27");
+    QVERIFY(!draw(recoloured).cached);
+    RenderRequest larger = math;
+    larger.fontSize = 24;
+    QVERIFY(!draw(larger).cached);
+    // A formula is drawn as vectors, so another pixel density draws nothing new.
+    RenderRequest denser = math;
+    denser.scale = 2;
+    QVERIFY(draw(denser).cached);
+    QCOMPARE(helperStarts(log), 3);
+    // A diagram is drawn in pixels: two runs each, again for another scale.
+    RenderRequest diagram;
+    diagram.kind = RenderKind::Diagram;
+    diagram.source = QStringLiteral("flowchart LR\n A --> B");
+    QVERIFY(draw(diagram).ok());
+    QCOMPARE(helperStarts(log), 5);
+    RenderRequest doubled = diagram;
+    doubled.scale = 2;
+    QVERIFY(!draw(doubled).cached);
+    QVERIFY(draw(doubled).cached);
+    QCOMPARE(helperStarts(log), 7);
+    QVERIFY(QString::fromUtf8(readFile(log)).contains(QStringLiteral("run png 2\n")));
+    RenderRequest themed = doubled;
+    themed.colors = lightColors();
+    QVERIFY(!draw(themed).cached);
+    QCOMPARE(helperStarts(log), 9);
+    RenderRequest printed = diagram;
+    printed.purpose = RenderPurpose::Print;
+    QVERIFY(!draw(printed).cached);
+    QVERIFY(QString::fromUtf8(readFile(log)).contains(QStringLiteral("run png 4\n")));
+    QCOMPARE(helperStarts(log), 11);
+    // Another helper, even one by the same name, draws everything again.
+    QFile helper(folder.filePath(QStringLiteral("render-svg")));
+    QVERIFY(helper.open(QIODevice::Append));
+    helper.write("# another version\n");
+    helper.close();
+    QVERIFY(!draw(math).cached);
+    QCOMPARE(helperStarts(log), 12);
+}
+
+void ParchTests::renderCacheLetsTheLeastRecentlyUsedGo()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService::Options options = renderOptions(HelperSet::in(folder.path()), folder.path());
+    // Nothing kept in memory, so that every repeat is read from disk.
+    options.limits.memoryCacheBytes = 0;
+    const QString cache = options.cacheFolder;
+    auto entries = [&cache] {
+        return QDir(cache).entryInfoList({QStringLiteral("*.render")}, QDir::Files);
+    };
+    qint64 entry = 0;
+    {
+        RenderService measuring(options);
+        RenderResults results(measuring);
+        RenderRequest request;
+        request.source = QStringLiteral("size0");
+        QVERIFY(results.wait(measuring.render(request)));
+        QCOMPARE(entries().size(), 1);
+        entry = entries().first().size();
+        QVERIFY(QFile::remove(entries().first().filePath()));
+    }
+    // Room for two entries of that size and not three.
+    options.limits.diskCacheBytes = entry * 5 / 2;
+    RenderService service(options);
+    RenderResults results(service);
+    auto draw = [&](const QString &source) {
+        RenderRequest request;
+        request.source = source;
+        const quint64 ticket = service.render(request);
+        return results.wait(ticket) ? results[ticket] : RenderResult{};
+    };
+    QVERIFY(!draw(QStringLiteral("size1")).cached);
+    QVERIFY(!draw(QStringLiteral("size2")).cached);
+    QCOMPARE(entries().size(), 2);
+    // Used again, so the other one is now the least recently used.
+    QVERIFY(draw(QStringLiteral("size1")).cached);
+    QVERIFY(!draw(QStringLiteral("size3")).cached);
+    QCOMPARE(entries().size(), 2);
+    QCOMPARE(service.statistics().evictions, 1);
+    const int runs = helperStarts(log);
+    QVERIFY(draw(QStringLiteral("size1")).cached);
+    QVERIFY(draw(QStringLiteral("size3")).cached);
+    QCOMPARE(helperStarts(log), runs);
+    QVERIFY(!draw(QStringLiteral("size2")).cached);
+    QCOMPARE(helperStarts(log), runs + 1);
+}
+
+void ParchTests::supersededRendersAreNeverDelivered()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    RenderResults results(service);
+    RenderRequest old;
+    old.source = QStringLiteral("sleep old");
+    const quint64 stale = service.render(old, QStringLiteral("block-7"));
+    QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+    const qint64 child = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
+    RenderRequest current;
+    current.source = QStringLiteral("new");
+    const quint64 fresh = service.render(current, QStringLiteral("block-7"));
+    QVERIFY(results.wait(fresh));
+    QCOMPARE(results[fresh].status, RenderResult::Rendered);
+    // The older helper was stopped, not waited for.
+    QTRY_VERIFY(processGone(child));
+    // A result already on its way when its slot is taken is dropped too.
+    RenderRequest quick;
+    quick.source = QStringLiteral("quick");
+    const quint64 overtaken = service.render(quick, QStringLiteral("block-8"));
+    current.source = QStringLiteral("quicker");
+    const quint64 winner = service.render(current, QStringLiteral("block-8"));
+    QVERIFY(results.wait(winner));
+    QTest::qWait(300);
+    QVERIFY(!results.has(stale));
+    QVERIFY(!results.has(overtaken));
+    // Other slots are left alone.
+    const quint64 one = service.render(quick, QStringLiteral("block-9"));
+    const quint64 two = service.render(current, QStringLiteral("block-10"));
+    QVERIFY(results.wait(one));
+    QVERIFY(results.wait(two));
+}
+
+void ParchTests::helperErrorsBecomeDiagnostics()
+{
+    QTemporaryDir folder;
+    const QString log = folder.filePath(QStringLiteral("log"));
+    writeFakeHelpers(folder.path(), log);
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    RenderResults results(service);
+    auto draw = [&](RenderService &on, RenderResults &into, const RenderRequest &request) {
+        const quint64 ticket = on.render(request);
+        return into.wait(ticket) ? into[ticket] : RenderResult{};
+    };
+    RenderRequest math;
+    math.source = QStringLiteral("refuse \\frac{");
+    RenderResult result = draw(service, results, math);
+    QCOMPARE(result.status, RenderResult::Refused);
+    QCOMPARE(result.diagnostic, QStringLiteral("Parse error: fake refusal of refuse \\frac{"));
+    // The source stays, as the description.
+    QCOMPARE(result.description, math.source);
+    QVERIFY(result.data.isEmpty());
+    // The same refusal is not asked for twice.
+    QVERIFY(draw(service, results, math).cached);
+
+    RenderRequest diagram;
+    diagram.kind = RenderKind::Diagram;
+    diagram.source = QStringLiteral("refuse flowchart");
+    result = draw(service, results, diagram);
+    QCOMPARE(result.status, RenderResult::Refused);
+    QCOMPARE(result.diagnostic, QStringLiteral("Diagram parse error (flowchart-v2): fake refusal"));
+    QCOMPARE(result.description, diagram.source);
+
+    math.source = QStringLiteral("crash");
+    result = draw(service, results, math);
+    QCOMPARE(result.status, RenderResult::Failed);
+    QVERIFY2(result.diagnostic.startsWith(QStringLiteral("render-svg could not draw it")), qPrintable(result.diagnostic));
+
+    math.source = QStringLiteral("  % nothing but a comment\n");
+    result = draw(service, results, math);
+    QCOMPARE(result.status, RenderResult::Refused);
+    QCOMPARE(result.diagnostic, QStringLiteral("The formula is empty."));
+
+    QTemporaryDir empty;
+    RenderService missing(renderOptions(HelperSet::in(empty.path()), empty.path()));
+    RenderResults missed(missing);
+    math.source = QStringLiteral("x");
+    result = draw(missing, missed, math);
+    QCOMPARE(result.status, RenderResult::Failed);
+    QVERIFY2(result.diagnostic.startsWith(QStringLiteral("Math cannot be drawn: render-svg was not found")),
+             qPrintable(result.diagnostic));
+    QCOMPARE(result.description, QStringLiteral("x"));
+    // Without a helper path at all, the message names where it was looked for.
+    RenderService::Options none = renderOptions({}, empty.path());
+    RenderService nowhere(none);
+    RenderResults nothing(nowhere);
+    result = draw(nowhere, nothing, diagram);
+    QCOMPARE(result.status, RenderResult::Failed);
+    QVERIFY2(result.diagnostic.contains(QStringLiteral("/usr/lib/parch")), qPrintable(result.diagnostic));
+}
+
+void ParchTests::formulasReachTheHelperAsOneLine()
+{
+    QCOMPARE(MathRender::oneLine(QStringLiteral("a\nb")), QStringLiteral("a b"));
+    QCOMPARE(MathRender::oneLine(QStringLiteral("a % a comment\r\n+ b")), QStringLiteral("a + b"));
+    QCOMPARE(MathRender::oneLine(QStringLiteral("50\\% off")), QStringLiteral("50\\% off"));
+    QCOMPARE(MathRender::oneLine(QStringLiteral("a\\\\% c\nb")), QStringLiteral("a\\\\b"));
+    QCOMPARE(MathRender::oneLine(QStringLiteral("x\\\ny")), QStringLiteral("x\\ y"));
+    QCOMPARE(MathRender::oneLine(QStringLiteral("\\begin{aligned}\na&=b\\\\\nc&=d\n\\end{aligned}")),
+             QStringLiteral("\\begin{aligned} a&=b\\\\ c&=d \\end{aligned}"));
+    QCOMPARE(MathRender::oneLine(QStringLiteral(" \u2028 ")), QString());
+
+    RenderRequest request;
+    request.kind = RenderKind::InlineMath;
+    request.source = QStringLiteral("#x");
+    request.fontSize = 18;
+    request.colors.foreground = QColor(0x12, 0x34, 0x56, 0x80);
+    const HelperRun run = MathRender::plan(request, QStringLiteral("/helper"));
+    QCOMPARE(run.program, QStringLiteral("/helper"));
+    QVERIFY(run.arguments.contains(QStringLiteral("--inline")));
+    QCOMPARE(run.arguments.at(run.arguments.indexOf(QStringLiteral("--color")) + 1), QStringLiteral("#12345680"));
+    QCOMPARE(run.arguments.at(run.arguments.indexOf(QStringLiteral("--font-size")) + 1), QStringLiteral("18"));
+    // The tool would skip a line starting with # as a comment.
+    QCOMPARE(run.input, QByteArray("{}#x\n{}#x \\rule[-100em]{0pt}{100em}\n"));
+    request.kind = RenderKind::DisplayMath;
+    QVERIFY(!MathRender::plan(request, QStringLiteral("/helper")).arguments.contains(QStringLiteral("--inline")));
+}
+
+void ParchTests::formulaBaselineComesFromTheRuledPicture()
+{
+    QTemporaryDir folder;
+    writeFakeHelpers(folder.path(), folder.filePath(QStringLiteral("log")));
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    RenderResults results(service);
+    RenderRequest request;
+    request.source = QStringLiteral("abc");
+    const quint64 ticket = service.render(request);
+    QVERIFY(results.wait(ticket));
+    const RenderResult result = results[ticket];
+    QCOMPARE(result.status, RenderResult::Rendered);
+    QCOMPARE(result.format, QStringLiteral("svg"));
+    QVERIFY(result.vector);
+    QCOMPARE(result.size, QSizeF(3, 20));
+    // The ruled picture is 14 + 100 em high: the formula rises 14 above its
+    // baseline and hangs 6 below.
+    QCOMPARE(result.baseline, 14.0);
+    // Sized in pixels, not the points the tool writes.
+    QCOMPARE(QSvgRenderer(result.data).defaultSize(), QSize(3, 20));
+    QVERIFY(!result.data.contains("pt\""));
+    QCOMPARE(MathRender::viewBoxSize("<svg viewBox=\"0 0 9.5 16.25\" width=\"1pt\">"), QSizeF(9.5, 16.25));
+    QVERIFY(!MathRender::viewBoxSize("<svg width=\"1\">").isValid());
+}
+
+void ParchTests::diagramDescriptionsComeFromTheirWords()
+{
+    // The source's own title and description come first.
+    QCOMPARE(DiagramRender::describe(
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" aria-roledescription=\"pie\"><title>Pages by state</title>"
+                 "<desc>Three drafts and two finals</desc><text>Draft</text></svg>"),
+             QStringLiteral("Pages by state. Three drafts and two finals."));
+    // Otherwise the kind of diagram and its words, each once, lines of a
+    // label joined, and styles left out.
+    QCOMPARE(DiagramRender::describe(
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" aria-roledescription=\"flowchart-v2\">"
+                 "<style>#a text { fill: red }</style><g><text x=\"1\">Write</text><text><tspan>Read</tspan>"
+                 "<tspan>again</tspan></text><text>Write</text><text>  </text></g></svg>"),
+             QStringLiteral("Flowchart: Write, Read again."));
+    QCOMPARE(DiagramRender::describe("<svg xmlns=\"http://www.w3.org/2000/svg\" aria-roledescription=\"sequence\"/>"),
+             QStringLiteral("Sequence diagram."));
+    QCOMPARE(DiagramRender::kindName(QStringLiteral("gitGraph")), QStringLiteral("Git graph"));
+    QCOMPARE(DiagramRender::kindName(QStringLiteral("something-new")), QStringLiteral("Diagram"));
+    // A long diagram's description stops.
+    QByteArray many = "<svg xmlns=\"http://www.w3.org/2000/svg\" aria-roledescription=\"mindmap\">";
+    for (int i = 0; i < 100; ++i) many += "<text>Idea " + QByteArray::number(i) + "</text>";
+    many += "</svg>";
+    const QString described = DiagramRender::describe(many);
+    QVERIFY(described.startsWith(QStringLiteral("Mind map: Idea 0, Idea 1")));
+    QVERIFY(described.endsWith(QStringLiteral(", ….")));
+    QVERIFY(!described.contains(QStringLiteral("Idea 99")));
+}
+
+void ParchTests::diagramThemeFollowsThePalette()
+{
+    for (const RenderColors &colors : {darkColors(), lightColors()}) {
+        RenderRequest request;
+        request.kind = RenderKind::Diagram;
+        request.colors = colors;
+        request.fontSize = 15;
+        const QJsonObject config =
+            QJsonDocument::fromJson(DiagramRender::configuration(request, QStringLiteral("Some Sans"))).object();
+        QCOMPARE(config.value(u"theme").toString(), QStringLiteral("base"));
+        const QJsonObject theme = config.value(u"themeVariables").toObject();
+        QCOMPARE(theme.value(u"darkMode").toBool(), colors.dark);
+        QCOMPARE(theme.value(u"background").toString(), colors.background.name());
+        QCOMPARE(theme.value(u"primaryColor").toString(), colors.surface.name());
+        QCOMPARE(theme.value(u"primaryTextColor").toString(), colors.foreground.name());
+        QCOMPARE(theme.value(u"primaryBorderColor").toString(), colors.accent.name());
+        QCOMPARE(theme.value(u"textColor").toString(), colors.foreground.name());
+        QCOMPARE(theme.value(u"actorBkg").toString(), colors.surface.name());
+        QCOMPARE(theme.value(u"pie1").toString(), colors.series.first().name());
+        QCOMPARE(theme.value(u"git2").toString(), colors.series.at(2).name());
+        QCOMPARE(theme.value(u"fontFamily").toString(), QStringLiteral("Some Sans"));
+        QCOMPARE(theme.value(u"fontSize").toString(), QStringLiteral("15px"));
+        QVERIFY(theme.value(u"xyChart").toObject().value(u"plotColorPalette").toString().startsWith(
+            colors.series.first().name() + u','));
+        // No colour of Mermaid's own default theme is left to chance: every
+        // colour set is one of the palette's or made from them.
+        for (auto it = theme.constBegin(); it != theme.constEnd(); ++it)
+            if (it.value().isString() && it.value().toString().startsWith(u'#'))
+                QVERIFY2(QColor(it.value().toString()).isValid(), qPrintable(it.key()));
+    }
+    // ZenUML and C4 bring colours of their own, which are replaced.
+    QCOMPARE(DiagramRender::declaredKind(QStringLiteral("---\nconfig:\n  layout: elk\n---\n%% a note\n\nflowchart LR\n A")),
+             QStringLiteral("flowchart"));
+    QVERIFY(DiagramRender::needsRestyle(QStringLiteral("\n zenuml\n title T")));
+    QVERIFY(DiagramRender::needsRestyle(QStringLiteral("C4Deployment\n")));
+    QVERIFY(!DiagramRender::needsRestyle(QStringLiteral("sequenceDiagram\n A->>B: zenuml")));
+    RenderRequest themed;
+    themed.colors = darkColors();
+    const QString zen = QString::fromUtf8(DiagramRender::restyle(
+        "<svg id=\"zenuml\" aria-roledescription=\"zenuml\"><style>#zenuml .participant-box{fill:#fff;stroke:#666}</style>"
+        "<path stroke=\"#000\" fill=\"#fff5ad\"/></svg>",
+        themed, QStringLiteral("Some Sans")));
+    QVERIFY2(zen.contains(QStringLiteral("stroke=\"%1\"").arg(Theme::mix(themed.colors.foreground, themed.colors.background, .25).name())),
+             qPrintable(zen));
+    QVERIFY(zen.contains(QStringLiteral("fill=\"#fff5ad\"")));
+    QVERIFY(zen.contains(QStringLiteral("#zenuml .participant-box,#zenuml .occurrence{fill:%1;stroke:%2}")
+                             .arg(themed.colors.surface.name(), themed.colors.accent.name())));
+    QVERIFY(zen.contains(QStringLiteral("font-family:\"Some Sans\"")));
+    QVERIFY(zen.indexOf(QStringLiteral("</style>")) > zen.indexOf(QStringLiteral("Some Sans")));
+    const QString c4 = QString::fromUtf8(DiagramRender::restyle(
+        "<svg aria-roledescription=\"c4\"><text fill=\"#444444\" style=\"fill:#FFFFFF\">Uses</text></svg>", themed, {}));
+    QVERIFY(!c4.contains(QStringLiteral("#444444")));
+    QVERIFY(c4.contains(QStringLiteral("fill:#FFFFFF")));
+    const QByteArray other = "<svg aria-roledescription=\"pie\"><path fill=\"#000\"/></svg>";
+    QCOMPARE(DiagramRender::restyle(other, themed, {}), other);
+    // C4's boxes take the accent, darkened until white words read on it.
+    const QJsonObject c4Config =
+        QJsonDocument::fromJson(DiagramRender::configuration(themed, {})).object().value(u"c4").toObject();
+    const QColor box(c4Config.value(u"person_bg_color").toString());
+    const double white = Theme::luminance(Qt::white), dark = Theme::luminance(box);
+    QVERIFY((white + .05) / (dark + .05) >= 4.5);
+    QCOMPARE(c4Config.value(u"container_border_color").toString(), themed.colors.accent.name());
+
+    // The live theme's colours, as a request takes them.
+    QTemporaryDir themeFolder;
+    writeTheme(themeFolder.path(), "light", "#F8F1E3", "#342B27", "#A7353A");
+    const Theme liveTheme(themeFolder.path());
+    const RenderColors live = RenderColors::fromTheme(liveTheme);
+    QCOMPARE(live.dark, false);
+    QCOMPARE(live.background, QColor("#F8F1E3"));
+    QCOMPARE(live.foreground, QColor("#342B27"));
+    QCOMPARE(live.accent, QColor("#A7353A"));
+    QCOMPARE(live.surface, liveTheme.raised());
+    QCOMPARE(live.muted, liveTheme.muted());
+    QCOMPARE(live.series.first(), live.accent);
+    QCOMPARE(live.series.size(), 8);
+    QVERIFY(live.identity() != darkColors().identity());
+    QCOMPARE(live.identity(), RenderColors::fromTheme(liveTheme).identity());
+
+    // A request without series turns the accent round the colour wheel.
+    RenderRequest bare;
+    bare.colors = darkColors();
+    bare.colors.series.clear();
+    const QJsonObject theme =
+        QJsonDocument::fromJson(DiagramRender::configuration(bare, {})).object().value(u"themeVariables").toObject();
+    QCOMPARE(theme.value(u"pie1").toString(), bare.colors.accent.name());
+    QVERIFY(theme.value(u"pie2").toString() != theme.value(u"pie1").toString());
+    QCOMPARE(theme.value(u"fontFamily").toString(), QStringLiteral("sans-serif"));
+}
+
+void ParchTests::diagramFontsStayWithinMermansLimits()
+{
+    const DiagramRender::Fonts fonts = DiagramRender::chooseFonts({});
+    if (fonts.files.isEmpty()) QSKIP("fontconfig finds no fonts here");
+    QVERIFY(!fonts.family.isEmpty());
+    QVERIFY(fonts.bytes <= DiagramRender::kFontBudget);
+    qint64 bytes = 0;
+    for (const QString &file : fonts.files) {
+        QVERIFY2(QFileInfo(file).isFile(), qPrintable(file));
+        bytes += QFileInfo(file).size();
+    }
+    QCOMPARE(bytes, fonts.bytes);
+    QCOMPARE(fonts.files.size(), qsizetype(QSet<QString>(fonts.files.cbegin(), fonts.files.cend()).size()));
+    QCOMPARE(fonts.identity.count(u'\n') + 1, fonts.files.size());
+    qInfo().noquote() << "Diagram fonts:" << fonts.family << fonts.files.size() << "files,"
+                      << fonts.bytes / (1024 * 1024) << "MiB:" << fonts.files.join(QStringLiteral(", "))
+                      << (fonts.omitted.isEmpty() ? QString() : QStringLiteral("; left out ") + fonts.omitted.join(QStringLiteral(", ")));
+    // A family that is not installed still gives a family that is.
+    const DiagramRender::Fonts substitute = DiagramRender::chooseFonts(QStringLiteral("No Such Family 4f1c"));
+    QVERIFY(!substitute.family.isEmpty());
+    QVERIFY(!substitute.files.isEmpty());
+}
+
+void ParchTests::everyMathFixtureDrawsWithRaTeX()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    RenderService service(renderOptions(helpers, folder.path()));
+    RenderResults results(service);
+    const QJsonArray fixtures = renderFixtures(QStringLiteral("math"));
+    QCOMPARE(fixtures.size(), 9);
+    for (const QJsonValue &value : fixtures) {
+        const QJsonObject fixture = value.toObject();
+        const QString id = fixture.value(u"id").toString();
+        RenderRequest request;
+        request.kind = fixture.value(u"display").toBool() ? RenderKind::DisplayMath : RenderKind::InlineMath;
+        request.source = fixture.value(u"source").toString();
+        request.fontSize = 20;
+        request.colors = darkColors();
+        const quint64 ticket = service.render(request);
+        QVERIFY2(results.wait(ticket), qPrintable(id));
+        const RenderResult result = results[ticket];
+        QCOMPARE(result.description, request.source);
+        if (!fixture.value(u"valid").toBool()) {
+            QCOMPARE(result.status, RenderResult::Refused);
+            QVERIFY2(result.diagnostic.contains(QStringLiteral("Unexpected end of input")), qPrintable(result.diagnostic));
+            qInfo().noquote() << id << "refused:" << result.diagnostic;
+            continue;
+        }
+        QVERIFY2(result.ok(), qPrintable(id + QStringLiteral(": ") + result.diagnostic));
+        QVERIFY(result.networkIsolated);
+        QCOMPARE(result.format, QStringLiteral("svg"));
+        QVERIFY(QSvgRenderer(result.data).isValid());
+        QVERIFY(result.size.width() > 0 && result.size.height() > 0);
+        QVERIFY(result.baseline > 0 && result.baseline <= result.size.height());
+        const QImage drawn = drawSvg(result.data, 1);
+        QVERIFY2(pixelsNear(drawn, request.colors.foreground, 30) > 10, qPrintable(id));
+        if (id == QLatin1String("math-overwide")) QVERIFY(result.size.width() > 360);
+        qInfo().noquote() << id << QStringLiteral("%1 × %2 px, baseline %3, %4 ms")
+                                       .arg(result.size.width(), 0, 'f', 1)
+                                       .arg(result.size.height(), 0, 'f', 1)
+                                       .arg(result.baseline, 0, 'f', 2)
+                                       .arg(result.elapsedMs);
+    }
+}
+
+void ParchTests::inlineMathSitsOnTheBaseline()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    RenderService service(renderOptions(helpers, folder.path()));
+    RenderResults results(service);
+    auto draw = [&](const QString &tex, RenderKind kind) {
+        RenderRequest request;
+        request.kind = kind;
+        request.source = tex;
+        request.fontSize = 20;
+        const quint64 ticket = service.render(request);
+        return results.wait(ticket) ? results[ticket] : RenderResult{};
+    };
+    // KaTeX's metrics, which RaTeX follows: an x is 0.431 em high and sits
+    // on the line; a y hangs 0.194 em below it; an inline fraction hangs 0.345 em.
+    const RenderResult x = draw(QStringLiteral("x"), RenderKind::InlineMath);
+    QVERIFY(x.ok());
+    QVERIFY2(qAbs(x.size.height() - 0.43056 * 20) < 0.05, qPrintable(QString::number(x.size.height())));
+    QVERIFY(qAbs(x.baseline - x.size.height()) < 0.05);
+    const RenderResult y = draw(QStringLiteral("y"), RenderKind::InlineMath);
+    QVERIFY(y.ok());
+    QVERIFY2(qAbs((y.size.height() - y.baseline) - 0.19444 * 20) < 0.1, qPrintable(QString::number(y.baseline)));
+    const RenderResult fraction = draw(QStringLiteral("\\frac{a}{b}"), RenderKind::InlineMath);
+    QVERIFY(fraction.ok());
+    QVERIFY2(qAbs((fraction.size.height() - fraction.baseline) - 0.345 * 20) < 0.2,
+             qPrintable(QString::number(fraction.size.height() - fraction.baseline)));
+    const RenderResult displayed = draw(QStringLiteral("\\frac{a}{b}"), RenderKind::DisplayMath);
+    QVERIFY(displayed.ok());
+    QVERIFY(displayed.size.height() > fraction.size.height());
+    // Drawn, the y's tail is below the baseline and the x has nothing there.
+    const qreal scale = 4;
+    const QImage tail = drawSvg(y.data, scale);
+    const int line = int(std::ceil(y.baseline * scale)) + 1;
+    QVERIFY(inked(tail, QRect(0, line, tail.width(), tail.height() - line)));
+    QVERIFY(inked(tail, QRect(0, 0, tail.width(), line)));
+    const QImage flat = drawSvg(x.data, scale);
+    const int under = int(std::ceil(x.baseline * scale)) + 2;
+    QVERIFY(!inked(flat, QRect(0, under, flat.width(), flat.height() - under)));
+    qInfo().noquote() << QStringLiteral("x: %1 high on the line; y: hangs %2; inline a/b: %3 high, hangs %4 (logical px at 20 px)")
+                             .arg(x.size.height(), 0, 'f', 3)
+                             .arg(y.size.height() - y.baseline, 0, 'f', 3)
+                             .arg(fraction.size.height(), 0, 'f', 3)
+                             .arg(fraction.size.height() - fraction.baseline, 0, 'f', 3);
+}
+
+void ParchTests::unicodeInsideFormulasIsMeasured()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    RenderService service(renderOptions(helpers, folder.path()));
+    RenderResults results(service);
+    RenderRequest request;
+    request.source = QStringLiteral("\\text{日本語 café עברית 😀} + \\alpha");
+    request.fontSize = 32;
+    request.colors = darkColors();
+    const quint64 ticket = service.render(request);
+    QVERIFY(results.wait(ticket));
+    const RenderResult result = results[ticket];
+    QVERIFY2(result.ok(), qPrintable(result.diagnostic));
+    const QString svg = QString::fromUtf8(result.data);
+    // Glyphs outside the KaTeX fonts come as text elements, placed one by
+    // one, and the emoji as a picture.
+    struct Placed {
+        QString text;
+        qreal x;
+    };
+    QList<Placed> letters;
+    static const QRegularExpression text(QStringLiteral(R"re(<text x="([-0-9.]+)"[^>]*>([^<]*)</text>)re"));
+    for (auto it = text.globalMatch(svg); it.hasNext();) {
+        const auto match = it.next();
+        letters << Placed{match.captured(2), match.captured(1).toDouble()};
+    }
+    const QStringList drawnAsText = [&letters] {
+        QStringList all;
+        for (const Placed &letter : letters) all << letter.text;
+        return all;
+    }();
+    for (const QString &letter : {QStringLiteral("日"), QStringLiteral("本"), QStringLiteral("語")})
+        QVERIFY2(drawnAsText.contains(letter), qPrintable(drawnAsText.join(u' ')));
+    const QStringList hebrew{QStringLiteral("ע"), QStringLiteral("ב"), QStringLiteral("ר"), QStringLiteral("י"), QStringLiteral("ת")};
+    for (const QString &letter : hebrew) QVERIFY(drawnAsText.contains(letter));
+    QVERIFY(svg.contains(QStringLiteral("<image")));
+    // Qt draws each of them: the Japanese through its own font fallback,
+    // and the emoji picture in colour.
+    const QImage drawn = drawSvg(result.data, 1);
+    for (const Placed &letter : std::as_const(letters))
+        if (letter.text == QStringLiteral("日") || letter.text == QStringLiteral("語"))
+            QVERIFY2(inked(drawn, QRect(int(letter.x) + 2, 0, int(request.fontSize) - 4, drawn.height())),
+                     qPrintable(letter.text));
+    static const QRegularExpression picture(QStringLiteral(R"re(<image[^>]*\sx="([-0-9.]+)"[^>]*\swidth="([-0-9.]+)")re"));
+    const auto emoji = picture.match(svg);
+    QVERIFY(emoji.hasMatch());
+    int colourful = 0;
+    for (int y = 0; y < drawn.height(); ++y)
+        for (int x = int(emoji.captured(1).toDouble()); x < int(emoji.captured(1).toDouble() + emoji.captured(2).toDouble()) && x < drawn.width(); ++x) {
+            const QRgb p = drawn.pixel(x, y);
+            if (qAlpha(p) > 200 && qRed(p) > 180 && qBlue(p) < 100) ++colourful;
+        }
+    QVERIFY2(colourful > 20, qPrintable(QString::number(colourful)));
+    // The accented Latin word is drawn as outlines between them.
+    qreal afterJapanese = 0, hebrewStart = drawn.width();
+    for (const Placed &letter : std::as_const(letters)) {
+        if (letter.text == QStringLiteral("語")) afterJapanese = letter.x + request.fontSize;
+        if (hebrew.contains(letter.text)) hebrewStart = std::min(hebrewStart, letter.x);
+    }
+    QVERIFY(inked(drawn, QRect(int(afterJapanese) + 4, 0, int(hebrewStart - afterJapanese) - 8, drawn.height())));
+    // Hebrew reads right to left, but RaTeX 0.1.15 sets its letters left to
+    // right in the order they are typed, so the word comes out backwards.
+    qreal first = 0, last = 0;
+    for (const Placed &letter : std::as_const(letters)) {
+        if (letter.text == hebrew.first()) first = letter.x;
+        if (letter.text == hebrew.last()) last = letter.x;
+    }
+    qInfo().noquote() << QStringLiteral("Unicode in a formula: 日本語 drawn as text with Qt's fallback font, café as outlines, "
+                                        "😀 as a picture; עברית set left to right (first letter at %1, last at %2)")
+                             .arg(first)
+                             .arg(last);
+    QEXPECT_FAIL("", "RaTeX 0.1.15 sets Hebrew left to right", Continue);
+    QVERIFY(first > last);
+}
+
+void ParchTests::everyMermaidFamilyDrawsWithMerman()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    RenderService service(renderOptions(helpers, folder.path()));
+    RenderResults results(service);
+    const QJsonArray fixtures = renderFixtures(QStringLiteral("mermaid"));
+    QCOMPARE(fixtures.size(), 35);
+    // PARCH_RENDER_SAMPLES names a folder to keep every picture in, to look at.
+    const QString samples = qEnvironmentVariable("PARCH_RENDER_SAMPLES");
+    QSet<QString> families;
+    for (const auto &[theme, colors] : {std::pair{QStringLiteral("dark"), darkColors()},
+                                        std::pair{QStringLiteral("light"), lightColors()}}) {
+        for (const QJsonValue &value : fixtures) {
+            const QJsonObject fixture = value.toObject();
+            const QString id = fixture.value(u"id").toString();
+            RenderRequest request;
+            request.kind = RenderKind::Diagram;
+            request.source = fixture.value(u"source").toString();
+            request.scale = 2;
+            request.colors = colors;
+            const quint64 ticket = service.render(request);
+            QVERIFY2(results.wait(ticket), qPrintable(id));
+            const RenderResult result = results[ticket];
+            if (!fixture.value(u"valid").toBool()) {
+                QCOMPARE(result.status, RenderResult::Refused);
+                QVERIFY2(result.diagnostic.contains(QStringLiteral("Unterminated node label")),
+                         qPrintable(result.diagnostic));
+                if (theme == QLatin1String("dark")) qInfo().noquote() << id << "refused:" << result.diagnostic;
+                continue;
+            }
+            QVERIFY2(result.ok(), qPrintable(id + QStringLiteral(": ") + result.diagnostic));
+            QVERIFY(result.networkIsolated);
+            QCOMPARE(result.format, QStringLiteral("png"));
+            QImage image;
+            QVERIFY(image.loadFromData(result.data, "png"));
+            if (!samples.isEmpty()) image.save(samples + u'/' + id + u'-' + theme + QStringLiteral(".png"));
+            QVERIFY(result.size.width() > 0 && result.size.height() > 0);
+            QVERIFY2(qAbs(image.width() - result.size.width() * result.scale) < 1.5, qPrintable(id));
+            QVERIFY2(qAbs(result.scale - 2) < 0.05, qPrintable(id + QString::number(result.scale)));
+            // Drawn on the theme's background.
+            QVERIFY2(pixelsNear(image, colors.background, 6) > image.width() * image.height() / 20,
+                     qPrintable(id + u' ' + theme));
+            QVERIFY2(!result.description.isEmpty(), qPrintable(id));
+            const QJsonArray expected = fixture.value(u"expectedLabels").toArray();
+            int found = 0;
+            for (const QJsonValue &label : expected)
+                if (result.description.contains(label.toString())) ++found;
+            // The formula labels are drawn as outlines, so they have no words.
+            if (!expected.isEmpty() && id != QLatin1String("mermaid-flowchart-formula"))
+                QVERIFY2(found > 0, qPrintable(id + QStringLiteral(": ") + result.description));
+            families.insert(fixture.value(u"family").toString());
+            if (theme == QLatin1String("dark"))
+                qInfo().noquote() << id << QStringLiteral("%1 × %2 px at %3×, %4 ms:")
+                                               .arg(result.size.width(), 0, 'f', 0)
+                                               .arg(result.size.height(), 0, 'f', 0)
+                                               .arg(result.scale, 0, 'f', 2)
+                                               .arg(result.elapsedMs)
+                                  << result.description;
+        }
+    }
+    QCOMPARE(families.size(), 23);
+}
+
+void ParchTests::diagramColoursFollowLightAndDarkThemes()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    RenderService service(renderOptions(helpers, folder.path()));
+    RenderResults results(service);
+    const QString samples = qEnvironmentVariable("PARCH_RENDER_SAMPLES");
+    const QStringList sources{QStringLiteral("flowchart LR\n A[Write a draft] --> B{Ready?}\n B -->|yes| C[Publish]"),
+                              QStringLiteral("sequenceDiagram\n Writer->>Editor: Draft\n Editor-->>Writer: Notes"),
+                              QStringLiteral("pie title Pages\n \"Draft\" : 3\n \"Final\" : 2"),
+                              // The two families that bring colours of their own.
+                              QStringLiteral("zenuml\n title Writing\n Writer->Editor: send()"),
+                              QStringLiteral("C4Container\n Person(writer, \"Writer\")\n Container(app, \"parch\", \"Qt\")\n"
+                                             " Rel(writer, app, \"Uses\")")};
+    for (const auto &[name, colors] : {std::pair{QStringLiteral("dark"), darkColors()},
+                                       std::pair{QStringLiteral("light"), lightColors()}}) {
+        for (int i = 0; i < sources.size(); ++i) {
+            RenderRequest request;
+            request.kind = RenderKind::Diagram;
+            request.source = sources.at(i);
+            request.scale = 2;
+            request.colors = colors;
+            const quint64 ticket = service.render(request);
+            QVERIFY(results.wait(ticket));
+            const RenderResult result = results[ticket];
+            QVERIFY2(result.ok(), qPrintable(result.diagnostic));
+            QImage image;
+            QVERIFY(image.loadFromData(result.data, "png"));
+            if (!samples.isEmpty()) image.save(samples + QStringLiteral("/colours-%1-%2.png").arg(name).arg(i));
+            const QString what = name + u' ' + sources.at(i).section(u'\n', 0, 0);
+            QVERIFY2(pixelsNear(image, colors.background, 6) > image.width() * image.height() / 5, qPrintable(what));
+            QVERIFY2(pixelsNear(image, colors.foreground, 60) > 20, qPrintable(what));
+            if (i < 2) {
+                // Boxes in the surface colour, edged in the accent.
+                QVERIFY2(pixelsNear(image, colors.surface, 6) > 500, qPrintable(what));
+                QVERIFY2(pixelsNear(image, colors.accent, 30) > 50, qPrintable(what));
+            } else if (i == 2) {
+                // Slices in the series colours, which Mermaid lays at 70 % over the background.
+                const QColor slice = Theme::mix(colors.background, colors.series.first(), .7);
+                QVERIFY2(pixelsNear(image, slice, 24) > 500, qPrintable(what));
+            } else if (i == 3) {
+                // ZenUML's participants in the surface colour, edged in the accent, and nothing white.
+                QVERIFY2(pixelsNear(image, colors.surface, 6) > 500, qPrintable(what));
+                QVERIFY2(pixelsNear(image, colors.accent, 30) > 50, qPrintable(what));
+                QVERIFY2(pixelsNear(image, QColor("#ffffff"), 6) == 0, qPrintable(what));
+            } else {
+                // C4's boxes in the accent, dark enough for their white words.
+                QVERIFY2(pixelsNear(image, colors.accent, 30) > 50, qPrintable(what));
+                for (const QColor &stock : {QColor("#08427b"), QColor("#1168bd"), QColor("#438dd5"), QColor("#444444")})
+                    QVERIFY2(pixelsNear(image, stock, 6) == 0, qPrintable(what + u' ' + stock.name()));
+            }
+            // None of Mermaid's own default colours.
+            for (const QColor &stock : {QColor("#ececff"), QColor("#9370db"), QColor("#ffffde")})
+                QVERIFY2(pixelsNear(image, stock, 6) == 0, qPrintable(what + u' ' + stock.name()));
+        }
+    }
+}
+
+void ParchTests::diagramsDescribeThemselves()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    RenderService service(renderOptions(helpers, folder.path()));
+    RenderResults results(service);
+    auto describe = [&](const QString &source) {
+        RenderRequest request;
+        request.kind = RenderKind::Diagram;
+        request.source = source;
+        const quint64 ticket = service.render(request);
+        return results.wait(ticket) ? results[ticket].description : QString();
+    };
+    QCOMPARE(describe(QStringLiteral("pie\n accTitle: Pages by state\n accDescr: Three drafts and two finals\n"
+                                     " \"Draft\" : 3\n \"Final\" : 2")),
+             QStringLiteral("Pages by state. Three drafts and two finals."));
+    QCOMPARE(describe(QStringLiteral("flowchart LR\n accDescr {\n The writing loop\n }\n A[Write] --> B[Read]")),
+             QStringLiteral("The writing loop."));
+    // Merman puts edge labels before the nodes they join.
+    QCOMPARE(describe(QStringLiteral("flowchart LR\n A[Write] -->|then| B[Read]")),
+             QStringLiteral("Flowchart: then, Write, Read."));
+    QCOMPARE(describe(QStringLiteral("sequenceDiagram\n Writer->>Editor: Draft")),
+             QStringLiteral("Sequence diagram: Editor, Writer, Draft."));
+}
+
+void ParchTests::diagramPrintRouteIsReported()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    const DiagramRender::Fonts fonts = DiagramRender::chooseFonts({});
+    // Merman's resvg-safe SVG drawn by Qt's SVG renderer into a PDF, for
+    // every family, against Merman's own PNG of the same SVG. It would do
+    // for print if every diagram kept all its labels as text, skipped
+    // nothing, and looked like Merman's picture.
+    int families = 0, labelsLost = 0, nestedSkipped = 0, unlike = 0, correct = 0;
+    static QStringList warnings;
+    const QtMessageHandler previous = qInstallMessageHandler([](QtMsgType, const QMessageLogContext &, const QString &text) {
+        warnings << text;
+    });
+    auto restore = qScopeGuard([previous] { qInstallMessageHandler(previous); });
+    QStringList lines;
+    for (const QJsonValue &value : renderFixtures(QStringLiteral("mermaid"))) {
+        const QJsonObject fixture = value.toObject();
+        if (!fixture.value(u"valid").toBool()) continue;
+        RenderRequest request;
+        request.kind = RenderKind::Diagram;
+        request.source = fixture.value(u"source").toString();
+        request.colors = darkColors();
+        QList<HelperRun> runs = DiagramRender::plan(request, helpers.merman, fonts);
+        const HelperOutcome drawn = runHelper(runs.at(0), folder.filePath(QStringLiteral("tmp")));
+        QVERIFY2(drawn.succeeded(), drawn.errors.constData());
+        QByteArray svg = drawn.output;
+        if (runs.at(1).inputFromPrevious) {
+            svg = runs.at(1).inputFromPrevious(svg);
+            runs[1].input = svg;
+        }
+        const HelperOutcome pictured = runHelper(runs.at(1), folder.filePath(QStringLiteral("tmp")));
+        QVERIFY2(pictured.succeeded(), pictured.errors.constData());
+        QImage merman;
+        QVERIFY(merman.loadFromData(pictured.output, "png"));
+        ++families;
+        warnings.clear();
+        QSvgRenderer renderer(svg);
+        QVERIFY(renderer.isValid());
+        QBuffer pdf;
+        pdf.open(QIODevice::WriteOnly);
+        {
+            QPdfWriter writer(&pdf);
+            writer.setPageSize(QPageSize(renderer.viewBoxF().size(), QPageSize::Point));
+            writer.setPageMargins({});
+            writer.setResolution(72);
+            QPainter painter(&writer);
+            renderer.render(&painter, QRectF(QPointF(0, 0), renderer.viewBoxF().size()));
+        }
+        QImage qt(merman.size(), QImage::Format_ARGB32);
+        qt.fill(request.colors.background);
+        {
+            QPainter painter(&qt);
+            painter.setRenderHint(QPainter::Antialiasing);
+            renderer.render(&painter, QRectF(QPointF(0, 0), QSizeF(qt.size())));
+        }
+        const PdfContents contents = inspectPdf(pdf.data());
+        const QString id = fixture.value(u"id").toString();
+        QVERIFY2(contents.pathOperators > 0, qPrintable(id));
+        const int labels = int(svg.count("<text"));
+        const bool lost = contents.textObjects < labels;
+        const bool skipped = !warnings.filter(QStringLiteral("nested svg")).isEmpty();
+        const double differing = differingShare(qt, merman);
+        labelsLost += lost;
+        nestedSkipped += skipped;
+        unlike += differing > 0.02;
+        correct += !lost && !skipped && differing <= 0.02;
+        lines << QStringLiteral("%1: %2 of %3 labels as text, %4 % unlike Merman's picture%5")
+                     .arg(id)
+                     .arg(std::min(contents.textObjects, labels))
+                     .arg(labels)
+                     .arg(differing * 100, 0, 'f', 1)
+                     .arg(skipped ? QStringLiteral(", nested SVG skipped") : QString());
+    }
+    qInstallMessageHandler(previous);
+    restore.dismiss();
+    for (const QString &line : std::as_const(lines)) qInfo().noquote() << line;
+    qInfo().noquote() << QStringLiteral("Merman SVG through QSvgRenderer into QPdfWriter: %1 diagrams; %2 lose labels, "
+                                        "%3 have nested SVG skipped, %4 look unlike Merman's picture; %5 correct")
+                             .arg(families)
+                             .arg(labelsLost)
+                             .arg(nestedSkipped)
+                             .arg(unlike)
+                             .arg(correct);
+    // Were every diagram to come out right, print should take the SVG instead.
+    QVERIFY2(correct < families, "Qt now draws Merman's SVG correctly: return it for print");
+
+    // So print takes a PNG drawn at four times the size or more, and says so.
+    RenderService service(renderOptions(helpers, folder.path()));
+    RenderResults results(service);
+    RenderRequest request;
+    request.kind = RenderKind::Diagram;
+    request.purpose = RenderPurpose::Print;
+    request.source = QStringLiteral("flowchart LR\n A[Write] --> B[Print]");
+    const quint64 ticket = service.render(request);
+    QVERIFY(results.wait(ticket));
+    const RenderResult result = results[ticket];
+    QVERIFY2(result.ok(), qPrintable(result.diagnostic));
+    QCOMPARE(result.format, QStringLiteral("png"));
+    QVERIFY(!result.vector);
+    QVERIFY(result.scale >= DiagramRender::kPrintScale - 0.05);
+    QVERIFY(result.note.contains(QStringLiteral("image")));
+    QImage image;
+    QVERIFY(image.loadFromData(result.data, "png"));
+    QBuffer pdf;
+    pdf.open(QIODevice::WriteOnly);
+    {
+        QPdfWriter writer(&pdf);
+        writer.setResolution(72);
+        QPainter painter(&writer);
+        painter.drawImage(QRectF(QPointF(0, 0), result.size), image);
+    }
+    QVERIFY(inspectPdf(pdf.data()).images >= 1);
+    qInfo().noquote() << "Print:" << result.note;
+}
+
+void ParchTests::helperTimeAndMemoryAreReported()
+{
+    const HelperSet helpers = realHelpers();
+    REQUIRE_REAL_HELPERS(helpers);
+    QTemporaryDir folder;
+    auto summary = [](QList<double> values) {
+        std::sort(values.begin(), values.end());
+        return QStringLiteral("median %1, most %2")
+            .arg(values.at(values.size() / 2), 0, 'f', 1)
+            .arg(values.last(), 0, 'f', 1);
+    };
+    QList<double> mathTimes, mathMemory, svgTimes, svgMemory, pngTimes, pngMemory;
+    int index = 0;
+    for (const QJsonValue &value : renderFixtures(QStringLiteral("math"))) {
+        const QJsonObject fixture = value.toObject();
+        RenderRequest request;
+        request.kind = fixture.value(u"display").toBool() ? RenderKind::DisplayMath : RenderKind::InlineMath;
+        request.source = fixture.value(u"source").toString();
+        request.fontSize = 20;
+        const HelperMeasure measure =
+            measureHelper(MathRender::plan(request, helpers.ratex), folder.filePath(QString::number(++index)));
+        QVERIFY(measure.peakMiB > 0);
+        mathTimes << measure.milliseconds;
+        mathMemory << measure.peakMiB;
+        qInfo().noquote() << fixture.value(u"id").toString()
+                          << QStringLiteral("%1 ms, %2 MiB").arg(measure.milliseconds, 0, 'f', 1).arg(measure.peakMiB, 0, 'f', 1);
+    }
+    const DiagramRender::Fonts fonts = DiagramRender::chooseFonts({});
+    for (const QJsonValue &value : renderFixtures(QStringLiteral("mermaid"))) {
+        const QJsonObject fixture = value.toObject();
+        if (!fixture.value(u"valid").toBool()) continue;
+        RenderRequest request;
+        request.kind = RenderKind::Diagram;
+        request.source = fixture.value(u"source").toString();
+        request.scale = 2;
+        QList<HelperRun> runs = DiagramRender::plan(request, helpers.merman, fonts);
+        const HelperMeasure svg = measureHelper(runs.at(0), folder.filePath(QString::number(++index)));
+        if (runs.at(1).inputFromPrevious) runs[1].input = runs.at(1).inputFromPrevious(svg.output);
+        const HelperMeasure png = measureHelper(runs.at(1), folder.filePath(QString::number(++index)));
+        QCOMPARE(svg.exitCode, 0);
+        QCOMPARE(png.exitCode, 0);
+        svgTimes << svg.milliseconds;
+        svgMemory << svg.peakMiB;
+        pngTimes << png.milliseconds;
+        pngMemory << png.peakMiB;
+        qInfo().noquote() << fixture.value(u"id").toString()
+                          << QStringLiteral("SVG %1 ms, %2 MiB; PNG at 2× %3 ms, %4 MiB")
+                                 .arg(svg.milliseconds, 0, 'f', 1)
+                                 .arg(svg.peakMiB, 0, 'f', 1)
+                                 .arg(png.milliseconds, 0, 'f', 1)
+                                 .arg(png.peakMiB, 0, 'f', 1);
+    }
+    qInfo().noquote() << "render-svg per formula: ms" << summary(mathTimes) << "; peak MiB" << summary(mathMemory);
+    qInfo().noquote() << "merman-cli SVG per diagram: ms" << summary(svgTimes) << "; peak MiB" << summary(svgMemory);
+    qInfo().noquote() << "merman-cli PNG at 2x per diagram: ms" << summary(pngTimes) << "; peak MiB" << summary(pngMemory);
 }
 
 QTEST_MAIN(ParchTests)

@@ -35,3 +35,18 @@ Parts of parch come from other MIT-licensed work, under the same terms:
   Hansson.
 - Additional icon attribution, for line icons that sprawl's set shares with
   Feather: Copyright (c) Cole Bemis.
+
+---
+
+The package also ships two programs parch runs to draw math and diagrams.
+They are not part of parch and keep their own licences, installed with them
+in /usr/share/licenses/parch/ (licenses/ratex/ in this repository):
+
+- RaTeX (render-svg), which draws TeX math: Copyright (c) erweixin, under
+  the MIT License. It carries the KaTeX fonts, Copyright (c) 2009-2010
+  Design Science, Inc. and Copyright (c) 2014-2018 Khan Academy, under the
+  SIL Open Font License 1.1.
+- Merman (merman-cli), which draws Mermaid diagrams: Copyright (c) 2026
+  merman contributors, under the MIT License or the Apache License 2.0. It carries work from
+  Mermaid, Eclipse ELK (Eclipse Public License 2.0), RaTeX, the KaTeX fonts,
+  and the other projects its third-party notices list with their licences.

@@ -1,6 +1,8 @@
 QT += core gui qml quick quickcontrols2 dbus svg concurrent network
 
-CONFIG += c++20 release
+CONFIG += c++20 release link_pkgconfig
+# fontconfig picks the fonts diagrams are drawn with.
+PKGCONFIG += fontconfig
 TARGET = parch
 TEMPLATE = app
 
@@ -18,6 +20,7 @@ HEADERS += \
     src/cli.h \
     src/commandfilter.h \
     src/commandregistry.h \
+    src/diagramrender.h \
     src/diskfile.h \
     src/document.h \
     src/documentfind.h \
@@ -38,6 +41,7 @@ HEADERS += \
     src/librarywalk.h \
     src/markdownlines.h \
     src/outline.h \
+    src/mathrender.h \
     src/pathtext.h \
     src/portalfilepicker.h \
     src/qmltypes.h \
@@ -46,6 +50,10 @@ HEADERS += \
     src/recentfiles.h \
     src/recovery.h \
     src/references.h \
+    src/rendercache.h \
+    src/renderhelpers.h \
+    src/renderrequest.h \
+    src/renderservice.h \
     src/session.h \
     src/settings.h \
     src/sourceboundaries.h \
@@ -70,6 +78,7 @@ SOURCES += \
     src/cli.cpp \
     src/commandfilter.cpp \
     src/commandregistry.cpp \
+    src/diagramrender.cpp \
     src/diskfile.cpp \
     src/document.cpp \
     src/documentfind.cpp \
@@ -90,6 +99,7 @@ SOURCES += \
     src/librarywalk.cpp \
     src/markdownlines.cpp \
     src/outline.cpp \
+    src/mathrender.cpp \
     src/pathtext.cpp \
     src/portalfilepicker.cpp \
     src/qmltypes.cpp \
@@ -98,6 +108,10 @@ SOURCES += \
     src/recentfiles.cpp \
     src/recovery.cpp \
     src/references.cpp \
+    src/rendercache.cpp \
+    src/renderhelpers.cpp \
+    src/renderrequest.cpp \
+    src/renderservice.cpp \
     src/session.cpp \
     src/settings.cpp \
     src/sourceboundaries.cpp \

@@ -1,0 +1,192 @@
+#!/bin/sh
+set -eu
+
+# Fetches the pinned math and diagram helpers for this machine's architecture
+# into build/helpers/<arch>/, where a development build finds them:
+#
+#   render-svg   RaTeX's command-line SVG renderer (TeX math)
+#   merman-cli   Merman's command-line Mermaid renderer
+#
+# with their licence and notice files beneath licenses/. Each release archive
+# is checked against the SHA-256 its project published before anything is
+# taken out of it, and only the files named here are taken out. An archive
+# already on disk with the right checksum is used instead of a download: one
+# kept from an earlier run in build/helpers/archives/, one in the download
+# folder under its release name, or any file or folder named in
+# PARCH_HELPER_ARCHIVES (separated by colons). Running it again changes
+# nothing once the helpers are in place.
+#
+# Usage: bin/fetch-helpers [--arch aarch64|x86_64] [--offline]
+#   --offline   use archives already on disk, download nothing
+
+ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
+ARCH="$(uname -m)"
+OFFLINE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --arch) ARCH="${2:?--arch needs a value}"; shift 2 ;;
+    --offline) OFFLINE=1; shift ;;
+    -h|--help) sed -n '4,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "fetch-helpers: unknown option $1" >&2; exit 2 ;;
+    esac
+done
+
+# The pins: version, release asset and the SHA-256 GitHub publishes for it.
+# pkgbuild/PKGBUILD carries the same archives and checksums.
+RATEX_VERSION=0.1.15
+MERMAN_VERSION=0.10.0
+case "$ARCH" in
+aarch64)
+    RATEX_ASSET=ratex-cli-v$RATEX_VERSION-aarch64-unknown-linux-musl.tar.gz
+    RATEX_SHA256=c654d54c24445931c235900eaf0dc226b99c12099a51da6caf58aad737f3c03d
+    MERMAN_ASSET=merman-cli-aarch64-unknown-linux-gnu.tar.xz
+    MERMAN_SHA256=5481cfebf8b642d77e9924d001330b6eb3a1cf75fb7f56aa1cd8f01115d76223
+    ;;
+x86_64)
+    RATEX_ASSET=ratex-cli-v$RATEX_VERSION-x86_64-unknown-linux-musl.tar.gz
+    RATEX_SHA256=81c197c0accd9346ce8722eaf0cba40a10e3b165cef332d78cfcd86fc25c53a7
+    MERMAN_ASSET=merman-cli-x86_64-unknown-linux-gnu.tar.xz
+    MERMAN_SHA256=f0273090f6c0973793139365bbe496035d1e89cd5bd514663ceaffb3d4f00926
+    ;;
+*)
+    echo "fetch-helpers: no pinned helpers for the $ARCH architecture" >&2
+    exit 1
+    ;;
+esac
+RATEX_URL=https://github.com/erweixin/RaTeX/releases/download/v$RATEX_VERSION/$RATEX_ASSET
+MERMAN_URL=https://github.com/Latias94/merman/releases/download/v$MERMAN_VERSION/$MERMAN_ASSET
+RATEX_DIR=${RATEX_ASSET%.tar.gz}
+MERMAN_DIR=${MERMAN_ASSET%.tar.xz}
+
+DEST="$ROOT/build/helpers/$ARCH"
+ARCHIVES="$ROOT/build/helpers/archives"
+STAMP="$DEST/.pins"
+PINS="ratex $RATEX_VERSION $RATEX_SHA256
+merman $MERMAN_VERSION $MERMAN_SHA256"
+
+if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$PINS" ] && [ -x "$DEST/render-svg" ] && [ -x "$DEST/merman-cli" ]; then
+    echo "Helpers for $ARCH are in place in $DEST"
+    exit 0
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/parch-helpers.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 1' HUP INT TERM
+mkdir -p "$ARCHIVES"
+
+sha256() { sha256sum "$1" | cut -d' ' -f1; }
+
+# Prints the path of an archive on disk whose checksum is the one given.
+find_local() {
+    name="$1" sum="$2"
+    candidates="$ARCHIVES/$name"
+    downloads="${XDG_DOWNLOAD_DIR:-${HOME:-}/Downloads}"
+    [ -n "$downloads" ] && candidates="$candidates
+$downloads/$name"
+    old_ifs="$IFS"
+    IFS=:
+    for entry in ${PARCH_HELPER_ARCHIVES:-}; do
+        if [ -d "$entry" ]; then
+            candidates="$candidates
+$entry/$name"
+        else
+            candidates="$candidates
+$entry"
+        fi
+    done
+    IFS='
+'
+    for candidate in $candidates; do
+        if [ -f "$candidate" ] && [ "$(sha256 "$candidate")" = "$sum" ]; then
+            IFS="$old_ifs"
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    IFS="$old_ifs"
+    return 1
+}
+
+# Prints the path of the verified archive, downloading it when none is on disk.
+obtain() {
+    name="$1" url="$2" sum="$3"
+    if found="$(find_local "$name" "$sum")"; then
+        printf '%s\n' "$found"
+        return 0
+    fi
+    if [ "$OFFLINE" = 1 ]; then
+        echo "fetch-helpers: $name is not on disk and --offline was given" >&2
+        return 1
+    fi
+    echo "Downloading $url" >&2
+    curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        --output "$WORK/$name" "$url"
+    got="$(sha256 "$WORK/$name")"
+    if [ "$got" != "$sum" ]; then
+        echo "fetch-helpers: $name has SHA-256 $got, expected $sum" >&2
+        return 1
+    fi
+    mv "$WORK/$name" "$ARCHIVES/$name"
+    printf '%s\n' "$ARCHIVES/$name"
+}
+
+# Takes the named members, and nothing else, out of an archive into a new
+# folder, refusing absolute paths, parent references and anything that is
+# not a plain file or folder.
+extract() {
+    archive="$1" into="$2"
+    shift 2
+    listing="$WORK/listing"
+    tar -tvf "$archive" > "$listing"
+    for member in "$@"; do
+        case "$member" in
+        /*|*..*) echo "fetch-helpers: refusing member $member" >&2; return 1 ;;
+        esac
+        # A member and everything beneath it must be plain files and
+        # folders. A listed path starts at the sixth field and ends before
+        # the arrow of a link.
+        if awk -v m="$member" '{
+                path = ""
+                for (i = 6; i <= NF && $i != "->"; i++) path = path == "" ? $i : path " " $i
+                if (path == m || index(path, m "/") == 1) print substr($1, 1, 1)
+            }' "$listing" | grep -qv '^[-d]$'; then
+            echo "fetch-helpers: $member in $(basename "$archive") is not a plain file" >&2
+            return 1
+        fi
+        if ! awk -v m="$member" '{ for (i = 6; i <= NF && $i != "->"; i++) path = (i == 6 ? $i : path " " $i) }
+                path == m || path == m "/" { found = 1 } END { exit !found }' "$listing"; then
+            echo "fetch-helpers: $(basename "$archive") has no $member" >&2
+            return 1
+        fi
+    done
+    mkdir -p "$into"
+    tar -xf "$archive" -C "$into" --no-same-owner --no-same-permissions "$@"
+    if [ -n "$(find "$into" ! -type f ! -type d)" ]; then
+        echo "fetch-helpers: $(basename "$archive") held something other than files and folders" >&2
+        return 1
+    fi
+}
+
+ratex="$(obtain "$RATEX_ASSET" "$RATEX_URL" "$RATEX_SHA256")"
+merman="$(obtain "$MERMAN_ASSET" "$MERMAN_URL" "$MERMAN_SHA256")"
+
+extract "$ratex" "$WORK/ratex" "$RATEX_DIR/render-svg"
+extract "$merman" "$WORK/merman" "$MERMAN_DIR/merman-cli" "$MERMAN_DIR/LICENSE-MIT" \
+    "$MERMAN_DIR/LICENSE-APACHE" "$MERMAN_DIR/THIRD_PARTY_NOTICES.md" "$MERMAN_DIR/THIRD_PARTY_LICENSES"
+
+# Swapped in whole, so that a run that stops half way leaves no mixture.
+NEXT="$DEST.next"
+rm -rf "$NEXT"
+mkdir -p "$NEXT/licenses/ratex" "$NEXT/licenses/merman"
+install -m755 "$WORK/ratex/$RATEX_DIR/render-svg" "$NEXT/render-svg"
+install -m755 "$WORK/merman/$MERMAN_DIR/merman-cli" "$NEXT/merman-cli"
+# RaTeX's archive carries no licence files; the repository keeps them.
+install -m644 "$ROOT"/licenses/ratex/* "$NEXT/licenses/ratex/"
+install -m644 "$WORK/merman/$MERMAN_DIR/LICENSE-MIT" "$WORK/merman/$MERMAN_DIR/LICENSE-APACHE" \
+    "$WORK/merman/$MERMAN_DIR/THIRD_PARTY_NOTICES.md" "$NEXT/licenses/merman/"
+cp -R "$WORK/merman/$MERMAN_DIR/THIRD_PARTY_LICENSES" "$NEXT/licenses/merman/"
+chmod -R u+rwX,go+rX,go-w "$NEXT/licenses"
+printf '%s\n' "$PINS" > "$NEXT/.pins"
+rm -rf "$DEST"
+mv "$NEXT" "$DEST"
+echo "Helpers for $ARCH are in $DEST: RaTeX $RATEX_VERSION, Merman $MERMAN_VERSION"

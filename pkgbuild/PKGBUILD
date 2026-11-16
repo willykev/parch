@@ -6,18 +6,37 @@ pkgrel=1
 pkgdesc='A native Markdown writing app for the Omarchy desktop'
 arch=('x86_64' 'aarch64')
 url='https://github.com/willykev/parch'
-license=('MIT')
+# parch is MIT. The helpers bring the rest: KaTeX's fonts (OFL-1.1) inside
+# both, Eclipse ELK (EPL-2.0) inside Merman, and the licences its Rust crates
+# and JavaScript sources carry, as its third-party notices record.
+license=('MIT' 'Apache-2.0' 'OFL-1.1' 'EPL-2.0' 'MPL-2.0' 'BSD-2-Clause' 'BSD-3-Clause' 'ISC' 'Zlib'
+         'Unicode-3.0' '0BSD' 'CDLA-Permissive-2.0' 'MIT-0' 'Unlicense')
 options=('!debug')
 # Core, GUI, OpenGL, D-Bus, networking and concurrency come from qt6-base;
 # QML, Quick, its controls and shapes from qt6-declarative; SVG from qt6-svg.
 # Nothing links to qt6-wayland, the plugin through which the window reaches
 # Omarchy's compositor, or to xdg-desktop-portal, which draws the open and
-# save dialogs, so this list is all that says they are needed.
-depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal')
+# save dialogs, so this list is all that says they are needed. fontconfig
+# picks the fonts diagrams are drawn with.
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal' 'fontconfig')
+optdepends=('noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'
+            'noto-fonts-emoji: emoji in diagrams')
 makedepends=('gcc' 'make')
-# This recipe builds a checkout.
+# This recipe builds a checkout. The math and diagram helpers are the pinned
+# release builds of RaTeX and Merman, the same archives and checksums as
+# bin/fetch-helpers.
+_ratex=0.1.15
+_merman=0.10.0
 source=()
 sha256sums=()
+source_aarch64=("https://github.com/erweixin/RaTeX/releases/download/v$_ratex/ratex-cli-v$_ratex-aarch64-unknown-linux-musl.tar.gz"
+                "https://github.com/Latias94/merman/releases/download/v$_merman/merman-cli-aarch64-unknown-linux-gnu.tar.xz")
+sha256sums_aarch64=('c654d54c24445931c235900eaf0dc226b99c12099a51da6caf58aad737f3c03d'
+                    '5481cfebf8b642d77e9924d001330b6eb3a1cf75fb7f56aa1cd8f01115d76223')
+source_x86_64=("https://github.com/erweixin/RaTeX/releases/download/v$_ratex/ratex-cli-v$_ratex-x86_64-unknown-linux-musl.tar.gz"
+               "https://github.com/Latias94/merman/releases/download/v$_merman/merman-cli-x86_64-unknown-linux-gnu.tar.xz")
+sha256sums_x86_64=('81c197c0accd9346ce8722eaf0cba40a10e3b165cef332d78cfcd86fc25c53a7'
+                   'f0273090f6c0973793139365bbe496035d1e89cd5bd514663ceaffb3d4f00926')
 
 build() {
   cd "$startdir/.."
@@ -30,4 +49,15 @@ package() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/parch.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/parch.svg"
   install -Dm644 "$startdir/parch.desktop" "$pkgdir/usr/share/applications/parch.desktop"
+
+  # The helpers parch runs on demand, and their licences and notices.
+  local ratex="$srcdir/ratex-cli-v$_ratex-$CARCH-unknown-linux-musl"
+  local merman="$srcdir/merman-cli-$CARCH-unknown-linux-gnu"
+  install -Dm755 "$ratex/render-svg" "$pkgdir/usr/lib/$pkgname/render-svg"
+  install -Dm755 "$merman/merman-cli" "$pkgdir/usr/lib/$pkgname/merman-cli"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/ratex" licenses/ratex/*
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/merman" \
+    "$merman/LICENSE-MIT" "$merman/LICENSE-APACHE" "$merman/THIRD_PARTY_NOTICES.md"
+  cp -R --no-preserve=ownership "$merman/THIRD_PARTY_LICENSES" "$pkgdir/usr/share/licenses/$pkgname/merman/"
+  chmod -R u=rwX,go=rX "$pkgdir/usr/share/licenses/$pkgname/merman"
 }

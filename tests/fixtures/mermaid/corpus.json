@@ -1,0 +1,350 @@
+[
+  {
+    "id": "mermaid-flowchart",
+    "family": "flowchart",
+    "source": "flowchart LR\nsubgraph cluster[\"日本語 café\"]\n A[\"A & <B>\"] -->|\"edge\"| B{\"Choice?\"}\nend\nB -.-> C[\"**Bold** label\"]",
+    "valid": true,
+    "expectedLabels": [
+      "日本語 café",
+      "A & <B>",
+      "Choice?",
+      "edge",
+      "Bold label"
+    ]
+  },
+  {
+    "id": "mermaid-sequence",
+    "family": "sequence",
+    "source": "sequenceDiagram\nparticipant A as Alice\nparticipant B as Bob\nA->>B: Hello 日本語\nB-->>A: Reply",
+    "valid": true,
+    "expectedLabels": [
+      "Alice",
+      "Bob",
+      "Hello 日本語",
+      "Reply"
+    ]
+  },
+  {
+    "id": "mermaid-class",
+    "family": "class",
+    "source": "classDiagram\nAnimal <|-- Duck\nAnimal : +int age\nDuck : +swim()",
+    "valid": true,
+    "expectedLabels": [
+      "Animal",
+      "Duck",
+      "age",
+      "swim"
+    ]
+  },
+  {
+    "id": "mermaid-state",
+    "family": "state",
+    "source": "stateDiagram-v2\n[*] --> Idle\nIdle --> Active: start\nActive --> [*]",
+    "valid": true,
+    "expectedLabels": [
+      "Idle",
+      "Active",
+      "start"
+    ]
+  },
+  {
+    "id": "mermaid-er",
+    "family": "er",
+    "source": "erDiagram\nPERSON ||--o{ NOTE : writes\nPERSON {\n string name\n}",
+    "valid": true,
+    "expectedLabels": [
+      "PERSON",
+      "NOTE",
+      "writes",
+      "name"
+    ]
+  },
+  {
+    "id": "mermaid-journey",
+    "family": "journey",
+    "source": "journey\n title Write a note\n section Morning\n  Write: 5: Alice\n  Review: 3: Bob",
+    "valid": true,
+    "expectedLabels": [
+      "Write a note",
+      "Morning",
+      "Write",
+      "Review",
+      "Alice",
+      "Bob"
+    ]
+  },
+  {
+    "id": "mermaid-gantt",
+    "family": "gantt",
+    "source": "gantt\n title Draft\n dateFormat YYYY-MM-DD\n section Writing\n Draft :a1, 2026-01-01, 3d\n Review :after a1, 2d",
+    "valid": true,
+    "expectedLabels": [
+      "Draft",
+      "Writing",
+      "Review"
+    ]
+  },
+  {
+    "id": "mermaid-pie",
+    "family": "pie",
+    "source": "pie title Pages\n \"Draft\" : 3\n \"Final\" : 2",
+    "valid": true,
+    "expectedLabels": [
+      "Pages",
+      "Draft",
+      "Final"
+    ]
+  },
+  {
+    "id": "mermaid-quadrant",
+    "family": "quadrant",
+    "source": "quadrantChart\n title Priorities\n x-axis Low --> High\n y-axis Low --> High\n Draft: [0.3, 0.6]",
+    "valid": true,
+    "expectedLabels": [
+      "Priorities",
+      "Low",
+      "High",
+      "Draft"
+    ]
+  },
+  {
+    "id": "mermaid-requirement",
+    "family": "requirement",
+    "source": "requirementDiagram\n requirement native {\n id: 1\n text: Native preview\n risk: low\n verifymethod: test\n }",
+    "valid": true,
+    "expectedLabels": [
+      "native",
+      "Native preview"
+    ]
+  },
+  {
+    "id": "mermaid-gitgraph",
+    "family": "gitgraph",
+    "source": "gitGraph\n commit\n branch draft\n checkout draft\n commit\n checkout main\n merge draft",
+    "valid": true,
+    "expectedLabels": [
+      "draft",
+      "main"
+    ]
+  },
+  {
+    "id": "mermaid-c4",
+    "family": "c4",
+    "source": "C4Context\n Person(writer, \"Writer\", \"Writes notes\")\n System(parch, \"parch\", \"Native writing\")\n Rel(writer, parch, \"Uses\")",
+    "valid": true,
+    "expectedLabels": [
+      "Writer",
+      "parch",
+      "Uses"
+    ]
+  },
+  {
+    "id": "mermaid-mindmap",
+    "family": "mindmap",
+    "source": "mindmap\n root((Writing))\n  Draft\n  Review",
+    "valid": true,
+    "expectedLabels": [
+      "Writing",
+      "Draft",
+      "Review"
+    ]
+  },
+  {
+    "id": "mermaid-timeline",
+    "family": "timeline",
+    "source": "timeline\n title Writing\n 2026 : Draft\n 2027 : Review",
+    "valid": true,
+    "expectedLabels": [
+      "Writing",
+      "Draft",
+      "Review"
+    ]
+  },
+  {
+    "id": "mermaid-sankey",
+    "family": "sankey",
+    "source": "sankey-beta\n\nDraft,Review,10\nReview,Final,8",
+    "valid": true,
+    "expectedLabels": [
+      "Draft",
+      "Review",
+      "Final"
+    ]
+  },
+  {
+    "id": "mermaid-xy",
+    "family": "xy",
+    "source": "xychart-beta\n title \"Pages\"\n x-axis [Jan, Feb, Mar]\n y-axis \"Pages\" 0 --> 100\n bar [20, 40, 60]",
+    "valid": true,
+    "expectedLabels": [
+      "Pages",
+      "Jan",
+      "Feb",
+      "Mar"
+    ]
+  },
+  {
+    "id": "mermaid-block",
+    "family": "block",
+    "source": "block-beta\n columns 3\n A B C\n A --> C",
+    "valid": true,
+    "expectedLabels": [
+      "A",
+      "B",
+      "C"
+    ]
+  },
+  {
+    "id": "mermaid-packet",
+    "family": "packet",
+    "source": "packet-beta\n 0-7: \"Header\"\n 8-15: \"Payload\"",
+    "valid": true,
+    "expectedLabels": [
+      "Header",
+      "Payload"
+    ]
+  },
+  {
+    "id": "mermaid-kanban",
+    "family": "kanban",
+    "source": "kanban\n todo[Todo]\n  task[Write note]\n done[Done]\n  review[Review]",
+    "valid": true,
+    "expectedLabels": [
+      "Todo",
+      "Write note",
+      "Done",
+      "Review"
+    ]
+  },
+  {
+    "id": "mermaid-architecture",
+    "family": "architecture",
+    "source": "architecture-beta\n group cloud(cloud)[Cloud]\n service db(database)[Database] in cloud\n service disk(disk)[Storage] in cloud\n db:R -- L:disk",
+    "valid": true,
+    "expectedLabels": [
+      "Cloud",
+      "Database",
+      "Storage"
+    ]
+  },
+  {
+    "id": "mermaid-radar",
+    "family": "radar",
+    "source": "radar-beta\n title Writing\n axis speed[\"Speed\"], clarity[\"Clarity\"], depth[\"Depth\"]\n curve draft[\"Draft\"]{80, 70, 90}\n",
+    "valid": true,
+    "expectedLabels": [
+      "Writing",
+      "Speed",
+      "Clarity",
+      "Depth",
+      "Draft"
+    ]
+  },
+  {
+    "id": "mermaid-treemap",
+    "family": "treemap",
+    "source": "treemap-beta\n \"Writing\"\n  \"Draft\": 30\n  \"Review\": 20",
+    "valid": true,
+    "expectedLabels": [
+      "Writing",
+      "Draft",
+      "Review"
+    ]
+  },
+  {
+    "id": "mermaid-zenuml",
+    "family": "zenuml",
+    "source": "zenuml\n title Writing\n Writer->Editor: type()",
+    "valid": true,
+    "expectedLabels": [
+      "Writing",
+      "Writer",
+      "Editor",
+      "type"
+    ]
+  },
+  {
+    "id": "mermaid-flowchart-markers",
+    "family": "flowchart",
+    "source": "flowchart LR\n A o--o B\n B x--x C\n C <--> D",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-flowchart-formula",
+    "family": "flowchart",
+    "source": "flowchart LR\n A[\"$$x^2 + y^2$$\"] --> B[\"$$\\frac{a}{b}$$\"]",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-flowchart-markdown",
+    "family": "flowchart",
+    "source": "flowchart LR\n A[\"`**Bold** and *italic*\nUnicode 日本語 😀`\"] --> B[\"Quoted & <tag>\"]",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-flowchart-graph",
+    "family": "flowchart",
+    "source": "graph TD\n A --> B",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-state-legacy",
+    "family": "state",
+    "source": "stateDiagram\n [*] --> Idle\n Idle --> [*]",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-class-v2",
+    "family": "class",
+    "source": "classDiagram-v2\n A <|-- B",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-flowchart-elk",
+    "family": "flowchart",
+    "source": "---\nconfig:\n  layout: elk\n---\nflowchart LR\n A --> B",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-invalid",
+    "family": "invalid",
+    "source": "flowchart LR\nA --> [",
+    "valid": false,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-c4-container",
+    "family": "c4",
+    "source": "C4Container\n Person(writer, \"Writer\", \"Writes notes\")\n Container(app, \"parch\", \"Qt\", \"Native writing\")\n ContainerDb(files, \"Files\", \"Markdown\", \"Documents\")\n Rel(writer, app, \"Uses\")\n Rel(app, files, \"Reads and writes\")\n",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-c4-component",
+    "family": "c4",
+    "source": "C4Component\n Container_Boundary(app, \"parch\") {\n  Component(editor, \"Editor\", \"Qt Quick\", \"Edits source\")\n  Component(store, \"Store\", \"C++\", \"Saves files\")\n }\n Rel(editor, store, \"Saves through\")\n",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-c4-dynamic",
+    "family": "c4",
+    "source": "C4Dynamic\n Person(writer, \"Writer\")\n Container(app, \"parch\", \"Qt\")\n ContainerDb(files, \"Files\", \"Markdown\")\n RelIndex(1, writer, app, \"Types\")\n RelIndex(2, app, files, \"Autosaves\")\n",
+    "valid": true,
+    "expectedLabels": []
+  },
+  {
+    "id": "mermaid-c4-deployment",
+    "family": "c4",
+    "source": "C4Deployment\n Deployment_Node(laptop, \"Laptop\", \"Omarchy\") {\n  Container(app, \"parch\", \"Qt\", \"Native writing\")\n }\n Deployment_Node(disk, \"Disk\", \"Btrfs\") {\n  ContainerDb(files, \"Files\", \"Markdown\")\n }\n Rel(app, files, \"Writes\")\n",
+    "valid": true,
+    "expectedLabels": []
+  }
+]

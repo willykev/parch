@@ -50,3 +50,10 @@ void replaceTheme(const QString &dir, const QString &mode, const QString &backgr
     QVERIFY(std::rename(qPrintable(fresh), qPrintable(dir + "/theme")) == 0);
     QDir(old).removeRecursively();
 }
+
+double testTimeFactor()
+{
+    bool ok = false;
+    const double factor = qEnvironmentVariable("PARCH_TEST_TIME_FACTOR").toDouble(&ok);
+    return ok && factor >= 1 ? factor : 1;
+}

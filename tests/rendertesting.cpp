@@ -1,4 +1,5 @@
 #include "rendertesting.h"
+#include <sched.h>
 
 #include "testfiles.h"
 
@@ -271,4 +272,17 @@ int pixelsNear(const QImage &image, const QColor &color, int tolerance)
         }
     }
     return count;
+}
+
+bool kernelGivesNetworkNamespaces()
+{
+    static const bool given = [] {
+        const pid_t child = ::fork();
+        if (child < 0) return false;
+        if (child == 0) ::_exit(::unshare(CLONE_NEWUSER | CLONE_NEWNET) == 0 ? 0 : 1);
+        int status = 0;
+        if (::waitpid(child, &status, 0) != child) return false;
+        return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    }();
+    return given;
 }

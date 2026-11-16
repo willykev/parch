@@ -1,4 +1,5 @@
 #include "markdown_tests.h"
+#include "testfiles.h"
 
 #include "frontmatter.h"
 #include "mdhtml.h"
@@ -2025,7 +2026,7 @@ void includeGuards()
     doc = md::parse(QStringLiteral("fan0.md\n"), writer(), source); // 2^24 leaves without the guard
     QVERIFY(count(doc, DiagnosticCode::IncludeCountLimit) >= 1);
     QVERIFY(doc.incomplete);
-    QVERIFY2(timer.elapsed() < 5000, qPrintable(QString::number(timer.elapsed())));
+    QVERIFY2(timer.elapsed() < timeLimit(5000), qPrintable(QString::number(timer.elapsed())));
 
     // A path that cannot be placed, and a file that is not there.
     doc = md::parse(QStringLiteral("/shared/two.md\n"), writer(), source);
@@ -3137,7 +3138,7 @@ void pathologicalInput()
             const md::Document doc = md::parse(input.text, options);
             const QString out = md::toHtml(doc);
             const qint64 elapsed = timer.elapsed();
-            QVERIFY2(elapsed < 3000, qPrintable(QStringLiteral("%1 took %2 ms").arg(input.name).arg(elapsed)));
+            QVERIFY2(elapsed < timeLimit(3000), qPrintable(QStringLiteral("%1 took %2 ms").arg(input.name).arg(elapsed)));
             // Shallow enough for any recursive reader.
             const int depth = treeDepth(doc.root);
             QVERIFY2(depth < 1200, qPrintable(QStringLiteral("%1 is %2 deep").arg(input.name).arg(depth)));

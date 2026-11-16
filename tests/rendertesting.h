@@ -78,3 +78,8 @@ QJsonArray renderFixtures(const QString &name);
 
 // Pixels of the image within `tolerance` (summed over the channels) of the colour.
 int pixelsNear(const QImage &image, const QColor &color, int tolerance);
+
+// Whether this kernel lets an unprivileged process make a user and a network
+// namespace, which is how the helpers are kept off the network. Some
+// containers and hardened kernels refuse; helpers then run with the network.
+bool kernelGivesNetworkNamespaces();

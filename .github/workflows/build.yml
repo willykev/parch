@@ -25,7 +25,7 @@ jobs:
         shell: bash
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed git python curl qt6-base qt6-declarative qt6-svg qt6-wayland syntax-highlighting xdg-desktop-portal fontconfig hunspell hunspell-en_us libyaml ttf-dejavu
+        run: pacman -Syu --noconfirm --needed git python curl qt6-base qt6-declarative qt6-svg qt6-wayland syntax-highlighting xdg-desktop-portal fontconfig hunspell hunspell-en_us libyaml librsvg cairo libzip poppler qpdf epubcheck ttf-dejavu
       - uses: actions/checkout@v7
         with:
           persist-credentials: false

@@ -21,9 +21,11 @@ options=('!debug')
 # and save dialogs, or to hunspell-en_us, the English dictionary spell
 # checking reads, so this list is all that says they are needed. fontconfig
 # picks the fonts diagrams are drawn with, and syntax-highlighting
-# (KSyntaxHighlighting) colours the code in previews.
+# (KSyntaxHighlighting) colours the code in previews. Exports use librsvg and
+# cairo to turn diagrams into vector drawings a PDF can hold and to draw SVG
+# as pictures, and libzip to pack DOCX and EPUB files.
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal' 'fontconfig'
-         'hunspell' 'hunspell-en_us' 'libyaml' 'syntax-highlighting')
+         'hunspell' 'hunspell-en_us' 'libyaml' 'syntax-highlighting' 'librsvg' 'cairo' 'libzip')
 optdepends=('qt6-imageformats: WebP and TIFF pictures in documents'
             'kimageformats: AVIF, HEIF and JPEG XL pictures in documents'
             'noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'

@@ -55,5 +55,6 @@
         <file>MarkdownPreferences.qml</file>
         <file>DialectSettingsForm.qml</file>
         <file>DocumentSettingsDialog.qml</file>
+        <file>ExportDialog.qml</file>
     </qresource>
 </RCC>

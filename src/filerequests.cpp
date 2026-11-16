@@ -107,6 +107,14 @@ bool FileRequests::askForFiles(WindowContext *window, const QString &purpose, co
     return true;
 }
 
+bool FileRequests::askForSaveFile(WindowContext *window, const QString &purpose, const QString &title,
+                                  const QString &suggested, const QString &filterName, const QStringList &patterns)
+{
+    if (!ask({Asked::SaveFile, window, nullptr, false, purpose})) return false;
+    m_picker->saveFile(title, QUrl::fromLocalFile(suggested), filterName, patterns);
+    return true;
+}
+
 void FileRequests::filesPicked(const QList<QUrl> &urls)
 {
     if (m_request.asked != Asked::Files) return;
@@ -193,6 +201,17 @@ void FileRequests::folderPicked(const QUrl &url)
 
 void FileRequests::saveTargetPicked(const QUrl &url)
 {
+    if (m_request.asked == Asked::SaveFile) {
+        const Request request = std::exchange(m_request, {});
+        emit answered();
+        const QString path = url.toLocalFile();
+        if (!url.isLocalFile() || !PathText::isFullPath(path)) {
+            emit problem(tr("Nothing written"), tr("Only a local file can be chosen."));
+            return;
+        }
+        emit saveFileChosen(request.window, request.purpose, path);
+        return;
+    }
     if (m_request.asked != Asked::SaveTarget) return;
     const Request request = std::exchange(m_request, {});
     if (!request.document) return;

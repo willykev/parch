@@ -185,6 +185,11 @@ void Writer::block(const Node &node, bool tight)
     }
     case NodeType::MermaidBlock:
         cr();
+        if (const QString drawn = opt.picture ? opt.picture(node) : QString(); !drawn.isEmpty()) {
+            out.append(drawn);
+            cr();
+            break;
+        }
         lit(QLatin1StringView("<pre class=\"mermaid\">"));
         esc(node.text);
         lit(QLatin1StringView("</pre>"));
@@ -192,6 +197,11 @@ void Writer::block(const Node &node, bool tight)
         break;
     case NodeType::MathBlock:
         cr();
+        if (const QString drawn = opt.picture ? opt.picture(node) : QString(); !drawn.isEmpty()) {
+            out.append(drawn);
+            cr();
+            break;
+        }
         lit(QLatin1StringView("<div class=\"math display\">"));
         esc(node.text);
         lit(QLatin1StringView("</div>"));
@@ -490,6 +500,10 @@ void Writer::inl(const Node &node)
         lit(QLatin1StringView("</a>"));
         break;
     case NodeType::Image:
+        if (const QString drawn = opt.picture ? opt.picture(node) : QString(); !drawn.isEmpty()) {
+            out.append(drawn);
+            break;
+        }
         lit(QLatin1StringView("<img"));
         attribute(QLatin1StringView("src"), url(node, node.dest, true));
         attribute(QLatin1StringView("alt"), plainText(node));
@@ -513,6 +527,10 @@ void Writer::inl(const Node &node)
         }
         break;
     case NodeType::MathInline:
+        if (const QString drawn = opt.picture ? opt.picture(node) : QString(); !drawn.isEmpty()) {
+            out.append(drawn);
+            break;
+        }
         lit(node.display ? QLatin1StringView("<span class=\"math display\">") : QLatin1StringView("<span class=\"math\">"));
         esc(node.text);
         lit(QLatin1StringView("</span>"));

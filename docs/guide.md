@@ -354,6 +354,72 @@ defines, a key given to two entries of one file or found in two files, a
 bibliography that cannot be read or has errors, with their lines, a style
 that cannot be used, and citations of a bibliography with no style chosen.
 
+## Export and printing
+
+**Export…** (`Ctrl+Shift+E`) writes the document in front as Markdown, HTML,
+PDF, DOCX (Word) or EPUB (an e-book). The dialog shows the format's options
+and, before anything is written, what that format leaves out of this
+document: that formulas and diagrams become pictures in a Word document, for
+example, or that pictures from the web are not fetched for a PDF. **Export…**
+then asks your desktop's file dialog where to write it.
+
+For a PDF, and for printing, the dialog also shows the pages as they will
+come out, laid out again as you change the paper, the margins, the type or
+the template. Tab reaches them, and the arrow keys, Home and End move from
+page to page.
+
+- The export reads the document as it is when it starts, with the files it
+  includes, its bibliography and its citation style, in its own
+  [document settings](#document-settings), and you can go on writing
+  meanwhile. Its progress shows above the text, with **Cancel**. When it
+  ends, the notice says what was written and what was left out, or why
+  nothing was.
+- An export never writes over the document or a file it includes, and
+  writes its file in one step: when it fails or is cancelled, a file that was
+  there is as it was. A folder of pictures beside an HTML page or a Markdown
+  file is replaced only when an earlier export made it.
+- **Export again** repeats the document's last export: the same format and
+  options, to the same file, with the text as it is now.
+- **Print…** (`Ctrl+P`) prints the document as the PDF export sets it,
+  through your desktop's print dialog, which chooses the printer and the
+  paper; the dialog before it chooses the margins and the type.
+
+What each format holds:
+
+- **Markdown**: the document as one file with its includes in place, its
+  images linked where they are or copied into a folder beside it
+  (`NAME_files`); or the document's own text as it is.
+- **HTML**: a page of its own, in typography that does not follow the
+  desktop theme. Images are copied into a folder beside it (`NAME_files`),
+  written into the page, or linked where they are. Formulas are SVG, named by
+  their TeX for screen readers, and diagrams are SVG pictures described by
+  their words.
+- **PDF**: pages of the size and margins you choose (A4 and 20 mm unless you
+  choose others), in a template: **classic**, a face made for reading at 11
+  points; **modern**, the desktop's sans-serif at 10 points; or **compact**,
+  10 points with close lines and 15 mm margins. A font, a size or margins
+  you choose go over the template's. The pages are numbered, with text you
+  can search and copy, working links, and an outline of the headings. `+++` starts a new page, and a heading never stays
+  at the foot of a page without its text. Formulas and diagrams are vectors;
+  a diagram that cannot be drawn as one is printed as a picture at four times
+  its size, and the notice says so. Notes and the bibliography follow the
+  text.
+- **DOCX**: a Word document with real styles (Title, Heading 1 to 6, Quote,
+  Code), bulleted, numbered and task lists, tables with merged cells, links,
+  notes as footnotes or endnotes, pictures with their descriptions, and the
+  title, author, subject, keywords and language from the front matter.
+  Formulas and diagrams are pictures, not Word equations.
+- **EPUB**: an EPUB 3 book with a file for each chapter (each heading of
+  level 1, or of level 2 when the document has a single title), a table of
+  contents from the headings, its images, formulas and diagrams as SVG, and
+  its title, author, language, description and date from the front matter.
+  Page breaks are hints, since a reader sets its own pages, and pictures from
+  the web are left out with their descriptions in their place.
+
+Formulas and diagrams are drawn by the same helpers as the preview, dark on
+white whatever the desktop's theme. Without them they are written as their
+source, and the dialog says so before you export.
+
 ## Vim keys
 
 Vim keys are off until you turn them on: **Turn on Vim keys** in the menu
@@ -657,6 +723,8 @@ and so does asking for the library or the toolbar.
 | `Ctrl+R` | Go to heading |
 | `Ctrl+S` | Save now |
 | `Ctrl+Shift+S` | Save as |
+| `Ctrl+Shift+E` | Export |
+| `Ctrl+P` | Print |
 | `Ctrl+W` | Close the tab |
 | `Ctrl+Q` | Quit |
 | `Ctrl+V` | Paste, rich text as Markdown |
@@ -714,7 +782,7 @@ Usage: parch [open] [--theme DIR] [--benchmark OUT] [FILE...]
 Commands that need no display (parch help COMMAND for its options):
   check FILE...    Report what is wrong in documents, with file, line and column
   render FILE      Write a document's HTML, plain text, outline or semantic tree
-  export FILE      Write a document as Markdown with its includes, or as an HTML page
+  export FILE      Write a document as Markdown, HTML, PDF, DOCX or EPUB
   stats FILE       Count words and characters, reading time and headings
   skill [install]  Print the skill for coding agents, or install it
   help [COMMAND]   Print this help, or a command's options
@@ -734,6 +802,8 @@ no display, never change the document, and print text for people or, with
 parch check notes.md chapters/*.md   # What is wrong, file by file
 parch render notes.md --to outline   # html, text, outline or json-tree
 parch export book.md -o book.html    # A page of its own
+parch export book.md -o book.pdf --page-size Letter
+parch export book.md -o book.docx    # Also .epub for a book
 parch export book.md -o whole.md     # One Markdown file with its includes in place
 parch stats book.md                  # Words, characters, reading time, headings
 ```
@@ -752,15 +822,20 @@ parch stats book.md                  # Words, characters, reading time, headings
   indented by level (`outline`), or the whole semantic tree with source ranges
   (`json-tree`). Relative links and images lead from the folder the HTML is
   written to, or from the document's.
-- **export** writes `md`, the document as one file with each include in
-  place (an included file's front matter left out and its variables written
-  out, its footnote and link labels kept apart from the document's, and its
-  paths written from the new file's folder), or `html`, a standalone page with
-  typography of its own that does not follow the desktop theme (`--title`
-  sets its title). Citations and the bibliography are written as the citation
-  style has them. Math and Mermaid diagrams are written as their source in
-  the page, and its notes say so. The format follows `-o`'s name unless `--to`
-  gives one. PDF, DOCX and EPUB cannot be exported from the terminal yet.
+- **export** writes the document in any of the formats the window's
+  [Export](#export-and-printing) writes, in the same way: `md`, the document
+  as one file with each include in place (an included file's front matter
+  left out and its variables written out, its footnote and link labels kept
+  apart from the document's, and its paths written from the new file's
+  folder; `--as-is` writes its own text instead, and `--images copy` copies
+  its images beside it); `html`, a standalone page; `pdf`, set on pages;
+  `docx`, a Word document; or `epub`, a book. Each format's options are in
+  `parch help export`, such as `--page-size`, `--margins`, `--font` and
+  `--font-size` for PDF, `--notes endnotes` for DOCX and `--images
+  copy|embed|link` for HTML. Formulas and diagrams are drawn with parch's
+  helpers when they are installed. What a format leaves out of the document
+  is printed as a note. The format follows `-o`'s name unless `--to` gives
+  one.
 - **stats** counts the words, characters (with and without spaces) and
   headings a reader reads, and the reading time at 200 words a minute.
 
@@ -799,7 +874,7 @@ the version of what drew the result.
 | 1 | The command line is wrong |
 | 2 | `check` found problems; `export` was given a document whose includes cannot all be read |
 | 3 | A file could not be read or written, or is there and `--force` was not given |
-| 4 | The export could not be made, as for a format that is not available yet |
+| 4 | The export could not be made |
 
 ### For coding agents
 
@@ -819,6 +894,7 @@ alone.
 | `~/.local/share/parch/documents.json` | Which history belongs to which file |
 | `~/.local/share/parch/dictionary.txt` | Words added to the spelling dictionary |
 | `~/.local/share/parch/document-settings.json` | Document settings, by document, library folder and for every document |
+| `~/.local/share/parch/exports.json` | Each document's last export, which Export again repeats |
 | `~/.local/state/parch/recovery/` | Text not yet in its file |
 | `~/.local/state/parch/session.json` | Open windows and tabs |
 | `~/.local/state/parch/recent.json` | Recent files |

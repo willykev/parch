@@ -67,6 +67,10 @@ struct RenderResult {
     // "svg" or "png".
     QString format;
     QByteArray data;
+    // A diagram drawn for print also keeps the SVG it was drawn from, in the
+    // request's colours: Qt cannot draw it as it is, but once librsvg has
+    // made it plain (SvgPaper::plain) a PDF can hold it as vectors.
+    QByteArray svg;
     // On the page, in logical pixels.
     QSizeF size;
     // From the top of a formula down to the baseline it sits on, in logical

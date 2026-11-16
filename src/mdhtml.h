@@ -76,6 +76,12 @@ struct HtmlOptions {
     std::function<QString(const Node &node, const QString &destination)> destination;
     // When set, citations and the bibliography as a citation style made them.
     std::optional<CitationHtml> citations;
+    // When set, what is written for a formula, a diagram or an image in
+    // place of what the renderer writes: called with the MathInline,
+    // MathBlock, MermaidBlock or Image node, it returns the markup to write,
+    // which is written as it is and so must be safe; an empty answer writes
+    // the usual markup.
+    std::function<QString(const Node &node)> picture;
 
     // The plain CommonMark rendering the specification's examples show.
     static HtmlOptions commonMark();

@@ -39,6 +39,18 @@ public:
         Q_UNUSED(multiple);
         emit failed(tr("The desktop's file dialog cannot choose these files."));
     }
+    // Where to write a file of one kind, such as an export, starting from
+    // the suggested file; the answer is saveSelected(). A picker that
+    // cannot ask says failed().
+    virtual void saveFile(const QString &title, const QUrl &suggested, const QString &filterName,
+                          const QStringList &patterns)
+    {
+        Q_UNUSED(title);
+        Q_UNUSED(suggested);
+        Q_UNUSED(filterName);
+        Q_UNUSED(patterns);
+        emit failed(tr("The desktop's file dialog cannot choose where to write this file."));
+    }
 
 signals:
     void documentsSelected(const QList<QUrl> &urls);

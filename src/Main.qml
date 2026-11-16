@@ -32,7 +32,7 @@ ApplicationWindow {
                                        || commandPalette.visible || preferencesDialog.visible || shortcutsDialog.visible
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
                                        || encodingDialog.visible
-                                       || documentSettingsDialog.visible
+                                       || documentSettingsDialog.visible || exportDialog.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -601,6 +601,7 @@ ApplicationWindow {
         attachmentDialog.close()
         linkCheckDialog.close()
         documentSettingsDialog.close()
+        exportDialog.close()
     }
     onWidthChanged: context.size = Qt.size(width, height)
     onHeightChanged: context.size = Qt.size(width, height)
@@ -705,6 +706,8 @@ ApplicationWindow {
         palette: () => commandPalette.show(),
         preferences: () => preferencesDialog.open(),
         documentSettings: () => { if (window.document) documentSettingsDialog.show(window.document) },
+        "export": () => { if (window.document) exportDialog.show(window.document, "export") },
+        "print": () => { if (window.document) exportDialog.show(window.document, "print") },
         shortcuts: () => shortcutsDialog.show()
     })
 
@@ -901,6 +904,8 @@ ApplicationWindow {
                 notice: backend.notice ? backend.problem : ""
                 noticeDetail: backend.notice ? backend.problemDetail : ""
                 noticeTone: backend.noticeTone
+                exportStatus: backend.exports.busy ? backend.exports.status : ""
+                onCancelExport: backend.exports.cancel()
                 onRetrySave: {
                     backend.activate(window.context)
                     backend.retrySave()
@@ -1353,6 +1358,12 @@ ApplicationWindow {
     DocumentSettingsDialog {
         id: documentSettingsDialog
         objectName: "documentSettingsDialog"
+        onClosed: window.dialogClosed()
+    }
+
+    ExportDialog {
+        id: exportDialog
+        objectName: "exportDialog"
         onClosed: window.dialogClosed()
     }
 

@@ -157,6 +157,24 @@ void PortalFilePicker::saveDocument(const QUrl &suggested)
     request(QStringLiteral("SaveFile"), tr("Save"), options, Action::Save);
 }
 
+void PortalFilePicker::saveFile(const QString &title, const QUrl &suggested, const QString &filterName,
+                                const QStringList &patterns)
+{
+    const QFileInfo target(suggested.toLocalFile());
+    PortalFileFilter kind{filterName, {}};
+    for (const QString &pattern : patterns) kind.rules.append({0, pattern});
+    QVariantMap options;
+    options.insert(QStringLiteral("accept_label"), tr("Export"));
+    options.insert(QStringLiteral("modal"), true);
+    options.insert(QStringLiteral("current_name"), target.fileName());
+    options.insert(QStringLiteral("current_folder"), portalPathBytes(target.absolutePath()));
+    if (!patterns.isEmpty()) {
+        options.insert(QStringLiteral("filters"), QVariant::fromValue(PortalFileFilters{kind, allFilter()}));
+        options.insert(QStringLiteral("current_filter"), QVariant::fromValue(kind));
+    }
+    request(QStringLiteral("SaveFile"), title, options, Action::Save);
+}
+
 bool PortalFilePicker::listen(const QString &path)
 {
     m_pendingPath = path;

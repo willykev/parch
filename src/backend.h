@@ -9,6 +9,7 @@
 #include "documentreview.h"
 #include "encodings.h"
 #include "documentsettingsstore.h"
+#include "exports.h"
 #include "fileorganizer.h"
 #include "history.h"
 #include "session.h"
@@ -91,6 +92,8 @@ class Backend : public QObject {
     // The Markdown settings of documents, library folders and every
     // document, which every open document is read in.
     Q_PROPERTY(DocumentSettingsStore *documentSettings READ documentSettings CONSTANT)
+    // Exports and printing, in the background, with their progress.
+    Q_PROPERTY(Exports *exports READ exports CONSTANT)
 
 public:
     enum NoticeTone { Failure, Warning, News };
@@ -133,6 +136,9 @@ public:
     Attachments *attachments() const;
     SpellChecker *spelling() const { return m_spelling; }
     DocumentSettingsStore *documentSettings() const { return m_documentSettings; }
+    Exports *exports() const { return m_exports; }
+    // The desktop's printing. Without it, printing says it cannot.
+    void setPrinter(Printer *printer);
     QList<WindowContext *> windows() const;
     // The window that came to the front last, or the oldest window when none has yet.
     WindowContext *activeWindow() const;
@@ -488,6 +494,7 @@ private:
     QSet<QString> m_givenUp;
     SpellChecker *m_spelling;
     DocumentSettingsStore *m_documentSettings;
+    Exports *m_exports;
     // A dictionary that is missing is said once in a run, unless spelling is turned on again.
     bool m_dictionaryMissingSaid = false;
     std::unique_ptr<RenderService> m_render;

@@ -15,7 +15,7 @@
 namespace {
 
 constexpr quint32 kMagic = 0x50524331; // "PRC1"
-constexpr quint32 kVersion = 1;
+constexpr quint32 kVersion = 2;
 const QString kSuffix = QStringLiteral(".render");
 
 QByteArray serialize(const RenderResult &result)
@@ -25,7 +25,7 @@ QByteArray serialize(const RenderResult &result)
     out.setVersion(QDataStream::Qt_6_0);
     out << kMagic << kVersion << qint32(result.status) << result.format << result.data << result.size
         << double(result.baseline) << double(result.scale) << result.vector << result.description << result.diagnostic
-        << result.note << result.networkIsolated;
+        << result.note << result.networkIsolated << result.svg;
     return bytes;
 }
 
@@ -40,7 +40,7 @@ std::optional<RenderResult> deserialize(const QByteArray &bytes)
     in >> magic >> version;
     if (magic != kMagic || version != kVersion) return std::nullopt;
     in >> status >> result.format >> result.data >> result.size >> baseline >> scale >> result.vector >>
-        result.description >> result.diagnostic >> result.note >> result.networkIsolated;
+        result.description >> result.diagnostic >> result.note >> result.networkIsolated >> result.svg;
     if (in.status() != QDataStream::Ok || status != RenderResult::Rendered) return std::nullopt;
     result.status = RenderResult::Rendered;
     result.baseline = baseline;

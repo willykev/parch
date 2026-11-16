@@ -41,9 +41,10 @@ This builds and installs the app. Open **parch** from the app launcher, or run
 `parch` with the files you want to open.
 
 Building requires a C++ compiler, `make`, `qmake6`, and the `qt6-base`,
-`qt6-declarative`, `qt6-svg`, `qt6-wayland`, `fontconfig`, `hunspell` and
-`syntax-highlighting` packages. File dialogs use `xdg-desktop-portal` and your
-desktop's portal backend; spell checking uses the `hunspell-en_us` dictionary.
+`qt6-declarative`, `qt6-svg`, `qt6-wayland`, `fontconfig`, `hunspell`,
+`syntax-highlighting`, `librsvg`, `cairo` and `libzip` packages. File dialogs
+and printing use `xdg-desktop-portal` and your desktop's portal backend; spell
+checking uses the `hunspell-en_us` dictionary.
 
 ## Start writing
 
@@ -69,6 +70,7 @@ moment after you pause.
 | `F11` | Distraction-free writing |
 | `F10` | Open the menu |
 | `Ctrl+Shift+P` | Find and run any command |
+| `Ctrl+Shift+E` / `Ctrl+P` | Export / print |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` | Bold / italic / link |
 
 ## Use the terminal
@@ -78,7 +80,7 @@ parch notes.md ideas.md            # Open files, in the running parch if there i
 parch ~/Writing                    # Add a folder to the library
 parch check notes.md               # Find broken links, missing images, notes and includes
 parch render notes.md --to text    # The HTML, text, outline or semantic tree
-parch export book.md -o book.html  # A web page, or Markdown with its includes in place
+parch export book.md -o book.pdf   # Also .html, .docx, .epub, or .md with its includes in place
 parch stats notes.md               # Words, characters and reading time
 parch skill install                # Teach your coding agents to use parch
 ```
@@ -99,8 +101,7 @@ keeps its own things separately:
 - Formulas and diagrams already drawn in `~/.cache/parch/render/`.
 
 The preview fetches pictures a document names by web address; turn that off
-in **Preferences** if you prefer. Exporting from the window is not included
-yet; the terminal exports Markdown and HTML.
+in **Preferences** if you prefer. Exports never fetch anything.
 
 ## Development
 

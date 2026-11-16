@@ -29,6 +29,9 @@ Rectangle {
     property int noticeTone: Backend.Failure
     // What the notice tells of can be undone, with Undo beside Dismiss.
     property bool noticeUndoable: false
+    // An export or a print running in the background, and how far it has
+    // come; empty when none is.
+    property string exportStatus
 
     signal retrySave()
     // A file that could not be read is read again.
@@ -45,6 +48,7 @@ Rectangle {
     // is written as UTF-8, each once the writer chooses.
     signal reopenAs()
     signal confirmEncoding()
+    signal cancelExport()
 
     // The rows shown, by what each is about, most pressing first.
     readonly property var kinds: {
@@ -70,6 +74,8 @@ Rectangle {
             if (bar.historyPaused)
                 shown.push("history")
         }
+        if (bar.exportStatus.length > 0)
+            shown.push("export")
         if (bar.notice.length > 0)
             shown.push("app")
         return shown
@@ -99,6 +105,8 @@ Rectangle {
             return qsTr("Reopen as…")
         case "converted":
             return qsTr("Save as UTF-8…")
+        case "export":
+            return qsTr("Cancel")
         default:
             return ""
         }
@@ -166,6 +174,8 @@ Rectangle {
                         return bar.historyFull
                             ? qsTr("History is paused: named versions fill the space it may use. Saving goes on.")
                             : qsTr("History is paused: the last version did not fit in the space it may use. Saving goes on.")
+                    case "export":
+                        return bar.exportStatus
                     default:
                         return bar.notice
                     }
@@ -197,7 +207,8 @@ Rectangle {
                 implicitHeight: stacked ? words.height + Math.round(theme.fontSize / 4) + button.height + 2 * inset
                                         : Math.max(words.height, actions.visible ? button.height : 0) + 2 * inset
                 readonly property real inset: Math.round(theme.fontSize / 3)
-                Accessible.role: Accessible.AlertMessage
+                // A running export is told calmly; anything else is an alert.
+                Accessible.role: kind === "export" ? Accessible.StatusBar : Accessible.AlertMessage
                 Accessible.name: message
                 Accessible.description: detail.length > 0 ? message + "\n" + detail : message
 
@@ -216,6 +227,7 @@ Rectangle {
                     // as red as their danger.
                     color: row.kind === "readOnly" || row.kind === "history" || row.kind === "converted"
                            || (row.kind === "app" && bar.noticeTone === Backend.Warning) ? theme.warning
+                         : row.kind === "export" ? theme.accent
                          : row.kind === "app" && bar.noticeTone === Backend.News ? theme.dim : theme.danger
                 }
 
@@ -294,7 +306,7 @@ Rectangle {
 
                     ThemedButton {
                         id: button
-                        objectName: row.kind === "app" ? "noticeDismiss" : "noticeAction"
+                        objectName: row.kind === "app" ? "noticeDismiss" : row.kind === "export" ? "exportCancel" : "noticeAction"
                         width: Math.min(implicitWidth, actions.room)
                         framed: true
                         // Reached by Tab and F6, but a click leaves the keys in the text.
@@ -328,6 +340,9 @@ Rectangle {
                                 break
                             case "converted":
                                 bar.confirmEncoding()
+                                break
+                            case "export":
+                                bar.cancelExport()
                                 break
                             }
                         }

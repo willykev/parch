@@ -60,6 +60,11 @@ public:
     // for one (a folder with `patterns` empty). The answer is filesChosen().
     bool askForFiles(WindowContext *window, const QString &purpose, const QString &title, const QString &filterName,
                      const QStringList &patterns, bool multiple);
+    // Where to write a file for a purpose of the asker's own, such as an
+    // export, starting from the suggested path, as FilePicker::saveFile()
+    // asks. The answer is saveFileChosen().
+    bool askForSaveFile(WindowContext *window, const QString &purpose, const QString &title, const QString &suggested,
+                        const QString &filterName, const QStringList &patterns);
 
 signals:
     // A question was answered, before what it does.
@@ -69,13 +74,15 @@ signals:
     void folderChosen(WindowContext *window, const QString &path);
     // The answer to askForFiles(): local full paths, at least one.
     void filesChosen(WindowContext *window, const QString &purpose, const QStringList &paths);
+    // The answer to askForSaveFile(): a local full path.
+    void saveFileChosen(WindowContext *window, const QString &purpose, const QString &path);
     // The document took the name it was given; its tab is to close if asked.
     void named(WindowContext *window, Document *document, bool closeAfter);
     void problem(const QString &problem, const QString &detail);
 
 private:
     // Files and FolderFor are asked for a purpose of the asker's own.
-    enum class Asked { Nothing, Documents, Folder, SaveTarget, Files, FolderFor };
+    enum class Asked { Nothing, Documents, Folder, SaveTarget, Files, FolderFor, SaveFile };
     struct Request {
         Asked asked = Asked::Nothing;
         QPointer<WindowContext> window;

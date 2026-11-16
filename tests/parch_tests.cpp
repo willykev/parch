@@ -16,6 +16,7 @@
 #include "documentstore.h"
 #include "clitests.h"
 #include "editingtests.h"
+#include "exporttests.h"
 #include "editorbinding.h"
 #include "editordecorations.h"
 #include "fileorganizer.h"
@@ -362,6 +363,32 @@ private slots:
     void cliJsonAndTextAreSafeToPrint() { CliTests::jsonAndTextAreSafeToPrint(); }
     void cliHtmlDestinationsCanBeRewritten() { CliTests::htmlDestinationsCanBeRewritten(); }
     void cliCommandsNeedNoDisplay() { CliTests::commandsNeedNoDisplay(); }
+    // Exports and printing. The tests themselves are in exporttests.cpp.
+    void exportPdfSetsPagesWithSearchableText() { ExportTests::pdfSetsPagesWithSearchableText(); }
+    void exportPdfKeepsHeadingsWithTheirText() { ExportTests::pdfKeepsHeadingsWithTheirText(); }
+    void exportPdfTallTableRowsRunOntoTheNextPage() { ExportTests::pdfTallTableRowsRunOntoTheNextPage(); }
+    void exportPdfSetsALongDocumentWhole() { ExportTests::pdfSetsALongDocumentWhole(); }
+    void exportPdfOutlineIsAnIncrementalUpdate() { ExportTests::pdfOutlineIsAnIncrementalUpdate(); }
+    void exportPaperFormulasSitOnTheBaseline() { ExportTests::paperFormulasSitOnTheBaseline(); }
+    void exportPaperDiagramsAreVectorsWhereQtDrawsThem() { ExportTests::paperDiagramsAreVectorsWhereQtDrawsThem(); }
+    void exportDocxIsWordprocessingMarkup() { ExportTests::docxIsWordprocessingMarkup(); }
+    void exportDocxOpensInLibreOffice() { ExportTests::docxOpensInLibreOffice(); }
+    void exportEpubFollowsTheContainerRules() { ExportTests::epubFollowsTheContainerRules(); }
+    void exportEpubSplitsIntoChapters() { ExportTests::epubSplitsIntoChapters(); }
+    void exportHtmlCarriesItsPictures() { ExportTests::htmlCarriesItsPictures(); }
+    void exportMarkdownAssembledOrAsIs() { ExportTests::markdownExportsAssembledOrAsIs(); }
+    void exportsListLimitationsBeforeWriting() { ExportTests::exportsListLimitationsBeforeWriting(); }
+    void exportsStopWhenCancelled() { ExportTests::exportsStopWhenCancelled(); }
+    void exportsFailWithAReasonAndKeepTheOldFile() { ExportTests::exportsFailWithAReasonAndKeepTheOldFile(); }
+    void exportsNeverTouchTheSource() { ExportTests::exportsNeverTouchTheSource(); }
+    void exportDialogListsLimitationsAndExportsInTheBackground()
+    {
+        ExportTests::exportDialogListsLimitationsAndExportsInTheBackground();
+    }
+    void exportAgainRepeatsTheRecipe() { ExportTests::exportAgainRepeatsTheRecipe(); }
+    void printingGoesThroughThePortal() { ExportTests::printingGoesThroughThePortal(); }
+    void printPreviewShowsThePagesThePdfHas() { ExportTests::printPreviewShowsThePagesThePdfHas(); }
+    void cliExportsEveryFormat() { ExportTests::cliExportsEveryFormat(); }
     void benchmarkReportsEveryMeasure();
     void benchmarkThatCannotStartEndsTheLoop();
     void themeReadsLightAndDarkPalettes();

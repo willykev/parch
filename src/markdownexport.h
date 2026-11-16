@@ -20,14 +20,25 @@ struct Assembled {
     QStringList limitations;
 };
 
-Assembled assemble(const md::Document &document, const QString &outputFolder);
+// Where an image the text names, by its absolute path, is written to lead:
+// a path relative to the output's folder, or empty to lead where it is.
+using ImageDestination = std::function<QString(const QString &absolutePath)>;
+
+Assembled assemble(const md::Document &document, const QString &outputFolder, const ImageDestination &image = {});
 
 } // namespace MarkdownExport
 
+// The document as Markdown again: assembled (as above), its local images
+// led to where they are or copied into a folder beside it, or its own text
+// as it is (the `as-is` option), include lines and all.
 class MarkdownExporter : public Exporter {
 public:
     QString format() const override { return QStringLiteral("md"); }
     QString title() const override { return QStringLiteral("Markdown"); }
     QStringList suffixes() const override { return {QStringLiteral("md"), QStringLiteral("markdown")}; }
-    ExportResult write(const md::Document &document, const ExportRecipe &recipe) const override;
+    QList<ExportOption> options() const override;
+    QStringList limitations(const md::Document &document, const ExportRecipe &recipe,
+                            const HelperSet &helpers) const override;
+    ExportResult write(const md::Document &document, const ExportRecipe &recipe,
+                       const ExportRun &run = ExportRun()) const override;
 };

@@ -33,14 +33,20 @@ errors to stderr.
   `outline` the headings indented by level, `json-tree` the whole semantic
   tree with source ranges (UTF-16 offsets per file) and line numbers. With
   `--json` the result is inside a report.
-- Export: `parch export notes.md --to md|html -o out.html`. `md` writes the
-  document as one Markdown file with its includes in place; `html` writes a
-  standalone page with its own neutral styling (`--title TEXT` sets its
-  title). The format follows `-o`'s suffix when `--to` is left out. It
-  refuses to replace a file that is there unless given `--force`, and never
-  writes over the document or a file it includes. `--quiet` prints nothing
-  but errors. PDF, DOCX and EPUB are not available from the command line yet
-  (exit 4 says so).
+- Export: `parch export notes.md --to md|html|pdf|docx|epub -o out.pdf`.
+  `md` writes the document as one Markdown file with its includes in place
+  (`--as-is` writes its own text); `html` a standalone page with its own
+  neutral styling, its images copied beside it (`--images copy|embed|link`);
+  `pdf` real pages (`--template classic|modern|compact`, `--page-size
+  A4|Letter|…`, `--landscape`, `--margins MM`, `--font FAMILY`,
+  `--font-size PT`); `docx` a Word document (`--notes
+  footnotes|endnotes`); `epub` an EPUB 3 book. `--title TEXT` sets the title.
+  Formulas and diagrams are drawn when parch's helpers are installed. What a
+  format leaves out is printed as a note (in `limitations` with `--json`, with
+  the recipe that repeats the export). The format follows `-o`'s suffix when
+  `--to` is left out. It refuses to replace a file that is there unless given
+  `--force`, and never writes over the document or a file it includes.
+  `--quiet` prints nothing but errors.
 - Count: `parch stats notes.md --json` gives words, characters (with and
   without spaces), reading minutes at 200 words a minute, and headings.
 - Open: `parch notes.md` (or `parch open notes.md`) opens the document in

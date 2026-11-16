@@ -72,4 +72,8 @@ void registerQmlTypes()
     qmlRegisterUncreatableType<Theme>("Parch", 1, 0, "Theme", QStringLiteral("There is one theme"));
     qmlRegisterUncreatableType<DocumentSettingsStore>("Parch", 1, 0, "DocumentSettingsStore",
                                                       QStringLiteral("The backend has one"));
+    qmlRegisterUncreatableType<Exports>("Parch", 1, 0, "Exports", QStringLiteral("The backend has one"));
+    // The pages of a PDF or a print before it is made, and a view of one.
+    qmlRegisterUncreatableType<PrintPreview>("Parch", 1, 0, "PrintPreview", QStringLiteral("Exports have one"));
+    qmlRegisterType<PreviewPage>("Parch", 1, 0, "PreviewPage");
 }

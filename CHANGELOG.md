@@ -99,6 +99,28 @@ The first version: a native Markdown writing app for Omarchy.
 - Distraction-free writing keeps the view: the text, the text beside its
   preview, or the preview alone. Focus mode and Vim keys are the text's.
 
+### Exporting and printing
+
+- Export to Markdown, HTML, PDF, DOCX and EPUB from the window
+  (`Ctrl+Shift+E`), in the background with progress and Cancel, and print
+  (`Ctrl+P`) through the desktop's print dialog. Before anything is written
+  the dialog lists what the chosen format leaves out of the document.
+- PDF: real pages of the size, margins and template chosen, numbered, with
+  searchable text, links, an outline of the headings, `+++` page breaks and
+  headings kept with their text; formulas and diagrams as vectors. The Export
+  dialog shows the pages as they will come out, for a PDF and for printing.
+- DOCX: real styles, lists, tables with merged cells, links, footnotes or
+  endnotes, pictures with their descriptions and the document's properties.
+- EPUB 3: a file for each chapter, a table of contents, its images, formulas
+  and diagrams as SVG, and metadata from the front matter.
+- HTML: formulas as SVG and diagrams as SVG pictures, with images copied
+  beside the page, written into it or linked.
+- Export again repeats a document's last export, which parch keeps with the
+  profile, options and renderers it was made with.
+- Exports are written in one step, never over the document or a file it
+  includes, and leave a file that was there as it was when they fail or are
+  cancelled.
+
 ### Keeping text safe
 
 - Saves as you pause, replacing the file in one step and keeping its
@@ -141,10 +163,9 @@ The first version: a native Markdown writing app for Omarchy.
 - `parch render` writes a document's HTML, plain text, outline or semantic
   tree, and `parch stats` counts its words, characters, reading time and
   headings.
-- `parch export` writes a document as one Markdown file with its includes in
-  place, or as a standalone HTML page, never over the document and never
-  over another file unless asked. PDF, DOCX and EPUB are not available from
-  the terminal yet.
+- `parch export` writes a document as Markdown with its includes in place, a
+  standalone HTML page, a PDF, a DOCX or an EPUB, as the window exports it,
+  never over the document and never over another file unless asked.
 - Every command needs no display, takes `--json`, and reads the Writer
   profile unless `--profile`, `--extension` or `--use-saved-settings` say
   otherwise.

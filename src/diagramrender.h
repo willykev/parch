@@ -23,8 +23,9 @@
 //
 // For print the PNG is drawn at four times the scale or more. Merman's
 // resvg-safe SVG drawn by Qt's SVG renderer into a PDF loses its labels and
-// most of its colours, so it is not a usable vector route; see
-// diagramPrintRouteIsReported in the tests.
+// most of its colours (see diagramPrintRouteIsReported in the tests), so the
+// result for print also keeps that SVG (RenderResult::svg), which exports
+// make plain with librsvg (SvgPaper) before a PDF holds it as vectors.
 namespace DiagramRender {
 
 // The fonts Merman measures and draws labels with: the label family in its

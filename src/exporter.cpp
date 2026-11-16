@@ -1,45 +1,16 @@
 #include "exporter.h"
 
+#include "docxexport.h"
+#include "epubexport.h"
+#include "exportpictures.h"
 #include "htmlexport.h"
 #include "markdownexport.h"
+#include "pdfexport.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QSaveFile>
-
-namespace {
-
-// A format this build does not write yet. It is listed, so that --to takes
-// its name and says why it cannot be written rather than that it is unknown.
-class UnavailableExporter : public Exporter {
-public:
-    UnavailableExporter(QString format, QString title, QStringList suffixes)
-        : m_format(std::move(format)), m_title(std::move(title)), m_suffixes(std::move(suffixes))
-    {
-    }
-    QString format() const override { return m_format; }
-    QString title() const override { return m_title; }
-    QStringList suffixes() const override { return m_suffixes; }
-    bool available(QString *why) const override
-    {
-        if (why) *why = QStringLiteral("%1 export is not available yet in this version of parch").arg(m_title);
-        return false;
-    }
-    ExportResult write(const md::Document &, const ExportRecipe &) const override
-    {
-        ExportResult result;
-        available(&result.error);
-        return result;
-    }
-
-private:
-    QString m_format;
-    QString m_title;
-    QStringList m_suffixes;
-};
-
-} // namespace
 
 QJsonObject ExportRecipe::toJson() const
 {
@@ -55,15 +26,23 @@ QJsonObject ExportRecipe::toJson() const
     };
 }
 
+QString Exporter::option(const ExportRecipe &recipe, const QString &name) const
+{
+    if (const auto given = recipe.options.constFind(name); given != recipe.options.cend()) return *given;
+    for (const ExportOption &option : options())
+        if (option.name == name) return option.defaultValue;
+    return {};
+}
+
 namespace Exporters {
 
 QList<const Exporter *> all()
 {
     static const MarkdownExporter markdown;
     static const HtmlExporter html;
-    static const UnavailableExporter pdf(QStringLiteral("pdf"), QStringLiteral("PDF"), {QStringLiteral("pdf")});
-    static const UnavailableExporter docx(QStringLiteral("docx"), QStringLiteral("DOCX"), {QStringLiteral("docx")});
-    static const UnavailableExporter epub(QStringLiteral("epub"), QStringLiteral("EPUB"), {QStringLiteral("epub")});
+    static const PdfExporter pdf;
+    static const DocxExporter docx;
+    static const EpubExporter epub;
     return {&markdown, &html, &pdf, &docx, &epub};
 }
 
@@ -114,6 +93,83 @@ bool writeFile(const QString &path, const QByteArray &bytes, QString *error)
 QString relativeTo(const QString &outputFolder, const QString &absolutePath)
 {
     return QDir(outputFolder).relativeFilePath(absolutePath);
+}
+
+QString count(int n, const QString &one, const QString &many)
+{
+    return QStringLiteral("%1 %2").arg(n).arg(n == 1 ? one : many);
+}
+
+namespace {
+
+bool holdsPictures(const md::Node &node)
+{
+    if (node.type == md::NodeType::MathInline || node.type == md::NodeType::MathBlock ||
+        node.type == md::NodeType::MermaidBlock)
+        return true;
+    return std::any_of(node.children.cbegin(), node.children.cend(), holdsPictures);
+}
+
+} // namespace
+
+std::unique_ptr<ExportPictures> drawPictures(const md::Document &document, const ExportRun &run, qreal fontSize,
+                                             qreal share, bool *cancelled)
+{
+    *cancelled = run.stopped();
+    if (*cancelled || !run.pictures || !holdsPictures(document.root)) return nullptr;
+    ExportPictures::Options options;
+    options.service = run.render;
+    options.fontSize = fontSize;
+    auto pictures = std::make_unique<ExportPictures>(options);
+    run.report(0, QStringLiteral("Drawing formulas and diagrams"));
+    const bool done = pictures->draw(document, run.cancelled, [&](int drawn, int total) {
+        run.report(share * drawn / std::max(total, 1), QStringLiteral("Drawing formulas and diagrams"));
+    });
+    if (!done) {
+        *cancelled = true;
+        return nullptr;
+    }
+    return pictures;
+}
+
+ExportResult cancelled()
+{
+    ExportResult result;
+    result.cancelled = true;
+    result.error = QStringLiteral("the export was cancelled");
+    return result;
+}
+
+QString frontMatterText(const md::Document &document, const QString &key)
+{
+    const md::YamlValue *value = document.frontMatter().data.find(key);
+    if (!value) return {};
+    if (value->isScalar()) return value->scalar.simplified();
+    // A list of names, as `author:` often is.
+    if (value->isList()) {
+        QStringList items;
+        for (const md::YamlValue &item : value->list)
+            if (item.isScalar() && !item.scalar.trimmed().isEmpty()) items.append(item.scalar.simplified());
+        return items.join(QStringLiteral(", "));
+    }
+    return {};
+}
+
+QString title(const md::Document &document, const ExportRecipe &recipe)
+{
+    QString title = recipe.options.value(QStringLiteral("title")).simplified();
+    if (title.isEmpty()) title = frontMatterText(document, QStringLiteral("title"));
+    if (title.isEmpty() && !document.headings.empty()) title = document.headings.front().text.simplified();
+    if (title.isEmpty()) title = QFileInfo(recipe.source).completeBaseName();
+    if (title.isEmpty()) title = QStringLiteral("Untitled");
+    return title;
+}
+
+QString language(const md::Document &document)
+{
+    QString language = frontMatterText(document, QStringLiteral("lang"));
+    if (language.isEmpty()) language = frontMatterText(document, QStringLiteral("language"));
+    return language;
 }
 
 } // namespace Exporters

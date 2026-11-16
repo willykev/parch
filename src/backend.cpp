@@ -86,8 +86,20 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
       m_positions(std::make_unique<ReadingPositions>(paths)),
       m_organizer(std::make_unique<FileOrganizer>(m_store.get(), m_settings)),
       m_spelling(new SpellChecker(paths.personalDictionaryFile(), this)),
-      m_documentSettings(new DocumentSettingsStore(paths, this))
+      m_documentSettings(new DocumentSettingsStore(paths, this)),
+      m_exports(new Exports(paths, m_files.get(), this))
 {
+    // An export reads the document from where it is, as the preview does.
+    m_exports->setPlaces([this](Document *document) {
+        QString library = document->libraryRoot();
+        if (library.isEmpty()) library = m_attachments ? m_attachments->libraryOf(document) : QString();
+        const QString folder = m_attachments ? m_attachments->documentFolder(document)
+                               : document->path().isEmpty() ? QString()
+                                                            : QFileInfo(document->path()).absolutePath();
+        return std::pair{folder, library};
+    });
+    connect(m_exports, &Exports::news, this, &Backend::inform);
+    connect(m_exports, &Exports::problem, this, &Backend::notify);
     // Every document is read in the dialect its settings choose, kept
     // current as they, its place and the library's folders change.
     m_documentSettings->setLibraryFolders([this] { return m_settings->libraryFolders(); });
@@ -350,6 +362,11 @@ void Backend::addCommands()
     m_commands->setAction(QStringLiteral("checkSpelling"),
                           [this](WindowContext *) { setSpellchecking(!m_spelling->wanted()); });
     m_commands->setAction(QStringLiteral("vimKeys"), [this](WindowContext *) { m_settings->setVimKeys(!m_settings->vimKeys()); });
+    // The document in front, exported as it was last time.
+    m_commands->setAction(QStringLiteral("exportAgain"), [this](WindowContext *window) {
+        if (window) activate(window);
+        m_exports->exportAgain(document());
+    });
     // So is the Markdown styled as it is written.
     m_commands->setAction(QStringLiteral("liveFormatting"),
                           [this](WindowContext *) { m_settings->setLiveFormatting(!m_settings->liveFormatting()); });
@@ -873,6 +890,8 @@ void Backend::setFilePicker(FilePicker *picker)
 {
     m_files->setPicker(picker);
 }
+
+void Backend::setPrinter(Printer *printer) { m_exports->setPrinter(printer); }
 
 RenderService *Backend::renderService()
 {

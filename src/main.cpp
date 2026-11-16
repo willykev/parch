@@ -6,6 +6,7 @@
 #include "clicommands.h"
 #include "documentstore.h"
 #include "portalfilepicker.h"
+#include "printportal.h"
 #include "qmltypes.h"
 #include "quitsignals.h"
 #include "remotefetcher.h"
@@ -56,8 +57,17 @@ int main(int argc, char *argv[])
         return 1;
     case Launch::Command: {
         // The commands that read, render and export documents need no
-        // display, so no GUI application is made for them.
-        QCoreApplication app(argc, argv);
+        // display. Exports set type on pages and draw pictures, which needs
+        // fonts and so a GUI application, but one with no display: Qt's
+        // offscreen platform, whatever the desktop is.
+        std::unique_ptr<QCoreApplication> application;
+        if (launch.commandArguments.value(1) == u"export") {
+            qputenv("QT_QPA_PLATFORM", "offscreen");
+            application = std::make_unique<QGuiApplication>(argc, argv);
+        } else {
+            application = std::make_unique<QCoreApplication>(argc, argv);
+        }
+        QCoreApplication &app = *application;
         app.setApplicationName(QStringLiteral("parch"));
         QFile out, err;
         if (!out.open(STDOUT_FILENO, QIODevice::WriteOnly) ||
@@ -203,12 +213,16 @@ int main(int argc, char *argv[])
     }, Qt::QueuedConnection);
     // The desktop's own open and save dialogs. A benchmark asks nothing.
     std::optional<PortalFilePicker> picker;
+    // The desktop's print dialog and printing.
+    std::optional<PortalPrinter> printer;
     // What a preview hands on: links to the desktop's handler for them, and
     // the pictures a document names by web address to the network.
     std::optional<NetworkFetcher> fetcher;
     if (!benchmarking) {
         picker.emplace();
         backend.setFilePicker(&*picker);
+        printer.emplace();
+        backend.setPrinter(&*printer);
         backend.setLinkOpener([](const QUrl &url) { return QDesktopServices::openUrl(url); });
         fetcher.emplace();
         backend.setRemoteFetcher(&*fetcher);

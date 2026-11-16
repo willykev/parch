@@ -609,27 +609,47 @@ int exportDocument(const QStringList &arguments, const Context &context)
                  QStringLiteral("Print nothing but errors (no file name, no notes)")});
     addDialectOptions(command);
     command.add({QStringLiteral("json"), jsonDescription});
-    // Each format's own options; a format takes only its own.
-    QHash<QString, const Exporter *> owners;
+    // Each format's own options; a format takes only its own, and an option
+    // several formats have is one option, said once for all of them.
+    QHash<QString, QList<const Exporter *>> owners;
+    QStringList order;
     for (const Exporter *exporter : Exporters::all()) {
         for (const ExportOption &option : exporter->options()) {
-            command.add(QCommandLineOption(option.name, option.description, option.valueName));
-            owners.insert(option.name, exporter);
+            if (!owners.contains(option.name)) order.append(option.name);
+            owners[option.name].append(exporter);
         }
     }
-    QStringList unavailable;
-    for (const Exporter *exporter : Exporters::all())
-        if (!exporter->available()) unavailable.append(exporter->title());
+    const auto optionOf = [](const Exporter *exporter, const QString &name) -> std::optional<ExportOption> {
+        for (const ExportOption &option : exporter->options())
+            if (option.name == name) return option;
+        return std::nullopt;
+    };
+    for (const QString &name : std::as_const(order)) {
+        // Formats that say the same are named together.
+        QList<std::pair<QStringList, QString>> said;
+        QString valueName;
+        for (const Exporter *exporter : owners.value(name)) {
+            const ExportOption option = *optionOf(exporter, name);
+            valueName = option.valueName;
+            auto same = std::find_if(said.begin(), said.end(), [&](const auto &s) { return s.second == option.description; });
+            if (same == said.end()) said.append({{exporter->title()}, option.description});
+            else same->first.append(exporter->title());
+        }
+        QStringList parts;
+        for (const auto &[titles, description] : std::as_const(said))
+            parts.append(titles.join(QStringLiteral(", ")) + QStringLiteral(": ") + description);
+        command.add(QCommandLineOption(name, parts.join(QStringLiteral("; ")), valueName));
+    }
     command.notes =
         dialectNotes() +
-        QStringLiteral("\n\nmd writes the document with its includes in place; html writes a page of its own.%1\n"
+        QStringLiteral("\n\nmd writes the document with its includes in place; html writes a page of its own;\n"
+                       "pdf sets it on pages; docx writes a Word document; epub packs it as a book.\n"
+                       "Formulas and diagrams are drawn by parch's helpers where they are installed;\n"
+                       "what a format cannot hold as the document has it is said as a note.\n"
                        "A document that includes a file that cannot be read is not exported.\n\n"
                        "Exit status: 0 written, 1 a wrong command line, 2 the document is incomplete,\n"
                        "3 a file could not be read or written, or OUT is there without --force,\n"
-                       "4 the export could not be made.")
-            .arg(unavailable.isEmpty()
-                     ? QString()
-                     : QStringLiteral(" %1 export is not available yet.").arg(unavailable.join(QStringLiteral(", "))));
+                       "4 the export could not be made.");
     if (const auto done = command.parse(arguments, context)) return *done;
     const QCommandLineParser &parser = command.parser;
     const QStringList files = parser.positionalArguments();
@@ -654,11 +674,37 @@ int exportDocument(const QStringList &arguments, const Context &context)
     recipe.output = output;
     for (auto it = owners.cbegin(); it != owners.cend(); ++it) {
         if (!parser.isSet(it.key())) continue;
-        if (it.value() != exporter)
-            return command.usage(
-                QStringLiteral("--%1 is an option of %2 export, not %3").arg(it.key(), it.value()->title(), exporter->title()),
-                context);
-        recipe.options.insert(it.key(), parser.value(it.key()));
+        if (!it.value().contains(exporter)) {
+            QStringList titles;
+            for (const Exporter *owner : it.value()) titles.append(owner->title());
+            const QString last = titles.takeLast();
+            const QString owned = titles.isEmpty() ? last : titles.join(QStringLiteral(", ")) + QStringLiteral(" and ") + last;
+            return command.usage(QStringLiteral("--%1 is an option of %2 export, not %3").arg(it.key(), owned, exporter->title()),
+                                 context);
+        }
+        const ExportOption option = *optionOf(exporter, it.key());
+        QString value = parser.value(it.key());
+        if (!option.choices.isEmpty()) {
+            const auto chosen = std::find_if(option.choices.cbegin(), option.choices.cend(), [&](const QString &choice) {
+                return choice.compare(value, Qt::CaseInsensitive) == 0;
+            });
+            if (chosen == option.choices.cend())
+                return command.usage(QStringLiteral("--%1 takes %2, not \"%3\"")
+                                         .arg(it.key(), option.choices.join(QStringLiteral(", ")), value),
+                                     context);
+            value = *chosen;
+        } else if (option.number) {
+            bool ok = false;
+            const double number = value.toDouble(&ok);
+            if (!ok || number < option.minimum || number > option.maximum)
+                return command.usage(QStringLiteral("--%1 takes a number from %2 to %3, not \"%4\"")
+                                         .arg(it.key())
+                                         .arg(option.minimum)
+                                         .arg(option.maximum)
+                                         .arg(value),
+                                     context);
+        }
+        recipe.options.insert(it.key(), value);
     }
     DialectFlags flags;
     if (const auto done = readDialectFlags(command, context, &flags)) return *done;
@@ -912,7 +958,7 @@ QString summary()
     return QStringLiteral(
         "  check FILE...    Report what is wrong in documents, with file, line and column\n"
         "  render FILE      Write a document's HTML, plain text, outline or semantic tree\n"
-        "  export FILE      Write a document as Markdown with its includes, or as an HTML page\n"
+        "  export FILE      Write a document as Markdown, HTML, PDF, DOCX or EPUB\n"
         "  stats FILE       Count words and characters, reading time and headings\n"
         "  skill [install]  Print the skill for coding agents, or install it\n"
         "  help [COMMAND]   Print this help, or a command's options\n");

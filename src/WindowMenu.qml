@@ -44,6 +44,9 @@ ThemedMenu {
     CommandEntry { command: "saveAs" }
     CommandEntry { objectName: "historyEntry"; command: "history" }
     CommandEntry { objectName: "checkLinksEntry"; command: "checkLinks" }
+    CommandEntry { objectName: "exportEntry"; command: "export" }
+    CommandEntry { objectName: "exportAgainEntry"; command: "exportAgain" }
+    CommandEntry { objectName: "printEntry"; command: "print" }
     CommandEntry { command: "closeTab" }
     MenuLine {}
     ThemedMenu {

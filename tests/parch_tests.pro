@@ -21,6 +21,7 @@ INCLUDEPATH += ../src
 HEADERS += \
     clitests.h \
     editingtests.h \
+    exporttests.h \
     librarytests.h \
     previewtests.h \
     stylingtests.h \
@@ -68,6 +69,18 @@ HEADERS += \
     ../src/editordecorations.h \
     ../src/encodings.h \
     ../src/exporter.h \
+    ../src/exportpictures.h \
+    ../src/exports.h \
+    ../src/printportal.h \
+    ../src/printpreview.h \
+    ../src/exportweb.h \
+    ../src/docxexport.h \
+    ../src/epubexport.h \
+    ../src/paperdocument.h \
+    ../src/pdfexport.h \
+    ../src/pdfoutline.h \
+    ../src/svgpaper.h \
+    ../src/zippackage.h \
     ../src/fileorganizer.h \
     ../src/filepicker.h \
     ../src/filerequests.h \
@@ -131,6 +144,7 @@ SOURCES += \
     parch_tests.cpp \
     clitests.cpp \
     editingtests.cpp \
+    exporttests.cpp \
     librarytests.cpp \
     previewtests.cpp \
     stylingtests.cpp \
@@ -177,6 +191,18 @@ SOURCES += \
     ../src/editordecorations.cpp \
     ../src/encodings.cpp \
     ../src/exporter.cpp \
+    ../src/exportpictures.cpp \
+    ../src/exports.cpp \
+    ../src/printportal.cpp \
+    ../src/printpreview.cpp \
+    ../src/exportweb.cpp \
+    ../src/docxexport.cpp \
+    ../src/epubexport.cpp \
+    ../src/paperdocument.cpp \
+    ../src/pdfexport.cpp \
+    ../src/pdfoutline.cpp \
+    ../src/svgpaper.cpp \
+    ../src/zippackage.cpp \
     ../src/editorpaste.cpp \
     ../src/fileorganizer.cpp \
     ../src/filerequests.cpp \
@@ -242,3 +268,7 @@ RESOURCES += ../src/guide/guide.qrc
 
 CONFIG += link_pkgconfig
 PKGCONFIG += yaml-0.1
+# librsvg and cairo turn diagrams into SVG that Qt can draw into a PDF, and
+# draw SVG as pictures where a format needs pixels; libzip packs DOCX and
+# EPUB files.
+PKGCONFIG += librsvg-2.0 cairo cairo-svg libzip

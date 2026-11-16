@@ -23,6 +23,8 @@ public:
     void openFolder() override;
     void saveDocument(const QUrl &suggested) override;
     void openFiles(const QString &title, const QString &filterName, const QStringList &patterns, bool multiple) override;
+    void saveFile(const QString &title, const QUrl &suggested, const QString &filterName,
+                  const QStringList &patterns) override;
 
     // What the portal's answer to a request means: the files or folder
     // chosen; nothing, for a dialog cancelled or closed through its window;

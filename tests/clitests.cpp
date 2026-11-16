@@ -22,6 +22,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QImage>
 #include <QScopeGuard>
 #include <QSet>
 #include <QTemporaryDir>
@@ -67,6 +68,14 @@ public:
         err.open(QIODevice::WriteOnly);
         const Cli::Context context{m_root, home(), paths(), &out, &err};
         arguments.prepend(QStringLiteral("parch"));
+        // No math or diagram helpers, unless a test names some: what an
+        // export writes does not hang on what is installed, and nothing is
+        // drawn into the cache the application keeps.
+        const QByteArray helpers = qgetenv("PARCH_HELPERS");
+        if (helpers.isNull()) qputenv("PARCH_HELPERS", QFile::encodeName(m_root + QStringLiteral("/no-helpers")));
+        const auto restore = qScopeGuard([&] {
+            if (helpers.isNull()) qunsetenv("PARCH_HELPERS");
+        });
         Ran ran;
         ran.code = Cli::run(arguments, context);
         ran.out = QString::fromUtf8(out.data());
@@ -286,7 +295,8 @@ Ran runProcess(const Sandbox &box, const QStringList &arguments)
     }
     QFile::setPermissions(box.path(QStringLiteral("app/runtime")), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
     environment.insert(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"), QStringLiteral("unix:path=") + box.path(QStringLiteral("no-bus")));
-    // A GUI application could not start with this; the commands make none.
+    // A GUI application could not start with this; the commands make none,
+    // and an export makes one on Qt's offscreen platform.
     environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("no-such-platform"));
     QProcess process;
     process.setProcessEnvironment(environment);
@@ -367,7 +377,7 @@ void helpExplainsEveryCommand()
     QVERIFY(exportHelp.out.contains(QStringLiteral("md, html, pdf, docx, epub")));
     QVERIFY(exportHelp.out.contains(QStringLiteral("--title TEXT")));
     QVERIFY(exportHelp.out.contains(QStringLiteral("--force")));
-    QVERIFY(exportHelp.out.contains(QStringLiteral("not available yet")));
+    QVERIFY(!exportHelp.out.contains(QStringLiteral("not available yet")));
     for (const QString &name : md::Options::extensionNames())
         QVERIFY2(box.run({QStringLiteral("help"), QStringLiteral("check")}).out.contains(name), qPrintable(name));
 
@@ -417,7 +427,7 @@ void usageErrorsExitOne()
     QVERIFY(box.run({"check", "a.md", "--profile", "fancy"}).err.contains(QStringLiteral("writer or standard")));
     QVERIFY(box.run({"check", "a.md", "--extension", "sparkles"}).err.contains(QStringLiteral("footnotes")));
     QVERIFY(box.run({"export", "a.md", "--to", "md", "-o", "o.md", "--title", "x"})
-                .err.contains(QStringLiteral("--title is an option of HTML export")));
+                .err.contains(QStringLiteral("--title is an option of HTML, PDF, DOCX and EPUB export, not Markdown")));
     // Nothing was written by a refused export.
     QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("out.md"))));
 }
@@ -1001,7 +1011,8 @@ void exportWritesAStandalonePage()
                              "# Heading\n\nText with $x^2$ and [bad](javascript:alert(1)) and <script>alert(2)</script>.\n\n"
                              "$$\ny = 1\n$$\n\n```mermaid\ngraph TD; A-->B\n```\n\n"
                              "![pic](<pics/a b.png>) [other](other.md) [web](https://example.org)\n"));
-    box.write(QStringLiteral("docs/pics/a b.png"), QStringLiteral("png"));
+    QDir().mkpath(box.path(QStringLiteral("docs/pics")));
+    QImage(4, 4, QImage::Format_ARGB32).save(box.path(QStringLiteral("docs/pics/a b.png")));
     QDir().mkpath(box.path(QStringLiteral("out")));
     const Ran ran = box.run({"export", "docs/page.md", "--to", "html", "-o", "out/page.html", "--json"});
     QVERIFY2(ran.code == 0, qPrintable(ran.said()));
@@ -1021,8 +1032,9 @@ void exportWritesAStandalonePage()
     QVERIFY(page.contains(QStringLiteral("&lt;script&gt;alert(2)&lt;/script&gt;")));
     QVERIFY(page.contains(QStringLiteral("<main>\n<h1 id=\"heading\">Heading</h1>")));
     QVERIFY(page.endsWith(QStringLiteral("</main>\n</body>\n</html>\n")));
-    // Paths lead from the page's folder.
-    QVERIFY2(page.contains(QStringLiteral("<img src=\"../docs/pics/a%20b.png\" alt=\"pic\" />")), qPrintable(page));
+    // Pictures go into a folder beside the page; links lead from its folder.
+    QVERIFY2(page.contains(QStringLiteral("<img src=\"page_files/a-b.png\" alt=\"pic\" />")), qPrintable(page));
+    QCOMPARE(box.read(QStringLiteral("out/page_files/a-b.png")), box.read(QStringLiteral("docs/pics/a b.png")));
     QVERIFY(page.contains(QStringLiteral("<a href=\"../docs/other.md\">other</a>")));
     QVERIFY(page.contains(QStringLiteral("<a href=\"https://example.org\">web</a>")));
     QVERIFY(page.contains(QStringLiteral("<pre class=\"mermaid\">")));
@@ -1032,14 +1044,23 @@ void exportWritesAStandalonePage()
     QCOMPARE(result.value(QStringLiteral("renderers")).toObject().value(QStringLiteral("html")).toString(),
              QStringLiteral("parch " PARCH_VERSION));
     const QJsonArray limitations = result.value(QStringLiteral("limitations")).toArray();
-    QCOMPARE(limitations.size(), 3);
-    QCOMPARE(limitations[0].toString(), QStringLiteral("Math is written as its TeX source (2 formulas)"));
-    QCOMPARE(limitations[1].toString(), QStringLiteral("Mermaid diagrams are written as their source (1 diagram)"));
-    QVERIFY(limitations[2].toString().startsWith(QStringLiteral("Images are linked from the page, not inside it (1 image)")));
+    QCOMPARE(limitations.size(), 2);
+    QCOMPARE(limitations[0].toString(),
+             QStringLiteral("Math is written as its TeX source (2 formulas): the math helper (render-svg) is not installed"));
+    QCOMPARE(limitations[1].toString(), QStringLiteral("Mermaid diagrams are written as their source (1 diagram): the "
+                                                       "diagram helper (merman-cli) is not installed"));
     const QJsonObject recipe = result.value(QStringLiteral("recipe")).toObject();
     QCOMPARE(recipe.value(QStringLiteral("format")).toString(), QStringLiteral("html"));
     QCOMPARE(recipe.value(QStringLiteral("output")).toString(), box.path(QStringLiteral("out/page.html")));
     QVERIFY(recipe.value(QStringLiteral("options")).toObject().isEmpty());
+    // Linked where they are, they are found from the page's folder.
+    const Ran linked = box.run({"export", "docs/page.md", "-o", "out/linked.html", "--images", "link", "--json"});
+    QCOMPARE(linked.code, 0);
+    QVERIFY(box.read(QStringLiteral("out/linked.html")).contains("<img src=\"../docs/pics/a%20b.png\" alt=\"pic\" />"));
+    QVERIFY(linked.json().value(QStringLiteral("limitations")).toArray().last().toString().startsWith(
+        QStringLiteral("Images are linked from the page, not inside it (1 image)")));
+    QCOMPARE(linked.json().value(QStringLiteral("recipe")).toObject().value(QStringLiteral("options")).toObject(),
+             (QJsonObject{{QStringLiteral("images"), QStringLiteral("link")}}));
 
     // Without --json: the path on the standard output, the notes on the error output.
     const Ran plain = box.run({"export", "docs/page.md", "-o", "out/page.html", "--force"});
@@ -1107,18 +1128,20 @@ void exportRefusesWhatItMustNot()
     QVERIFY2(partial.err.contains(QStringLiteral("partial.md:3:1: error:")), qPrintable(partial.said()));
     QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("partial.html"))));
 
-    // The formats this version cannot write say so, and write nothing.
+    // PDF, DOCX and EPUB follow the same rules: written, then refused over
+    // a file that is there without --force, and never over the document.
     for (const char *format : {"pdf", "docx", "epub"}) {
         const QString output = QStringLiteral("doc.") + QLatin1StringView(format);
-        for (const QStringList &arguments : {QStringList{"export", "doc.md", "-o", output},
-                                             QStringList{"export", "doc.md", "--to", QLatin1StringView(format), "-o",
-                                                         QStringLiteral("other.out"), "--json"}}) {
-            const Ran ran = box.run(arguments);
-            QVERIFY2(ran.code == 4, qPrintable(ran.said()));
-            QVERIFY(ran.err.contains(QStringLiteral("not available yet")));
-        }
-        QVERIFY(!QFileInfo::exists(box.path(output)));
-        QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("other.out"))));
+        const Ran written = box.run({"export", "doc.md", "-o", output});
+        QVERIFY2(written.code == 0, qPrintable(written.said()));
+        const QByteArray first = box.read(output);
+        QVERIFY(!first.isEmpty());
+        const Ran again = box.run({"export", "doc.md", "--to", QLatin1StringView(format), "-o", output});
+        QCOMPARE(again.code, 3);
+        QCOMPARE(box.read(output), first);
+        const Ran over = box.run({"export", "doc.md", "--to", QLatin1StringView(format), "-o", "chapter.md", "--force"});
+        QCOMPARE(over.code, 3);
+        QCOMPARE(box.read(QStringLiteral("chapter.md")), QByteArray("Chapter.\n"));
     }
 
     // --quiet says nothing when all is well, and still says what is wrong.
@@ -1163,21 +1186,23 @@ void exportFormatsPlugInThroughOneInterface()
     for (const Exporter *exporter : Exporters::all()) {
         QVERIFY(!exporter->title().isEmpty());
         QVERIFY(!exporter->suffixes().isEmpty());
-        QString why;
-        const bool ready = exporter->format() == u"md" || exporter->format() == u"html";
-        QCOMPARE(exporter->available(&why), ready);
-        if (ready) continue;
-        // Until its exporter is written, a format says so.
-        QVERIFY(why.contains(QStringLiteral("not available yet")));
+        // Every format is written, and each of its options is described.
+        QVERIFY(exporter->available());
+        for (const ExportOption &option : exporter->options()) {
+            QVERIFY(!option.description.isEmpty());
+            QVERIFY(!option.label.isEmpty());
+            if (!option.choices.isEmpty()) QVERIFY(option.choices.contains(option.defaultValue));
+        }
         Sandbox box;
         box.write(QStringLiteral("a.md"), QStringLiteral("# A\n"));
         const DocumentCheck::Loaded loaded = loadedFrom(box.path(QStringLiteral("a.md")));
         ExportRecipe recipe;
+        recipe.source = loaded.path;
         recipe.output = box.path(QStringLiteral("a.") + exporter->suffixes().first());
         const ExportResult result = exporter->write(loaded.document, recipe);
-        QVERIFY(!result.ok);
-        QCOMPARE(result.error, why);
-        QVERIFY(!QFileInfo::exists(recipe.output));
+        QVERIFY2(result.ok, qPrintable(exporter->format() + u' ' + result.error));
+        QCOMPARE(result.written.first(), recipe.output);
+        QVERIFY(QFileInfo(recipe.output).size() > 0);
     }
     // The format's options are the command line's.
     QCOMPARE(Exporters::find(QStringLiteral("html"))->options().first().name, QStringLiteral("title"));
@@ -1423,7 +1448,9 @@ void commandsNeedNoDisplay()
         {{"export", "clean.md", "-o", "clean.html"}, 3, "--force"},
         {{"export", "clean.md", "--to", "md", "-o", "assembled.md"}, 0, "assembled.md"},
         {{"export", "partial.md", "-o", "partial.html"}, 2, "not-there.md"},
-        {{"export", "clean.md", "-o", "clean.pdf"}, 4, "not available yet"},
+        {{"export", "clean.md", "-o", "clean.pdf"}, 0, "clean.pdf"},
+        {{"export", "clean.md", "-o", "clean.docx"}, 0, "clean.docx"},
+        {{"export", "clean.md", "-o", "clean.epub"}, 0, "clean.epub"},
         {{"stats", "clean.md", "--json"}, 0, "\"words\": 2"},
         {{"skill"}, 0, "name: parch"},
         {{"skill", "install"}, 0, "Linked "},

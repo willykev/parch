@@ -569,10 +569,15 @@ RenderResult read(const HelperOutcome &svg, const HelperOutcome &png, const Rend
     result.size = size;
     result.scale = pixels.width() / size.width();
     result.vector = false;
-    if (request.purpose == RenderPurpose::Print)
+    if (request.purpose == RenderPurpose::Print) {
         result.note = QStringLiteral("Printed as a %1 × %2 pixel image: Qt cannot draw Merman's SVG correctly.")
                           .arg(pixels.width())
                           .arg(pixels.height());
+        // In the colours the picture has, as the PNG run drew it.
+        result.svg = needsRestyle(request.source)
+                         ? restyle(svg.output, request, chooseFonts(request.fontFamily).family)
+                         : svg.output;
+    }
     return result;
 }
 

@@ -53,6 +53,10 @@ ThemedDialog {
                 width: parent.width
             }
 
+            PreviewPreferences {
+                width: parent.width
+            }
+
             WritingAidsPreferences {
                 width: parent.width
             }

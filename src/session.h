@@ -22,6 +22,14 @@ struct ViewState {
     int top = 0;
     // What the tab was called, so that a tab not yet read is still named.
     QString title = {};
+    // How the view shows its document: the source alone, the source beside
+    // its preview, or the preview alone.
+    enum Mode { Source, Split, Reading };
+    int mode = Source;
+    // The part of the width the source takes while it is beside the preview.
+    double split = 0.5;
+
+    static constexpr double MinSplit = 0.2, MaxSplit = 0.8;
 };
 
 // One window: its tabs, the one in front, whether the library is shown

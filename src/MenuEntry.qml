@@ -3,12 +3,15 @@ import QtQuick.Controls.Basic
 import "icons.js" as Icons
 
 // A row of a ThemedMenu: what it does on the left, and on the right its
-// keys, or the arrow of a section that opens beside the menu.
+// keys, or the arrow of a section that opens beside the menu. A row that
+// names the choice now in force has a tick before its keys.
 MenuItem {
     id: entry
 
     // The text of the keys that do the same.
     property string keys
+    // The row names what is chosen now.
+    property bool marked: false
 
     readonly property real gap: Math.round(theme.fontSize * 2 / 3)
 
@@ -19,6 +22,8 @@ MenuItem {
     font.pixelSize: theme.fontSize
     arrow: null
     indicator: null
+    Accessible.checkable: marked
+    Accessible.checked: marked
 
     TextMetrics {
         id: zero
@@ -28,12 +33,13 @@ MenuItem {
 
     contentItem: Item {
         implicitWidth: name.implicitWidth + 3 * zero.advanceWidth + Math.max(shortcut.implicitWidth, opens.width)
+                       + (entry.marked ? tick.size + zero.advanceWidth : 0)
         implicitHeight: name.implicitHeight
 
         Text {
             id: name
             anchors.left: parent.left
-            anchors.right: shortcut.left
+            anchors.right: tick.left
             anchors.rightMargin: zero.advanceWidth
             anchors.verticalCenter: parent.verticalCenter
             text: entry.text
@@ -51,6 +57,19 @@ MenuItem {
             textFormat: Text.PlainText
             font: entry.font
             color: theme.dim
+        }
+
+        Icon {
+            id: tick
+            objectName: "tick"
+            visible: entry.marked
+            anchors.right: shortcut.left
+            anchors.rightMargin: visible ? zero.advanceWidth : 0
+            anchors.verticalCenter: parent.verticalCenter
+            width: visible ? size : 0
+            path: Icons.check
+            size: Math.round(theme.fontSize)
+            color: entry.highlighted ? theme.bright : theme.accent
         }
 
         Icon {

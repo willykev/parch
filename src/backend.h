@@ -20,8 +20,10 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
+#include <functional>
 #include <memory>
 
 class Autosave;
@@ -32,6 +34,8 @@ class ReadingPositions;
 class QThreadPool;
 class RecentFiles;
 class Recovery;
+class RemoteFetcher;
+class RenderService;
 class WindowContext;
 
 // What the windows work with: the store of open documents, autosave and
@@ -132,6 +136,19 @@ public:
     // The desktop's open and save dialogs. Without one, the actions that need
     // it say so and change nothing.
     void setFilePicker(FilePicker *picker);
+    // Draws the formulas and diagrams of every preview: made, with its
+    // thread, when a preview first asks for it, or given beforehand.
+    RenderService *renderService();
+    void setRenderService(std::unique_ptr<RenderService> service);
+    // What opens a link a preview does not show itself: the desktop's
+    // handler for it. Without an opener, as in the tests, nothing is opened.
+    void setLinkOpener(std::function<bool(const QUrl &url)> opener);
+    // True when an opener took the link.
+    bool openLink(const QUrl &url);
+    // What fetches the pictures a preview shows from the network. Without
+    // one, such pictures are not shown.
+    void setRemoteFetcher(RemoteFetcher *fetcher);
+    RemoteFetcher *remoteFetcher() const;
     // As FileRequests::firstFolder().
     static QString firstFolder(const QStringList &candidates, const QString &fallback);
     // A message as the writer reads it: a draft's file and parch's own
@@ -404,6 +421,9 @@ private:
     DocumentSettingsStore *m_documentSettings;
     // A dictionary that is missing is said once in a run, unless spelling is turned on again.
     bool m_dictionaryMissingSaid = false;
+    std::unique_ptr<RenderService> m_render;
+    std::function<bool(const QUrl &url)> m_linkOpener;
+    RemoteFetcher *m_remoteFetcher = nullptr;
     // Declared last, so that it goes first and its copies end before the
     // documents they insert into do.
     std::unique_ptr<Attachments> m_attachments;

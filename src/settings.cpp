@@ -34,6 +34,12 @@ const auto outlineShownKey = QStringLiteral("outlineShown");
 const auto spellcheckKey = QStringLiteral("spellcheck");
 const auto focusUnitKey = QStringLiteral("focusUnit");
 const auto liveFormattingKey = QStringLiteral("liveFormatting");
+const auto previewFontFamilyKey = QStringLiteral("previewFontFamily");
+const auto previewFontPixelSizeKey = QStringLiteral("previewFontPixelSize");
+const auto previewLineHeightKey = QStringLiteral("previewLineHeight");
+const auto previewLineLengthKey = QStringLiteral("previewLineLength");
+const auto scrollSyncKey = QStringLiteral("scrollSync");
+const auto remoteImagesKey = QStringLiteral("remoteImages");
 
 bool isFocusUnit(const QString &unit) { return unit == u"sentence" || unit == u"paragraph"; }
 // More folders than anyone lists, so that a damaged file costs little.
@@ -260,6 +266,79 @@ void Settings::setLiveFormatting(bool on)
     emit changed();
 }
 
+int Settings::previewFontPixelSize() const
+{
+    return m_previewSize > 0 ? m_previewSize
+                             : qBound(MinFontPixelSize, fontPixelSize() + PreviewFontOffset, MaxFontPixelSize);
+}
+
+void Settings::setPreviewFontFamily(const QString &family)
+{
+    const QString chosen = family.trimmed();
+    if (chosen == m_previewFontFamily) return;
+    m_previewFontFamily = chosen;
+    if (chosen.isEmpty()) m_stored.remove(previewFontFamilyKey);
+    else m_stored.insert(previewFontFamilyKey, chosen);
+    write();
+    emit changed();
+}
+
+void Settings::setPreviewFontPixelSize(int size)
+{
+    size = qBound(MinFontPixelSize, size, MaxFontPixelSize);
+    if (size == m_previewSize) return;
+    m_previewSize = size;
+    m_stored.insert(previewFontPixelSizeKey, size);
+    write();
+    emit changed();
+}
+
+void Settings::resetPreviewFontPixelSize()
+{
+    if (m_previewSize == 0) return;
+    m_previewSize = 0;
+    m_stored.remove(previewFontPixelSizeKey);
+    write();
+    emit changed();
+}
+
+void Settings::setPreviewLineHeight(qreal lineHeight)
+{
+    if (!(lineHeight >= MinLineHeight && lineHeight <= MaxLineHeight) || qFuzzyCompare(lineHeight, m_previewLineHeight))
+        return;
+    m_previewLineHeight = lineHeight;
+    m_stored.insert(previewLineHeightKey, lineHeight);
+    write();
+    emit changed();
+}
+
+void Settings::setPreviewLineLength(int characters)
+{
+    if (characters < MinLineLength || characters > MaxLineLength || characters == m_previewLineLength) return;
+    m_previewLineLength = characters;
+    m_stored.insert(previewLineLengthKey, characters);
+    write();
+    emit changed();
+}
+
+void Settings::setScrollSync(bool sync)
+{
+    if (sync == m_scrollSync) return;
+    m_scrollSync = sync;
+    m_stored.insert(scrollSyncKey, sync);
+    write();
+    emit changed();
+}
+
+void Settings::setRemoteImages(bool load)
+{
+    if (load == m_remoteImages) return;
+    m_remoteImages = load;
+    m_stored.insert(remoteImagesKey, load);
+    write();
+    emit changed();
+}
+
 void Settings::load()
 {
     QFile file(m_file);
@@ -397,6 +476,39 @@ void Settings::load()
             m_liveFormatting = m_stored.value(liveFormattingKey).toBool();
         else
             ignored << liveFormattingKey;
+    }
+    if (present(previewFontFamilyKey)) {
+        const QString family = m_stored.value(previewFontFamilyKey).toString().trimmed();
+        if (!family.isEmpty())
+            m_previewFontFamily = family;
+        else
+            ignored << previewFontFamilyKey;
+    }
+    if (present(previewFontPixelSizeKey)) {
+        if (wholeIn(m_stored.value(previewFontPixelSizeKey), MinFontPixelSize, MaxFontPixelSize, &whole))
+            m_previewSize = whole;
+        else
+            ignored << previewFontPixelSizeKey;
+    }
+    if (present(previewLineHeightKey)) {
+        const QJsonValue value = m_stored.value(previewLineHeightKey);
+        if (value.isDouble() && value.toDouble() >= MinLineHeight && value.toDouble() <= MaxLineHeight)
+            m_previewLineHeight = value.toDouble();
+        else
+            ignored << previewLineHeightKey;
+    }
+    if (present(previewLineLengthKey)) {
+        if (wholeIn(m_stored.value(previewLineLengthKey), MinLineLength, MaxLineLength, &whole))
+            m_previewLineLength = whole;
+        else
+            ignored << previewLineLengthKey;
+    }
+    for (const auto &[key, flag] : {std::pair{scrollSyncKey, &m_scrollSync}, std::pair{remoteImagesKey, &m_remoteImages}}) {
+        if (!present(key)) continue;
+        if (m_stored.value(key).isBool())
+            *flag = m_stored.value(key).toBool();
+        else
+            ignored << key;
     }
     if (!ignored.isEmpty())
         qWarning("parch: ignoring settings out of range in %s: %s", qPrintable(m_file), qPrintable(ignored.join(", ")));

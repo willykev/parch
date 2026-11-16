@@ -35,3 +35,5 @@ var image = "M4 5h16v14H4Z M4 16l5-5 4 4 2-2 5 5 M15.5 9.5h0.01"
 var codeBlock = "M4 5h16v14H4Z M9.5 10l-2 2 2 2 M14.5 10l2 2-2 2"
 var table = "M4 5h16v14H4Z M4 10h16 M4 14.5h16 M12 10v9"
 var chevronUp = "M5.5 15l6.5-6.5L18.5 15"
+// The text and its preview, side by side.
+var split = "M4 5h16v14H4Z M12 5v14"

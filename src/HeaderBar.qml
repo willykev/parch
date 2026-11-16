@@ -18,10 +18,13 @@ Rectangle {
     // spans; 0 while the library is not docked and shown.
     property real libraryWidth: 0
     property bool libraryShown: false
+    // The document is shown with its preview, beside its text or alone.
+    property bool previewShown: false
     // The text of the window's shortcuts, by action.
     property var keys: ({})
 
     signal toggleLibrary()
+    signal togglePreview()
     // The menu button was pressed; the window opens its menu below it.
     signal menuRequested()
 
@@ -104,7 +107,7 @@ Rectangle {
         id: where
         anchors.left: divider.right
         anchors.leftMargin: bar.gap
-        anchors.right: moreButton.left
+        anchors.right: previewButton.left
         anchors.rightMargin: bar.gap
         anchors.top: parent.top
         anchors.bottom: parent.bottom
@@ -164,6 +167,23 @@ Rectangle {
             Accessible.role: Accessible.StaticText
             Accessible.name: text
         }
+    }
+
+    // The preview beside the text, or the text alone again.
+    ThemedButton {
+        id: previewButton
+        objectName: "previewButton"
+        anchors.right: moreButton.left
+        anchors.rightMargin: bar.inset
+        anchors.verticalCenter: moreButton.verticalCenter
+        width: bar.buttonSize
+        height: bar.buttonSize
+        enabled: bar.document !== null
+        iconPath: Icons.split
+        text: bar.previewShown ? qsTr("Hide preview") : qsTr("Show preview")
+        keys: bar.keys.togglePreview || ""
+        textColor: bar.previewShown ? theme.accent : theme.foreground
+        onClicked: bar.togglePreview()
     }
 
     ThemedButton {

@@ -8,11 +8,13 @@
 #include "portalfilepicker.h"
 #include "qmltypes.h"
 #include "quitsignals.h"
+#include "remotefetcher.h"
 #include "settings.h"
 #include "theme.h"
 #include "themefolder.h"
 #include "windowcontext.h"
 
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -201,9 +203,15 @@ int main(int argc, char *argv[])
     }, Qt::QueuedConnection);
     // The desktop's own open and save dialogs. A benchmark asks nothing.
     std::optional<PortalFilePicker> picker;
+    // What a preview hands on: links to the desktop's handler for them, and
+    // the pictures a document names by web address to the network.
+    std::optional<NetworkFetcher> fetcher;
     if (!benchmarking) {
         picker.emplace();
         backend.setFilePicker(&*picker);
+        backend.setLinkOpener([](const QUrl &url) { return QDesktopServices::openUrl(url); });
+        fetcher.emplace();
+        backend.setRemoteFetcher(&*fetcher);
     }
 
     QQmlEngine engine;

@@ -1,16 +1,22 @@
 import QtQuick
 import Parch
+import "icons.js" as Icons
 
 // The line along the bottom of the editor: with Vim keys, their mode first,
 // and the command line being typed, the keys of a command not yet complete
 // or what the last command said; whether the document is saved, in words,
 // and why the last action could not be done, if it could not; and on the
 // right how many words the document has, or the selection, and how long
-// they take to read. The reason keeps its room first.
+// they take to read. The reason keeps its room first. Between them, while
+// the text and its preview are side by side, whether they scroll together.
 Rectangle {
     id: line
 
     property Document document
+    // The text and the preview are side by side, and scroll together.
+    property bool syncShown: false
+    property bool syncOn: true
+    signal syncToggled()
     // The state in words: the document's, or why the tab has no document.
     property string status: document ? document.statusText : ""
     // Why the last action could not be done, in a few words, and in full.
@@ -145,6 +151,37 @@ Rectangle {
         detail: line.problemDetail
         tipAbove: true
         textColor: theme.danger
+    }
+
+    // In the middle while there is room there, and clear of what stands on
+    // either side of it; left out where there is no room for it.
+    ThemedButton {
+        id: syncButton
+        objectName: "scrollSyncButton"
+        readonly property real after: (problemButton.visible ? problemButton.x + problemButton.width
+                                                              : saving.x + saving.width) + line.gap
+        readonly property real before: (count.visible ? count.x : line.width) - line.gap
+        visible: line.syncShown && before - after >= implicitWidth
+        x: Math.max(after, Math.min(before - width, Math.round((line.width - width) / 2)))
+        anchors.verticalCenter: parent.verticalCenter
+        height: line.height - 2 * Math.round(theme.fontSize / 4)
+        iconPath: Icons.link
+        iconSize: Math.round(theme.fontSize * 1.1)
+        labelled: true
+        text: line.syncOn ? qsTr("Scroll sync") : qsTr("Scroll sync off")
+        detail: line.syncOn ? qsTr("The text and the preview scroll together. Press to let each scroll by itself.")
+                            : qsTr("The text and the preview each scroll by themselves. Press to scroll them together.")
+        textColor: line.syncOn ? theme.foreground : theme.dim
+        tipAbove: true
+        // It is on or off, as assistive technology is told; which of the two
+        // is the setting's to say, so it is bound again after a press, which
+        // changes it by itself.
+        checkable: true
+        checked: line.syncOn
+        onClicked: {
+            line.syncToggled()
+            checked = Qt.binding(() => line.syncOn)
+        }
     }
 
     WordCounter {

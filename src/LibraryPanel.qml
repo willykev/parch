@@ -58,6 +58,11 @@ Item {
         search.forceActiveFocus(Qt.TabFocusReason)
     }
 
+    // The keys go to the outline of the document in front.
+    function focusOutline() {
+        outlineList.takeKeys()
+    }
+
     function rowData(row, role) {
         return panel.library.data(tree.index(row, 0), role)
     }

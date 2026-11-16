@@ -30,6 +30,7 @@
 #include "documentlinks.h"
 #include "outline.h"
 #include "markdown_tests.h"
+#include "previewtests.h"
 #include "pathtext.h"
 #include "portalfilepicker.h"
 #include "qmltypes.h"
@@ -651,6 +652,41 @@ private slots:
     void toolbarShowsHidesAndRunsCommands() { EditingTests::toolbarShowsHidesAndRunsCommands(); }
     void formattingCommandsRunFromEveryEntryPoint() { EditingTests::formattingCommandsRunFromEveryEntryPoint(); }
     void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
+    // The preview and the three views, written in previewtests.cpp.
+    void viewModesAreKeptByEachView() { PreviewTests::viewModesAreKeptByEachView(); }
+    void previewBuildsTextAndInlineFormatting() { PreviewTests::previewBuildsTextAndInlineFormatting(); }
+    void previewBuildsListsQuotesAndRules() { PreviewTests::previewBuildsListsQuotesAndRules(); }
+    void previewBuildsCodeAndTablesAsIslands() { PreviewTests::previewBuildsCodeAndTablesAsIslands(); }
+    void previewBuildsNotesCitationsAndContents() { PreviewTests::previewBuildsNotesCitationsAndContents(); }
+    void previewBuildsPicturesAndTheirStates() { PreviewTests::previewBuildsPicturesAndTheirStates(); }
+    void previewShowsRawHtmlUnderThePolicy() { PreviewTests::previewShowsRawHtmlUnderThePolicy(); }
+    void previewPartsKeepTheirKeysAndSources() { PreviewTests::previewPartsKeepTheirKeysAndSources(); }
+    void previewBuildsInPlaceForPaper() { PreviewTests::previewBuildsInPlaceForPaper(); }
+    void previewStyleIsReadableInAnyTheme() { PreviewTests::previewStyleIsReadableInAnyTheme(); }
+    void codeIsColouredByLanguage() { PreviewTests::codeIsColouredByLanguage(); }
+    void viewsShowTheTextThePreviewOrBoth() { PreviewTests::viewsShowTheTextThePreviewOrBoth(); }
+    void previewFollowsEditsWithoutRebuilding() { PreviewTests::previewFollowsEditsWithoutRebuilding(); }
+    void staleResultsNeverReplaceNewerText() { PreviewTests::staleResultsNeverReplaceNewerText(); }
+    void previewAndSourceFindEachOther() { PreviewTests::previewAndSourceFindEachOther(); }
+    void textAndPreviewScrollTogether() { PreviewTests::textAndPreviewScrollTogether(); }
+    void linksGoWhereTheyLead() { PreviewTests::linksGoWhereTheyLead(); }
+    void tasksAreTickedInTheSource() { PreviewTests::tasksAreTickedInTheSource(); }
+    void notesGoThereAndBack() { PreviewTests::notesGoThereAndBack(); }
+    void themeChangeRecoloursWithoutRebuilding() { PreviewTests::themeChangeRecoloursWithoutRebuilding(); }
+    void narrowWindowsShowOnePaneOfASplit() { PreviewTests::narrowWindowsShowOnePaneOfASplit(); }
+    void dividerMovesAndIsRemembered() { PreviewTests::dividerMovesAndIsRemembered(); }
+    void aBookIsFollowedWithinAFrame() { PreviewTests::aBookIsFollowedWithinAFrame(); }
+    void wideBlocksScrollByThemselves() { PreviewTests::wideBlocksScrollByThemselves(); }
+    void previewIsReachedAndReadWithoutAMouse() { PreviewTests::previewIsReachedAndReadWithoutAMouse(); }
+    void copyingFromThePreviewGivesTextAndHtml() { PreviewTests::copyingFromThePreviewGivesTextAndHtml(); }
+    void picturesArriveAndFailInTheirPlace() { PreviewTests::picturesArriveAndFailInTheirPlace(); }
+    void theRealHelpersDrawInThePreview() { PreviewTests::theRealHelpersDrawInThePreview(); }
+    void outlineAndPreferencesReachThePreview() { PreviewTests::outlineAndPreferencesReachThePreview(); }
+    void vimKeysAreTheTextsAlone() { PreviewTests::vimKeysAreTheTextsAlone(); }
+    void focusModeDimsTheTextAlone() { PreviewTests::focusModeDimsTheTextAlone(); }
+    void distractionFreeWritingKeepsEachView() { PreviewTests::distractionFreeWritingKeepsEachView(); }
+    void citationsReadAsTheirStyleWordsThem() { PreviewTests::citationsReadAsTheirStyleWordsThem(); }
+    void documentSettingsReachThePreview() { PreviewTests::documentSettingsReachThePreview(); }
     // Vim keys, written in vimtests.cpp.
     void undoStepsJoinIntoOneChange() { VimTests::undoStepsJoinIntoOneChange(); }
     void vimKeysAreOffUntilChosenAndKept() { VimTests::vimKeysAreOffUntilChosenAndKept(); }
@@ -11706,8 +11742,11 @@ void ParchTests::windowShortcutsReachPastTheEditor()
         if (shell.backend->commands()->needs(shortcut->property("commandId").toString()) == u"text") continue;
         for (const QKeySequence &sequence : shortcutSequences(shortcut)) {
             // Ctrl+Shift+N opens a window that comes to the front, and only
-            // the window in front answers keys.
+            // the window in front answers keys. A shortcut before this one
+            // may have shown the preview in the text's place: the text is
+            // shown again.
             activate(window);
+            shell.context()->tabs()->setActiveMode(TabModel::Source);
             editor->forceActiveFocus();
             QCOMPARE(window->activeFocusItem(), editor);
             QSignalSpy activated(shortcut, SIGNAL(activated()));

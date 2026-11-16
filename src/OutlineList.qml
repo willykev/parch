@@ -20,6 +20,18 @@ Item {
     // A heading was chosen: the window puts its line at the top of the view.
     signal chosen(int position)
 
+    // The keys go to the headings. Until they are found, and when there are
+    // none, the row that shows and hides them has the keys.
+    property bool keysPending: false
+    function takeKeys() {
+        if (open && list.count > 0) {
+            list.forceActiveFocus(Qt.TabFocusReason)
+        } else {
+            header.forceActiveFocus(Qt.TabFocusReason)
+            keysPending = open
+        }
+    }
+
     readonly property bool open: settings.outlineShown
     readonly property real rowHeight: Math.round(theme.fontSize * 2.2)
     readonly property real indent: Math.round(theme.fontSize)
@@ -68,6 +80,14 @@ Item {
         currentIndex: section.currentRow
         Accessible.role: Accessible.List
         Accessible.name: qsTr("Outline")
+        // The headings were asked for before they were found, and the keys
+        // are still waiting on the row above.
+        onCountChanged: {
+            if (section.keysPending && count > 0 && header.activeFocus)
+                forceActiveFocus(Qt.TabFocusReason)
+            if (count > 0 || !header.activeFocus)
+                section.keysPending = false
+        }
         Keys.onReturnPressed: section.chosen(outline.positionAt(currentIndex))
         Keys.onEnterPressed: section.chosen(outline.positionAt(currentIndex))
         Keys.onSpacePressed: section.chosen(outline.positionAt(currentIndex))

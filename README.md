@@ -9,6 +9,8 @@ A Markdown writing app for Omarchy. Open it and write: parch keeps every word
 safe and stays out of your way.
 
 - Write Markdown with its punctuation in view, in tabs and separate windows.
+- Read it as it will look, beside the text or alone: a preview with tables,
+  coloured code, math, diagrams and footnotes that scrolls with what you write.
 - Cite from your BibTeX or CSL bibliography in APA, Chicago, MLA, IEEE or a
   style of your own, chosen per document or per library folder.
 - Check your spelling as you write, and dim all but the sentence you are on
@@ -37,9 +39,9 @@ This builds and installs the app. Open **parch** from the app launcher, or run
 `parch` with the files you want to open.
 
 Building requires a C++ compiler, `make`, `qmake6`, and the `qt6-base`,
-`qt6-declarative`, `qt6-svg`, `qt6-wayland`, `fontconfig` and `hunspell`
-packages. File dialogs use `xdg-desktop-portal` and your desktop's portal
-backend; spell checking uses the `hunspell-en_us` dictionary.
+`qt6-declarative`, `qt6-svg`, `qt6-wayland`, `fontconfig`, `hunspell` and
+`syntax-highlighting` packages. File dialogs use `xdg-desktop-portal` and your
+desktop's portal backend; spell checking uses the `hunspell-en_us` dictionary.
 
 ## Start writing
 
@@ -55,6 +57,8 @@ moment after you pause.
 | `Ctrl+F` / `Ctrl+Shift+F` | Find in the document / search the library |
 | `Ctrl+S` / `Ctrl+Shift+S` | Save now / save as |
 | `F9` | Show or hide the library |
+| `Ctrl+Alt+P` | Show or hide the preview |
+| `Ctrl+Alt+1` / `Ctrl+Alt+2` / `Ctrl+Alt+3` | Source / split / reading view |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+W` | Close the tab |
 | `Ctrl+Shift+N` | New window |
@@ -90,9 +94,11 @@ keeps its own things separately:
 - Words you add to the spelling dictionary in `~/.local/share/parch/dictionary.txt`.
 - Settings in `~/.config/parch/settings.json`, and document settings in
   `~/.local/share/parch/document-settings.json`.
+- Formulas and diagrams already drawn in `~/.cache/parch/render/`.
 
-A formatted preview and exporting from the window are not included yet; the
-terminal exports Markdown and HTML.
+The preview fetches pictures a document names by web address; turn that off
+in **Preferences** if you prefer. Exporting from the window is not included
+yet; the terminal exports Markdown and HTML.
 
 ## Development
 

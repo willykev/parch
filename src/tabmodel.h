@@ -40,10 +40,19 @@ class TabModel : public QAbstractListModel {
     Q_PROPERTY(QString activeTitle READ activeTitle NOTIFY activeChanged)
     Q_PROPERTY(QString activePath READ activePath NOTIFY activeChanged)
     Q_PROPERTY(QString activeStatus READ activeStatus NOTIFY activeChanged)
+    // How the front tab shows its document, and the part of the width its
+    // source takes beside the preview. Each tab keeps its own; a new tab
+    // starts beside its preview when the tab in front is, at that tab's
+    // divider, and as source alone otherwise.
+    Q_PROPERTY(ViewMode activeMode READ activeMode WRITE setActiveMode NOTIFY activeModeChanged)
+    Q_PROPERTY(qreal activeSplit READ activeSplit WRITE setActiveSplit NOTIFY activeModeChanged)
 
 public:
     enum Role { TitleRole = Qt::UserRole + 1, PathRole, StateRole, DocumentIdRole, DocumentRole };
     Q_ENUM(Role)
+    // The values of ViewState::Mode, by the names QML uses.
+    enum ViewMode { Source = ViewState::Source, Split = ViewState::Split, Reading = ViewState::Reading };
+    Q_ENUM(ViewMode)
 
     explicit TabModel(DocumentStore *store, QObject *parent = nullptr);
 
@@ -58,6 +67,11 @@ public:
     QString activeTitle() const;
     QString activePath() const;
     QString activeStatus() const;
+    ViewMode activeMode() const;
+    void setActiveMode(ViewMode mode);
+    qreal activeSplit() const;
+    // Kept within ViewState::MinSplit and MaxSplit.
+    void setActiveSplit(qreal split);
 
     // Shows the document in front, in the tab that already shows it here or
     // in a new tab at the end. A new tab starts at `view`'s cursor, selection
@@ -135,6 +149,8 @@ signals:
     // Another tab came to the front, or the front tab's document was read:
     // the window shows its view.
     void activeViewChanged();
+    // The front tab's mode or divider changed, or another tab came to the front.
+    void activeModeChanged();
     // A tab took a document.
     void documentAdded(Document *document);
     // The tabs, the front tab, or a document's name or file changed.
@@ -154,6 +170,8 @@ private:
 
     // The tab holds no document and stands for this one, by its id or its file.
     static bool waitsFor(const Tab &tab, const Document *document);
+    // A new tab's view of a document, with the mode and divider it starts at.
+    ViewState freshView(const QString &documentId, const QString &path) const;
     int insert(int at, const Tab &tab);
     // Reads the tab's document, or finds out why it cannot.
     void load(int index);

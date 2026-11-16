@@ -33,6 +33,9 @@
         <file>PreferenceSection.qml</file>
         <file>PreferenceRow.qml</file>
         <file>WritingPreferences.qml</file>
+        <file>PreviewPreferences.qml</file>
+        <file>PreviewPane.qml</file>
+        <file>ViewDivider.qml</file>
         <file>WritingAidsPreferences.qml</file>
         <file>FindBar.qml</file>
         <file>HeadingsDialog.qml</file>

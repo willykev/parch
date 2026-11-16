@@ -35,6 +35,131 @@ ApplicationWindow {
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
+    // How the tab in front shows its document: its source alone, the source
+    // beside its preview, or the preview alone. Each tab keeps its own.
+    readonly property int viewMode: tabs.activeMode
+    // Side by side, each pane keeps this much; a window with less room for
+    // them shows one pane of a split at a time: the text, or the preview
+    // once it is asked for.
+    readonly property real minimumPane: Math.round(theme.fontSize * 26)
+    readonly property bool splitFits: writing.width >= 2 * minimumPane
+    property bool narrowPreview: false
+    readonly property bool splitBoth: document !== null && viewMode === TabModel.Split && splitFits
+    readonly property bool editorShown: document !== null && (viewMode === TabModel.Source
+                                        || (viewMode === TabModel.Split && (splitFits || !narrowPreview)))
+    readonly property bool previewShown: document !== null && (viewMode === TabModel.Reading
+                                         || (viewMode === TabModel.Split && (splitFits || narrowPreview)))
+
+    // The source at the top of what is shown, and showing it there in
+    // whatever is shown now: a view opens where the one before it was.
+    function shownTop() {
+        return editorShown ? editorPane.viewState().top : previewPane.topSource()
+    }
+    function showTop(top) {
+        if (editorShown)
+            editorPane.restoreView(editorPane.cursorSource, editorPane.anchorSource, top)
+        if (previewShown)
+            previewPane.showSource(top)
+    }
+
+    function setViewMode(mode) {
+        if (!document || mode === viewMode)
+            return
+        const top = shownTop()
+        // Wherever in the document's panes the keys are, also on the
+        // divider or in a table of the preview.
+        const region = regionOf(activeFocusItem)
+        const keys = !dialogOpen && (region === textRegion || region === previewRegion)
+        tabs.activeMode = mode
+        showTop(top)
+        // The keys stay with the document, in whichever pane now shows it.
+        if (keys)
+            focusText()
+    }
+
+    // The preview beside the text, or the text alone again.
+    function togglePreview() {
+        setViewMode(viewMode === TabModel.Source ? TabModel.Split : TabModel.Source)
+    }
+
+    // In a split, the keys go to the other pane; a split that shows one pane
+    // at a time shows the other. From the text alone or the preview alone
+    // it is the split that is shown, with the keys in the pane that came.
+    function otherPane() {
+        if (!document)
+            return
+        if (viewMode !== TabModel.Split) {
+            const reading = viewMode === TabModel.Reading
+            const top = shownTop()
+            narrowPreview = !reading
+            tabs.activeMode = TabModel.Split
+            showTop(top)
+            if (splitFits && reading)
+                editorPane.focusText()
+            else if (splitFits)
+                previewPane.focusText(true)
+            else
+                focusText()
+            return
+        }
+        if (splitFits) {
+            if (previewKeys)
+                editorPane.focusText()
+            else
+                previewPane.focusText(true)
+            return
+        }
+        const top = shownTop()
+        narrowPreview = !narrowPreview
+        showTop(top)
+        focusText()
+    }
+
+    // Shows one pane of a split that shows one at a time.
+    function showPane(preview) {
+        if (splitFits) {
+            if (preview)
+                previewPane.focusText()
+            else
+                editorPane.focusText()
+        } else if (narrowPreview !== preview) {
+            otherPane()
+        } else {
+            focusText()
+        }
+    }
+
+    // What acts on the source needs it in view: the text comes back beside
+    // the preview, or alone where there is no room for both.
+    function showEditor() {
+        if (!document || editorShown)
+            return
+        if (viewMode === TabModel.Reading)
+            setViewMode(splitFits ? TabModel.Split : TabModel.Source)
+        else
+            otherPane()
+    }
+
+    // The outline in the library, shown with the keys on its headings, or hidden.
+    property bool outlinePending: false
+    function toggleOutline() {
+        const shown = libraryDocked ? context.libraryOpen : drawer.visible
+        if (settings.outlineShown && shown) {
+            settings.outlineShown = false
+            return
+        }
+        settings.outlineShown = true
+        if (libraryDocked) {
+            if (focusLibrary(""))
+                Qt.callLater(libraryPanel.focusOutline)
+        } else {
+            outlinePending = true
+            if (!focusLibrary(""))
+                outlinePending = false
+            else if (drawer.opened)
+                drawer.takeKeys()
+        }
+    }
     // Focus mode dims all but the sentence or paragraph being written.
     property bool focusMode: false
     // Distraction-free writing shows the text alone: no library, tabs,
@@ -43,10 +168,15 @@ ApplicationWindow {
 
     // The one way the keys go back to the text: never while a dialog is
     // open. A dialog that closes calls it in turn, so that the keys then go
-    // to the text, which may be a tab the dialog's choice opened.
+    // to the text, which may be a tab the dialog's choice opened. Where the
+    // preview is shown alone, the keys go to it.
     function focusText() {
-        if (!dialogOpen)
+        if (dialogOpen)
+            return
+        if (editorShown || !previewShown)
             editorPane.focusText()
+        else
+            previewPane.focusText()
     }
 
     // The one way the keys go to the library, shown beside the editor or
@@ -84,15 +214,41 @@ ApplicationWindow {
         libraryPanel.showFolder(path, !dialogOpen)
     }
 
+    // Which of the document's two panes had the keys last: the preview, or
+    // the text. A menu or a dialog that closes gives them back to it, and
+    // the other pane is the one it is not.
+    property bool previewKeys: false
+    onActiveFocusItemChanged: {
+        for (let at = activeFocusItem; at; at = at.parent) {
+            if (at === previewPane) {
+                previewKeys = true
+                return
+            }
+            if (at === editorPane) {
+                previewKeys = false
+                return
+            }
+        }
+    }
+
+    // The keys back to the document as a menu or a dialog closes: to the
+    // preview where it had them beside the text, and otherwise as ever.
+    function returnKeys() {
+        if (!dialogOpen && splitBoth && previewKeys)
+            previewPane.focusText()
+        else
+            focusText()
+    }
+
     // Where the keys go as a dialog closes: to the library over the text,
-    // while it is open there, and otherwise to the text.
+    // while it is open there, and otherwise to the document.
     function dialogClosed() {
         if (dialogOpen)
             return
         if (drawer.opened)
             drawer.takeKeys()
         else
-            focusText()
+            returnKeys()
     }
 
     function toggleFocusMode() {
@@ -100,18 +256,29 @@ ApplicationWindow {
     }
 
     // Enters or leaves distraction-free writing, keeping the caret, the
-    // selection and the first line in view where they were.
+    // selection and the first line in view where they were. The view stays
+    // what it was: the text, the preview, or both; the preview keeps its
+    // place too, and the keys where it had them.
     function setDistractionFree(on) {
         if (on === distractionFree)
             return
         const view = editorPane.viewState()
+        const previewTop = previewShown ? previewPane.topSource() : -1
+        const inPreview = previewShown && previewKeys
         if (on && drawer.visible)
             drawer.close()
         distractionFree = on
         Qt.callLater(() => {
-            if (window.document && editorPane.document === window.document)
+            if (window.document && editorPane.document === window.document) {
                 editorPane.restoreView(view.cursor, view.anchor, view.top)
-            window.focusText()
+                // Beside the text it follows, the preview is brought along.
+                if (previewTop >= 0 && window.previewShown && !(window.editorShown && scrollSync.enabled))
+                    previewPane.showSource(previewTop)
+            }
+            if (inPreview && window.previewShown && !window.dialogOpen)
+                previewPane.focusText()
+            else
+                window.focusText()
         })
     }
     function toggleDistractionFree() {
@@ -183,7 +350,8 @@ ApplicationWindow {
         if (tabs.activeIndex < 0 || !document || editorPane.document !== document)
             return
         const view = editorPane.viewState()
-        tabs.setView(tabs.activeIndex, view.cursor, view.anchor, view.top)
+        // Where the preview is, while it alone shows the document.
+        tabs.setView(tabs.activeIndex, view.cursor, view.anchor, editorShown ? view.top : previewPane.topSource())
     }
 
     // Shows the front tab where its view was.
@@ -192,6 +360,8 @@ ApplicationWindow {
             return
         const view = tabs.viewAt(tabs.activeIndex)
         editorPane.restoreView(view.cursor, view.anchor, view.top)
+        if (previewShown)
+            previewPane.showSource(view.top)
     }
 
     // Does what the backend does for the window in front, in this window: a
@@ -219,12 +389,13 @@ ApplicationWindow {
 
     // The window's regions, in the order F6 visits them: the library, at its
     // field; the notice bar, at its first button; the find bar, at its
-    // field; and the text. A library, notice bar or find bar not shown, or a
-    // notice bar with no button, is passed over.
+    // field; the text; and the preview. A region not shown, or a notice bar
+    // with no button, is passed over.
     readonly property int libraryRegion: 0
     readonly property int noticeRegion: 1
     readonly property int findRegion: 2
     readonly property int textRegion: 3
+    readonly property int previewRegion: 4
     // Where the keys go once the library over the editor has closed.
     property int regionAfterDrawer: textRegion
 
@@ -236,13 +407,18 @@ ApplicationWindow {
                 return noticeRegion
             if (at === findBar)
                 return findRegion
+            if (at === previewPane)
+                return previewRegion
         }
         return textRegion
     }
 
     // Gives the keys to the next region shown, or the one before for a step of -1.
     function stepRegion(step) {
-        const shown = [library.visible || drawer.visible, noticeBar.reachable, findBar.visible, true]
+        // With no document the text's place still takes the keys, so that
+        // there is always somewhere for them to go.
+        const shown = [library.visible || drawer.visible, noticeBar.reachable, findBar.visible,
+                       editorShown || !previewShown, previewShown]
         let region = regionOf(activeFocusItem)
         do {
             region = (region + step + shown.length) % shown.length
@@ -262,6 +438,10 @@ ApplicationWindow {
     function focusRegion(region) {
         if (region === findRegion && findBar.visible)
             findBar.focusFind()
+        else if (region === previewRegion && previewShown && !dialogOpen)
+            previewPane.focusText(true)
+        else if (region === textRegion && editorShown && !dialogOpen)
+            editorPane.focusText()
         else if (region !== noticeRegion || !noticeBar.focusFirst())
             focusText()
     }
@@ -284,6 +464,7 @@ ApplicationWindow {
     function openFind(replacing) {
         if (!document)
             return
+        showEditor()
         const selected = editorPane.selectedText
         findBar.replacing = replacing
         findBar.visible = true
@@ -302,11 +483,24 @@ ApplicationWindow {
         focusText()
     }
 
+    // Escape in the text or the preview closes the find bar, or else leaves
+    // distraction-free writing, or else dismisses a notice that has nothing
+    // behind it.
+    function escapeInText() {
+        if (findBar.visible)
+            closeFind()
+        else if (distractionFree)
+            setDistractionFree(false)
+        else if (backend.notice)
+            backend.dismissNotice()
+    }
+
     // The next match, or the one before; the bar shows again, without the
     // keys, should it be closed.
     function findStep(forward) {
         if (!document)
             return
+        showEditor()
         if (!findBar.visible) {
             findBar.visible = true
             documentFind.setSelection(editorPane.anchorSource, editorPane.cursorSource)
@@ -326,10 +520,23 @@ ApplicationWindow {
             headingsDialog.show(document, editorPane.cursorSource)
     }
 
-    // A heading's line at the top of the view, with the caret on it.
+    // A heading's line at the top of the view, with the caret on it; the
+    // preview shows the heading too, when it is not following the text.
     function showHeading(position) {
         editorPane.showAtTop(position)
+        if (previewShown && !scrollSync.enabled)
+            previewPane.showSource(position)
         focusText()
+    }
+
+    // The heading with this slug in the document in front, as a link to
+    // another document names one; nothing when it has none.
+    function showAnchor(slug) {
+        if (!document)
+            return
+        const position = previewPane.preview.headingSource(slug)
+        if (position >= 0)
+            showHeading(position)
     }
 
     // Search across the library, starting from the selection when it is one line.
@@ -448,7 +655,10 @@ ApplicationWindow {
     function canRun(command) {
         switch (commands.needs(command)) {
         case "text":
+            // What edits at the caret needs the text in view; undoing and
+            // redoing act on the document wherever it is shown.
             return document !== null && editorPane.editable
+                    && (editorShown || command === "undo" || command === "redo")
         case "document":
             return document !== null
         default:
@@ -470,6 +680,14 @@ ApplicationWindow {
         goToHeading: () => window.goToHeading(),
         findDocument: () => window.findDocument(),
         library: () => window.toggleLibrary(),
+        outline: () => window.toggleOutline(),
+        viewSource: () => window.setViewMode(TabModel.Source),
+        viewSplit: () => window.setViewMode(TabModel.Split),
+        viewReading: () => window.setViewMode(TabModel.Reading),
+        togglePreview: () => window.togglePreview(),
+        otherPane: () => window.otherPane(),
+        scrollSync: () => settings.setScrollSync(!settings.scrollSync),
+        previewBack: () => previewPane.preview.goBack(),
         toolbar: () => window.toggleToolbar(),
         // Focus mode and distraction-free writing are each window's own.
         focusMode: () => window.toggleFocusMode(),
@@ -531,8 +749,14 @@ ApplicationWindow {
         place: window.tabs.count > 0 ? backend.folderLabel(window.tabs.activePath, settings.libraryFolders) : ""
         libraryWidth: library.visible ? library.width : 0
         libraryShown: library.visible || drawer.visible
+        previewShown: window.viewMode !== TabModel.Source
         keys: window.keys
         onToggleLibrary: window.toggleLibrary()
+        // The keys go back to the document, in whichever pane now shows it.
+        onTogglePreview: {
+            window.run("togglePreview")
+            window.focusText()
+        }
         onMenuRequested: windowMenu.open()
     }
 
@@ -547,17 +771,20 @@ ApplicationWindow {
         keys: window.keys
         libraryShown: header.libraryShown
         toolbarShown: window.toolbarShown
+        outlineShown: settings.outlineShown && header.libraryShown
+        viewMode: window.viewMode
         focusMode: window.focusMode
         distractionFree: window.distractionFree
         spellingWanted: backend.spelling.wanted
         liveFormatting: settings.liveFormatting
         canRun: window.canRun
         // Each command is this window's, whichever window the backend last
-        // heard was in front. Finding a document gives the keys to the
-        // library, so it waits until the menu has closed and given them back
-        // to the text.
-        onCommandChosen: (command) => command === "findDocument" ? Qt.callLater(window.run, command) : window.run(command)
-        onClosed: window.focusText()
+        // heard was in front. Finding a document and showing the outline
+        // give the keys to the library, so they wait until the menu has
+        // closed and given them back to the document.
+        onCommandChosen: (command) => command === "findDocument" || command === "outline"
+                                      ? Qt.callLater(window.run, command) : window.run(command)
+        onClosed: window.returnKeys()
     }
 
     Item {
@@ -716,50 +943,163 @@ ApplicationWindow {
                 problemDetail: backend.notice ? "" : backend.shownText(backend.problemDetail)
                 selectionStart: editorPane.anchorPosition
                 selectionEnd: editorPane.cursorPosition
-                vim: settings.vimKeys ? editorPane.vim : null
+                syncShown: window.splitBoth
+                syncOn: settings.scrollSync
+                onSyncToggled: window.run("scrollSync")
+                // Vim keys are the text's: no mode is shown where it is not.
+                vim: settings.vimKeys && window.editorShown ? editorPane.vim : null
             }
 
-            EditorPane {
-                id: editorPane
-                objectName: "editorPane"
+            // The names of a split's two panes, each over its own; a click
+            // gives a pane the keys. In a window too narrow for both panes
+            // they stand together and choose which of the two is shown.
+            // Distraction-free writing hides them with the rest.
+            Item {
+                id: paneNames
+                objectName: "paneNames"
+                visible: window.document !== null && window.viewMode === TabModel.Split && !window.distractionFree
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: findBar.bottom
-                anchors.bottom: statusLine.top
-                visible: window.document !== null
-                document: window.document
-                title: window.tabs.activeTitle
-                maxLineLength: settings.maxLineLength
-                fontPixelSize: settings.fontPixelSize
-                lineHeight: settings.lineHeight
-                fontFamily: settings.editorFontFamily
-                setextHeadings: settings.setextHeadings
-                vimKeys: settings.vimKeys
-                inputBlocked: window.dialogOpen
-                attachments: backend.attachments
-                spellChecker: backend.spelling
-                focusMode: window.focusMode
-                focusUnit: settings.focusUnit
-                liveFormatting: settings.liveFormatting
-                onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
-                onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
-                onViewMoved: window.context.noteViewMoved()
-                // :w saves and :q closes the tab, as their commands do.
-                onVimCommand: (command) => window.run(command)
-                // Escape in the text closes the find bar, or else leaves
-                // distraction-free writing, or else dismisses a notice that
-                // has nothing behind it.
-                onEscapePressed: {
-                    if (findBar.visible)
-                        window.closeFind()
-                    else if (window.distractionFree)
-                        window.setDistractionFree(false)
-                    else if (backend.notice)
-                        backend.dismissNotice()
+                height: visible ? Math.round(theme.fontSize * 2.2) : 0
+
+                ThemedButton {
+                    id: textName
+                    objectName: "textPaneName"
+                    readonly property bool current: window.splitFits ? editorPane.hasKeys : !window.narrowPreview
+                    x: (window.splitFits ? editorPane.x + editorPane.columnLeft : editorPane.margin) - leftPadding
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: parent.height - 2 * Math.round(theme.fontSize / 4)
+                    text: qsTr("Markdown")
+                    topPadding: 0
+                    bottomPadding: 0
+                    font.pixelSize: theme.sizes.small
+                    font.capitalization: Font.AllUppercase
+                    textColor: current ? theme.foreground : theme.dim
+                    Accessible.description: window.splitFits ? qsTr("Gives the keys to the text") : qsTr("Shows the text")
+                    onClicked: window.showPane(false)
                 }
-                // The find follows where the selection is.
-                onCursorSourceChanged: documentFind.setSelection(anchorSource, cursorSource)
-                onAnchorSourceChanged: documentFind.setSelection(anchorSource, cursorSource)
+
+                ThemedButton {
+                    id: previewName
+                    objectName: "previewPaneName"
+                    readonly property bool current: window.splitFits ? previewPane.hasKeys : window.narrowPreview
+                    x: window.splitFits ? previewPane.x + previewPane.columnLeft - leftPadding
+                                        : textName.x + textName.width + Math.round(theme.fontSize / 2)
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: textName.height
+                    text: qsTr("Preview")
+                    topPadding: 0
+                    bottomPadding: 0
+                    font.pixelSize: theme.sizes.small
+                    font.capitalization: Font.AllUppercase
+                    textColor: current ? theme.foreground : theme.dim
+                    Accessible.description: window.splitFits ? qsTr("Gives the keys to the preview") : qsTr("Shows the preview")
+                    onClicked: window.showPane(true)
+                }
+            }
+
+            // The document: its text, its preview, or both with a divider
+            // between them. The preview and the divider come before the
+            // editor for Tab, which types in the editor.
+            Item {
+                id: panes
+                objectName: "panes"
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: paneNames.bottom
+                anchors.bottom: statusLine.top
+
+                PreviewPane {
+                    id: previewPane
+                    objectName: "previewPane"
+                    x: window.splitBoth ? viewDivider.x + viewDivider.width : 0
+                    width: parent.width - x
+                    height: parent.height
+                    visible: window.previewShown
+                    document: window.document
+                    title: window.tabs.activeTitle
+                    maxLineLength: settings.previewLineLength
+                    fontFamily: settings.previewFontFamily
+                    fontPixelSize: settings.previewFontPixelSize
+                    lineHeight: settings.previewLineHeight
+                    remoteImages: settings.remoteImages
+                    // The caret goes to what was double-clicked, and the keys
+                    // with it where the text is shown.
+                    onSourceRequested: (position) => {
+                        editorPane.selectSource(position, position)
+                        if (window.editorShown)
+                            editorPane.focusText()
+                    }
+                    // A link to another document opens it in a tab, at the
+                    // heading the link names once the tab is in front.
+                    // A document that could not be opened leaves this one
+                    // where it is, whatever its own headings are called.
+                    onOpenRequested: (path, heading) => {
+                        const from = window.document
+                        window.act(() => backend.openFiles([path]))
+                        if (heading.length > 0 && (window.document !== from || window.tabs.activePath === path))
+                            Qt.callLater(window.showAnchor, heading)
+                    }
+                    onEscapePressed: window.escapeInText()
+                }
+
+                ViewDivider {
+                    id: viewDivider
+                    objectName: "viewDivider"
+                    visible: window.splitBoth
+                    height: parent.height
+                    room: parent.width
+                    // Neither pane is made narrower than it can be read in.
+                    from: Math.min(0.5, window.minimumPane / Math.max(1, parent.width))
+                    to: 1 - from
+                    value: Math.max(from, Math.min(to, window.tabs.activeSplit))
+                    x: Math.round(parent.width * value - width / 2)
+                    onMoved: (value) => window.tabs.activeSplit = value
+                }
+
+                EditorPane {
+                    id: editorPane
+                    objectName: "editorPane"
+                    anchors.left: parent.left
+                    anchors.right: window.splitBoth ? viewDivider.left : parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    visible: window.editorShown
+                    document: window.document
+                    title: window.tabs.activeTitle
+                    maxLineLength: settings.maxLineLength
+                    fontPixelSize: settings.fontPixelSize
+                    lineHeight: settings.lineHeight
+                    fontFamily: settings.editorFontFamily
+                    setextHeadings: settings.setextHeadings
+                    vimKeys: settings.vimKeys
+                    inputBlocked: window.dialogOpen
+                    attachments: backend.attachments
+                    spellChecker: backend.spelling
+                    focusMode: window.focusMode
+                    focusUnit: settings.focusUnit
+                    liveFormatting: settings.liveFormatting
+                    onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
+                    onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
+                    onViewMoved: window.context.noteViewMoved()
+                    // :w saves and :q closes the tab, as their commands do.
+                    onVimCommand: (command) => window.run(command)
+                    onEscapePressed: window.escapeInText()
+                    // The find follows where the selection is.
+                    onCursorSourceChanged: documentFind.setSelection(anchorSource, cursorSource)
+                    onAnchorSourceChanged: documentFind.setSelection(anchorSource, cursorSource)
+                }
+            }
+
+            // Keeps the text and the preview beside it at the same place.
+            ScrollSync {
+                id: scrollSync
+                objectName: "scrollSync"
+                preview: previewPane.preview
+                binding: editorPane.binding
+                editorViewport: editorPane.viewport
+                enabled: window.splitBoth && settings.scrollSync
             }
 
             // In place of the editor, for a tab whose file is not there: what
@@ -767,8 +1107,8 @@ ApplicationWindow {
             Item {
                 id: missingFile
                 objectName: "missingFile"
-                visible: !editorPane.visible && window.tabs.count > 0
-                anchors.fill: editorPane
+                visible: window.document === null && window.tabs.count > 0
+                anchors.fill: panes
 
                 Column {
                     anchors.centerIn: parent
@@ -838,10 +1178,14 @@ ApplicationWindow {
             window.folderPending = ""
         }
         function takeKeys() {
-            if (window.folderPending)
+            if (window.folderPending) {
                 showPending()
-            else
+            } else if (window.outlinePending) {
+                window.outlinePending = false
+                libraryPanel.focusOutline()
+            } else {
                 libraryPanel.focusSearch()
+            }
         }
         // A dialog that opened while the library slid in keeps the keys: the
         // folder the library is to show is shown without them, as the
@@ -978,7 +1322,7 @@ ApplicationWindow {
     HeadingsDialog {
         id: headingsDialog
         objectName: "headingsDialog"
-        onChosen: (position) => editorPane.showAtTop(position)
+        onChosen: (position) => window.showHeading(position)
         onClosed: window.dialogClosed()
     }
 

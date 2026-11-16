@@ -19,9 +19,10 @@ options=('!debug')
 # reaches Omarchy's compositor, to xdg-desktop-portal, which draws the open
 # and save dialogs, or to hunspell-en_us, the English dictionary spell
 # checking reads, so this list is all that says they are needed. fontconfig
-# picks the fonts diagrams are drawn with.
+# picks the fonts diagrams are drawn with, and syntax-highlighting
+# (KSyntaxHighlighting) colours the code in previews.
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal' 'fontconfig'
-         'hunspell' 'hunspell-en_us' 'libyaml')
+         'hunspell' 'hunspell-en_us' 'libyaml' 'syntax-highlighting')
 optdepends=('noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'
             'noto-fonts-emoji: emoji in diagrams')
 makedepends=('gcc' 'make')

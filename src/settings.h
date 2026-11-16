@@ -54,6 +54,18 @@ class Settings : public QObject {
     Q_PROPERTY(QStringList libraryFolders READ libraryFolders NOTIFY changed)
     // The library shows the outline of the document in front beneath its folders.
     Q_PROPERTY(bool outlineShown READ outlineShown WRITE setOutlineShown NOTIFY changed)
+    // The preview: its reading face, empty for the default one; its text
+    // size, which is the editor's and two pixels until one is chosen; its
+    // line height and the most characters its lines hold.
+    Q_PROPERTY(QString previewFontFamily READ previewFontFamily NOTIFY changed)
+    Q_PROPERTY(int previewFontPixelSize READ previewFontPixelSize NOTIFY changed)
+    Q_PROPERTY(bool previewSizeChosen READ previewSizeChosen NOTIFY changed)
+    Q_PROPERTY(qreal previewLineHeight READ previewLineHeight NOTIFY changed)
+    Q_PROPERTY(int previewLineLength READ previewLineLength NOTIFY changed)
+    // The editor and the preview beside it scroll together.
+    Q_PROPERTY(bool scrollSync READ scrollSync WRITE setScrollSync NOTIFY changed)
+    // The preview fetches the pictures a document names by web address.
+    Q_PROPERTY(bool remoteImages READ remoteImages NOTIFY changed)
     // What focus mode keeps bright: "sentence" or "paragraph".
     Q_PROPERTY(QString focusUnit READ focusUnit NOTIFY changed)
     // Whether the editor styles its Markdown as it is written; on by default.
@@ -65,6 +77,8 @@ public:
     static constexpr qreal MinLineHeight = 1.0, MaxLineHeight = 3.0;
     // How much larger the editor's text is than the shell's.
     static constexpr int ThemeFontOffset = 4;
+    // How much larger the preview's text is than the editor's.
+    static constexpr int PreviewFontOffset = 2;
 
     explicit Settings(const QString &file, QObject *parent = nullptr);
 
@@ -124,6 +138,23 @@ public:
     Q_INVOKABLE void setShowToolbar(bool show);
     Q_INVOKABLE void setVimKeys(bool on);
 
+    QString previewFontFamily() const { return m_previewFontFamily; }
+    int previewFontPixelSize() const;
+    bool previewSizeChosen() const { return m_previewSize > 0; }
+    qreal previewLineHeight() const { return m_previewLineHeight; }
+    int previewLineLength() const { return m_previewLineLength; }
+    bool scrollSync() const { return m_scrollSync; }
+    bool remoteImages() const { return m_remoteImages; }
+    // An empty family returns the preview to the default reading face.
+    Q_INVOKABLE void setPreviewFontFamily(const QString &family);
+    Q_INVOKABLE void setPreviewFontPixelSize(int size);
+    // Returns the preview's text size to following the editor's.
+    Q_INVOKABLE void resetPreviewFontPixelSize();
+    Q_INVOKABLE void setPreviewLineHeight(qreal lineHeight);
+    Q_INVOKABLE void setPreviewLineLength(int characters);
+    Q_INVOKABLE void setScrollSync(bool sync);
+    Q_INVOKABLE void setRemoteImages(bool load);
+
     // The writer's own key bindings, by command id, each replacing all of
     // that command's default keys; an empty list leaves the command without
     // keys. Kept as portable key sequence text, ids this version does not
@@ -161,6 +192,13 @@ private:
     QStringList m_libraryFolders;
     QString m_lastFolder;
     bool m_outlineShown = false;
+    QString m_previewFontFamily;
+    // 0 while the size follows the editor's.
+    int m_previewSize = 0;
+    qreal m_previewLineHeight = 1.6;
+    int m_previewLineLength = 68;
+    bool m_scrollSync = true;
+    bool m_remoteImages = true;
     std::optional<bool> m_spellcheck;
     QString m_focusUnit = QStringLiteral("sentence");
     bool m_liveFormatting = true;

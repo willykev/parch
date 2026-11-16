@@ -15,6 +15,9 @@ ThemedMenu {
     property var keys: ({})
     property bool libraryShown: false
     property bool toolbarShown: false
+    property bool outlineShown: false
+    // How the window shows the document in front: a TabModel view mode.
+    property int viewMode: TabModel.Source
     property bool focusMode: false
     property bool distractionFree: false
     property bool spellingWanted: false
@@ -88,9 +91,38 @@ ThemedMenu {
         text: windowMenu.spellingWanted ? qsTr("Stop checking spelling") : qsTr("Check spelling")
     }
     MenuLine {}
+    // The three views of the document in front, the one shown marked, and
+    // what goes with its preview.
+    ThemedMenu {
+        objectName: "viewMenu"
+        title: qsTr("View")
+
+        CommandEntry { objectName: "viewSourceEntry"; command: "viewSource"; marked: windowMenu.viewMode === TabModel.Source }
+        CommandEntry { objectName: "viewSplitEntry"; command: "viewSplit"; marked: windowMenu.viewMode === TabModel.Split }
+        CommandEntry { objectName: "viewReadingEntry"; command: "viewReading"; marked: windowMenu.viewMode === TabModel.Reading }
+        MenuLine {}
+        CommandEntry {
+            objectName: "togglePreviewEntry"
+            command: "togglePreview"
+            text: windowMenu.viewMode === TabModel.Source ? qsTr("Show preview") : qsTr("Hide preview")
+        }
+        CommandEntry { command: "otherPane" }
+        CommandEntry {
+            objectName: "scrollSyncEntry"
+            command: "scrollSync"
+            marked: settings.scrollSync
+        }
+        CommandEntry { command: "previewBack" }
+    }
+    MenuLine {}
     CommandEntry {
         command: "library"
         text: windowMenu.libraryShown ? qsTr("Hide library") : qsTr("Show library")
+    }
+    CommandEntry {
+        objectName: "outlineEntry"
+        command: "outline"
+        text: windowMenu.outlineShown ? qsTr("Hide outline") : qsTr("Show outline")
     }
     CommandEntry {
         objectName: "toolbarEntry"

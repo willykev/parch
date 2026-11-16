@@ -14,6 +14,7 @@
 #include "readingpositions.h"
 #include "recentfiles.h"
 #include "recovery.h"
+#include "renderservice.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "textsearch.h"
@@ -785,6 +786,18 @@ void Backend::setFilePicker(FilePicker *picker)
 {
     m_files->setPicker(picker);
 }
+
+RenderService *Backend::renderService()
+{
+    if (!m_render) m_render = std::make_unique<RenderService>();
+    return m_render.get();
+}
+
+void Backend::setRenderService(std::unique_ptr<RenderService> service) { m_render = std::move(service); }
+void Backend::setLinkOpener(std::function<bool(const QUrl &url)> opener) { m_linkOpener = std::move(opener); }
+bool Backend::openLink(const QUrl &url) { return m_linkOpener && url.isValid() && m_linkOpener(url); }
+void Backend::setRemoteFetcher(RemoteFetcher *fetcher) { m_remoteFetcher = fetcher; }
+RemoteFetcher *Backend::remoteFetcher() const { return m_remoteFetcher; }
 
 QString Backend::firstFolder(const QStringList &candidates, const QString &fallback)
 {

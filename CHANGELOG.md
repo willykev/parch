@@ -54,6 +54,33 @@ The first version: a native Markdown writing app for Omarchy.
   shows the mode, and `Esc`, the command palette and the menu always lead
   back out.
 
+### Reading
+
+- A preview of what the document reads as, in a reading font and the theme's
+  colours: beside the text in a split with a divider you can drag or move
+  with the keys, or alone in a reading view. Each tab keeps its view.
+- Everything the Markdown dialect has is shown: tables with alignment and
+  merged cells, code coloured by language, task lists, definition lists,
+  footnotes with links both ways, citations and a bibliography, a table of
+  contents, images, math and Mermaid diagrams, and included files.
+- Citations and the bibliography read as the document's citation style
+  writes them, author and date, numbers or notes, and a key that nothing
+  defines stays in view. The preview reads a document in its own settings,
+  the Standard profile too, and follows a change of them at once.
+- The preview follows the text as you type, setting again only what changed,
+  and scrolls with it; a book of 100,000 words keeps up.
+- Tables, code and formulas wider than the column scroll sideways by
+  themselves.
+- In the preview, links open, a task's box ticks the task in the text, a
+  double click puts the caret at the same place in the text, and what you
+  select copies as plain text and with its formatting.
+- Preferences for the reading font, text size, line height and line length,
+  for scrolling together, and for fetching pictures from the web.
+- The outline has a command and a key of its own, and a heading chosen from
+  it is shown in the preview too.
+- Distraction-free writing keeps the view: the text, the text beside its
+  preview, or the preview alone. Focus mode and Vim keys are the text's.
+
 ### Keeping text safe
 
 - Saves as you pause, replacing the file in one step and keeping its

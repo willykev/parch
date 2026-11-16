@@ -6,9 +6,10 @@ Bug reports and small improvements are welcome. Open an
 ## Build and test
 
 On Arch Linux, install `base-devel`, `qt6-base`, `qt6-declarative`,
-`qt6-svg`, `qt6-wayland`, `fontconfig`, `hunspell` and `libyaml`. parch also uses
-`xdg-desktop-portal` for file dialogs and the `hunspell-en_us` dictionary for
-spell checking; the tests bring a small dictionary of their own.
+`qt6-svg`, `qt6-wayland`, `fontconfig`, `hunspell`, `libyaml` and
+`syntax-highlighting`. parch also uses `xdg-desktop-portal` for file dialogs
+and the `hunspell-en_us` dictionary for spell checking; the tests bring a
+small dictionary of their own.
 
 ```sh
 bin/build

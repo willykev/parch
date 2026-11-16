@@ -62,6 +62,14 @@ Rectangle {
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
     readonly property real columnWidth: Math.max(0, Math.min(width - 2 * margin, maxLineLength * characterWidth))
+    // Where the column starts, from the pane's left edge.
+    readonly property real columnLeft: Math.round((width - columnWidth) / 2)
+    // The text has the keys.
+    readonly property bool hasKeys: editor.activeFocus
+    // What keeps the text a projection of its source, and what it scrolls
+    // in: for the preview beside it, which scrolls with it.
+    readonly property alias binding: binding
+    readonly property alias viewport: flickable
     // Laying out a document longer than this takes long enough to drop frames,
     // so while the column is being resized its new width waits until the width
     // has settled.

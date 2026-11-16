@@ -16,11 +16,14 @@
 #include "librarymodel.h"
 #include "markdownstyling.h"
 #include "outline.h"
+#include "preview.h"
+#include "scrollsync.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "spellchecker.h"
 #include "spellinglayer.h"
 #include "tabmodel.h"
+#include "theme.h"
 #include "vimmode.h"
 #include "windowcontext.h"
 #include "wordcounter.h"
@@ -58,6 +61,13 @@ void registerQmlTypes()
     qmlRegisterUncreatableType<Backend>("Parch", 1, 0, "Backend", QStringLiteral("There is one backend"));
     qmlRegisterUncreatableType<DocumentReview>("Parch", 1, 0, "DocumentReview", QStringLiteral("The backend has one"));
     qmlRegisterUncreatableType<Attachments>("Parch", 1, 0, "Attachments", QStringLiteral("The backend has one"));
+    // The preview of a view, what it places over its text, and what keeps
+    // it and the editor at the same place.
+    qmlRegisterType<Preview>("Parch", 1, 0, "Preview");
+    qmlRegisterType<ScrollSync>("Parch", 1, 0, "ScrollSync");
+    qmlRegisterUncreatableType<PreviewMarks>("Parch", 1, 0, "PreviewMarks", QStringLiteral("A preview has its marks"));
+    // QML reaches the one theme as a context property, and hands it to a preview.
+    qmlRegisterUncreatableType<Theme>("Parch", 1, 0, "Theme", QStringLiteral("There is one theme"));
     qmlRegisterUncreatableType<DocumentSettingsStore>("Parch", 1, 0, "DocumentSettingsStore",
                                                       QStringLiteral("The backend has one"));
 }

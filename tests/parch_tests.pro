@@ -2,6 +2,10 @@ QT += core gui qml quick quickcontrols2 testlib dbus svg concurrent network
 CONFIG += c++20 testcase link_pkgconfig
 # fontconfig picks the fonts diagrams are drawn with; Hunspell checks spelling.
 PKGCONFIG += fontconfig hunspell
+# KSyntaxHighlighting colours the code in previews, as in parch.pro.
+isEmpty(KSYNTAXHIGHLIGHTING_INCLUDE): KSYNTAXHIGHLIGHTING_INCLUDE = $$clean_path($$[QT_INSTALL_HEADERS]/../KF6/KSyntaxHighlighting)
+INCLUDEPATH += $$KSYNTAXHIGHLIGHTING_INCLUDE
+LIBS += -lKF6SyntaxHighlighting
 TARGET = parch_tests
 TEMPLATE = app
 
@@ -17,6 +21,7 @@ INCLUDEPATH += ../src
 HEADERS += \
     clitests.h \
     editingtests.h \
+    previewtests.h \
     stylingtests.h \
     rendertesting.h \
     markdown_tests.h \
@@ -36,6 +41,7 @@ HEADERS += \
     ../src/caretrest.h \
     ../src/citations.h \
     ../src/cli.h \
+    ../src/codehighlight.h \
     ../src/clicommands.h \
     ../src/commandfilter.h \
     ../src/commandregistry.h \
@@ -83,15 +89,21 @@ HEADERS += \
     ../src/mdtree.h \
     ../src/pathtext.h \
     ../src/portalfilepicker.h \
+    ../src/preview.h \
+    ../src/previewbuilder.h \
+    ../src/previewresources.h \
+    ../src/previewstyle.h \
     ../src/qmltypes.h \
     ../src/quitsignals.h \
     ../src/readingpositions.h \
     ../src/recentfiles.h \
     ../src/recovery.h \
+    ../src/remotefetcher.h \
     ../src/rendercache.h \
     ../src/renderhelpers.h \
     ../src/renderrequest.h \
     ../src/renderservice.h \
+    ../src/scrollsync.h \
     ../src/session.h \
     ../src/settings.h \
     ../src/sourceboundaries.h \
@@ -114,6 +126,7 @@ SOURCES += \
     parch_tests.cpp \
     clitests.cpp \
     editingtests.cpp \
+    previewtests.cpp \
     stylingtests.cpp \
     rendertesting.cpp \
     citationtests.cpp \
@@ -132,6 +145,7 @@ SOURCES += \
     ../src/caretrest.cpp \
     ../src/citations.cpp \
     ../src/cli.cpp \
+    ../src/codehighlight.cpp \
     ../src/clicommands.cpp \
     ../src/commandfilter.cpp \
     ../src/commandregistry.cpp \
@@ -184,15 +198,21 @@ SOURCES += \
     ../src/mdtree.cpp \
     ../src/pathtext.cpp \
     ../src/portalfilepicker.cpp \
+    ../src/preview.cpp \
+    ../src/previewbuilder.cpp \
+    ../src/previewresources.cpp \
+    ../src/previewstyle.cpp \
     ../src/qmltypes.cpp \
     ../src/quitsignals.cpp \
     ../src/readingpositions.cpp \
     ../src/recentfiles.cpp \
     ../src/recovery.cpp \
+    ../src/remotefetcher.cpp \
     ../src/rendercache.cpp \
     ../src/renderhelpers.cpp \
     ../src/renderrequest.cpp \
     ../src/renderservice.cpp \
+    ../src/scrollsync.cpp \
     ../src/session.cpp \
     ../src/settings.cpp \
     ../src/sourceboundaries.cpp \

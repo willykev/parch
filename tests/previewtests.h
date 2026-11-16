@@ -1,0 +1,44 @@
+#pragma once
+
+// The tests of the preview: the three views and what each view keeps, the
+// document the preview builds from the Markdown engine's tree, how it
+// follows edits and the theme, and how it and the editor find each other.
+// ParchTests runs each of them as a test function of its own.
+namespace PreviewTests {
+
+void viewModesAreKeptByEachView();
+void previewBuildsTextAndInlineFormatting();
+void previewBuildsListsQuotesAndRules();
+void previewBuildsCodeAndTablesAsIslands();
+void previewBuildsNotesCitationsAndContents();
+void previewBuildsPicturesAndTheirStates();
+void previewShowsRawHtmlUnderThePolicy();
+void previewPartsKeepTheirKeysAndSources();
+void previewBuildsInPlaceForPaper();
+void previewStyleIsReadableInAnyTheme();
+void codeIsColouredByLanguage();
+void viewsShowTheTextThePreviewOrBoth();
+void previewFollowsEditsWithoutRebuilding();
+void staleResultsNeverReplaceNewerText();
+void previewAndSourceFindEachOther();
+void textAndPreviewScrollTogether();
+void linksGoWhereTheyLead();
+void tasksAreTickedInTheSource();
+void notesGoThereAndBack();
+void themeChangeRecoloursWithoutRebuilding();
+void narrowWindowsShowOnePaneOfASplit();
+void dividerMovesAndIsRemembered();
+void aBookIsFollowedWithinAFrame();
+void wideBlocksScrollByThemselves();
+void previewIsReachedAndReadWithoutAMouse();
+void copyingFromThePreviewGivesTextAndHtml();
+void picturesArriveAndFailInTheirPlace();
+void theRealHelpersDrawInThePreview();
+void outlineAndPreferencesReachThePreview();
+void vimKeysAreTheTextsAlone();
+void focusModeDimsTheTextAlone();
+void distractionFreeWritingKeepsEachView();
+void citationsReadAsTheirStyleWordsThem();
+void documentSettingsReachThePreview();
+
+} // namespace PreviewTests

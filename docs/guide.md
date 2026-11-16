@@ -127,6 +127,70 @@ once. **Turn off live formatting**, in the menu (`F10`) or the command
 palette, or **Live formatting** in **Preferences…**, shows the source as
 plain text; turning it on again styles it at once.
 
+## Preview
+
+parch shows what a document reads as, set in a reading font in the colours of
+your theme. There are three views, under **View** in the menu:
+
+- **Source view** (`Ctrl+Alt+1`): the text alone.
+- **Split view** (`Ctrl+Alt+2`): the text and its preview side by side.
+- **Reading view** (`Ctrl+Alt+3`): the preview alone, in a column in the
+  middle of the window.
+
+`Ctrl+Alt+P`, or the button at the right of the header, shows the preview
+beside the text and hides it again. Each tab keeps its own view, and the next
+launch brings it back. A new tab opens beside its preview when the tab in
+front is.
+
+In a split, drag the line between the two to give one more room; or reach it
+with `Tab` and press `Left` or `Right`, and `Home` to put it back in the
+middle. A window too narrow for both shows one at a time: **Markdown** and
+**Preview** above the text choose which, as does `Ctrl+Alt+E`.
+
+The preview follows the text a moment after you pause, and keeps up while you
+type. Only what changed is set again, so it stays where you were reading.
+
+What it shows:
+
+- Headings, paragraphs, emphasis, strikethrough, highlights, superscripts and
+  subscripts, links, quotes, lists, task lists, definition lists, thematic
+  breaks, and a quiet mark where a page break (`+++`) is.
+- Code blocks coloured by their language, and tables with their alignment and
+  merged cells. A table, a code block or a formula wider than the column
+  scrolls sideways by itself; the text around it never does.
+- Images, scaled to the column. A path is read from the document's folder;
+  a web address is fetched, unless you turn that off in **Preferences**.
+- Math (`$…$`, `$$…$$`) and Mermaid diagrams, drawn in the theme's colours.
+  The source stands in until the picture is drawn, and if it cannot be, the
+  reason is shown in its place.
+- Footnotes as numbered notes after the text, a table of contents for
+  `{{TOC}}`, the text of included files, and `[%key]` values from the front
+  matter.
+- Citations and the bibliography as the document's citation style writes
+  them, with a note style's citations among the notes; see
+  [Citations and bibliographies](#citations-and-bibliographies).
+- Not comments or front matter. Raw HTML that parch supports is formatted;
+  anything else is shown as the text it is and never run.
+
+The preview reads the document as its [document settings](#document-settings)
+say: a document in the Standard profile is previewed as Standard.
+
+In the preview:
+
+- It scrolls with the text beside it, each showing the same place. **Scroll
+  sync** in the status line turns that off and on.
+- A click on a link opens a web address in your browser and a Markdown file
+  in a tab, at the heading the link names if it names one, and scrolls to a
+  heading in the same document. A footnote's number goes to the note and
+  the arrow after the note comes back.
+  **Back in the preview** (`Alt+Left`) returns to where you were.
+- A click on a task's box ticks it in the text; `Ctrl+Z` takes that back.
+- A double click puts the caret at the same place in the text.
+- Select text with the mouse, or with `Shift` and the arrow keys, and copy it
+  with `Ctrl+C`, as plain text and with its formatting.
+- `Up`, `Down`, `PageUp`, `PageDown`, `Space`, `Home` and `End` scroll.
+  `F6` moves the keys between the library, the text and the preview.
+
 ## Commands and keys
 
 The command palette (`Ctrl+Shift+P`) lists everything parch can do. Type a
@@ -151,6 +215,12 @@ Every change applies at once in every window. Under **Keys**, **Edit with Vim
 keys** turns on Vim keys. Under **Markdown and citations**, the Markdown
 profile, extensions, citation style and bibliography for every document, as
 [Document settings](#document-settings) describes them.
+
+Under **Preview** it sets the reading font, which is a serif made for reading
+unless you choose another; the preview's text size, two pixels larger than
+the text's until you choose one; its line height and longest line; whether
+the text and the preview scroll together; and whether pictures are fetched
+from the web.
 
 ## Document settings
 
@@ -177,8 +247,8 @@ setting the dialog says which it is.
 Choose **This document** to change the document alone, or **Every document
 in the library folder** to change every document in it; a setting of the
 document itself still wins over its folder's. **Use the default** gives a
-setting back to the next of these. A change applies at once to live
-formatting, spelling, the outline, the word count and **Check links**. It
+setting back to the next of these. A change applies at once to the preview,
+live formatting, spelling, the outline, the word count and **Check links**. It
 changes how the text is read, never the text: parch keeps these settings
 itself, in `~/.local/share/parch/document-settings.json`, and they follow a
 document when parch renames or moves it. A draft has settings of its own
@@ -221,14 +291,20 @@ and bibliography (`chicago-notes-bibliography`), IEEE (`ieee`), MLA
 works as well. A chapter you include can name a bibliography of its own in
 its front matter; one that does not uses the document's.
 
-With a style, `parch render` and the HTML export write each citation as the
-style has it, `(Doe, 2006, p. 23)` or `[1, p. 23]`, and the bibliography after
-the text: the style's entries, then the document's own Writer entries,
-numbered as they are first cited. A note style, such as Chicago notes and
-bibliography, puts each citation of the text in a footnote of its own,
-numbered with your other notes; a citation inside a footnote stays in it.
-Without a style or a bibliography file, Writer citations are numbered as they
-are first cited: `[1, p. 23]`.
+With a style, the preview, `parch render` and the HTML export write each
+citation as the style has it, `(Doe, 2006, p. 23)` or `[1, p. 23]`, and the
+bibliography after the text: the style's entries, then the document's own
+Writer entries, numbered as they are first cited. A note style, such as
+Chicago notes and bibliography, puts each citation of the text in a footnote
+of its own, numbered with your other notes; a citation inside a footnote
+stays in it. Without a style or a bibliography file, Writer citations are
+numbered as they are first cited: `[1, p. 23]`.
+
+In the preview a key that nothing defines stays where it is cited, in the
+theme's colour for what is wrong, and says which key it is when the pointer
+rests on it. The preview shows a new style or bibliography as soon as you
+choose it; a bibliography file changed on disk is read again at your next
+edit.
 
 `parch check` reports a key that neither the document nor its bibliography
 defines, a key given to two entries of one file or found in two files, a
@@ -242,7 +318,9 @@ Vim keys are off until you turn them on: **Turn on Vim keys** in the menu
 The editor then starts in Normal mode, the caret is a block on the character
 it is on, and the status line shows the mode (NORMAL, INSERT, VISUAL or VISUAL
 LINE) with, beside it, the command line as you type it, the keys of a command
-not yet complete, or what the last command had to say.
+not yet complete, or what the last command had to say. Vim keys are keys of
+the text: the preview keeps its own, beside the text or alone, and reading
+view shows no mode.
 
 **Leaving them.** `Esc` (or `Ctrl+[`) always returns to Normal mode, from
 Insert or Visual mode, the command line or a command half typed. The command
@@ -438,7 +516,8 @@ parch watches the files you have open.
 - **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
   including folders you have not opened.
 - **Outline**, at the foot of the library, lists the headings of the document
-  in front; choosing one goes there.
+  in front; choosing one goes there, in the text and in the preview.
+  `Ctrl+Alt+O` shows it with the keys on the headings, and hides it.
 - A folder's menu (right click, or the `Menu` key) makes a **New document…**
   or **New folder…** in it. A document's menu can **Rename…** it (`F2`),
   **Move to…** another library folder (or drag it there), and **Move to
@@ -486,10 +565,12 @@ palette, or **Preferences…**, turns spell checking on or off. It needs the
 when you turn it on.
 
 **Focus mode** (`Ctrl+Shift+D`) dims everything but the sentence you are
-writing; **Preferences…** switches it to the paragraph. **Distraction-free
-writing** (`F11`) hides the library, the tabs, the header, the toolbar and the
-status line, and leaves only the text, centred. `F11` or `Esc` brings them
-back, and so does asking for the library or the toolbar.
+writing; **Preferences…** switches it to the paragraph. It dims the text you
+write, never its preview. **Distraction-free writing** (`F11`) hides the
+library, the tabs, the header, the toolbar and the status line, and leaves
+only the document, in the view it is in: the text, centred; the text and its
+preview side by side; or the preview alone. `F11` or `Esc` brings them back,
+and so does asking for the library or the toolbar.
 
 ## Keys
 
@@ -514,9 +595,14 @@ back, and so does asking for the library or the toolbar.
 | `Ctrl+Tab` / `Ctrl+PageDown` | Next tab |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Previous tab |
 | `F9` | Show or hide the library |
+| `Ctrl+Alt+O` | Show or hide the outline |
+| `Ctrl+Alt+1` / `Ctrl+Alt+2` / `Ctrl+Alt+3` | Source / split / reading view |
+| `Ctrl+Alt+P` | Show or hide the preview |
+| `Ctrl+Alt+E` | Switch between the text and the preview |
+| `Alt+Left` | Back in the preview |
 | `Ctrl+=` / `Ctrl+-` | Larger / smaller text |
 | `Ctrl+0` | Theme text size |
-| `F6` / `Shift+F6` | Move between the library, tabs, text and notices |
+| `F6` / `Shift+F6` | Move between the library, tabs, text, preview and notices |
 | `Ctrl+Shift+D` | Focus mode |
 | `F11` | Distraction-free writing |
 | `Menu` / `Shift+F10` | Spelling suggestions for the word at the caret |
@@ -666,6 +752,7 @@ alone.
 | `~/.local/state/parch/recent.json` | Recent files |
 | `~/.local/state/parch/positions.json` | Where you were in each document |
 | `~/.config/parch/settings.json` | Settings, such as library folders, text size and your own keys |
+| `~/.cache/parch/render/` | Formulas and diagrams already drawn, at most 128 MiB |
 
-These follow `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CONFIG_HOME` when they
-are set.
+These follow `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and
+`XDG_CACHE_HOME` when they are set.

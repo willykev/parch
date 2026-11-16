@@ -48,6 +48,14 @@ std::optional<ViewState> readTab(const QJsonValue &value)
     view.anchor = whole(tab.value(QStringLiteral("anchor")), 0, most, 0);
     view.top = whole(tab.value(QStringLiteral("top")), 0, most, 0);
     view.title = tab.value(QStringLiteral("title")).toString().left(maxTitle);
+    // A mode this version does not know is the source alone.
+    const QString mode = tab.value(QStringLiteral("mode")).toString();
+    view.mode = mode == QLatin1String("split")     ? ViewState::Split
+                : mode == QLatin1String("reading") ? ViewState::Reading
+                                                   : ViewState::Source;
+    const QJsonValue split = tab.value(QStringLiteral("split"));
+    if (split.isDouble() && split.toDouble() >= ViewState::MinSplit && split.toDouble() <= ViewState::MaxSplit)
+        view.split = split.toDouble();
     return view;
 }
 
@@ -88,6 +96,9 @@ QByteArray Session::encode(const SessionState &state)
             tab.insert(QStringLiteral("anchor"), view.anchor);
             tab.insert(QStringLiteral("top"), view.top);
             if (!view.title.isEmpty()) tab.insert(QStringLiteral("title"), view.title);
+            if (view.mode == ViewState::Split) tab.insert(QStringLiteral("mode"), QStringLiteral("split"));
+            else if (view.mode == ViewState::Reading) tab.insert(QStringLiteral("mode"), QStringLiteral("reading"));
+            if (view.split != 0.5) tab.insert(QStringLiteral("split"), view.split);
             tabs.append(tab);
         }
         QJsonObject object;

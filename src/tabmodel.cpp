@@ -54,6 +54,44 @@ QString TabModel::activeTitle() const { return m_active >= 0 ? titleOf(m_tabs.at
 QString TabModel::activePath() const { return m_active >= 0 ? pathOf(m_tabs.at(m_active)) : QString(); }
 QString TabModel::activeStatus() const { return m_active >= 0 ? statusOf(m_tabs.at(m_active)) : QString(); }
 
+TabModel::ViewMode TabModel::activeMode() const
+{
+    return m_active >= 0 ? ViewMode(m_tabs.at(m_active).view.mode) : Source;
+}
+
+void TabModel::setActiveMode(ViewMode mode)
+{
+    if (m_active < 0 || mode < Source || mode > Reading || m_tabs.at(m_active).view.mode == mode) return;
+    m_tabs[m_active].view.mode = mode;
+    emit activeModeChanged();
+    emit changed();
+}
+
+qreal TabModel::activeSplit() const { return m_active >= 0 ? m_tabs.at(m_active).view.split : 0.5; }
+
+void TabModel::setActiveSplit(qreal split)
+{
+    // A value that is no number changes nothing.
+    if (m_active < 0 || !(split == split)) return;
+    split = std::clamp(split, ViewState::MinSplit, ViewState::MaxSplit);
+    if (m_tabs.at(m_active).view.split == split) return;
+    m_tabs[m_active].view.split = split;
+    emit activeModeChanged();
+    emit changed();
+}
+
+ViewState TabModel::freshView(const QString &documentId, const QString &path) const
+{
+    ViewState view{documentId, path};
+    if (m_active >= 0) {
+        const ViewState &front = m_tabs.at(m_active).view;
+        // Reading shows no text to write in, which a new tab is for.
+        if (front.mode == ViewState::Split) view.mode = ViewState::Split;
+        view.split = front.split;
+    }
+    return view;
+}
+
 void TabModel::setActiveIndex(int index)
 {
     if (index < 0 || index >= m_tabs.size() || index == m_active) return;
@@ -84,11 +122,13 @@ int TabModel::openDocument(Document *document, const std::optional<ViewState> &v
             return i;
         }
     }
-    ViewState start{document->id(), document->path()};
+    ViewState start = freshView(document->id(), document->path());
     if (view) {
         start.cursor = view->cursor;
         start.anchor = view->anchor;
         start.top = view->top;
+        start.mode = view->mode;
+        start.split = view->split;
     }
     const int at = insert(int(m_tabs.size()), Tab{nullptr, start, {}, {}});
     take(at, document);
@@ -99,7 +139,7 @@ int TabModel::openDocument(Document *document, const std::optional<ViewState> &v
 int TabModel::openInPlaceOf(int index, Document *document)
 {
     if (!document || index < 0 || index >= m_tabs.size()) return openDocument(document);
-    const int at = insert(index + 1, Tab{nullptr, ViewState{document->id(), document->path()}, {}, {}});
+    const int at = insert(index + 1, Tab{nullptr, freshView(document->id(), document->path()), {}, {}});
     take(at, document);
     setActiveIndex(at);
     closeTab(index);
@@ -152,7 +192,7 @@ void TabModel::closeTab(int index)
 int TabModel::openNewFile(Document *draft, const QString &path)
 {
     if (!draft) return -1;
-    const int at = insert(int(m_tabs.size()), Tab{nullptr, ViewState{draft->id(), QString()}, {}, path});
+    const int at = insert(int(m_tabs.size()), Tab{nullptr, freshView(draft->id(), QString()), {}, path});
     take(at, draft);
     setActiveIndex(at);
     return at;
@@ -180,7 +220,7 @@ int TabModel::openMissing(const QString &path)
         setActiveIndex(found);
         return found;
     }
-    const int at = insert(int(m_tabs.size()), Tab{nullptr, ViewState{QString(), path}, {}, {}});
+    const int at = insert(int(m_tabs.size()), Tab{nullptr, freshView(QString(), path), {}, {}});
     // Showing it looks for the file, which finds out that it is not there.
     setActiveIndex(at);
     return at;
@@ -191,7 +231,7 @@ int TabModel::append(Document *document)
     if (!document) return -1;
     for (int i = 0; i < m_tabs.size(); ++i)
         if (m_tabs.at(i).document == document) return i;
-    const int at = insert(int(m_tabs.size()), Tab{nullptr, ViewState{document->id(), document->path()}, {}, {}});
+    const int at = insert(int(m_tabs.size()), Tab{nullptr, freshView(document->id(), document->path()), {}, {}});
     take(at, document);
     if (m_active < 0) setActiveIndex(at);
     emit changed();
@@ -259,6 +299,7 @@ void TabModel::restore(const QList<ViewState> &views, int active)
         m_active = first + std::clamp(active, 0, int(tabs.size()) - 1);
         emit activeIndexChanged();
         emit activeChanged();
+        emit activeModeChanged();
     }
     emit countChanged();
     emit changed();
@@ -346,6 +387,7 @@ void TabModel::clear()
     if (before) emit activeDocumentChanged();
     emit activeIndexChanged();
     emit activeChanged();
+    emit activeModeChanged();
     emit countChanged();
     for (const Tab &tab : closing)
         if (tab.document) release(tab.document);
@@ -447,6 +489,7 @@ void TabModel::announceActive(Document *before)
     if (activeDocument() != before) emit activeDocumentChanged();
     emit activeIndexChanged();
     emit activeChanged();
+    emit activeModeChanged();
     emit activeViewChanged();
     emit changed();
 }

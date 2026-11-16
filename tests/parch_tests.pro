@@ -21,6 +21,7 @@ INCLUDEPATH += ../src
 HEADERS += \
     clitests.h \
     editingtests.h \
+    librarytests.h \
     previewtests.h \
     stylingtests.h \
     rendertesting.h \
@@ -64,6 +65,7 @@ HEADERS += \
     ../src/documentstore.h \
     ../src/editorbinding.h \
     ../src/editordecorations.h \
+    ../src/encodings.h \
     ../src/exporter.h \
     ../src/fileorganizer.h \
     ../src/filepicker.h \
@@ -126,6 +128,7 @@ SOURCES += \
     parch_tests.cpp \
     clitests.cpp \
     editingtests.cpp \
+    librarytests.cpp \
     previewtests.cpp \
     stylingtests.cpp \
     rendertesting.cpp \
@@ -168,6 +171,7 @@ SOURCES += \
     ../src/documentstore.cpp \
     ../src/editorbinding.cpp \
     ../src/editordecorations.cpp \
+    ../src/encodings.cpp \
     ../src/exporter.cpp \
     ../src/editorpaste.cpp \
     ../src/fileorganizer.cpp \

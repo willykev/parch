@@ -57,8 +57,8 @@ public:
 
     // Why history kept a version by itself: a save, or one of the moments
     // before text is replaced or set aside, as when a move in the library
-    // updates the links in a file.
-    enum class Reason { Save, Opened, Reload, Overwrite, Restore, Recovery, Draft, Closed, Links };
+    // updates the links in a file, or a draft is deleted.
+    enum class Reason { Save, Opened, Reload, Overwrite, Restore, Recovery, Draft, Closed, Links, Deleted };
     Q_ENUM(Reason)
 
     struct Version {
@@ -68,6 +68,10 @@ public:
         QString name;
         qint64 bytes = 0;
         Reason reason = Reason::Save;
+        // For bytes that are not UTF-8, the encoding the writer read them
+        // in, as a file read in another encoding keeps its original bytes;
+        // empty otherwise.
+        QString encoding;
     };
 
     // Records the bytes always, as a named version when a name is given. The
@@ -89,9 +93,11 @@ public:
     // CaptureIntervalMinutes old or there is none. Empty when not due.
     QString captureIfDue(const QString &documentId, const QByteArray &bytes);
     // Records the bytes unless the document's newest version holds them
-    // already, as every capture history makes by itself does.
+    // already, as every capture history makes by itself does. An encoding,
+    // when given, is kept with the version, the newest one that holds the
+    // bytes already included.
     QString captureUnlessNewest(const QString &documentId, const QByteArray &bytes, Reason reason,
-                                CaptureStatus *status = nullptr);
+                                CaptureStatus *status = nullptr, const QString &encoding = {});
     // Newest first.
     QList<Version> versions(const QString &documentId) const;
     // Empty for a version that is missing as well as for an empty one, so a
@@ -113,6 +119,15 @@ public:
     bool remove(const QString &documentId, const QString &versionId);
     // Works out whether history is paused, and says so if that changed.
     void checkPaused();
+    // The limits in force.
+    HistoryLimits limits() const;
+    // Takes other limits for every document from now on; how often pruning
+    // runs stays as it was. Lower ones prune every document's unnamed
+    // versions to them at once, on the pruner's thread rather than the
+    // caller's, and never a named version; more space can end a pause,
+    // which is said there too. Waits only while another call holds history,
+    // as the look at every document as history starts does.
+    void setLimits(const HistoryLimits &limits);
     // The bytes every document's versions take, and the named ones among them.
     struct Usage {
         qint64 bytes = 0;
@@ -123,7 +138,9 @@ public:
     // when no id is given; for tests and measures.
     int indexReads(const QString &documentId = {}) const;
     // For tests: called as captureUnlessNewest() begins, on the thread that
-    // makes the capture, before anything is locked or written.
+    // makes the capture, before anything is locked or written. Safe to call
+    // while a capture runs the hook it replaces: that hook, and what it
+    // holds, lives until the capture's call of it returns.
     static void setBeforeCapture(std::function<void()> hook);
 
 signals:
@@ -141,7 +158,7 @@ private:
     // Records the bytes for a document whose versions, as its index lists
     // them, are given.
     QString captureLocked(const QString &documentId, QList<Version> versions, const QByteArray &bytes,
-                          const QString &name, CaptureStatus &status, Reason reason);
+                          const QString &name, CaptureStatus &status, Reason reason, const QString &encoding = {});
     // The document's own unnamed versions beyond the count or the age go,
     // and when all documents together exceed the byte budget, every
     // document's are pruned with pruneAll().

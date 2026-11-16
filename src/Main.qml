@@ -20,7 +20,7 @@ ApplicationWindow {
     readonly property int rowHeight: Math.round(theme.fontSize * 2.6)
     // The library docks beside the editor while the editor keeps room for 45
     // characters and its margins; otherwise it opens over the editor.
-    readonly property bool libraryDocked: width - settings.libraryWidth >= 45 * editorPane.characterWidth + 2 * editorPane.margin
+    readonly property bool libraryDocked: width - context.libraryWidth >= 45 * editorPane.characterWidth + 2 * editorPane.margin
     // Whether the docked library is shown. The drawer opens only when asked.
     readonly property bool libraryOpen: context.libraryOpen
 
@@ -31,6 +31,7 @@ ApplicationWindow {
                                        || attachmentDialog.visible || linkCheckDialog.visible
                                        || commandPalette.visible || preferencesDialog.visible || shortcutsDialog.visible
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
+                                       || encodingDialog.visible
                                        || documentSettingsDialog.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
@@ -635,6 +636,7 @@ ApplicationWindow {
             window.focusText()
         }
         function onCloseConfirmationRequested(document, discarding) { closeConfirmation.ask(document, discarding) }
+        function onEncodingConfirmationRequested(document) { encodingDialog.confirm(document) }
         function onViewShowRequested() { window.showView() }
     }
 
@@ -746,7 +748,9 @@ ApplicationWindow {
         height: visible ? window.rowHeight : 0
         document: window.document
         title: window.tabs.activeTitle
-        place: window.tabs.count > 0 ? backend.folderLabel(window.tabs.activePath, settings.libraryFolders) : ""
+        // parch's own documents, such as its guide, are help, in no folder.
+        place: window.tabs.count === 0 ? "" : window.document && window.document.scratch ? qsTr("Help")
+               : backend.folderLabel(window.tabs.activePath, settings.libraryFolders)
         libraryWidth: library.visible ? library.width : 0
         libraryShown: library.visible || drawer.visible
         previewShown: window.viewMode !== TabModel.Source
@@ -806,18 +810,30 @@ ApplicationWindow {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            width: settings.libraryWidth
+            width: window.context.libraryWidth
             color: theme.panel
         }
 
-        Rectangle {
+        // The library's edge, which sets its width in this window: dragged,
+        // or moved with the arrow keys once Tab reaches it, never so far that
+        // the editor loses the room the library docks beside. The width
+        // chosen last is where new windows start.
+        LibrarySplitter {
             id: divider
+            objectName: "librarySplitter"
             visible: library.visible
+            // Over the library and the text, which its grip reaches into.
+            z: 1
             anchors.left: library.right
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: theme.controlBorderWidth
-            color: theme.controlBorder
+            libraryWidth: window.context.libraryWidth
+            minimum: settings.limits.minLibraryWidth
+            maximum: Math.max(minimum, Math.min(settings.limits.maxLibraryWidth,
+                Math.floor(window.width - 45 * editorPane.characterWidth - 2 * editorPane.margin)))
+            onResized: (width) => window.context.libraryWidth = width
+            onChosen: (width) => settings.setLibraryWidth(width)
         }
 
         Item {
@@ -908,6 +924,21 @@ ApplicationWindow {
                 onDismiss: {
                     backend.dismissNotice()
                     window.focusText()
+                }
+                noticeUndoable: backend.noticeUndoable
+                onUndo: {
+                    backend.activate(window.context)
+                    backend.undoNotice()
+                    window.focusText()
+                }
+                onReopenAs: {
+                    backend.activate(window.context)
+                    encodingDialog.choose(window.document)
+                }
+                // Saving asks first, in this window.
+                onConfirmEncoding: {
+                    backend.activate(window.context)
+                    backend.save()
                 }
             }
 
@@ -1159,7 +1190,7 @@ ApplicationWindow {
         parent: T.Overlay.overlay
         x: 0
         y: header.height
-        width: Math.min(settings.libraryWidth, window.width - window.rowHeight)
+        width: Math.min(window.context.libraryWidth, window.width - window.rowHeight)
         height: window.height - header.height
         padding: 0
         // The content stops short of the edge toward the editor, so nothing
@@ -1265,6 +1296,14 @@ ApplicationWindow {
     HistoryDialog {
         id: historyDialog
         objectName: "historyDialog"
+        onClosed: window.dialogClosed()
+    }
+
+    // Reopen as…, for a file that is not UTF-8, and the question before
+    // such a file is first written as UTF-8.
+    EncodingDialog {
+        id: encodingDialog
+        objectName: "encodingDialog"
         onClosed: window.dialogClosed()
     }
 

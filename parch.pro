@@ -50,6 +50,7 @@ HEADERS += \
     src/documentstore.h \
     src/editorbinding.h \
     src/editordecorations.h \
+    src/encodings.h \
     src/exporter.h \
     src/fileorganizer.h \
     src/filepicker.h \
@@ -141,6 +142,7 @@ SOURCES += \
     src/documentstore.cpp \
     src/editorbinding.cpp \
     src/editordecorations.cpp \
+    src/encodings.cpp \
     src/exporter.cpp \
     src/editorpaste.cpp \
     src/fileorganizer.cpp \

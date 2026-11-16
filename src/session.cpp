@@ -2,6 +2,7 @@
 
 #include "diskfile.h"
 #include "pathtext.h"
+#include "settings.h"
 
 #include <QDir>
 #include <QFile>
@@ -79,6 +80,8 @@ std::optional<WindowState> readWindow(const QJsonValue &value)
     const int width = whole(window.value(QStringLiteral("width")), minSide, maxSide, 0);
     const int height = whole(window.value(QStringLiteral("height")), minSide, maxSide, 0);
     if (width > 0 && height > 0) state.size = QSize(width, height);
+    state.libraryWidth = whole(window.value(QStringLiteral("libraryWidth")), Settings::MinLibraryWidth,
+                               Settings::MaxLibraryWidth, 0);
     return state;
 }
 } // namespace
@@ -109,6 +112,7 @@ QByteArray Session::encode(const SessionState &state)
             object.insert(QStringLiteral("width"), window.size.width());
             object.insert(QStringLiteral("height"), window.size.height());
         }
+        if (window.libraryWidth > 0) object.insert(QStringLiteral("libraryWidth"), window.libraryWidth);
         windows.append(object);
     }
     QJsonObject root;

@@ -14,6 +14,7 @@
 #include <QSaveFile>
 #include <QTimeZone>
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 namespace {
@@ -48,6 +49,7 @@ const std::pair<History::Reason, const char *> reasonKeys[] = {
     {History::Reason::Overwrite, "overwrite"}, {History::Reason::Restore, "restore"},
     {History::Reason::Recovery, "recovery"},   {History::Reason::Draft, "draft"},
     {History::Reason::Closed, "closed"},       {History::Reason::Links, "links"},
+    {History::Reason::Deleted, "deleted"},
 };
 
 QString keyOf(History::Reason reason)
@@ -65,8 +67,18 @@ History::Reason reasonOf(const QString &key)
     return History::Reason::Save;
 }
 
-// What tests make of a capture: a step before it begins.
-std::function<void()> beforeCapture;
+// What tests make of a capture: a step before it begins. A capture calls
+// its own copy, taken under the lock, so that a hook replaced while a
+// capture on another thread runs it, or waits in it, lives until that call
+// has returned.
+QMutex beforeCaptureLock;
+std::shared_ptr<const std::function<void()>> beforeCapture;
+
+std::shared_ptr<const std::function<void()>> currentBeforeCapture()
+{
+    QMutexLocker lock(&beforeCaptureLock);
+    return beforeCapture;
+}
 } // namespace
 
 History::History(const AppPaths &paths, HistoryLimits limits, std::function<QDateTime()> now, QObject *parent)
@@ -217,6 +229,7 @@ QList<History::Version> History::load(const QString &documentId) const
             version.name = entry.value(QStringLiteral("name")).toString();
             version.bytes = qint64(entry.value(QStringLiteral("bytes")).toDouble());
             version.reason = reasonOf(entry.value(QStringLiteral("reason")).toString());
+            version.encoding = entry.value(QStringLiteral("encoding")).toString();
             if (isVersionId(version.id) && version.taken.isValid() && kept.contains(version.id)) {
                 if (version.name.isEmpty() && named.contains(version.id)) version.name = nameFile(version.id);
                 listed.insert(version.id);
@@ -258,6 +271,7 @@ bool History::store(const QString &documentId, const QList<Version> &versions) c
         if (!version.name.isEmpty()) entry.insert(QStringLiteral("name"), version.name);
         entry.insert(QStringLiteral("bytes"), double(version.bytes));
         if (version.reason != Reason::Save) entry.insert(QStringLiteral("reason"), keyOf(version.reason));
+        if (!version.encoding.isEmpty()) entry.insert(QStringLiteral("encoding"), version.encoding);
         entries.append(entry);
     }
     QSaveFile file(folderOf(documentId) + u'/' + indexName);
@@ -329,11 +343,11 @@ QString History::captureIfDue(const QString &documentId, const QByteArray &bytes
 }
 
 QString History::captureUnlessNewest(const QString &documentId, const QByteArray &bytes, Reason reason,
-                                     CaptureStatus *status)
+                                     CaptureStatus *status, const QString &encoding)
 {
     if (status) *status = CaptureStatus::Failed;
     if (!AppPaths::isDocumentId(documentId)) return {};
-    if (beforeCapture) beforeCapture();
+    if (const auto hook = currentBeforeCapture()) (*hook)();
     QMutexLocker lock(&m_mutex);
     const QList<Version> existing = load(documentId);
     if (!existing.isEmpty()) {
@@ -341,11 +355,17 @@ QString History::captureUnlessNewest(const QString &documentId, const QByteArray
         if (newest.size() == bytes.size() && newest.open(QIODevice::ReadOnly) && newest.readAll() == bytes
             && newest.error() == QFileDevice::NoError) {
             if (status) *status = CaptureStatus::Held;
+            // The encoding the bytes were read in is kept with them.
+            if (!encoding.isEmpty() && existing.first().encoding != encoding) {
+                QList<Version> kept = existing;
+                kept.first().encoding = encoding;
+                store(documentId, kept);
+            }
             return existing.first().id;
         }
     }
     CaptureStatus outcome = CaptureStatus::Failed;
-    const QString id = captureLocked(documentId, existing, bytes, {}, outcome, reason);
+    const QString id = captureLocked(documentId, existing, bytes, {}, outcome, reason, encoding);
     if (status) *status = outcome;
     announceLocked();
     return id;
@@ -395,13 +415,48 @@ bool History::remove(const QString &documentId, const QString &versionId)
 
 void History::setBeforeCapture(std::function<void()> hook)
 {
-    beforeCapture = std::move(hook);
+    auto replacement = hook ? std::make_shared<const std::function<void()>>(std::move(hook)) : nullptr;
+    // The hook it replaces goes outside the lock, once no capture still holds it.
+    std::shared_ptr<const std::function<void()>> replaced;
+    QMutexLocker lock(&beforeCaptureLock);
+    replaced = std::exchange(beforeCapture, std::move(replacement));
 }
 
 void History::checkPaused()
 {
     QMutexLocker lock(&m_mutex);
     announceLocked();
+}
+
+HistoryLimits History::limits() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_limits;
+}
+
+void History::setLimits(const HistoryLimits &limits)
+{
+    QMutexLocker lock(&m_mutex);
+    HistoryLimits taken = limits;
+    taken.versions = std::max(1, limits.versions);
+    taken.days = std::max(1, limits.days);
+    taken.bytes = std::max<qint64>(0, limits.bytes);
+    taken.pruneEveryMs = m_limits.pruneEveryMs;
+    const HistoryLimits before = std::exchange(m_limits, taken);
+    const bool lowered = taken.versions < before.versions || taken.days < before.days || taken.bytes < before.bytes;
+    // A version that did not fit may fit in more space; the next capture
+    // finds out.
+    if (taken.bytes > before.bytes) m_full = false;
+    lock.unlock();
+    // Pruning reads every document's index, and whether history is paused
+    // needs the totals, which the look as history starts may still be
+    // working out: neither is done on the caller's thread. Queued behind
+    // any prune still running, so that the newest limits prune last.
+    m_pruner.start([this, lowered] {
+        QMutexLocker lock(&m_mutex);
+        if (lowered) pruneAll();
+        announceLocked();
+    });
 }
 
 void History::announceLocked()
@@ -414,7 +469,7 @@ void History::announceLocked()
 }
 
 QString History::captureLocked(const QString &documentId, QList<Version> versions, const QByteArray &bytes,
-                               const QString &name, CaptureStatus &status, Reason reason)
+                               const QString &name, CaptureStatus &status, Reason reason, const QString &encoding)
 {
     status = CaptureStatus::Failed;
     if (!AppPaths::isDocumentId(documentId)) return {};
@@ -490,6 +545,7 @@ QString History::captureLocked(const QString &documentId, QList<Version> version
     version.name = name;
     version.bytes = bytes.size();
     version.reason = reason;
+    version.encoding = encoding;
     versions.prepend(version);
     if (!store(documentId, versions)) {
         // A version missing from the index would be adopted later as one the

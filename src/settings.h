@@ -46,7 +46,8 @@ class Settings : public QObject {
     Q_PROPERTY(bool vimKeys READ vimKeys NOTIFY changed)
     // The ranges of the writing settings, for controls that set them:
     // minFontPixelSize, maxFontPixelSize, minLineHeight, maxLineHeight,
-    // minLineLength and maxLineLength.
+    // minLineLength, maxLineLength, minLibraryWidth, maxLibraryWidth and
+    // the history limits' ranges.
     Q_PROPERTY(QVariantMap limits READ limits CONSTANT)
     Q_PROPERTY(bool freshDraftOnLaunch READ freshDraftOnLaunch NOTIFY changed)
     Q_PROPERTY(int libraryWidth READ libraryWidth NOTIFY changed)
@@ -70,6 +71,13 @@ class Settings : public QObject {
     Q_PROPERTY(QString focusUnit READ focusUnit NOTIFY changed)
     // Whether the editor styles its Markdown as it is written; on by default.
     Q_PROPERTY(bool liveFormatting READ liveFormatting NOTIFY changed)
+    // How much history keeps: at most historyVersions unnamed versions of
+    // each document, none older than historyDays, and every document's
+    // versions together within historyGigabytes (GiB, in tenths). Versions
+    // the writer named are never removed.
+    Q_PROPERTY(int historyVersions READ historyVersions NOTIFY changed)
+    Q_PROPERTY(int historyDays READ historyDays NOTIFY changed)
+    Q_PROPERTY(qreal historyGigabytes READ historyGigabytes NOTIFY changed)
 
 public:
     static constexpr int MinFontPixelSize = 10, MaxFontPixelSize = 40;
@@ -77,6 +85,11 @@ public:
     static constexpr qreal MinLineHeight = 1.0, MaxLineHeight = 3.0;
     // How much larger the editor's text is than the shell's.
     static constexpr int ThemeFontOffset = 4;
+    // The library's width, in pixels.
+    static constexpr int MinLibraryWidth = 160, MaxLibraryWidth = 640;
+    static constexpr int MinHistoryVersions = 1, MaxHistoryVersions = 1000;
+    static constexpr int MinHistoryDays = 1, MaxHistoryDays = 3650;
+    static constexpr qreal MinHistoryGigabytes = 0.1, MaxHistoryGigabytes = 100.0;
     // How much larger the preview's text is than the editor's.
     static constexpr int PreviewFontOffset = 2;
 
@@ -93,7 +106,11 @@ public:
     int maxLineLength() const { return m_maxLineLength; }
     QString editorFontFamily() const { return m_editorFontFamily; }
     bool freshDraftOnLaunch() const { return m_freshDraftOnLaunch; }
+    // The library's width a new window starts with: each window has its own
+    // from then on, and the width chosen last in any window is kept here.
     int libraryWidth() const { return m_libraryWidth; }
+    // Keeps a width within its range; ignores one outside it.
+    Q_INVOKABLE void setLibraryWidth(int width);
     QStringList libraryFolders() const { return m_libraryFolders; }
     // Keeps the library's folders: full paths only, each once, in order.
     void setLibraryFolders(const QStringList &folders);
@@ -113,6 +130,14 @@ public:
     Q_INVOKABLE void setFocusUnit(const QString &unit);
     bool liveFormatting() const { return m_liveFormatting; }
     Q_INVOKABLE void setLiveFormatting(bool on);
+    int historyVersions() const { return m_historyVersions; }
+    int historyDays() const { return m_historyDays; }
+    qreal historyGigabytes() const { return m_historyGigabytes; }
+    // Each keeps a value within its range, the space rounded to a tenth, and
+    // ignores one outside it.
+    Q_INVOKABLE void setHistoryVersions(int versions);
+    Q_INVOKABLE void setHistoryDays(int days);
+    Q_INVOKABLE void setHistoryGigabytes(qreal gigabytes);
 
     // Makes the text `steps` pixels larger, or smaller for a negative number,
     // within MinFontPixelSize and MaxFontPixelSize, and keeps that size. A
@@ -202,4 +227,7 @@ private:
     std::optional<bool> m_spellcheck;
     QString m_focusUnit = QStringLiteral("sentence");
     bool m_liveFormatting = true;
+    int m_historyVersions = 100;
+    int m_historyDays = 30;
+    qreal m_historyGigabytes = 1.0;
 };

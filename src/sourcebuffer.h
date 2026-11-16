@@ -52,6 +52,11 @@ public:
     void joinSince(qsizetype depth);
     // The current history position is what is on disk.
     void markSaved();
+    // Undo and redo no longer reach past the text as it is now, as when it
+    // was read anew in another encoding and the text before it is no text
+    // to go back to. The text counts as modified unless it is what is on
+    // disk. Nothing changes while a step is being made or replayed.
+    void forgetUndo();
     // True when the history position differs from the saved one.
     bool modified() const;
     QSharedPointer<const SourceSnapshot> snapshot() const;

@@ -3,6 +3,7 @@
 #include "diskfile.h"
 #include "document.h"
 #include "documentstore.h"
+#include "encodings.h"
 #include "sourcebuffer.h"
 
 #include <QFutureWatcher>
@@ -15,19 +16,6 @@
 #include <vector>
 #include <type_traits>
 #include <utility>
-
-namespace {
-// Text read from a file or a version, without its byte-order mark, or why it
-// cannot be shown as text.
-QString decoded(const QByteArray &bytes, QString *problem)
-{
-    // Read as the file's own bytes are, so that a version and the file read alike.
-    const DecodedText read = DiskFile::decode(bytes);
-    if (read.valid) return read.text;
-    *problem = DocumentReview::tr("This is not valid UTF-8 text, so it is not shown.");
-    return {};
-}
-} // namespace
 
 template <typename Work, typename Done>
 void DocumentReview::runJob(Work work, Done done)
@@ -112,6 +100,17 @@ bool DocumentReview::restoreVersion(Document *document, const QString &versionId
 {
     emit acting();
     if (!document) return false;
+    // A version that is not UTF-8 text goes back into the file as its own
+    // bytes, which the document then reads as it reads such a file.
+    bool found = false;
+    const QByteArray bytes = m_store->history()->read(document->id(), versionId, &found);
+    if (found && !DiskFile::decode(bytes).valid) {
+        m_store->restoreBytes(document, versionId, [this, id = document->id()](const QString &error) {
+            if (!error.isEmpty()) emit problem(tr("Not restored"), error);
+            emit versionsChanged(id);
+        });
+        return true;
+    }
     QString refusal;
     if (m_store->restoreVersion(document, versionId, &refusal) == DocumentStore::Restore::Refused) {
         emit problem(tr("Not restored"), refusal);
@@ -163,7 +162,10 @@ int DocumentReview::readVersions(Document *document)
                                         {QStringLiteral("taken"), kept.at(i).taken},
                                         {QStringLiteral("when"), said.at(i)},
                                         {QStringLiteral("name"), kept.at(i).name},
-                                        {QStringLiteral("reason"), reasonWords(kept.at(i).reason)}});
+                                        {QStringLiteral("reason"), reasonWords(kept.at(i).reason)},
+                                        {QStringLiteral("encoding"), kept.at(i).encoding.isEmpty()
+                                                                         ? QString()
+                                                                         : Encodings::labelOf(kept.at(i).encoding)}});
         return versions;
     }, [this, request, id](const QVariantList &versions) { emit versionsRead(request, id, versions); });
     return request;
@@ -174,15 +176,26 @@ int DocumentReview::readVersion(Document *document, const QString &versionId)
     if (!document) return 0;
     const int request = ++m_lastRequest;
     const QString id = document->id();
+    struct Read {
+        QString text;
+        QString problem;
+        QString encoding;
+    };
     runJob([history = m_store->history(), id, versionId] {
         bool found = false;
         const QByteArray bytes = history->read(id, versionId, &found);
-        QString problem;
-        const QString text = found ? decoded(bytes, &problem) : QString();
-        if (!found) problem = tr("This version is no longer in history.");
-        return std::pair(text, problem);
-    }, [this, request, id, versionId](const std::pair<QString, QString> &read) {
-        emit versionRead(request, id, versionId, read.first, read.second);
+        if (!found) return Read{{}, tr("This version is no longer in history."), {}};
+        const DecodedText utf8 = DiskFile::decode(bytes);
+        if (utf8.valid) return Read{utf8.text, {}, {}};
+        // Bytes that are not UTF-8 are shown in the encoding they were read
+        // in, or else the one they most likely are in.
+        QString encoding;
+        for (const History::Version &version : history->versions(id))
+            if (version.id == versionId) encoding = version.encoding;
+        if (encoding.isEmpty()) encoding = Encodings::likely(bytes);
+        return Read{Encodings::decode(bytes, encoding).text, {}, Encodings::labelOf(encoding)};
+    }, [this, request, id, versionId](const Read &read) {
+        emit versionRead(request, id, versionId, read.text, read.problem, read.encoding);
     });
     return request;
 }
@@ -353,13 +366,14 @@ int DocumentReview::readDiskText(Document *document, const QString &compareWith)
     return request;
 }
 
-void DocumentReview::record(Document *document, std::function<void(History::CaptureStatus, Revision)> done)
+void DocumentReview::record(Document *document, std::function<void(History::CaptureStatus, Revision)> done,
+                            History::Reason reason)
 {
     const QString id = document->id();
     const Revision revision = document->buffer()->revision();
-    runJob([history = m_store->history(), id, bytes = document->bytes()] {
+    runJob([history = m_store->history(), id, bytes = document->bytes(), reason] {
         History::CaptureStatus status = History::CaptureStatus::Failed;
-        history->captureUnlessNewest(id, bytes, History::Reason::Closed, &status);
+        history->captureUnlessNewest(id, bytes, reason, &status);
         return status;
     }, [this, id, revision, done](History::CaptureStatus status) {
         if (status == History::CaptureStatus::Recorded) emit versionsChanged(id);
@@ -396,6 +410,8 @@ QString DocumentReview::reasonWords(History::Reason reason)
         return tr("when closed");
     case History::Reason::Links:
         return tr("before links were updated");
+    case History::Reason::Deleted:
+        return tr("before it was deleted");
     }
     return {};
 }

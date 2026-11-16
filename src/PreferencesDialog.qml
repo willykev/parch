@@ -57,6 +57,10 @@ ThemedDialog {
                 width: parent.width
             }
 
+            HistoryPreferences {
+                width: parent.width
+            }
+
             WritingAidsPreferences {
                 width: parent.width
             }

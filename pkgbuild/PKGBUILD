@@ -54,6 +54,8 @@ package() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/parch.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/parch.svg"
   install -Dm644 "$startdir/parch.desktop" "$pkgdir/usr/share/applications/parch.desktop"
+  # The English guide, which Help → User guide opens.
+  install -Dm644 docs/guide.md "$pkgdir/usr/share/doc/$pkgname/guide.md"
 
   # The helpers parch runs on demand, and their licences and notices.
   local ratex="$srcdir/ratex-cli-v$_ratex-$CARCH-unknown-linux-musl"

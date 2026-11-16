@@ -158,10 +158,13 @@ QString Document::leadsTo() const { return m_problem == Problem::Conflict ? m_le
 bool Document::nameTaken() const { return m_nameTaken && m_problem == Problem::Conflict; }
 bool Document::isSaving() const { return m_saving; }
 bool Document::isTextless() const { return m_textless; }
+bool Document::isScratch() const { return m_scratch; }
+QString Document::convertedFrom() const { return m_convertedFrom; }
 TextConvention Document::convention() const { return m_convention; }
 
 QString Document::title() const
 {
+    if (m_scratch) return m_scratchTitle;
     if (!isDraft()) return m_path.mid(m_path.lastIndexOf(u'/') + 1);
     return draftTitle(m_buffer->text());
 }
@@ -231,7 +234,7 @@ QString Document::statusText() const
 Document::Shown Document::shown() const
 {
     return Shown{state(),       statusText(),     title(),   m_path,      m_lastError,
-                 fileMissing(), fileUnreadable(), leadsTo(), nameTaken(), m_textless};
+                 fileMissing(), fileUnreadable(), leadsTo(), nameTaken(), m_textless, m_convertedFrom};
 }
 
 void Document::refresh()

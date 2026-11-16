@@ -7,6 +7,7 @@
 #include "commandregistry.h"
 #include "document.h"
 #include "documentreview.h"
+#include "encodings.h"
 #include "documentsettingsstore.h"
 #include "fileorganizer.h"
 #include "history.h"
@@ -16,6 +17,7 @@
 
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -25,6 +27,7 @@
 #include <QVariantMap>
 #include <functional>
 #include <memory>
+#include <optional>
 
 class Autosave;
 class DocumentStore;
@@ -68,6 +71,8 @@ class Backend : public QObject {
     Q_PROPERTY(NoticeTone noticeTone READ noticeTone NOTIFY problemChanged)
     // The notice is news, with no failure behind it.
     Q_PROPERTY(bool noticeInforms READ noticeInforms NOTIFY problemChanged)
+    // What the notice tells of can be undone, with undoNotice(), while it shows.
+    Q_PROPERTY(bool noticeUndoable READ noticeUndoable NOTIFY problemChanged)
     // History records nothing new until room is made in it.
     Q_PROPERTY(bool historyPaused READ historyPaused NOTIFY historyPausedChanged)
     // Paused because named versions alone fill its space, rather than
@@ -118,6 +123,7 @@ public:
     bool notice() const;
     NoticeTone noticeTone() const;
     bool noticeInforms() const;
+    bool noticeUndoable() const;
     bool historyPaused() const;
     bool historyFull() const;
     // The file dialogs' questions and answers.
@@ -289,6 +295,34 @@ public:
     // on without a dictionary, it says so.
     Q_INVOKABLE void setSpellchecking(bool on);
 
+    // Takes a file out of the recent files, or every file; the files stay
+    // where they are. Clearing them says so, with Undo.
+    Q_INVOKABLE void forgetRecent(const QString &path);
+    Q_INVOKABLE void clearRecent();
+    // Deletes an unnamed draft from the library: its text goes to history
+    // first, then its tabs close in every window, each window keeping a tab,
+    // and its folder is set aside, which the notice that says so can undo.
+    // Refused while a window other than the active one shows the draft with
+    // text not yet in its draft file, or when history cannot keep the text.
+    Q_INVOKABLE void deleteDraft(const QString &documentId);
+    // Undoes what the notice tells of, while it shows.
+    Q_INVOKABLE void undoNotice();
+
+    // Reads a document open read-only, because its file is not UTF-8, in
+    // the encoding the choice has, as DocumentStore::reopenAs() does. Saving
+    // it then asks the window first, and confirmEncoding() is its answer.
+    Q_INVOKABLE bool reopenAs(Document *document, EncodingChoice *choice);
+    Q_INVOKABLE void confirmEncoding(Document *document);
+
+    // Shows the user guide in a tab of the active window, read-only and of
+    // parch's own (Document::isScratch()): the copy the package installs,
+    // read off the UI thread, or else the one parch carries. A tab that
+    // shows it already comes to the front.
+    Q_INVOKABLE void openUserGuide();
+    // Where the installed guide is: <prefix>/share/doc/parch/guide.md
+    // beside the program, until tests give another file.
+    void setInstalledGuide(const QString &path);
+
     // Asks the desktop's file dialog, for the active window, for a file that
     // document settings name: "bibliography" (BibTeX, BibLaTeX, CSL JSON or
     // CSL YAML files, several at once), "style" (a .csl file) or
@@ -360,12 +394,25 @@ private:
     void rememberPositions(WindowContext *window) const;
 
     void forgetRecoveryFailure(const QString &documentId);
+    // Gives history the limits the settings keep, when they changed.
+    void followHistoryLimits();
     // Spelling is wanted as the settings say, or, until the writer chooses,
     // whenever a dictionary is found.
     void followSpelling();
     // Says that spelling is wanted but there is no dictionary to check it with.
     void sayDictionaryIsMissing();
 
+    // Saving parch's own read-only document is refused with a notice.
+    bool refuseReadOnlyScratch(Document *document);
+    // A draft whose text history has: its tabs close and it is set aside.
+    void takeDraftOut(Document *draft);
+    void setDraftAside(const QString &documentId, const std::optional<QByteArray> &bytes);
+    // A notice whose news can be undone, while it shows: `undo` undoes it,
+    // and `forget`, when given, runs once it can no longer be undone.
+    void postUndoable(const QString &news, const QString &detail, std::function<void()> undo,
+                      std::function<void()> forget = {});
+    // The notice can no longer be undone.
+    void dropUndo();
     void setProblem(const QString &problem, const QString &detail);
     // A problem that the next action clears.
     void notify(const QString &problem, const QString &detail);
@@ -380,12 +427,13 @@ private:
     void forgetUnsafe(const QString &documentId);
 
     AppPaths m_paths;
+    // Made first, since history starts with the limits the settings keep.
+    Settings *m_settings;
     // Declared in the order they depend on each other, so that autosave goes
     // before the store it saves through, and the store before recovery.
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<DocumentStore> m_store;
     std::unique_ptr<Autosave> m_autosave;
-    Settings *m_settings;
     std::unique_ptr<CommandRegistry> m_commands;
     std::unique_ptr<RecentFiles> m_recentFiles;
     std::unique_ptr<QThreadPool> m_libraryPool;
@@ -411,6 +459,16 @@ private:
     // Goes before the store, whose documents it moves.
     std::unique_ptr<FileOrganizer> m_organizer;
     History::Pause m_historyPause = History::Pause::None;
+    // The limits history was given last.
+    HistoryLimits m_historyLimits;
+    // What undoes the notice, and what runs once it can no longer be undone.
+    std::function<void()> m_undo;
+    std::function<void()> m_forgetUndo;
+    // The user guide: where it is installed, the document that shows it,
+    // and whether it is being read.
+    QString m_installedGuide;
+    QPointer<Document> m_userGuide;
+    bool m_readingGuide = false;
     QVariantMap m_recoveryFailures;
     // The documents whose tab closes once their save lands, by id.
     QSet<QString> m_closing;

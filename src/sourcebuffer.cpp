@@ -215,6 +215,18 @@ void SourceBuffer::markSaved()
     if (modified() != wasModified) emit modifiedChanged();
 }
 
+void SourceBuffer::forgetUndo()
+{
+    if (m_replaying || m_stepDepth > 0) return;
+    const bool wasModified = modified();
+    const bool saved = !wasModified;
+    m_history.clear();
+    m_historyPosition = 0;
+    m_savedPosition = saved ? 0 : -1;
+    m_canJoin = false;
+    if (modified() != wasModified) emit modifiedChanged();
+}
+
 void SourceBuffer::apply(SourceRange range, const QString &replacement)
 {
     // Edits waiting for a step address the text as it was when they were

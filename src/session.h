@@ -40,6 +40,8 @@ struct WindowState {
     bool libraryOpen = true;
     // Invalid when the window should take its default size.
     QSize size;
+    // The library's width in this window, in pixels; 0 for the default.
+    int libraryWidth = 0;
 };
 
 struct SessionState {

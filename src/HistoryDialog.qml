@@ -6,7 +6,10 @@ import Parch
 // history, newest first, with when it was taken and its name. The one chosen is
 // shown read-only beside the list, or under it in a narrow window, read
 // off the UI thread. A version can be named, restored as one edit that a
-// single undo takes back, or deleted after asking; the text as it is now
+// single undo takes back, or deleted after asking; a version that is not
+// UTF-8 text, as a file's original bytes are once it was written as UTF-8,
+// is shown in the encoding it was read in, said beside it, and restored as
+// those bytes, into the file; the text as it is now
 // can be named, as a new version, but not restored or deleted. Everything
 // here acts on the document the dialog shows, whichever is in front, and a
 // read answered after a newer one was asked is not shown.
@@ -32,6 +35,8 @@ ThemedDialog {
     // The text the preview shows, or why it cannot.
     property string previewText
     property string previewProblem
+    // The encoding the version shown is read in, for one that is not UTF-8 text.
+    property string previewEncoding
     property bool loading: false
     readonly property bool stacked: availableWidth < 2 * 30 * characterWidth + gap
     readonly property real rowHeight: Math.round(theme.fontSize * 2.2)
@@ -77,11 +82,13 @@ ThemedDialog {
             previewRequest = 0
             previewText = dialog.document.buffer.text()
             previewProblem = ""
+            previewEncoding = ""
             loading = false
             return
         }
         previewText = ""
         previewProblem = ""
+        previewEncoding = ""
         loading = true
         previewRequest = backend.review.readVersion(dialog.document, row.id)
     }
@@ -120,11 +127,12 @@ ThemedDialog {
             if (!was || dialog.chosen().id !== was)
                 dialog.showCurrent()
         }
-        function onVersionRead(request, documentId, versionId, text, problem) {
+        function onVersionRead(request, documentId, versionId, text, problem, encoding) {
             if (request !== dialog.previewRequest)
                 return
             dialog.previewText = text
             dialog.previewProblem = problem
+            dialog.previewEncoding = encoding || ""
             dialog.loading = false
         }
         function onVersionsChanged(documentId) {
@@ -254,7 +262,9 @@ ThemedDialog {
             y: dialog.stacked ? listFrame.height + dialog.gap : 0
             width: dialog.stacked ? parent.width : parent.width - x
             height: dialog.stacked ? parent.height - y : parent.height
-            caption: dialog.describe(dialog.current)
+            caption: dialog.previewEncoding.length > 0
+                     ? qsTr("%1 · read as %2").arg(dialog.describe(dialog.current)).arg(dialog.previewEncoding)
+                     : dialog.describe(dialog.current)
             text: dialog.previewText
             note: dialog.loading ? qsTr("Reading the version…") : dialog.previewProblem
         }
@@ -270,7 +280,9 @@ ThemedDialog {
             objectName: "restoreVersion"
             text: qsTr("Restore")
             enabled: !dialog.currentText && !dialog.loading && dialog.previewProblem.length === 0
-            Accessible.description: qsTr("Replace the text with this version; undo takes it back.")
+            Accessible.description: dialog.previewEncoding.length > 0
+                                    ? qsTr("Put this version's own bytes back into the file; it then opens read-only, for Reopen as… to read it again.")
+                                    : qsTr("Replace the text with this version; undo takes it back.")
             onClicked: {
                 backend.review.restoreVersion(dialog.document, dialog.chosen().id)
                 dialog.accept()

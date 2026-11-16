@@ -31,7 +31,9 @@ class Settings;
 // the match marked. A document that cannot be read, or is not UTF-8 text, is
 // passed over and counted. What a document's file held is kept for a repeat
 // search in a small cache, by path, modification time and size, shared by
-// every window.
+// every window. It lets the least recently used go first, but never what
+// the search running has used, so that a repeat search of a library larger
+// than the cache reads again only what the cache could not hold.
 class FolderSearch : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QString pattern READ pattern WRITE setPattern NOTIFY queryChanged)
@@ -126,8 +128,10 @@ public:
     // A document's text from the cache, or else from its file, which is
     // then kept in the cache; false for one that cannot be read, is larger
     // than MaxFileBytes or is not UTF-8 text. `size` and `modified`, in
-    // nanoseconds, are the file's as a walk found it. Safe on any thread.
-    static bool readText(const QString &path, qint64 size, qint64 modified, QString *text);
+    // nanoseconds, are the file's as a walk found it. `search`, a search's
+    // own number, keeps what that search has used from making room for the
+    // rest it reads; 0 for a read that is no search. Safe on any thread.
+    static bool readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search = 0);
     // How many times a document's file has been read, rather than found in
     // the cache, since the process began; for tests.
     static quint64 fileReads();

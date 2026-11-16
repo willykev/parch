@@ -38,7 +38,9 @@ public:
     Q_INVOKABLE void resolveConflict(Document *document, int choice);
     // Records the text as it is now as a new version with a name, off the UI thread.
     Q_INVOKABLE void checkpoint(Document *document, const QString &name);
-    // As DocumentStore::restoreVersion() does; a refusal is a problem said, every time.
+    // As DocumentStore::restoreVersion() does; a refusal is a problem said,
+    // every time. A version that is not UTF-8 text is restored as its bytes,
+    // as DocumentStore::restoreBytes() does, off the UI thread.
     Q_INVOKABLE bool restoreVersion(Document *document, const QString &versionId);
     Q_INVOKABLE void nameVersion(Document *document, const QString &versionId, const QString &name);
     Q_INVOKABLE void removeVersion(Document *document, const QString &versionId);
@@ -67,9 +69,10 @@ public:
     static constexpr int DiffEdits = 2000;
     static QVariantMap difference(const QString &local, const QString &disk);
 
-    // Records the text as it is now, off the UI thread, and hands `done` the
-    // outcome and the revision that was recorded.
-    void record(Document *document, std::function<void(History::CaptureStatus, Revision)> done);
+    // Records the text as it is now, off the UI thread, for the reason
+    // given, and hands `done` the outcome and the revision that was recorded.
+    void record(Document *document, std::function<void(History::CaptureStatus, Revision)> done,
+                History::Reason reason = History::Reason::Closed);
     // Works out, off the UI thread, whether history is paused.
     void checkPaused();
     // When a version was taken, as a person says it, in the locale's time:
@@ -89,11 +92,13 @@ signals:
     // An action is starting, before what it does.
     void acting();
     // A document's versions, newest first, each a map of its id, the time
-    // it was taken, that time in words, and its name.
+    // it was taken, that time in words, its name, why history kept it, and
+    // the encoding of one that is not UTF-8 text, as shown.
     void versionsRead(int request, const QString &documentId, const QVariantList &versions);
-    // A version's text, or why it cannot be shown.
+    // A version's text, or why it cannot be shown. A version that is not
+    // UTF-8 text is read in the encoding named, as it is shown.
     void versionRead(int request, const QString &documentId, const QString &versionId, const QString &text,
-                     const QString &problem);
+                     const QString &problem, const QString &encoding = {});
     // The text of a document's file, or why it cannot be shown.
     void diskTextRead(int request, const QString &documentId, const QString &text, const QString &problem,
                       const QVariantMap &difference = {});

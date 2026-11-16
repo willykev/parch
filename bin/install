@@ -2,7 +2,9 @@
 set -eu
 
 # Adapted from sprawl's bin/install (MIT). Builds parch, then builds and
-# installs its Arch package, asking for the missing packages it needs.
+# installs its Arch package, asking for the missing packages it needs. The
+# package holds the program, its helpers, its licences, its launcher entry
+# and icon, and the English guide in /usr/share/doc/parch.
 ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 "$ROOT/bin/build"
 cd "$ROOT/pkgbuild"

@@ -15,6 +15,11 @@ The first version: a native Markdown writing app for Omarchy.
 - Tabs, separate windows, and several views of one document.
 - Drafts that are kept from the first keystroke and named when saved.
 - Each file's line endings and byte-order mark are kept.
+- A file that is not UTF-8 opens read-only, and Reopen as… reads it in
+  Windows-1252, Latin-1, UTF-16 or any other encoding the system knows, with
+  a preview; it is written as UTF-8 only once you confirm, its original
+  bytes kept in history first, where Version history shows them in that
+  encoding and can put them back.
 - Rich text pastes as clean Markdown; `Ctrl+Shift+V` pastes plain text.
 - Pasted images and dropped files go into an `assets` folder beside the
   document; a dropped Markdown document can be linked or included.
@@ -87,11 +92,14 @@ The first version: a native Markdown writing app for Omarchy.
   permissions, group, extended attributes and access lists.
 - Crash recovery for text that has not reached its file yet.
 - Version history with the reason each version was kept, named versions, and
-  restore with undo.
+  restore with undo. How many versions it keeps, for how many days and in
+  how much space are preferences; named versions are never removed.
 - Conflicts when a file changes on disk under unsaved text, with a side by
   side review and Reload, Keep both, Overwrite or Save as.
 - A file replaced by a link to another file is never read or written through
   that link unless you choose to follow it.
+- A file another program renames, or moves into a folder parch watches, is
+  followed, with its unsaved text, history and recent-file entry.
 
 ### Finding documents
 
@@ -100,10 +108,16 @@ The first version: a native Markdown writing app for Omarchy.
 - Make, rename, move and trash files from the library, with links to them
   updated, and an outline of the document in front.
 - Each document reopens where you were in it.
-- A library of folders, drafts and recent files.
+- A library of folders, drafts and recent files. Recent files can be removed
+  one by one or cleared, and drafts deleted, each with Undo; a deleted
+  draft's text stays in its history.
 - Find a document by name across every library folder.
 - Open files from the terminal, in the running window when there is one.
 - The session reopens your windows and tabs where you left them.
+- The library's edge can be dragged, or moved with the arrow keys; each
+  window keeps its own width.
+- The English user guide opens in a read-only tab from the menu or `F1`,
+  and the package installs it in `/usr/share/doc/parch`.
 
 ### From the terminal
 

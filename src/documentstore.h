@@ -22,6 +22,7 @@
 #include <optional>
 
 class Document;
+class SourceBuffer;
 
 // Follow takes the file a document's path now leads to, when that is not its
 // own file, as the document's file from then on.
@@ -42,6 +43,9 @@ public:
     ~DocumentStore() override;
 
     Document *newDraft();
+    // A document of parch's own, such as its guide, with the title and text
+    // given, read-only when asked: see Document::isScratch().
+    Document *newScratch(const QString &title, const QString &text, bool readOnly);
     // The unnamed draft with this id, read from <drafts>/<id>/draft.md unless
     // it is open already; null when there is no such draft.
     // Opens a draft by its id. One that cannot be opened is null, with why
@@ -158,6 +162,16 @@ public:
     // How messages name the folder of a path, as the writer sees folders
     // named elsewhere; without it, by the folder's own name.
     void setFolderNames(std::function<QString(const QString &path)> names);
+    // The folders the libraries watch, where a document's file renamed by
+    // another program is looked for too. Asked on the UI thread.
+    void setWatchedFolders(std::function<QStringList()> folders);
+    // How long a file gone from its name, and found under another, is given
+    // to come back, as when a program sets the old file aside and writes a
+    // new one in its place, before the document follows it.
+    static constexpr int RenameSettleMs = 100;
+    // At most this many folders and entries in each are looked through.
+    static constexpr int RenameFolders = 256;
+    static constexpr int RenameEntries = 20000;
     // For tests: called with each of a named draft's assets, at its new
     // path, just before it is written there.
     static void setBeforePlacing(std::function<void(const QString &path)> hook);
@@ -177,6 +191,51 @@ public:
     // The id history keeps a file's versions under, as opening it would
     // give it, given now if it has none yet.
     QString documentIdFor(const QString &canonicalPath);
+
+    // A document open read-only because its file is not UTF-8 takes the
+    // text the writer chose to read the file as, in the named encoding,
+    // with the convention given: it is editable from then on, undo leads no
+    // further back, and nothing saves it until confirmEncoding(). `read` is
+    // the version of the file the text was read from. False, with why in
+    // refusal and nothing changed, for a document that is not read-only so,
+    // or whose file is no longer that version.
+    bool reopenAs(Document *document, const QString &text, const TextConvention &convention, const QString &encoding,
+                  const DiskVersion &read, QString *refusal = nullptr);
+    // The writer confirms that saving writes UTF-8 over the file: its
+    // original bytes go to history first, off the UI thread, and then the
+    // document saves as any does. `done` is called here with why not, when
+    // history could not keep them or the file changed meanwhile.
+    void confirmEncoding(Document *document, std::function<void(const QString &error)> done);
+    // Restores a version from history that is not UTF-8 text, such as a
+    // file's original bytes kept as it was first written as UTF-8: those
+    // bytes go back into the file as they are, once history has what the
+    // file and the text hold now, and the document then reads its file as
+    // any not UTF-8 is read, read-only, for Reopen as… to read again. Off
+    // the UI thread; `done` is called here with why not, should that be so:
+    // a draft keeps UTF-8 text only, and a file changed meanwhile, or one
+    // history could not keep the text of, is left as it is. A save of the
+    // document that runs is waited for first.
+    void restoreBytes(Document *document, const QString &versionId, std::function<void(const QString &error)> done);
+
+    // A draft deleted from the library is set aside, in a hidden folder
+    // beside the drafts that nothing lists, until it is put back or forgotten.
+    static QString asideFolder(const AppPaths &paths, const QString &documentId);
+    // Sets aside an unnamed draft that no document has open, once history
+    // has its text: the bytes given, such as an open draft's text as it was
+    // let go, else its file's. Off the UI thread; `done` is called here with
+    // the draft's title, and why nothing was set aside, should that be so:
+    // history did not keep the text, or the folder could not be moved. A
+    // draft never written has nothing on disk to set aside.
+    void setDraftAside(const QString &documentId, const std::optional<QByteArray> &bytes,
+                       std::function<void(const QString &title, const QString &error)> done);
+    // Puts a draft set aside back among the drafts; should its folder be
+    // gone, its newest version in history becomes its text. Off the UI
+    // thread; `done` is called here with why not, should that be so.
+    void restoreDraft(const QString &documentId, std::function<void(const QString &error)> done);
+    // Removes a draft set aside, off the UI thread.
+    void forgetDraft(const QString &documentId);
+    // Removes every draft set aside, as those a crash left, off the UI thread.
+    void forgetDraftsSetAside();
 
 signals:
     // A document is open: a new draft, a draft or file read, or one restored.
@@ -223,6 +282,11 @@ signals:
     // Text recovery held since the launch came back when its path, opened
     // again, led to its own file: the document is as restore() makes it.
     void heldRestored(Document *document, DocumentStore::Recovered how);
+    // Another program renamed or moved an open document's file, within its
+    // folder or into another watched one, and the document followed it,
+    // keeping its identity, text, undo, history and recovery. A file moved
+    // where nothing is watched is missing, as one deleted is.
+    void renamedElsewhere(Document *document, const QString &from, const QString &to);
 
 private:
     // Everything a save needs, as plain values, since it runs on another thread.
@@ -295,11 +359,25 @@ private:
         bool entry = false;
         // Read only when the file is not what the document last read.
         LoadedFile loaded;
+        // The file is gone from its name, and the very file, by device and
+        // inode, is at this canonical path now, in its folder or another
+        // that is watched: another program renamed or moved it.
+        QString movedTo;
     };
 
     static SaveOutcome writeJob(const SaveJob &job, History *history, const Recovery &recovery,
                                 const QString &documentId);
-    static DiskCheck checkJob(const QString &path, const DiskVersion &known);
+    // Looks at the file; one gone from its name is looked for in the
+    // folders given, its own first.
+    static DiskCheck checkJob(const QString &path, const DiskVersion &known, const QStringList &folders = {});
+    // The canonical path of the file with the known device and inode
+    // among the entries of the folders, or empty.
+    static QString findMoved(const DiskVersion &known, const QStringList &folders);
+    // The folders a renamed file is looked for in: its own, those of every
+    // file the store watches, and those the libraries watch.
+    QStringList renameFolders(const QString &path) const;
+    // Another program renamed or moved the document's file: it follows.
+    void followRename(Document *document, const QString &movedTo);
     // What Keep both found and made, off the UI thread: the file as it is
     // now, and the copy of the text beside it, made at a name nothing has,
     // and still that very file once made.
@@ -318,6 +396,10 @@ private:
         bool own = false;
     };
     static Followed followJob(const QString &path, const AppPaths &paths);
+    // Runs work off the UI thread, as the store's own, waited for as it
+    // goes, and hands its result to `then` here.
+    template <typename Result>
+    void runFiled(std::function<Result()> work, std::function<void(const Result &)> then);
     void follow(Document *document);
     // The document as its writer saw it when choosing to follow the link.
     struct Chosen {
@@ -403,6 +485,9 @@ private:
     // Replaces the buffer's text with the file's by one edit of the changed
     // middle, and makes the file's version the document's.
     void takeFile(Document *document, const LoadedFile &file);
+    // The text becomes `after` by one edit of the middle that differs,
+    // grown to whole graphemes.
+    static void replaceChanged(SourceBuffer *buffer, const QString &after);
     void enterConflict(Document *document, const QString &error, bool missing = false, bool unreadable = false);
     // The document's path leads to another file than its own now: it waits
     // in conflict, saying so.
@@ -459,6 +544,7 @@ private:
     QList<QFutureWatcher<DiskCheck> *> m_checks;
     FileWatch m_watch;
     std::function<QString(const QString &path)> m_folderNames;
+    std::function<QStringList()> m_watchedFolders;
     // The entries recovery holds, by document id.
     QHash<QString, Held> m_held;
 };

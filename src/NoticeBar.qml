@@ -27,6 +27,8 @@ Rectangle {
     // What the notice tells of, as Backend.NoticeTone: a failure is marked
     // as danger, one whose harm was headed off as a warning, and news calmly.
     property int noticeTone: Backend.Failure
+    // What the notice tells of can be undone, with Undo beside Dismiss.
+    property bool noticeUndoable: false
 
     signal retrySave()
     // A file that could not be read is read again.
@@ -38,6 +40,11 @@ Rectangle {
     signal retryRecovery()
     signal reviewHistory()
     signal dismiss()
+    signal undo()
+    // A file that is not UTF-8 is read in another encoding, and one read so
+    // is written as UTF-8, each once the writer chooses.
+    signal reopenAs()
+    signal confirmEncoding()
 
     // The rows shown, by what each is about, most pressing first.
     readonly property var kinds: {
@@ -51,9 +58,13 @@ Rectangle {
                 shown.push("saveFailed")
                 break
             case Document.ReadOnly:
-                shown.push("readOnly")
+                // parch's own read-only documents, such as its guide, are as they should be.
+                if (!bar.document.scratch)
+                    shown.push("readOnly")
                 break
             }
+            if (bar.document.convertedFrom.length > 0 && bar.document.state !== Document.Conflict)
+                shown.push("converted")
             if (bar.recoveryFailure.length > 0)
                 shown.push("recovery")
             if (bar.historyPaused)
@@ -84,6 +95,10 @@ Rectangle {
             return qsTr("Review history")
         case "app":
             return qsTr("Dismiss")
+        case "readOnly":
+            return qsTr("Reopen as…")
+        case "converted":
+            return qsTr("Save as UTF-8…")
         default:
             return ""
         }
@@ -141,7 +156,10 @@ Rectangle {
                     case "saveFailed":
                         return error.length > 0 ? qsTr("Not saved: %1").arg(error) : qsTr("Not saved")
                     case "readOnly":
-                        return qsTr("Read-only: this file is not valid UTF-8 text, so its bytes are kept as they are and it is never saved.")
+                        return qsTr("Read-only: this file is not valid UTF-8 text, so its bytes are kept as they are and it is never saved. Reopen it in the encoding it was written in to edit it.")
+                    case "converted":
+                        return qsTr("Read as %1. Nothing is saved until you choose to write it as UTF-8; its original bytes are kept in history first.")
+                            .arg(bar.document.convertedFrom)
                     case "recovery":
                         return qsTr("Recovery could not keep this text: %1").arg(bar.recoveryFailure)
                     case "history":
@@ -161,14 +179,16 @@ Rectangle {
                 readonly property real markRoom: mark.width + bar.gap
                 readonly property real buttonGap: Math.round(theme.fontSize / 2)
                 readonly property real actionsWidth: actions.visible
-                    ? button.implicitWidth + (saveAsButton.visible ? buttonGap + saveAsButton.implicitWidth : 0) : 0
+                    ? button.implicitWidth + (saveAsButton.visible ? buttonGap + saveAsButton.implicitWidth : 0)
+                      + (undoButton.visible ? buttonGap + undoButton.implicitWidth : 0) : 0
                 readonly property bool stacked: actions.visible
                     && width - 2 * bar.gap - markRoom - actionsWidth - bar.gap < 24 * bar.characterWidth
 
                 function takeKeys() {
                     if (!actions.visible)
                         return false
-                    button.forceActiveFocus(Qt.TabFocusReason)
+                    const first = undoButton.visible ? undoButton : button
+                    first.forceActiveFocus(Qt.TabFocusReason)
                     return true
                 }
 
@@ -194,7 +214,7 @@ Rectangle {
                     // was headed off. News is marked in the dim role, a mix of
                     // the text and the background, since some themes' accent is
                     // as red as their danger.
-                    color: row.kind === "readOnly" || row.kind === "history"
+                    color: row.kind === "readOnly" || row.kind === "history" || row.kind === "converted"
                            || (row.kind === "app" && bar.noticeTone === Backend.Warning) ? theme.warning
                          : row.kind === "app" && bar.noticeTone === Backend.News ? theme.dim : theme.danger
                 }
@@ -254,8 +274,23 @@ Rectangle {
                     y: row.stacked ? words.y + words.height + Math.round(theme.fontSize / 4)
                                    : Math.round((row.implicitHeight - height) / 2)
                     spacing: row.buttonGap
-                    readonly property real room: (row.width - 2 * bar.gap - (saveAsButton.visible ? spacing : 0))
-                                                 / (saveAsButton.visible ? 2 : 1)
+                    readonly property int buttons: 1 + (saveAsButton.visible ? 1 : 0) + (undoButton.visible ? 1 : 0)
+                    readonly property real room: (row.width - 2 * bar.gap - (buttons - 1) * spacing) / buttons
+
+                    // Undo comes first, as what the notice offers.
+                    ThemedButton {
+                        id: undoButton
+                        objectName: "noticeUndo"
+                        visible: row.kind === "app" && bar.noticeUndoable
+                        width: Math.min(implicitWidth, actions.room)
+                        framed: true
+                        focusPolicy: Qt.TabFocus
+                        text: qsTr("Undo")
+                        Accessible.description: row.message
+                        Keys.onReturnPressed: clicked()
+                        Keys.onEnterPressed: clicked()
+                        onClicked: bar.undo()
+                    }
 
                     ThemedButton {
                         id: button
@@ -287,6 +322,12 @@ Rectangle {
                                 break
                             case "app":
                                 bar.dismiss()
+                                break
+                            case "readOnly":
+                                bar.reopenAs()
+                                break
+                            case "converted":
+                                bar.confirmEncoding()
                                 break
                             }
                         }

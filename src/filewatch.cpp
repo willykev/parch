@@ -55,6 +55,16 @@ void FileWatch::unwatch(const QString &path)
     m_watcher->removePath(folder);
 }
 
+QStringList FileWatch::folders() const
+{
+    QStringList folders;
+    for (const QString &path : m_paths) {
+        const QString folder = PathText::folderOf(path);
+        if (!folders.contains(folder)) folders.append(folder);
+    }
+    return folders;
+}
+
 FileWatch::Stamp FileWatch::stampOf(const QString &path)
 {
     struct stat state {};

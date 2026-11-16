@@ -27,6 +27,7 @@
 #include "htmlmarkdown.h"
 #include "hyprland.h"
 #include "librarymodel.h"
+#include "librarytests.h"
 #include "documentlinks.h"
 #include "outline.h"
 #include "markdown_tests.h"
@@ -652,6 +653,23 @@ private slots:
     void toolbarShowsHidesAndRunsCommands() { EditingTests::toolbarShowsHidesAndRunsCommands(); }
     void formattingCommandsRunFromEveryEntryPoint() { EditingTests::formattingCommandsRunFromEveryEntryPoint(); }
     void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
+    // How much history keeps, other encodings, the library's width, files
+    // renamed elsewhere, recent files and drafts, library search and the
+    // user guide, written in librarytests.cpp.
+    void historyLimitsChangeWhileHistoryRuns() { LibraryTests::historyLimitsChangeWhileHistoryRuns(); }
+    void historyRetentionIsAPreference() { LibraryTests::historyRetentionIsAPreference(); }
+    void captureHookOutlivesItsReplacement() { LibraryTests::captureHookOutlivesItsReplacement(); }
+    void recentFilesCanBeClearedOrForgotten() { LibraryTests::recentFilesCanBeClearedOrForgotten(); }
+    void deletedDraftsGoToHistoryAndCanComeBack() { LibraryTests::deletedDraftsGoToHistoryAndCanComeBack(); }
+    void draftsSetAsideAreForgottenAtLaunch() { LibraryTests::draftsSetAsideAreForgottenAtLaunch(); }
+    void userGuideOpensAsReadOnlyHelp() { LibraryTests::userGuideOpensAsReadOnlyHelp(); }
+    void eachWindowKeepsItsLibraryWidth() { LibraryTests::eachWindowKeepsItsLibraryWidth(); }
+    void renamesByOtherProgramsAreFollowed() { LibraryTests::renamesByOtherProgramsAreFollowed(); }
+    void encodingsDecodeWhatUtf8CannotRead() { LibraryTests::encodingsDecodeWhatUtf8CannotRead(); }
+    void reopeningInAnotherEncodingSavesOnlyOnceConfirmed() { LibraryTests::reopeningInAnotherEncodingSavesOnlyOnceConfirmed(); }
+    void reopeningRefusesAFileThatChanged() { LibraryTests::reopeningRefusesAFileThatChanged(); }
+    void historyRestoresBytesThatAreNotUtf8() { LibraryTests::historyRestoresBytesThatAreNotUtf8(); }
+    void repeatedLibrarySearchesReadLittleAgain() { LibraryTests::repeatedLibrarySearchesReadLittleAgain(); }
     // The preview and the three views, written in previewtests.cpp.
     void viewModesAreKeptByEachView() { PreviewTests::viewModesAreKeptByEachView(); }
     void previewBuildsTextAndInlineFormatting() { PreviewTests::previewBuildsTextAndInlineFormatting(); }
@@ -11740,6 +11758,9 @@ void ParchTests::windowShortcutsReachPastTheEditor()
     int tried = 0;
     for (QObject *shortcut : shortcutsIn(window)) {
         if (shell.backend->commands()->needs(shortcut->property("commandId").toString()) == u"text") continue;
+        // The user guide opens a document of its own in front, with its
+        // text; userGuideOpensAsReadOnlyHelp presses its key in the editor.
+        if (shortcut->property("commandId").toString() == u"userGuide") continue;
         for (const QKeySequence &sequence : shortcutSequences(shortcut)) {
             // Ctrl+Shift+N opens a window that comes to the front, and only
             // the window in front answers keys. A shortcut before this one
@@ -19360,12 +19381,12 @@ void ParchTests::noticeBarShowsEachStateUntilResolved()
     QTRY_VERIFY(!bar->isVisible());
     QCOMPARE(readFile(DocumentStore::draftFile(paths, draft->id())), QByteArray("words"));
 
-    // A read-only file says why, and has nothing to press.
+    // A read-only file says why, and offers to read it in another encoding.
     const QString broken = files.filePath(QStringLiteral("broken.md"));
     writeFile(broken, QByteArray("caf\xe9\n"));
     shell.backend->openFiles({broken});
     QTRY_COMPARE(noticeKinds(shell), QStringList{"readOnly"});
-    QVERIFY(!noticeButton(shell, QStringLiteral("readOnly"))->isVisible());
+    QCOMPARE(noticeButton(shell, QStringLiteral("readOnly"))->property("text").toString(), QStringLiteral("Reopen as…"));
     // The bar follows the document in front.
     shell.context()->tabs()->setActiveIndex(0);
     QTRY_COMPARE(noticeKinds(shell), QStringList());

@@ -8,14 +8,17 @@
 #include "settings.h"
 #include "sourcebuffer.h"
 
-#include <QCache>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QMap>
 #include <QMutex>
 #include <QSet>
 #include <algorithm>
+#include <atomic>
+#include <iterator>
+#include <list>
 #include <sys/stat.h>
 #include <utility>
 
@@ -31,17 +34,75 @@ constexpr int countedPerFile = 100000;
 
 std::atomic<quint64> reads{0};
 
-// What a document's file held, for as long as the file still stands so.
-struct Cached {
-    qint64 size = 0;
-    qint64 modified = 0;
-    QString text;
+// What documents' files held, for as long as each file still stands so, at
+// most FolderSearch::CacheUnits of text. The least recently used goes first,
+// but never one a search running now has used: a search runs through every
+// document in the same order, so in a library larger than the cache, letting
+// go of whatever was used least recently would drop just what the next
+// search reads first, and every file would be read again. A search that
+// finds the cache full of what it has used itself reads the rest without
+// keeping it, and the next search finds again what this one kept.
+struct TextCache {
+    struct Entry {
+        qint64 size = 0;
+        qint64 modified = 0;
+        QString text;
+        // The search that used it last; 0 for none.
+        quint64 search = 0;
+        std::list<QString>::iterator order;
+    };
+
+    QMutex mutex;
+    QHash<QString, Entry> entries;
+    // The least recently used first.
+    std::list<QString> order;
+    qint64 units = 0;
+
+    static qint64 costOf(const QString &text) { return std::max<qint64>(1, text.size()); }
+
+    const Entry *find(const QString &path, quint64 search)
+    {
+        const auto found = entries.find(path);
+        if (found == entries.end()) return nullptr;
+        found->search = search;
+        order.splice(order.end(), order, found->order);
+        return &*found;
+    }
+
+    void remove(QHash<QString, Entry>::iterator entry)
+    {
+        units -= costOf(entry->text);
+        order.erase(entry->order);
+        entries.erase(entry);
+    }
+
+    void insert(const QString &path, qint64 size, qint64 modified, const QString &text, quint64 search)
+    {
+        if (const auto older = entries.find(path); older != entries.end()) remove(older);
+        const qint64 cost = costOf(text);
+        if (cost > FolderSearch::CacheUnits) return;
+        // Room is made from the least recently used, up to what the running
+        // search has used.
+        while (units + cost > FolderSearch::CacheUnits && !order.empty()) {
+            const auto oldest = entries.find(order.front());
+            if (search != 0 && oldest->search == search) return;
+            remove(oldest);
+        }
+        order.push_back(path);
+        entries.insert(path, Entry{size, modified, text, search, std::prev(order.end())});
+        units += cost;
+    }
+
+    void clear()
+    {
+        entries.clear();
+        order.clear();
+        units = 0;
+    }
 };
 
-struct TextCache {
-    QMutex mutex;
-    QCache<QString, Cached> entries{FolderSearch::CacheUnits};
-};
+// Each search's number, which the cache knows what it has used by.
+std::atomic<quint64> searches{0};
 
 TextCache &textCache()
 {
@@ -108,6 +169,8 @@ struct FolderSearch::Batch {
 
 struct FolderSearch::Run {
     std::atomic<bool> cancel{false};
+    // This search's number, for the cache.
+    quint64 number = ++searches;
     QRegularExpression expression;
     QStringList folders;
     AppPaths paths;
@@ -256,12 +319,12 @@ QVariantMap FolderSearch::row(int row) const
     return values;
 }
 
-bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, QString *text)
+bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search)
 {
     TextCache &cache = textCache();
     {
         QMutexLocker lock(&cache.mutex);
-        const Cached *cached = cache.entries.object(path);
+        const TextCache::Entry *cached = cache.find(path, search);
         if (cached && cached->size == size && cached->modified == modified) {
             *text = cached->text;
             return true;
@@ -277,7 +340,7 @@ bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, Q
     if (!decoded.valid) return false;
     *text = decoded.text;
     QMutexLocker lock(&cache.mutex);
-    cache.entries.insert(path, new Cached{size, modified, decoded.text}, std::max<qsizetype>(1, decoded.text.size()));
+    cache.insert(path, size, modified, decoded.text, search);
     return true;
 }
 
@@ -287,7 +350,7 @@ void FolderSearch::clearCache()
 {
     TextCache &cache = textCache();
     QMutexLocker lock(&cache.mutex);
-    cache.entries.clear();
+    cache.clear();
 }
 
 void FolderSearch::start()
@@ -313,7 +376,8 @@ void FolderSearch::start()
     run->paths = m_paths;
     // Open documents are searched as their text is now.
     for (Document *document : m_store->documents()) {
-        if (document->isTextless()) continue;
+        // parch's own documents, such as its guide, are no part of the library.
+        if (document->isTextless() || document->isScratch()) continue;
         const QString text = document->buffer()->text();
         if (document->isDraft()) {
             // A draft nothing is written in holds nothing to find.
@@ -427,7 +491,7 @@ FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &it
     QString text;
     if (item.hasText) {
         text = item.text;
-    } else if (!readText(item.path, item.size, item.modified, &text)) {
+    } else if (!readText(item.path, item.size, item.modified, &text, run.number)) {
         return result;
     }
     *read = true;

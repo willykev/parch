@@ -10,6 +10,7 @@
 #include "documentsettingsstore.h"
 #include "editorbinding.h"
 #include "editordecorations.h"
+#include "encodings.h"
 #include "fileorganizer.h"
 #include "focusmode.h"
 #include "foldersearch.h"
@@ -44,6 +45,7 @@ void registerQmlTypes()
     qmlRegisterUncreatableType<CommandRegistry>("Parch", 1, 0, "CommandRegistry",
                                                 QStringLiteral("The backend keeps the commands"));
     qmlRegisterType<DocumentFind>("Parch", 1, 0, "DocumentFind");
+    qmlRegisterType<EncodingChoice>("Parch", 1, 0, "EncodingChoice");
     qmlRegisterType<OutlineModel>("Parch", 1, 0, "OutlineModel");
     // QML reads documents, their buffers and their states by name, but never makes one.
     qmlRegisterUncreatableType<Document>("Parch", 1, 0, "Document", QStringLiteral("Documents come from the store"));

@@ -35,6 +35,15 @@ class Document : public QObject {
     // Whether the text has ever had a file of its own; false for a draft
     // that was never saved, which nothing on disk leads back to.
     Q_PROPERTY(bool everSaved READ everSaved NOTIFY changed)
+    // A document of parch's own, such as its guide, under a title of its
+    // own: it has no file and is no draft that the library lists, it is
+    // never saved or kept in recovery, history or the session, and it goes
+    // when its last tab closes.
+    Q_PROPERTY(bool scratch READ isScratch CONSTANT)
+    // The encoding the text was read in, as the writer chose for a file that
+    // is not UTF-8, until the writer confirms that saving writes UTF-8 over
+    // the file: nothing saves it meanwhile. Empty otherwise.
+    Q_PROPERTY(QString convertedFrom READ convertedFrom NOTIFY changed)
 public:
     enum class State { Clean, Modified, Saving, SaveFailed, Conflict, ReadOnly };
     Q_ENUM(State)
@@ -114,6 +123,8 @@ public:
     // save, until a version from its history is restored or the link is
     // followed.
     bool isTextless() const;
+    bool isScratch() const;
+    QString convertedFrom() const;
 
 signals:
     void changed();
@@ -139,6 +150,7 @@ private:
         QString leadsTo;
         bool nameTaken;
         bool textless;
+        QString convertedFrom;
         bool operator==(const Shown &) const = default;
     };
 
@@ -184,6 +196,10 @@ private:
     // to and keeps this text in history.
     bool m_resolving = false;
     bool m_textless = false;
+    // A document of parch's own, and its title.
+    bool m_scratch = false;
+    QString m_scratchTitle;
+    QString m_convertedFrom;
     // The file may have changed again while a save or a comparison ran.
     bool m_checkAgain = false;
     Shown m_shown;

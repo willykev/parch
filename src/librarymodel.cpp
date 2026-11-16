@@ -1223,7 +1223,7 @@ void LibraryModel::rebuildDrafts()
     QSet<QString> open;
     const QDateTime now = QDateTime::currentDateTimeUtc();
     for (Document *document : m_store->documents()) {
-        if (!document->isDraft()) continue;
+        if (!document->isDraft() || document->isScratch()) continue;
         open.insert(document->id());
         Row row{Kind::Draft, document->title(), {}, document->id()};
         const auto disk = m_shared->drafts().constFind(document->id());
@@ -1298,7 +1298,7 @@ void LibraryModel::checkRecent()
 
 void LibraryModel::follow(Document *document)
 {
-    if (!document->isDraft()) return;
+    if (!document->isDraft() || document->isScratch()) return;
     connect(document, &Document::changed, this, [this, document] {
         if (document->isDraft()) {
             updateDraft(document);

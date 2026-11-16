@@ -55,6 +55,32 @@ void RecentFiles::relocate(const QString &from, const QString &to)
     emit changed();
 }
 
+void RecentFiles::forget(const QString &path)
+{
+    if (m_paths.removeAll(path) == 0) return;
+    write();
+    emit changed();
+}
+
+void RecentFiles::clear()
+{
+    if (m_paths.isEmpty()) return;
+    m_paths.clear();
+    write();
+    emit changed();
+}
+
+void RecentFiles::restore(const QStringList &paths)
+{
+    QStringList now = m_paths;
+    for (const QString &path : paths)
+        if (PathText::isFullPath(path) && !now.contains(path) && now.size() < MaxPaths) now.append(path);
+    if (now == m_paths) return;
+    m_paths = now;
+    write();
+    emit changed();
+}
+
 QStringList RecentFiles::paths() const { return m_paths; }
 
 bool RecentFiles::missing(const QString &path) const { return isMissing(path); }

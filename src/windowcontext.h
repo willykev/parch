@@ -20,6 +20,9 @@ class WindowContext : public QObject {
     // What its library shows, with the window's own filter and expanded folders.
     Q_PROPERTY(LibraryModel *library READ library CONSTANT)
     Q_PROPERTY(bool libraryOpen READ libraryOpen WRITE setLibraryOpen NOTIFY libraryOpenChanged)
+    // The library's width in this window, in pixels, which the session
+    // keeps; a new window starts at the default the settings keep.
+    Q_PROPERTY(int libraryWidth READ libraryWidth WRITE setLibraryWidth NOTIFY libraryWidthChanged)
     // The size the window opens at, set before the window is made; invalid
     // for the default.
     Q_PROPERTY(QSize initialSize READ initialSize CONSTANT)
@@ -42,6 +45,9 @@ public:
     LibraryModel *library() const;
     bool libraryOpen() const;
     void setLibraryOpen(bool open);
+    int libraryWidth() const;
+    // Keeps a width within Settings' range for it.
+    void setLibraryWidth(int width);
     QSize initialSize() const;
     QSize size() const;
     void setSize(const QSize &size);
@@ -71,6 +77,9 @@ public:
     // in front. Discarding, it asks whether to give up text that nothing
     // will keep.
     void askToClose(Document *document, bool discarding = false);
+    // Asks the window whether saving the document, read in another
+    // encoding, may write UTF-8 over its file.
+    void askToConfirmEncoding(Document *document);
     // The window's editor moved its cursor or scrolled.
     Q_INVOKABLE void noteViewMoved();
     FolderSearch *folderSearch() const;
@@ -82,12 +91,14 @@ public:
 
 signals:
     void libraryOpenChanged();
+    void libraryWidthChanged();
     void sizeChanged();
     void viewCaptureRequested();
     void raiseRequested();
     void folderToShowChanged();
     void textFocusRequested();
     void closeConfirmationRequested(Document *document, bool discarding);
+    void encodingConfirmationRequested(Document *document);
     void viewShowRequested();
     // Something the session keeps changed.
     void changed();
@@ -96,6 +107,7 @@ private:
     TabModel *m_tabs;
     LibraryModel *m_library;
     bool m_libraryOpen = true;
+    int m_libraryWidth = 260;
     QSize m_initialSize;
     QSize m_size;
     QString m_folderToShow;

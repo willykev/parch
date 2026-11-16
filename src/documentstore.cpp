@@ -20,6 +20,7 @@
 #include <QPointer>
 #include <QSaveFile>
 #include <QSemaphore>
+#include <QThread>
 #include <QTimer>
 #include <QUuid>
 #include <QtConcurrent>
@@ -301,6 +302,15 @@ DocumentStore::~DocumentStore()
 Document *DocumentStore::newDraft()
 {
     return adopt(new Document(newId(), {}, {}, {}, {}, false, this));
+}
+
+Document *DocumentStore::newScratch(const QString &title, const QString &text, bool readOnly)
+{
+    auto *document = new Document(newId(), {}, text, {}, {}, readOnly, this);
+    document->m_scratch = true;
+    document->m_scratchTitle = title;
+    document->m_shown = document->shown();
+    return adopt(document);
 }
 
 Document *DocumentStore::openDraft(const QString &documentId, QString *error)
@@ -999,6 +1009,8 @@ bool DocumentStore::resolveConflict(Document *document, ConflictChoice choice, Q
         document->m_leadsTo.clear();
         document->m_nameTaken = false;
         document->m_lastError.clear();
+        // Overwriting is the writer's word to write the text as UTF-8.
+        document->m_convertedFrom.clear();
         // A draft whose file is gone makes its folder and file afresh, and a
         // named one its file, at that path: the save's worker never follows
         // a link put there since, and leaves it, and anything else there,
@@ -1140,8 +1152,11 @@ void DocumentStore::save(Document *document)
 {
     if (!m_documents.contains(document)) return;
     // Text read from invalid UTF-8 cannot be written back unchanged, and a
-    // conflict waits for a choice, so neither is ever saved over.
-    if (document->m_readOnly || document->m_problem == Document::Problem::Conflict) return;
+    // conflict waits for a choice, so neither is ever saved over; nor is a
+    // file read in another encoding until the writer confirms writing UTF-8.
+    if (document->m_readOnly || document->m_problem == Document::Problem::Conflict
+        || !document->m_convertedFrom.isEmpty())
+        return;
     if (document->m_saving) {
         document->m_saveAgain = true;
         return;
@@ -1292,7 +1307,7 @@ QList<Document *> DocumentStore::documents() const
 bool DocumentStore::isUnnamedDraft(const QString &documentId) const
 {
     if (!AppPaths::isDocumentId(documentId)) return false;
-    if (Document *live = documentWithId(documentId)) return live->isDraft();
+    if (Document *live = documentWithId(documentId)) return live->isDraft() && !live->isScratch();
     for (const QString &id : std::as_const(m_registry))
         if (id == documentId) return false;
     return true;
@@ -1526,6 +1541,8 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
         document->m_lastError.clear();
         document->m_diskVersion = result.version;
         document->m_diskUnkept = false;
+        // Written as UTF-8, by a naming or a choice made in a conflict.
+        document->m_convertedFrom.clear();
         if (job.renames) {
             const bool wasDraft = document->isDraft();
             if (!wasDraft) {
@@ -1603,8 +1620,10 @@ void DocumentStore::refuse(Document *document, const QString &error)
 
 void DocumentStore::closeIfUnused(Document *document)
 {
-    // A document with no text of its own has nothing to keep it open.
-    if (!m_unviewed.contains(document) || (document->state() != Document::State::Clean && !document->m_textless))
+    // A document with no text of its own has nothing to keep it open, nor
+    // has one of parch's own, which is never kept.
+    if (!m_unviewed.contains(document)
+        || (document->state() != Document::State::Clean && !document->m_textless && !document->m_scratch))
         return;
     close(document);
 }
@@ -1648,21 +1667,77 @@ void DocumentStore::watchPath(const QString &path)
     if (!path.isEmpty()) m_watch.watch(path);
 }
 
-DocumentStore::DiskCheck DocumentStore::checkJob(const QString &path, const DiskVersion &known)
+DocumentStore::DiskCheck DocumentStore::checkJob(const QString &path, const DiskVersion &known,
+                                                const QStringList &folders)
 {
-    DiskCheck check;
-    struct stat entry {};
-    check.entry = ::lstat(QFile::encodeName(path).constData(), &entry) == 0;
-    // A file that still stands as parch last read or wrote it, as after
-    // parch's own save, is not read again.
-    check.now = DiskFile::fingerprint(path, known);
-    // A file with the content already known needs no reading.
-    if (check.now.exists && !sameContentIdentity(check.now, known)) {
-        check.loaded = DiskFile::load(path);
-        // What was read is the file the text belongs to, even if it changed since the first look.
-        if (check.loaded.ok) check.now = check.loaded.version;
-    }
+    const auto look = [&path, &known] {
+        DiskCheck check;
+        struct stat entry {};
+        check.entry = ::lstat(QFile::encodeName(path).constData(), &entry) == 0;
+        // A file that still stands as parch last read or wrote it, as after
+        // parch's own save, is not read again.
+        check.now = DiskFile::fingerprint(path, known);
+        // A file with the content already known needs no reading.
+        if (check.now.exists && !sameContentIdentity(check.now, known)) {
+            check.loaded = DiskFile::load(path);
+            // What was read is the file the text belongs to, even if it changed since the first look.
+            if (check.loaded.ok) check.now = check.loaded.version;
+        }
+        return check;
+    };
+    DiskCheck check = look();
+    // Gone from its name: the very file may be under another name now.
+    if (check.entry || check.now.exists || !known.exists || known.inode == 0 || folders.isEmpty()) return check;
+    if (findMoved(known, folders).isEmpty()) return check;
+    // A program that sets the file aside and writes a new one in its place
+    // is not moving it: the name gets a moment to come back.
+    QThread::msleep(RenameSettleMs);
+    check = look();
+    if (!check.entry && !check.now.exists) check.movedTo = findMoved(known, folders);
     return check;
+}
+
+QString DocumentStore::findMoved(const DiskVersion &known, const QStringList &folders)
+{
+    for (const QString &folder : folders.mid(0, RenameFolders)) {
+        QDirIterator entries(folder, QDir::Files | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+        for (int seen = 0; entries.hasNext() && seen < RenameEntries; ++seen) {
+            const QString candidate = entries.next();
+            struct stat state {};
+            // The file itself, never one a link leads to.
+            if (::lstat(QFile::encodeName(candidate).constData(), &state) != 0 || !S_ISREG(state.st_mode)) continue;
+            if (quint64(state.st_dev) == known.device && quint64(state.st_ino) == known.inode)
+                return DiskFile::canonicalPath(candidate);
+        }
+    }
+    return {};
+}
+
+QStringList DocumentStore::renameFolders(const QString &path) const
+{
+    QStringList folders{PathText::folderOf(path)};
+    QStringList more = m_watch.folders();
+    if (m_watchedFolders) more += m_watchedFolders();
+    for (const QString &folder : std::as_const(more))
+        if (!folder.isEmpty() && !folders.contains(folder)) folders.append(folder);
+    return folders;
+}
+
+void DocumentStore::setWatchedFolders(std::function<QStringList()> folders)
+{
+    m_watchedFolders = std::move(folders);
+}
+
+void DocumentStore::followRename(Document *document, const QString &movedTo)
+{
+    const QString from = document->m_path;
+    // The document's file as it was last read, now at its new name; what
+    // changed in it on the way is taken by the look that follows.
+    DiskVersion version = document->m_diskVersion;
+    version.canonicalPath = movedTo;
+    relocate(document, movedTo, version);
+    emit renamedElsewhere(document, from, movedTo);
+    checkDisk(document);
 }
 
 void DocumentStore::checkDisk(Document *document)
@@ -1692,7 +1767,8 @@ void DocumentStore::checkDisk(Document *document)
         }
         applyCheck(target, watcher->result());
     });
-    watcher->setFuture(QtConcurrent::run(&DocumentStore::checkJob, document->m_path, known));
+    watcher->setFuture(
+        QtConcurrent::run(&DocumentStore::checkJob, document->m_path, known, renameFolders(document->m_path)));
 }
 
 void DocumentStore::applyCheck(Document *document, const DiskCheck &check)
@@ -1756,6 +1832,12 @@ void DocumentStore::applyCheck(Document *document, const DiskCheck &check)
             document->m_lastError = tr("The file has changed since this text was last saved");
             document->refresh();
         }
+        return;
+    }
+    // Another program renamed or moved the file: the document follows it,
+    // unless another document has that file already.
+    if (missing && !check.movedTo.isEmpty() && !documentAt(check.movedTo)) {
+        followRename(document, check.movedTo);
         return;
     }
     // The file's own save, or a rewrite with the same content: nothing to
@@ -1837,11 +1919,9 @@ bool DocumentStore::refuseChoice(Document *document, const QString &error, QStri
     return false;
 }
 
-void DocumentStore::takeFile(Document *document, const LoadedFile &file)
+void DocumentStore::replaceChanged(SourceBuffer *buffer, const QString &after)
 {
-    forgetSaves(document->m_id);
-    const QString before = document->m_buffer->text();
-    const QString &after = file.text;
+    const QString before = buffer->text();
     // The shared start and end are kept, so a view keeps its place around the change.
     const qsizetype limit = std::min(before.size(), after.size());
     qsizetype start = 0;
@@ -1855,11 +1935,17 @@ void DocumentStore::takeFile(Document *document, const LoadedFile &file)
                 && sourceGraphemeBoundary(after, int(after.size() - tail))))
         --tail;
     if (before != after)
-        document->m_buffer->replace({int(start), int(before.size() - start - tail)},
-                                    after.mid(start, after.size() - start - tail));
+        buffer->replace({int(start), int(before.size() - start - tail)}, after.mid(start, after.size() - start - tail));
+}
+
+void DocumentStore::takeFile(Document *document, const LoadedFile &file)
+{
+    forgetSaves(document->m_id);
+    replaceChanged(document->m_buffer, file.text);
     document->m_buffer->markSaved();
     document->m_convention = file.convention;
     document->m_readOnly = file.readOnly;
+    document->m_convertedFrom.clear();
     document->m_textless = false;
     document->m_diskVersion = file.version;
     document->m_diskAhead = false;
@@ -2041,4 +2127,230 @@ QString DocumentStore::documentIdFor(const QString &canonicalPath)
         writeRegistry();
     }
     return id;
+}
+
+template <typename Result>
+void DocumentStore::runFiled(std::function<Result()> work, std::function<void(const Result &)> then)
+{
+    auto *watcher = new QFutureWatcher<Result>(this);
+    m_running.append(watcher);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, then = std::move(then)] {
+        m_running.removeOne(watcher);
+        watcher->deleteLater();
+        if (then) then(watcher->result());
+    });
+    watcher->setFuture(QtConcurrent::run(std::move(work)));
+}
+
+bool DocumentStore::reopenAs(Document *document, const QString &text, const TextConvention &convention,
+                             const QString &encoding, const DiskVersion &read, QString *refusal)
+{
+    const auto refused = [refusal](const QString &why) {
+        if (refusal) *refusal = why;
+        return false;
+    };
+    if (!m_documents.contains(document) || document->isDraft() || document->isScratch() || !document->m_readOnly
+        || document->m_problem == Document::Problem::Conflict)
+        return refused(tr("Only a file that is open read-only, because it is not UTF-8, can be read in another encoding."));
+    if (document->m_saving || document->m_checking || !(read == document->m_diskVersion))
+        return refused(tr("The file changed while it was being read again. Choose the encoding again."));
+    // One edit of what differs, so that a view keeps its place, after which
+    // undo leads no further back: the text read as UTF-8 is no text to return to.
+    replaceChanged(document->m_buffer, text);
+    document->m_buffer->forgetUndo();
+    document->m_convention = convention;
+    document->m_readOnly = false;
+    document->m_convertedFrom = encoding;
+    document->refresh();
+    return true;
+}
+
+void DocumentStore::confirmEncoding(Document *document, std::function<void(const QString &error)> done)
+{
+    if (!m_documents.contains(document) || document->m_convertedFrom.isEmpty()) {
+        done({});
+        return;
+    }
+    // The file's own bytes, as they were when they were read, go to history
+    // before anything is written over them.
+    runFiled<QString>([history = m_history.get(), id = document->m_id, path = document->m_path,
+                       version = document->m_diskVersion, encoding = document->m_convertedFrom]() -> QString {
+        QByteArray bytes;
+        if (!DiskFile::readVersion(path, version, bytes))
+            return tr("The file changed since it was read, so nothing was saved over it.");
+        History::CaptureStatus status = History::CaptureStatus::Failed;
+        // With the encoding they were read in, so that history can show them so.
+        history->captureUnlessNewest(id, bytes, History::Reason::Opened, &status, encoding);
+        if (status == History::CaptureStatus::Paused)
+            return tr("History is paused, so it could not keep the file's original bytes, and nothing was saved over them.");
+        if (status == History::CaptureStatus::Failed)
+            return tr("History could not keep the file's original bytes, so nothing was saved over them.");
+        return {};
+    }, [this, target = QPointer(document), done = std::move(done)](const QString &error) {
+        if (!target || !m_documents.contains(target)) return;
+        if (error.isEmpty()) {
+            target->m_convertedFrom.clear();
+            target->refresh();
+            save(target);
+        }
+        done(error);
+    });
+}
+
+void DocumentStore::restoreBytes(Document *document, const QString &versionId,
+                                 std::function<void(const QString &error)> done)
+{
+    if (!m_documents.contains(document)) {
+        done(tr("The document is no longer open."));
+        return;
+    }
+    if (document->isDraft() || document->isScratch()) {
+        done(tr("A draft keeps UTF-8 text only, so a version that is not UTF-8 cannot be restored into it."));
+        return;
+    }
+    if (document->m_textless || document->m_problem == Document::Problem::Conflict) {
+        done(tr("The document waits for a choice about its file, so nothing was restored."));
+        return;
+    }
+    if (document->m_resolving) {
+        done(tr("A choice about its file is being carried out; try again in a moment."));
+        return;
+    }
+    // After the save that runs now, and any that follows it. A look at the
+    // file that runs is looked at again once this ends.
+    if (document->m_saving) {
+        auto once = std::make_shared<QMetaObject::Connection>();
+        *once = connect(this, &DocumentStore::saveFinished, this,
+                        [this, once, target = QPointer(document), versionId, done](Document *saved) {
+            if (target && saved != target) return;
+            disconnect(*once);
+            if (target) restoreBytes(target, versionId, done);
+        });
+        return;
+    }
+    // Written as a save is: nothing else saves it or takes its file meanwhile.
+    document->m_saving = true;
+    document->refresh();
+    struct Outcome {
+        QString error;
+        LoadedFile loaded;
+    };
+    // What is kept first: the text as a save would write it, or, read-only,
+    // the file's own bytes, which the text does not hold.
+    const std::optional<QByteArray> current =
+        document->m_readOnly ? std::nullopt : std::optional<QByteArray>(document->bytes());
+    runFiled<Outcome>([history = m_history.get(), id = document->m_id, versionId, path = document->m_path,
+                       expected = document->m_diskVersion, current]() -> Outcome {
+        bool found = false;
+        const QByteArray bytes = history->read(id, versionId, &found);
+        if (!found) return {tr("That version is no longer in history"), {}};
+        QByteArray now;
+        if (current) now = *current;
+        else if (!DiskFile::readVersion(path, expected, now))
+            return {tr("The file changed on disk, so nothing was restored"), {}};
+        History::CaptureStatus status = History::CaptureStatus::Failed;
+        history->captureUnlessNewest(id, now, History::Reason::Restore, &status);
+        // A pause does not stop it, as it does not stop any restore.
+        if (status == History::CaptureStatus::Failed)
+            return {tr("The current text could not be saved to history, so nothing was restored"), {}};
+        const SaveResult saved = DiskFile::save(path, bytes, expected);
+        if (saved.status == SaveStatus::Conflict) return {tr("The file changed on disk, so nothing was restored"), {}};
+        if (saved.status != SaveStatus::Saved) return {tr("The file could not be written: %1").arg(saved.error), {}};
+        return {{}, DiskFile::load(path)};
+    }, [this, target = QPointer(document), done = std::move(done)](const Outcome &outcome) {
+        if (!target || !m_documents.contains(target)) return;
+        target->m_saving = false;
+        // The file holds the version's bytes now, which the document reads
+        // as it reads any file, read-only when they are not UTF-8.
+        if (outcome.error.isEmpty() && outcome.loaded.ok) takeFile(target, outcome.loaded);
+        else target->refresh();
+        if (std::exchange(target->m_checkAgain, false)) checkDisk(target);
+        if (std::exchange(target->m_saveAgain, false)) save(target);
+        done(outcome.error.isEmpty() && !outcome.loaded.ok ? outcome.loaded.error : outcome.error);
+    });
+}
+
+QString DocumentStore::asideFolder(const AppPaths &paths, const QString &documentId)
+{
+    // Hidden, so that neither the library nor a search lists it as a draft.
+    return paths.drafts() + QStringLiteral("/.deleted-") + documentId;
+}
+
+void DocumentStore::setDraftAside(const QString &documentId, const std::optional<QByteArray> &bytes,
+                                  std::function<void(const QString &title, const QString &error)> done)
+{
+    using Outcome = std::pair<QString, QString>;
+    if (!AppPaths::isDocumentId(documentId)) {
+        done({}, tr("It is not one of parch's drafts."));
+        return;
+    }
+    runFiled<Outcome>([paths = m_paths, history = m_history.get(), documentId, bytes]() -> Outcome {
+        QByteArray text;
+        if (bytes) {
+            text = *bytes;
+        } else {
+            QFile file(draftFile(paths, documentId));
+            if (file.open(QIODevice::ReadOnly)) text = file.readAll();
+            else if (file.exists()) return {{}, tr("Its text could not be read: %1.").arg(file.errorString())};
+        }
+        const QString title = Document::draftTitle(DiskFile::decode(text).text);
+        // History has the text before anything goes, or nothing goes.
+        if (!text.isEmpty()) {
+            History::CaptureStatus status = History::CaptureStatus::Failed;
+            history->captureUnlessNewest(documentId, text, History::Reason::Deleted, &status);
+            if (status == History::CaptureStatus::Paused)
+                return {title, tr("History is paused, so it could not keep the text, and the draft stays.")};
+            if (status == History::CaptureStatus::Failed)
+                return {title, tr("History could not keep the text, so the draft stays.")};
+        }
+        const QString folder = paths.drafts() + u'/' + documentId;
+        if (!QFileInfo::exists(folder)) return {title, {}};
+        const QString aside = asideFolder(paths, documentId);
+        if (QFileInfo::exists(aside) && !QDir(aside).removeRecursively())
+            return {title, tr("An earlier copy of it set aside could not be removed, so the draft stays.")};
+        if (!QDir().rename(folder, aside)) return {title, tr("Its folder could not be moved, so the draft stays.")};
+        return {title, {}};
+    }, [done = std::move(done)](const Outcome &outcome) { done(outcome.first, outcome.second); });
+}
+
+void DocumentStore::restoreDraft(const QString &documentId, std::function<void(const QString &error)> done)
+{
+    if (!AppPaths::isDocumentId(documentId)) {
+        done(tr("It is not one of parch's drafts."));
+        return;
+    }
+    runFiled<QString>([paths = m_paths, history = m_history.get(), documentId]() -> QString {
+        const QString folder = paths.drafts() + u'/' + documentId;
+        const QString aside = asideFolder(paths, documentId);
+        if (QFileInfo::exists(folder)) return tr("A draft is in its place already.");
+        if (QFileInfo::exists(aside))
+            return QDir().rename(aside, folder) ? QString() : tr("Its folder could not be moved back.");
+        // Its folder is gone: its text comes back from history.
+        const QList<History::Version> versions = history->versions(documentId);
+        bool found = false;
+        const QByteArray text = versions.isEmpty() ? QByteArray() : history->read(documentId, versions.first().id, &found);
+        if (!found) return tr("Nothing of it is left to put back.");
+        QSaveFile file(draftFile(paths, documentId));
+        if (!QDir().mkpath(folder) || !file.open(QIODevice::WriteOnly) || file.write(text) != text.size() || !file.commit())
+            return tr("Its text could not be written back: %1.").arg(file.errorString());
+        return {};
+    }, std::move(done));
+}
+
+void DocumentStore::forgetDraft(const QString &documentId)
+{
+    if (!AppPaths::isDocumentId(documentId)) return;
+    runFiled<bool>([aside = asideFolder(m_paths, documentId)] { return QDir(aside).removeRecursively(); }, {});
+}
+
+void DocumentStore::forgetDraftsSetAside()
+{
+    runFiled<bool>([paths = m_paths] {
+        const QDir drafts(paths.drafts());
+        const QString prefix = QStringLiteral(".deleted-");
+        bool all = true;
+        for (const QString &name : drafts.entryList({prefix + u'*'}, QDir::Dirs | QDir::Hidden))
+            if (AppPaths::isDocumentId(name.mid(prefix.size()))) all = QDir(drafts.filePath(name)).removeRecursively() && all;
+        return all;
+    }, {});
 }

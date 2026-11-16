@@ -31,6 +31,11 @@ public:
     // A file, or a folder and everything in it, moved: its paths follow, in
     // their places.
     void relocate(const QString &from, const QString &to);
+    // Takes a path out of the list, or every path.
+    void forget(const QString &path);
+    void clear();
+    // Puts paths back, as clearing the list undone, after those it holds now.
+    void restore(const QStringList &paths);
     QStringList paths() const;
     // Nothing is at the path any more.
     bool missing(const QString &path) const;

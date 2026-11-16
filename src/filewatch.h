@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QThreadPool>
 
 class QFileSystemWatcher;
@@ -33,6 +34,8 @@ public:
 
     void watch(const QString &path);
     void unwatch(const QString &path);
+    // The folders of the files watched, each once.
+    QStringList folders() const;
 
 signals:
     // The file exists after a burst of events. This can also be a change that

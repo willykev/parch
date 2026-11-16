@@ -20,11 +20,13 @@
 #include "textsearch.h"
 #include "windowcontext.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QPointer>
 #include <QRegularExpression>
 #include <QThreadPool>
+#include <QtConcurrent>
 #include <memory>
 #include <utility>
 
@@ -57,13 +59,24 @@ QString spelledClean(const QString &path)
 {
     return QDir::cleanPath(path) == path ? path : DiskFile::literalPath(path);
 }
+
+// What history keeps, as the settings say.
+HistoryLimits historyLimitsOf(const Settings *settings)
+{
+    HistoryLimits limits;
+    limits.versions = settings->historyVersions();
+    limits.days = settings->historyDays();
+    limits.bytes = qRound64(settings->historyGigabytes() * 10) * (qint64(1) << 30) / 10;
+    return limits;
+}
 } // namespace
 
 Backend::Backend(const AppPaths &paths, QObject *parent)
-    : QObject(parent), m_paths(paths), m_recovery(std::make_unique<Recovery>(paths)),
-      m_store(std::make_unique<DocumentStore>(paths)),
+    : QObject(parent), m_paths(paths), m_settings(new Settings(paths.settingsFile(), this)),
+      m_recovery(std::make_unique<Recovery>(paths)),
+      m_store(std::make_unique<DocumentStore>(paths, historyLimitsOf(m_settings))),
       m_autosave(std::make_unique<Autosave>(m_store.get(), m_recovery.get())),
-      m_settings(new Settings(paths.settingsFile(), this)), m_commands(std::make_unique<CommandRegistry>(m_settings)),
+      m_commands(std::make_unique<CommandRegistry>(m_settings)),
       m_recentFiles(std::make_unique<RecentFiles>(paths)),
       m_libraryPool(std::make_unique<QThreadPool>()), m_sessionWriter(paths),
       m_files(std::make_unique<FileRequests>(m_store.get(), m_settings)),
@@ -84,6 +97,9 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     // Two workers: enough to list a folder while another is slow, and few
     // enough that a folder that never answers costs little.
     m_libraryPool->setMaxThreadCount(2);
+    // The guide the package installs beside the program, as <prefix>/share/doc/parch.
+    m_installedGuide = QDir::cleanPath(QCoreApplication::applicationDirPath()
+                                       + QStringLiteral("/../share/doc/parch/guide.md"));
     addCommands();
     // Text in recovery is safe, but only a write started after a refused quit
     // shows that the text it refused is; a document closes only once it is clean.
@@ -141,6 +157,33 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     });
     // The store names folders in its messages as the header does.
     m_store->setFolderNames([this](const QString &path) { return folderLabel(path); });
+    // A file another program renames is looked for in the folders the
+    // libraries watch too.
+    m_store->setWatchedFolders([this] {
+        QStringList folders;
+        for (WindowContext *window : std::as_const(m_windows))
+            for (const QString &folder : window->library()->watchedFolders())
+                if (!folders.contains(folder)) folders.append(folder);
+        return folders;
+    });
+    // A document whose file another program renamed or moved has followed
+    // it: so do its tabs not read yet, its place among the recent files and
+    // where the writer was in it, and recovery takes unsaved text at the new
+    // name at once.
+    connect(m_store.get(), &DocumentStore::renamedElsewhere, this,
+            [this](Document *document, const QString &from, const QString &to) {
+        for (WindowContext *window : std::as_const(m_windows)) window->tabs()->relocate(from, to);
+        m_recentFiles->relocate(from, to);
+        m_positions->relocate(from, to);
+        scheduleSession();
+        if (document->buffer()->modified()) m_autosave->writeNow(document);
+        const bool sameFolder = PathText::folderOf(from) == PathText::folderOf(to);
+        inform(sameFolder ? tr("Renamed: %1").arg(PathText::fileName(to)) : tr("Moved: %1").arg(PathText::fileName(to)),
+               sameFolder ? tr("Another program renamed “%1” to “%2”. Its tab follows it.")
+                                .arg(PathText::fileName(from), PathText::fileName(to))
+                          : tr("Another program moved “%1” from “%2” to “%3”. Its tab follows it.")
+                                .arg(PathText::fileName(from), folderLabel(from), folderLabel(to)));
+    });
     // A draft named where its assets cannot go says where they stay.
     connect(m_store.get(), &DocumentStore::assetsKept, this, [this](Document *named, const QString &folder) {
         post(tr("Assets not moved: %1").arg(named->title()),
@@ -191,6 +234,9 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
         emit historyPausedChanged();
     }, Qt::QueuedConnection);
     m_review->checkPaused();
+    // The limits history keeps change with the settings, and apply at once.
+    m_historyLimits = historyLimitsOf(m_settings);
+    connect(m_settings, &Settings::changed, this, &Backend::followHistoryLimits);
     // The file dialogs' answers, and the dialogs' actions, are actions too:
     // each clears a notice, and what goes wrong is one.
     connect(m_files.get(), &FileRequests::answered, this, &Backend::clearNotice);
@@ -303,6 +349,8 @@ void Backend::addCommands()
     // So is the Markdown styled as it is written.
     m_commands->setAction(QStringLiteral("liveFormatting"),
                           [this](WindowContext *) { m_settings->setLiveFormatting(!m_settings->liveFormatting()); });
+    m_commands->setAction(QStringLiteral("clearRecent"), inWindow(&Backend::clearRecent));
+    m_commands->setAction(QStringLiteral("userGuide"), inWindow(&Backend::openUserGuide));
 }
 RecentFiles *Backend::recentFiles() const { return m_recentFiles.get(); }
 ReadingPositions *Backend::readingPositions() const { return m_positions.get(); }
@@ -313,6 +361,7 @@ QString Backend::problemDetail() const { return m_problemDetail; }
 bool Backend::notice() const { return m_notice && !m_problem.isEmpty(); }
 Backend::NoticeTone Backend::noticeTone() const { return notice() ? m_tone : Failure; }
 bool Backend::noticeInforms() const { return noticeTone() == News; }
+bool Backend::noticeUndoable() const { return notice() && bool(m_undo); }
 FileRequests *Backend::fileRequests() const { return m_files.get(); }
 DocumentReview *Backend::review() const { return m_review.get(); }
 Attachments *Backend::attachments() const { return m_attachments.get(); }
@@ -368,6 +417,8 @@ void Backend::start(const QStringList &files)
 {
     // The dictionary is read off the UI thread while the windows open.
     m_spelling->load();
+    // Drafts deleted before parch last ended can no longer be undone.
+    m_store->forgetDraftsSetAside();
     bool onlyKept = false;
     const QStringList recovered = restoreSession(&onlyKept);
     if (m_windows.isEmpty()) {
@@ -543,9 +594,40 @@ void Backend::save()
     clearNotice();
     WindowContext *window = activeWindow();
     Document *document = this->document();
-    if (!window || !document) return;
-    if (document->isDraft()) m_files->askForName(window, document, false);
+    if (!window || !document || refuseReadOnlyScratch(document)) return;
+    // A file read in another encoding is written as UTF-8 only once the writer says so.
+    if (!document->convertedFrom().isEmpty()) window->askToConfirmEncoding(document);
+    else if (document->isDraft()) m_files->askForName(window, document, false);
     else m_store->save(document);
+}
+
+bool Backend::reopenAs(Document *document, EncodingChoice *choice)
+{
+    clearNotice();
+    if (!document || !choice || choice->document() != document || !choice->ready()) return false;
+    QString refusal;
+    const Encodings::Decoded decoded = choice->decoded();
+    if (m_store->reopenAs(document, decoded.text, decoded.convention, choice->name(), choice->version(), &refusal))
+        return true;
+    notify(tr("Not read again: %1").arg(document->title()), refusal);
+    return false;
+}
+
+void Backend::confirmEncoding(Document *document)
+{
+    clearNotice();
+    if (!document) return;
+    m_store->confirmEncoding(document, [this, title = document->title()](const QString &error) {
+        if (!error.isEmpty()) notify(tr("Not saved: %1").arg(title), error);
+    });
+}
+
+bool Backend::refuseReadOnlyScratch(Document *document)
+{
+    if (!document->isScratch() || document->state() != Document::State::ReadOnly) return false;
+    notify(tr("Read-only: not saved"),
+           tr("%1 is parch's own, and read-only. Copy what you need into a document of your own.").arg(document->title()));
+    return true;
 }
 
 void Backend::saveAs()
@@ -553,7 +635,7 @@ void Backend::saveAs()
     clearNotice();
     WindowContext *window = activeWindow();
     Document *document = this->document();
-    if (!window || !document) return;
+    if (!window || !document || refuseReadOnlyScratch(document)) return;
     if (document->state() == Document::State::ReadOnly) {
         notify(tr("Read-only: not saved"),
                tr("%1 is not valid UTF-8 text. It is open read-only so that its bytes stay as they are, and it "
@@ -868,6 +950,18 @@ void Backend::forgetRecoveryFailure(const QString &documentId)
     if (m_recoveryFailures.remove(documentId) > 0) emit recoveryFailuresChanged();
 }
 
+void Backend::followHistoryLimits()
+{
+    // Compared with what history was last given, so that the many changes
+    // of other settings never wait for history's lock.
+    const HistoryLimits wanted = historyLimitsOf(m_settings);
+    if (wanted.versions == m_historyLimits.versions && wanted.days == m_historyLimits.days
+        && wanted.bytes == m_historyLimits.bytes)
+        return;
+    m_historyLimits = wanted;
+    history()->setLimits(wanted);
+}
+
 WindowContext *Backend::makeWindow()
 {
     auto *window = new WindowContext(
@@ -876,6 +970,9 @@ WindowContext *Backend::makeWindow()
     // Why a tab holds no document is worded as a notice is, a path from ~.
     window->tabs()->setShownText([this](const QString &text) { return shownText(text); });
     window->setFolderSearch(new FolderSearch(m_paths, m_store.get(), m_settings));
+    // A new window's library starts at the width chosen last; a session's
+    // window then takes its own.
+    window->setLibraryWidth(m_settings->libraryWidth());
     connect(window, &WindowContext::changed, this, &Backend::scheduleSession);
     connect(window->tabs(), &TabModel::documentAdded, this, &Backend::watch);
     m_windows.append(window);
@@ -1095,9 +1192,12 @@ void Backend::closeTab(WindowContext *window, int index)
         askToClose(window, document);
         return;
     }
-    // A named document's own file takes the text before its tab goes.
+    // A named document's own file takes the text before its tab goes, unless
+    // it was read in another encoding and nothing may save it yet: its text
+    // is kept as an unsaved draft's is.
     const Document::State state = last ? document->state() : Document::State::Clean;
-    if (last && !document->isDraft() && (state == Document::State::Modified || state == Document::State::Saving)) {
+    if (last && !document->isDraft() && document->convertedFrom().isEmpty()
+        && (state == Document::State::Modified || state == Document::State::Saving)) {
         closeOnceSaved(window, document);
         return;
     }
@@ -1317,6 +1417,185 @@ void Backend::sayDictionaryIsMissing()
     else post(problem, detail, Warning);
 }
 
+void Backend::setInstalledGuide(const QString &path)
+{
+    m_installedGuide = path;
+}
+
+void Backend::openUserGuide()
+{
+    clearNotice();
+    if (!activeWindow()) return;
+    // One guide at a time: the tab that shows it comes to the front.
+    if (m_userGuide && m_store->documents().contains(m_userGuide)) {
+        showDocument(activeWindow(), m_userGuide)->raise();
+        return;
+    }
+    if (std::exchange(m_readingGuide, true)) return;
+    // The installed copy, read off the UI thread, or else the one parch carries.
+    QtConcurrent::run(m_libraryPool.get(), [installed = m_installedGuide] {
+        for (const QString &path : {installed, QStringLiteral(":/docs/guide.md")}) {
+            QFile file(path);
+            if (!path.isEmpty() && file.open(QIODevice::ReadOnly)) return DiskFile::decode(file.readAll()).text;
+        }
+        return QString();
+    }).then(this, [this](const QString &text) {
+        m_readingGuide = false;
+        WindowContext *window = activeWindow();
+        if (!window) return;
+        m_userGuide = m_store->newScratch(tr("User guide"), text, true);
+        showDocument(window, m_userGuide)->raise();
+    });
+}
+
+void Backend::forgetRecent(const QString &path)
+{
+    clearNotice();
+    m_recentFiles->forget(path);
+}
+
+void Backend::clearRecent()
+{
+    clearNotice();
+    const QStringList paths = m_recentFiles->paths();
+    if (paths.isEmpty()) return;
+    m_recentFiles->clear();
+    postUndoable(tr("Recent files cleared"), tr("The files themselves are where they were."),
+                 [this, paths] { m_recentFiles->restore(paths); });
+}
+
+void Backend::deleteDraft(const QString &documentId)
+{
+    clearNotice();
+    Document *open = nullptr;
+    for (Document *document : m_store->documents())
+        if (document->id() == documentId) open = document;
+    if (open ? !open->isDraft() : !m_store->isUnnamedDraft(documentId)) {
+        notify(tr("Draft not found"), tr("This draft is no longer among parch's drafts."));
+        return;
+    }
+    if (!open) {
+        setDraftAside(documentId, std::nullopt);
+        return;
+    }
+    // Text being written in another window is not taken from under it.
+    const auto writtenElsewhere = [this](Document *draft) {
+        return (draft->differsFromFile() || draft->isSaving()) && viewsOf(draft, activeWindow()) > 0;
+    };
+    const auto refuse = [this](Document *draft) {
+        notify(tr("Draft not deleted: %1").arg(draft->title()),
+               tr("It is open in another window with text not yet saved. Close it there, or delete it once it is saved."));
+    };
+    if (writtenElsewhere(open)) {
+        refuse(open);
+        return;
+    }
+    // History takes the text as it is now first, on a worker; text written
+    // meanwhile is taken too, before anything goes.
+    // Each record holds what records again, which holds itself only weakly.
+    auto keep = std::make_shared<std::function<void(Document *)>>();
+    *keep = [this, weak = std::weak_ptr(keep), writtenElsewhere, refuse](Document *draft) {
+        m_review->record(draft, [this, again = weak.lock(), writtenElsewhere, refuse, target = QPointer(draft)](
+                                    History::CaptureStatus status, Revision recorded) {
+            if (!target) return;
+            if (target->buffer()->revision() != recorded) {
+                (*again)(target);
+                return;
+            }
+            if (status != History::CaptureStatus::Recorded && status != History::CaptureStatus::Held) {
+                notify(tr("Draft not deleted: %1").arg(target->title()),
+                       status == History::CaptureStatus::Paused
+                           ? tr("History is paused, so it could not keep the text, and the draft stays.")
+                           : tr("History could not keep the text, so the draft stays."));
+                return;
+            }
+            if (writtenElsewhere(target)) {
+                refuse(target);
+                return;
+            }
+            takeDraftOut(target);
+        }, History::Reason::Deleted);
+    };
+    (*keep)(open);
+}
+
+void Backend::takeDraftOut(Document *draft)
+{
+    const QString id = draft->id();
+    const QByteArray bytes = draft->bytes();
+    // Set aside once the store has let it go, after any save of it has
+    // ended, so that nothing writes in its folder afterwards.
+    auto closed = std::make_shared<QMetaObject::Connection>();
+    *closed = connect(m_store.get(), &DocumentStore::documentClosed, this,
+                      [this, closed, id, bytes](const QString &gone) {
+        if (gone != id) return;
+        disconnect(*closed);
+        setDraftAside(id, bytes);
+    });
+    // Its recovery entry goes with it.
+    m_givenUp.insert(id);
+    for (WindowContext *window : std::as_const(m_windows)) {
+        TabModel *tabs = window->tabs();
+        if (tabs->indexOf(draft) < 0) continue;
+        rememberPositions(window);
+        // A window keeps a tab to write in.
+        if (tabs->viewsOf(draft) >= tabs->rowCount()) tabs->openDocument(m_store->newDraft());
+        for (int index = tabs->indexOf(draft); index >= 0; index = tabs->indexOf(draft)) tabs->closeTab(index);
+    }
+    if (m_store->documents().contains(draft)) m_store->drop(draft);
+}
+
+void Backend::setDraftAside(const QString &documentId, const std::optional<QByteArray> &bytes)
+{
+    m_store->setDraftAside(documentId, bytes, [this, documentId](const QString &title, const QString &error) {
+        const QString name = title.isEmpty() ? tr("Untitled") : title;
+        if (!error.isEmpty()) {
+            notify(tr("Draft not deleted: %1").arg(name), error);
+            return;
+        }
+        postUndoable(tr("Draft deleted: %1").arg(name), tr("Its text is kept in history."),
+                     [this, documentId, name] {
+            m_store->restoreDraft(documentId, [this, documentId, name](const QString &error) {
+                if (!error.isEmpty()) {
+                    notify(tr("Draft not put back: %1").arg(name), error);
+                    return;
+                }
+                openDraft(documentId);
+            });
+        }, [this, documentId] { m_store->forgetDraft(documentId); });
+    });
+}
+
+void Backend::undoNotice()
+{
+    if (!noticeUndoable()) return;
+    // Undone, it needs forgetting no more.
+    const std::function<void()> undo = std::exchange(m_undo, {});
+    m_forgetUndo = {};
+    clearNotice();
+    undo();
+}
+
+void Backend::postUndoable(const QString &news, const QString &detail, std::function<void()> undo,
+                           std::function<void()> forget)
+{
+    post(news, detail, News);
+    // A refused quit holds the notice; the news joins it, without Undo.
+    if (!m_unsafe.isEmpty()) {
+        if (forget) forget();
+        return;
+    }
+    m_undo = std::move(undo);
+    m_forgetUndo = std::move(forget);
+    emit problemChanged();
+}
+
+void Backend::dropUndo()
+{
+    m_undo = {};
+    if (const std::function<void()> forget = std::exchange(m_forgetUndo, {})) forget();
+}
+
 void Backend::setProblem(const QString &problem, const QString &detail)
 {
     if (problem == m_problem && detail == m_problemDetail) return;
@@ -1342,8 +1621,11 @@ void Backend::post(const QString &problem, const QString &detail, NoticeTone ton
         setProblem(m_problem, m_problemDetail + u'\n' + detail);
         return;
     }
+    // A notice in its place can no longer be undone.
+    const bool undoable = noticeUndoable();
+    dropUndo();
     // Everything about the notice is set first, and said once.
-    const bool same = m_notice && m_tone == tone && problem == m_problem && detail == m_problemDetail;
+    const bool same = !undoable && m_notice && m_tone == tone && problem == m_problem && detail == m_problemDetail;
     m_notice = true;
     m_tone = tone;
     m_problem = problem;
@@ -1353,6 +1635,7 @@ void Backend::post(const QString &problem, const QString &detail, NoticeTone ton
 
 void Backend::clearNotice()
 {
+    dropUndo();
     if (!std::exchange(m_notice, false)) return;
     m_tone = Failure;
     setProblem({}, {});

@@ -64,7 +64,8 @@ bool Autosave::needsRecovery(const Document *document)
 
 void Autosave::watch(Document *document)
 {
-    if (!document || m_watches.contains(document->id())) return;
+    // parch's own documents, such as its guide, are never saved or kept.
+    if (!document || document->isScratch() || m_watches.contains(document->id())) return;
     auto *watch = new Watch;
     watch->document = document;
     watch->id = document->id();

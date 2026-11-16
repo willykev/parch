@@ -4,6 +4,10 @@ parch is a Markdown writing app for Omarchy. It edits Markdown as plain text,
 with every `#`, `*` and `[link](…)` in view, and keeps what you write safe
 while you work.
 
+This guide is also in parch: **User guide** in the menu, or `F1`, opens it
+in a read-only tab. The package installs it as
+`/usr/share/doc/parch/guide.md`.
+
 ## Documents and drafts
 
 - **New draft** (`Ctrl+N`) opens an empty tab. A draft is kept in parch's own
@@ -17,7 +21,11 @@ while you work.
 - Run `parch new-note.md` with a name that does not exist yet to start a
   document that becomes that file when you first type.
 - A file that is not valid UTF-8 opens read-only, so its bytes stay exactly as
-  they are.
+  they are. **Reopen as…**, in the bar above the text, reads it in the
+  encoding it was written in: Windows-1252, Latin-1, UTF-16 and every other
+  your system knows, with a preview of the text in each. Once you convert
+  it, you can edit it, and nothing is saved until you choose **Save as
+  UTF-8**, which keeps the file's original bytes in its history first.
 - parch opens files of up to 64 MiB, at paths of up to 4,095 bytes with every
   link followed. A larger file, or a longer path, is not opened, and parch
   says why.
@@ -209,11 +217,12 @@ another command has can be swapped. **Remove** leaves a command without keys,
 the theme's; the text size; the line height; the longest line, in
 characters; whether the Markdown is styled as you write; how headings are
 written; whether the formatting toolbar shows; whether spelling is checked;
-and what focus mode keeps bright. A window too
-narrow for the toolbar hides it until you ask for it with **Show toolbar**.
-Every change applies at once in every window. Under **Keys**, **Edit with Vim
-keys** turns on Vim keys. Under **Markdown and citations**, the Markdown
-profile, extensions, citation style and bibliography for every document, as
+what focus mode keeps bright; and how many versions history keeps, for how
+long and in how much space. A window too narrow for the toolbar hides it
+until you ask for it with **Show toolbar**. Every change applies at once in
+every window. Under **Keys**, **Edit with Vim keys** turns on Vim keys. Under
+**Markdown and citations**, the Markdown profile, extensions, citation style
+and bibliography for every document, as
 [Document settings](#document-settings) describes them.
 
 Under **Preview** it sets the reading font, which is a serif made for reading
@@ -469,8 +478,15 @@ parch keeps earlier versions of each document. Open them with
   says why it was kept.
 - **Restore** replaces the text with the chosen version; `Ctrl+Z` takes it
   back.
+- A file you reopened in another encoding and saved as UTF-8 keeps its
+  original bytes as a version, shown as that encoding reads them, and saying
+  so. **Restore** on it puts those bytes back into the file as they were; the
+  file then opens read-only again, and **Reopen as…** reads it once more. The
+  text it replaced is kept as a version too.
 - **Name this version** keeps a version until you delete it. Unnamed versions
-  are kept for 30 days, at most 100 per document, within 1 GiB in all.
+  are kept for 30 days, at most 100 per document, within 1 GB in all. Under
+  **History** in **Preferences…** you can change all three. A lower limit
+  removes the older versions past it at once, but never a version you named.
 - If named versions alone fill that space, history pauses and the notice bar
   says so. Saving carries on.
 
@@ -490,6 +506,11 @@ parch watches the files you have open.
   - **Overwrite**: save your text over the file. The file's text goes to
     history.
   - **Save as…**: put your text somewhere else.
+- If another program renames the file, or moves it into a folder parch
+  watches (that of another open file, or a library folder you have open),
+  the tab follows it, with any unsaved text, its history and its place among
+  the recent files, and a notice says so. Moved anywhere else, the file is
+  missing, as if it had been deleted.
 - If the file was deleted, **Save again** puts your text back where it was.
 - If the file was replaced by a link to another file, nothing is read from
   or written to that file unless you choose **Follow the link**. **Put this
@@ -508,9 +529,21 @@ parch watches the files you have open.
 
 ## The library
 
-`F9` shows or hides the library beside the text.
+`F9` shows or hides the library beside the text. Drag its edge to make it
+wider or narrower, or reach the edge with `Tab` and use `Left` and `Right`
+(`Home` and `End` for as narrow or as wide as it goes). Each window keeps its
+own width, and the session brings it back; a new window starts at the width
+you chose last.
 
 - **Drafts** lists your drafts. **Recent** lists the files you opened last.
+- `Delete` on a recent file, or **Remove from recent** in its menu, takes it
+  out of **Recent**; the file stays where it is. **Clear recent files**, in
+  the menu (`F10`), the command palette and the menu of **Recent**, empties
+  the list, and **Undo** in the notice that says so brings it back.
+- `Delete` on a draft, or **Delete draft** in its menu, deletes it. Its text
+  is kept in its history first, and **Undo** in the notice that says so
+  brings the draft back, attachments and all, while the notice shows. A draft
+  open in another window with text not yet saved is not deleted.
 - **Open folder** adds a folder. Its `.md`, `.markdown` and `.txt` files are
   listed beneath it and follow changes on disk.
 - **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
@@ -610,6 +643,7 @@ and so does asking for the library or the toolbar.
 | `Esc` | Close the find bar, leave distraction-free writing, or dismiss a notice |
 | `Ctrl+Shift+P` | Command palette |
 | `Ctrl+,` | Preferences |
+| `F1` | User guide |
 | `Ctrl+B` / `Ctrl+I` | Bold / italic |
 | `Ctrl+Shift+X` / `Ctrl+Shift+H` | Strikethrough / highlight |
 | `Ctrl+E` / `Ctrl+/` | Inline code / comment |

@@ -1,6 +1,7 @@
 #include "windowcontext.h"
 
 #include "document.h"
+#include "settings.h"
 #include "sourcebuffer.h"
 
 WindowContext::WindowContext(DocumentStore *store, LibraryModel *library, QObject *parent)
@@ -24,6 +25,17 @@ void WindowContext::setLibraryOpen(bool open)
     emit changed();
 }
 
+int WindowContext::libraryWidth() const { return m_libraryWidth; }
+
+void WindowContext::setLibraryWidth(int width)
+{
+    width = qBound(Settings::MinLibraryWidth, width, Settings::MaxLibraryWidth);
+    if (width == m_libraryWidth) return;
+    m_libraryWidth = width;
+    emit libraryWidthChanged();
+    emit changed();
+}
+
 void WindowContext::setSize(const QSize &size)
 {
     if (size == m_size) return;
@@ -36,6 +48,7 @@ WindowState WindowContext::state() const
 {
     WindowState state;
     state.libraryOpen = m_libraryOpen;
+    state.libraryWidth = m_libraryWidth;
     state.size = size();
     const int active = m_tabs->activeIndex();
     for (int i = 0; i < m_tabs->rowCount(); ++i) {
@@ -44,6 +57,8 @@ WindowState WindowContext::state() const
         if (document && document->isDraft() && document->buffer()->length() == 0 && !document->buffer()->modified()
             && document->diskVersion().canonicalPath.isEmpty())
             continue;
+        // Nor has one of parch's own, such as its guide, which opens afresh.
+        if (document && document->isScratch()) continue;
         if (i <= active) state.activeTab = int(state.tabs.size());
         state.tabs.append(m_tabs->viewState(i));
     }
@@ -53,6 +68,7 @@ WindowState WindowContext::state() const
 void WindowContext::restore(const WindowState &state)
 {
     setLibraryOpen(state.libraryOpen);
+    if (state.libraryWidth > 0) setLibraryWidth(state.libraryWidth);
     if (state.size.isValid()) m_initialSize = state.size;
     m_tabs->restore(state.tabs, state.activeTab);
 }
@@ -63,6 +79,11 @@ QString WindowContext::folderToShow() const { return m_folderToShow; }
 void WindowContext::askToClose(Document *document, bool discarding)
 {
     emit closeConfirmationRequested(document, discarding);
+}
+
+void WindowContext::askToConfirmEncoding(Document *document)
+{
+    emit encodingConfirmationRequested(document);
 }
 
 void WindowContext::showFolder(const QString &path, bool takesKeys)

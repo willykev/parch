@@ -19,6 +19,8 @@ import "icons.js" as Icons
 // menu key offers what can be done with the row: a folder of the library can
 // be taken out of it, and what lies inside one can be made, renamed (F2),
 // moved, also by dragging it onto a folder, or moved to the trash (Delete).
+// A recent file can be taken out of Recent (Delete), and Recent cleared; a
+// draft can be deleted (Delete), which the notice that says so can undo.
 // Escape anywhere in the library empties the field and goes back to the text.
 //
 // Beneath the folders, the outline of the document in front can be shown.
@@ -163,7 +165,14 @@ Item {
         const kind = rowData(row, LibraryModel.KindRole)
         const path = rowData(row, LibraryModel.PathRole)
         let menu = null
-        if (kind === "folder" && tree.depth(row) === 0) {
+        if (inRecent(row) || (kind === "section" && rowData(row, LibraryModel.SectionRole) === "recent")) {
+            menu = listMenu
+            listMenu.kind = kind === "section" ? "recentSection" : "recent"
+        } else if (kind === "draft") {
+            menu = listMenu
+            listMenu.kind = "draft"
+            listMenu.documentId = rowData(row, LibraryModel.DocumentIdRole)
+        } else if (kind === "folder" && tree.depth(row) === 0) {
             menu = folderMenu
         } else if ((kind === "folder" || kind === "document") && backend.organizer.organizes(path)) {
             menu = entryMenu
@@ -177,6 +186,27 @@ Item {
         menu.x = below.x
         menu.y = below.y
         menu.open()
+    }
+
+    // Whether the row is a file in the Recent section.
+    function inRecent(row) {
+        const index = tree.index(row, 0)
+        return index.valid && rowData(row, LibraryModel.KindRole) === "document"
+               && panel.library.data(index.parent, LibraryModel.SectionRole) === "recent"
+    }
+
+    // What Delete does on a row: a recent file leaves Recent, a draft is
+    // deleted, and what lies inside a library folder is offered to the trash.
+    function deleteRow(row) {
+        if (row < 0)
+            return
+        backend.activate(panel.context)
+        if (inRecent(row))
+            backend.forgetRecent(rowData(row, LibraryModel.PathRole))
+        else if (rowData(row, LibraryModel.KindRole) === "draft")
+            backend.deleteDraft(rowData(row, LibraryModel.DocumentIdRole))
+        else
+            askTrash(rowData(row, LibraryModel.PathRole))
     }
 
     function nameOf(path) {
@@ -588,7 +618,7 @@ Item {
                 panel.askRename(panel.cursorEntry().path)
                 break
             case Qt.Key_Delete:
-                panel.askTrash(panel.cursorEntry().path)
+                panel.deleteRow(row)
                 break
             case Qt.Key_Menu:
             case Qt.Key_F10:
@@ -1024,6 +1054,77 @@ Item {
             treeKey: "Del"
             danger: true
             onTriggered: panel.askTrash(entryMenu.folder)
+        }
+    }
+
+    // What can be done with a recent file, with Recent, or with a draft.
+    Menu {
+        id: listMenu
+        objectName: "libraryListMenu"
+
+        // "recent", "recentSection" or "draft".
+        property string kind
+        property string folder
+        property string documentId
+
+        padding: Math.max(1, theme.controlBorderWidth)
+        font.family: theme.fontFamily
+        font.pixelSize: theme.fontSize
+
+        // Which entries show changes with the row, so the list is laid out
+        // again as it opens.
+        onAboutToShow: listEntries.forceLayout()
+
+        contentItem: ListView {
+            id: listEntries
+            implicitWidth: Math.max(forgetRecentEntry.implicitWidth, clearRecentEntry.implicitWidth,
+                                    deleteDraftEntry.implicitWidth)
+            implicitHeight: forgetRecentEntry.height + clearRecentEntry.height + deleteDraftEntry.height
+            model: listMenu.contentModel
+            interactive: false
+            clip: true
+            currentIndex: listMenu.currentIndex
+        }
+
+        background: Rectangle {
+            color: theme.menuBackground
+            radius: theme.radius
+            border.width: Math.max(1, theme.controlBorderWidth)
+            border.color: theme.menuBorder
+        }
+
+        MenuEntry {
+            id: forgetRecentEntry
+            objectName: "menuForgetRecent"
+            shown: listMenu.kind === "recent"
+            text: qsTr("Remove from recent")
+            treeKey: "Del"
+            onTriggered: {
+                backend.activate(panel.context)
+                backend.forgetRecent(listMenu.folder)
+            }
+        }
+        MenuEntry {
+            id: clearRecentEntry
+            objectName: "menuClearRecent"
+            shown: listMenu.kind === "recent" || listMenu.kind === "recentSection"
+            text: qsTr("Clear recent files")
+            onTriggered: {
+                backend.activate(panel.context)
+                backend.clearRecent()
+            }
+        }
+        MenuEntry {
+            id: deleteDraftEntry
+            objectName: "menuDeleteDraft"
+            shown: listMenu.kind === "draft"
+            text: qsTr("Delete draft")
+            treeKey: "Del"
+            danger: true
+            onTriggered: {
+                backend.activate(panel.context)
+                backend.deleteDraft(listMenu.documentId)
+            }
         }
     }
 

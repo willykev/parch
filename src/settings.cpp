@@ -34,6 +34,12 @@ const auto outlineShownKey = QStringLiteral("outlineShown");
 const auto spellcheckKey = QStringLiteral("spellcheck");
 const auto focusUnitKey = QStringLiteral("focusUnit");
 const auto liveFormattingKey = QStringLiteral("liveFormatting");
+const auto historyVersionsKey = QStringLiteral("historyVersions");
+const auto historyDaysKey = QStringLiteral("historyDays");
+const auto historyGigabytesKey = QStringLiteral("historyGigabytes");
+
+// History's space, in tenths of a gigabyte.
+qreal inTenths(qreal gigabytes) { return qRound(gigabytes * 10) / 10.0; }
 const auto previewFontFamilyKey = QStringLiteral("previewFontFamily");
 const auto previewFontPixelSizeKey = QStringLiteral("previewFontPixelSize");
 const auto previewLineHeightKey = QStringLiteral("previewLineHeight");
@@ -118,7 +124,15 @@ QVariantMap Settings::limits() const
 {
     return {{QStringLiteral("minFontPixelSize"), MinFontPixelSize}, {QStringLiteral("maxFontPixelSize"), MaxFontPixelSize},
             {QStringLiteral("minLineHeight"), MinLineHeight},       {QStringLiteral("maxLineHeight"), MaxLineHeight},
-            {QStringLiteral("minLineLength"), MinLineLength},       {QStringLiteral("maxLineLength"), MaxLineLength}};
+            {QStringLiteral("minLineLength"), MinLineLength},       {QStringLiteral("maxLineLength"), MaxLineLength},
+            {QStringLiteral("minLibraryWidth"), MinLibraryWidth},
+            {QStringLiteral("maxLibraryWidth"), MaxLibraryWidth},
+            {QStringLiteral("minHistoryVersions"), MinHistoryVersions},
+            {QStringLiteral("maxHistoryVersions"), MaxHistoryVersions},
+            {QStringLiteral("minHistoryDays"), MinHistoryDays},
+            {QStringLiteral("maxHistoryDays"), MaxHistoryDays},
+            {QStringLiteral("minHistoryGigabytes"), MinHistoryGigabytes},
+            {QStringLiteral("maxHistoryGigabytes"), MaxHistoryGigabytes}};
 }
 
 void Settings::setEditorFontFamily(const QString &family)
@@ -210,6 +224,15 @@ void Settings::writeShortcuts()
     emit changed();
 }
 
+void Settings::setLibraryWidth(int width)
+{
+    if (width < MinLibraryWidth || width > MaxLibraryWidth || width == m_libraryWidth) return;
+    m_libraryWidth = width;
+    m_stored.insert(libraryWidthKey, width);
+    write();
+    emit changed();
+}
+
 void Settings::setLibraryFolders(const QStringList &folders)
 {
     const QStringList usable = usableFolders(folders);
@@ -266,6 +289,15 @@ void Settings::setLiveFormatting(bool on)
     emit changed();
 }
 
+void Settings::setHistoryVersions(int versions)
+{
+    if (versions < MinHistoryVersions || versions > MaxHistoryVersions || versions == m_historyVersions) return;
+    m_historyVersions = versions;
+    m_stored.insert(historyVersionsKey, versions);
+    write();
+    emit changed();
+}
+
 int Settings::previewFontPixelSize() const
 {
     return m_previewSize > 0 ? m_previewSize
@@ -283,12 +315,32 @@ void Settings::setPreviewFontFamily(const QString &family)
     emit changed();
 }
 
+void Settings::setHistoryDays(int days)
+{
+    if (days < MinHistoryDays || days > MaxHistoryDays || days == m_historyDays) return;
+    m_historyDays = days;
+    m_stored.insert(historyDaysKey, days);
+    write();
+    emit changed();
+}
+
 void Settings::setPreviewFontPixelSize(int size)
 {
     size = qBound(MinFontPixelSize, size, MaxFontPixelSize);
     if (size == m_previewSize) return;
     m_previewSize = size;
     m_stored.insert(previewFontPixelSizeKey, size);
+    write();
+    emit changed();
+}
+
+void Settings::setHistoryGigabytes(qreal gigabytes)
+{
+    if (!(gigabytes >= MinHistoryGigabytes && gigabytes <= MaxHistoryGigabytes)) return;
+    const qreal tenths = inTenths(gigabytes);
+    if (qFuzzyCompare(tenths, m_historyGigabytes)) return;
+    m_historyGigabytes = tenths;
+    m_stored.insert(historyGigabytesKey, tenths);
     write();
     emit changed();
 }
@@ -433,7 +485,7 @@ void Settings::load()
             ignored << freshDraftOnLaunchKey;
     }
     if (present(libraryWidthKey)) {
-        if (wholeIn(m_stored.value(libraryWidthKey), 160, 640, &whole))
+        if (wholeIn(m_stored.value(libraryWidthKey), MinLibraryWidth, MaxLibraryWidth, &whole))
             m_libraryWidth = whole;
         else
             ignored << libraryWidthKey;
@@ -476,6 +528,25 @@ void Settings::load()
             m_liveFormatting = m_stored.value(liveFormattingKey).toBool();
         else
             ignored << liveFormattingKey;
+    }
+    if (present(historyVersionsKey)) {
+        if (wholeIn(m_stored.value(historyVersionsKey), MinHistoryVersions, MaxHistoryVersions, &whole))
+            m_historyVersions = whole;
+        else
+            ignored << historyVersionsKey;
+    }
+    if (present(historyDaysKey)) {
+        if (wholeIn(m_stored.value(historyDaysKey), MinHistoryDays, MaxHistoryDays, &whole))
+            m_historyDays = whole;
+        else
+            ignored << historyDaysKey;
+    }
+    if (present(historyGigabytesKey)) {
+        const QJsonValue value = m_stored.value(historyGigabytesKey);
+        if (value.isDouble() && value.toDouble() >= MinHistoryGigabytes && value.toDouble() <= MaxHistoryGigabytes)
+            m_historyGigabytes = inTenths(value.toDouble());
+        else
+            ignored << historyGigabytesKey;
     }
     if (present(previewFontFamilyKey)) {
         const QString family = m_stored.value(previewFontFamilyKey).toString().trimmed();

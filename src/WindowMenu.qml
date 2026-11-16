@@ -35,6 +35,7 @@ ThemedMenu {
     CommandEntry { command: "open" }
     CommandEntry { command: "openFolder" }
     CommandEntry { command: "findDocument" }
+    CommandEntry { objectName: "clearRecentEntry"; command: "clearRecent" }
     CommandEntry { command: "findText" }
     CommandEntry { command: "replace" }
     CommandEntry { command: "searchLibrary" }
@@ -157,6 +158,8 @@ ThemedMenu {
         command: "vimKeys"
         text: settings.vimKeys ? qsTr("Turn off Vim keys") : qsTr("Turn on Vim keys")
     }
+    MenuLine {}
+    CommandEntry { objectName: "userGuideEntry"; command: "userGuide" }
     MenuLine {}
     CommandEntry { command: "quit" }
 

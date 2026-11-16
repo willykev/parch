@@ -6,6 +6,8 @@
         <file>HeaderBar.qml</file>
         <file>WindowMenu.qml</file>
         <file>LibraryPanel.qml</file>
+        <file>LibrarySplitter.qml</file>
+        <file>EncodingDialog.qml</file>
         <file>TabStrip.qml</file>
         <file>StatusLine.qml</file>
         <file>NoticeBar.qml</file>
@@ -48,6 +50,8 @@
         <file>skill.md</file>
         <file>export.css</file>
         <file>KeysPreferences.qml</file>
+        <file>HistoryPreferences.qml</file>
+        <file alias="docs/guide.md">../docs/guide.md</file>
         <file>MarkdownPreferences.qml</file>
         <file>DialectSettingsForm.qml</file>
         <file>DocumentSettingsDialog.qml</file>

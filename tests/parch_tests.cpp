@@ -8890,8 +8890,11 @@ void ParchTests::tabStripKeepsTabsReadableAndScrolls()
     QVERIFY(before->mapToScene(QPointF(0, 0)).x() < view.left());
     QVERIFY(after->mapToScene(QPointF(0, 0)).x() >= view.right() - 0.5);
     QVERIFY(everyVisibleItemFitsWithin(window, &problems));
-    // With room for every tab, nothing is beyond either edge.
-    resizeWindow(window, 1440);
+    // With room for every tab, nothing is beyond either edge. How wide that
+    // is depends on the interface font, so the window grows until it is.
+    for (int width = 1440; width <= 4096 && tabStrip->property("overflowing").toBool(); width += 320)
+        resizeWindow(window, width);
+    QVERIFY2(!tabStrip->property("overflowing").toBool(), qPrintable(QString::number(window->width())));
     QTRY_COMPARE(marked(), qMakePair(false, false));
 }
 

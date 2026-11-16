@@ -272,11 +272,17 @@ void Preview::setDocument(Document *document)
     if (document == m_document) return;
     disconnect(m_edits);
     disconnect(m_dialect);
+    disconnect(m_parses);
     m_document = document;
     clear();
+    // A parse asked of the document before never comes.
+    if (std::exchange(m_awaiting, false)) m_parsing = false;
     if (document) {
         m_edits = connect(document->buffer(), &SourceBuffer::sourceChanged, this, &Preview::edited);
         m_dialect = connect(document, &Document::dialectChanged, this, &Preview::dialectChanged);
+        m_parses = connect(document->parse(), &DocumentParse::parsed, this, [this](const ParsedTextPtr &parse) {
+            if (std::exchange(m_awaiting, false)) read(parse);
+        });
     }
     emit documentChanged();
     if (m_active && document) schedule(0);
@@ -599,34 +605,32 @@ std::atomic<int> workerDelay{0};
 
 void Preview::setWorkerDelay(int milliseconds) { workerDelay = std::max(0, milliseconds); }
 
-// Reads the text as every output of the document reads it: in the dialect
-// its settings and front matter choose, with its includes from disk, its
-// bibliography read and its citations formatted by its citation style.
-Preview::Parsed Preview::parseJob(QSharedPointer<const SourceSnapshot> snapshot, const QString &path,
-                                  const QString &directory, const QString &libraryRoot,
-                                  const Dialect::Layers &dialect, quint64 generation)
+// Reads the text as every output of the document reads it: the document's
+// parse of it, in the dialect its settings and front matter choose, with
+// its includes from disk and its bibliography read, which every view of the
+// document shares; here its citations are formatted by its citation style,
+// and its parts found.
+Preview::Parsed Preview::parseJob(ParsedTextPtr parse, quint64 generation)
 {
     if (const int delay = workerDelay; delay > 0) QThread::msleep(delay);
-    md::FileIncludeResolver resolver;
-    md::Source source;
-    source.path = path;
-    source.directory = directory;
-    source.libraryRoot = libraryRoot;
-    source.resolver = &resolver;
     Parsed result;
-    result.revision = snapshot->revision;
+    result.revision = parse->revision;
     result.generation = generation;
-    // The tree and the citations formatted from it are kept together: the
-    // citations point into the tree.
-    const auto reading =
-        std::make_shared<const DocumentReading::Reading>(DocumentReading::read(snapshot->text, dialect, source));
-    result.tree = std::shared_ptr<const md::Document>(reading, &reading->document);
-    result.citations = std::shared_ptr<const DocumentCitations::Formatted>(reading, &reading->formatted);
+    // The citations point into the tree, which the parse holds: the two
+    // are kept together.
+    struct Read {
+        ParsedTextPtr parse;
+        DocumentCitations::Formatted formatted;
+    };
+    const DocumentReading::Reading &reading = parse->reading;
+    auto read = std::make_shared<const Read>(Read{parse, DocumentCitations::format(reading.document, reading.citations)});
+    result.tree = std::shared_ptr<const md::Document>(read, &read->parse->reading.document);
+    result.citations = std::shared_ptr<const DocumentCitations::Formatted>(read, &read->formatted);
     result.parts = std::make_shared<std::vector<Part>>(preview::parts(*result.tree, result.citations.get()));
     preview::warm(*result.tree);
-    picturesOf(reading->document, reading->document.root, result.pictures);
-    result.files = filesRead(*reading);
-    result.unresolved = preview::Unresolved(reading->document).messages();
+    picturesOf(reading.document, reading.document.root, result.pictures);
+    result.files = filesRead(reading);
+    result.unresolved = preview::Unresolved(reading.document).messages();
     return result;
 }
 
@@ -639,21 +643,25 @@ void Preview::parse()
     }
     m_parsing = true;
     m_parseAgain = false;
-    // The library root the document's settings choose, or else the library
-    // folder that holds it.
-    QString directory, library = m_document->libraryRoot();
-    if (m_backend) {
-        directory = m_backend->attachments()->documentFolder(m_document);
-        if (library.isEmpty()) library = m_backend->attachments()->libraryOf(m_document);
-    } else if (!m_document->path().isEmpty()) {
-        directory = QFileInfo(m_document->path()).absolutePath();
+    // The text as it is now, parsed for every view of the document: at
+    // once when it is already, or else once it is.
+    m_awaiting = true;
+    if (const ParsedTextPtr parse = m_document->parse()->request()) {
+        m_awaiting = false;
+        read(parse);
     }
-    QtConcurrent::run(&m_pool, &Preview::parseJob, m_document->buffer()->snapshot(), m_document->path(), directory,
-                      library, m_document->savedDialect(), m_generation)
-        .then(this, [this](const Parsed &result) {
-            m_parsing = false;
-            take(result);
-        });
+}
+
+void Preview::read(const ParsedTextPtr &parse)
+{
+    if (!m_active || !m_document || !m_text) {
+        m_parsing = false;
+        return;
+    }
+    QtConcurrent::run(&m_pool, &Preview::parseJob, parse, m_generation).then(this, [this](const Parsed &result) {
+        m_parsing = false;
+        take(result);
+    });
 }
 
 void Preview::take(const Parsed &result)
@@ -941,6 +949,8 @@ void Preview::dependencyChanged(const QString &path)
     if (m_pictureFiles.contains(path)) m_resources->reread(path);
     if (!m_readFiles.contains(path)) return;
     m_reread = true;
+    // Every view of the document reads the text again with it.
+    if (m_document) m_document->parse()->invalidate();
     if (m_active && m_document) schedule(0);
 }
 

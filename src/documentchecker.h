@@ -5,6 +5,7 @@
 #include "backend.h"
 #include "document.h"
 #include "documentcheck.h"
+#include "documentparse.h"
 
 #include <QObject>
 #include <QPointer>
@@ -20,11 +21,13 @@ class Batch;
 }
 
 // Check document: everything wrong in the document in front, as `parch
-// check` finds it, listed for the window. The text is taken as it is when
-// the check starts and read on a worker, as every output reads it (its
-// settings, its front matter, its includes from disk, its citations): the
-// engine's diagnostics, missing images, links to files and headings that
-// are not there, and what is wrong with its citations. Then its formulas
+// check` finds it, listed for the window. It reads the document's parse of
+// its text as it is when the check starts (DocumentParse, shared by every
+// view of the document, which reads it as every output reads it: its
+// settings, its front matter, its includes from disk), formats its
+// citations and checks it on a worker: the engine's diagnostics, missing
+// images, links to files and headings that are not there, and what is
+// wrong with its citations. Then its formulas
 // and diagrams are drawn by the render service, on the service's own
 // thread, and what their helpers refuse is added in its place. Nothing of
 // it runs on the UI thread but taking the results.
@@ -75,8 +78,7 @@ signals:
 
 private:
     struct Found;
-    static std::shared_ptr<Found> work(QString text, QString path, QString folder, QString library,
-                                       Dialect::Layers layers);
+    static std::shared_ptr<Found> work(ParsedTextPtr parse);
     void read(quint64 request, const std::shared_ptr<Found> &found);
     void finish();
     QVariantMap row(const DocumentCheck::Problem &problem) const;

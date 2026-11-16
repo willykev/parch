@@ -9,22 +9,32 @@
 #include <memory>
 #include <vector>
 
+class Backend;
 class Document;
 class EditorBinding;
 class QQuickItem;
 class QQuickWindow;
+class WindowContext;
 
 // What `parch open --benchmark OUT FILE` measures, in the real window with
-// saving, recovery, history and file watching running. main() gives it a
-// temporary folder of its own for every file parch keeps and a copy of FILE
-// to open there.
+// saving, recovery, history and file watching running, and with live
+// formatting and spelling on. main() gives it a temporary folder of its own
+// for every file parch keeps and a copy of FILE to open there.
 //
-// Once the window shows the document and takes keys, it types 20 keys at the
-// start, the middle and the end, scrolls 60 pixels a frame for four seconds,
-// jumps to ten distant places, narrows and widens the text column 4 pixels a
-// frame, leaves the window idle for a minute with the caret in view, and then
-// does the same scroll and re-wrap over a plain striped item in the editor's
-// place as a control.
+// The document is shown as source, beside its preview, or as the preview
+// alone (Options::view), in one window or in two that show the same
+// document (Options::windows). Once the window shows the document and takes
+// keys, it types 20 keys at the start, the middle and the end, each place
+// until every view of the text has caught up, scrolls 60 pixels a frame for
+// four seconds, jumps to ten distant places, narrows and widens the text
+// column 4 pixels a frame, optionally edits as no writer does
+// (Options::adversarial: a paste of a megabyte and its undo, nesting two
+// hundred deep, and keys faster than any view settles), leaves the window
+// idle for a minute with the caret in view, does the same scroll and
+// re-wrap over a plain striped item in the editor's place as a control, and
+// finally restores a recovery draft of the text as it is then. As the
+// preview alone shows no text to type in, that view scrolls the preview and
+// neither types nor re-wraps.
 // Keys are Qt key events sent to the window; a frame is counted when the
 // window swaps it. The results are written to OUT as JSON.
 //
@@ -45,6 +55,16 @@ public:
         int quietMs = 3000;   // before idling, for saves and the session to land
         int idleMs = 60000;
         int waitMs = 10000;   // the longest wait for the document and its first frame
+        int caughtUpMs = 400; // after the last key, at least, before the views count as caught up
+        int catchUpMs = 30000; // the longest wait for the views to catch up
+        int rapidKeyMs = 5;   // between keys typed faster than any view settles
+        int pasteUnits = 1 << 20; // the adversarial paste, in UTF-16 units
+    };
+    // What is measured.
+    struct Options {
+        QString view = QStringLiteral("source"); // "source", "split" or "reading"
+        int windows = 1;                          // 2: a second window shows the same document
+        bool adversarial = false;
     };
 
     Benchmark(const QString &output, const QString &label, const Timing &timing, QObject *parent = nullptr);
@@ -53,10 +73,17 @@ public:
 
     // The steady clock in nanoseconds, the clock every time here is taken on.
     static qint64 now();
-    // Copies `file` into `folder`, which it makes, under the same name.
+    // Copies `file` into `folder`, which it makes, under the same name, with
+    // what it reads from its own folder (filesRead()) where it is beside it.
     // Returns the copy, or nothing with the reason in `error`.
     static QString copyIn(const QString &file, const QString &folder, QString *error);
+    // The files a document reads besides its text: what it includes, the
+    // pictures it and they show, its bibliographies and a style file.
+    static QStringList filesRead(const QString &file);
 
+    void setOptions(const Options &options) { m_options = options; }
+    // The application measured: its settings, windows, store and recovery.
+    void setBackend(Backend *backend);
     // When main() began.
     void setLaunchTime(qint64 mainNs);
     // Just before the window and its document are made.
@@ -76,33 +103,64 @@ private slots:
 
 private:
     struct Frames;
+    struct Views;
 
     void then(int delayMs, std::function<void()> step);
+    // A step that waits until `ready` holds, or `capMs` has passed, and
+    // then calls `done` with how long it waited and whether it gave up.
+    void thenWaitFor(std::function<bool()> ready, int capMs, std::function<void(qint64 waitedNs, bool gaveUp)> done);
     void next();
     void fail(const QString &reason);
     bool editorReady() const;
     void waitForEditor();
     // The steps after the document shows, in order.
     void plan();
+    void planTyping();
+    void planScrolling();
+    void planAdversarial();
+    void planIdle();
+    void planControl();
+    void planRecovery();
 
     qint64 firstFrameAfter(qint64 t) const;
     std::vector<double> intervals(qint64 from, qint64 to) const;
     int framesBetween(qint64 from, qint64 to) const;
+    int otherFramesBetween(qint64 from, qint64 to) const;
     int widthChangesBetween(qint64 from, qint64 to) const;
+    // Frames that missed the display's refresh while the frame intervals
+    // were measured: an interval of n refresh intervals missed n - 1.
+    int droppedFrames(const std::vector<double> &intervals) const;
+    double refreshIntervalMs() const;
     // A FrameAnimation from QML text, with its initial properties.
     QObject *make(const QByteArray &qml, const QVariantMap &properties);
     void stopDrivers();
     // Puts the cursor at a fraction of the text, shows it, and gives the text the keys.
     void reveal(double fraction);
+    void typeKey(QChar key, std::vector<double> *dispatch, std::vector<qint64> *sent);
+    // Every view of the text in every window has caught up with it: the
+    // styling, the spelling, the preview and the word count.
+    bool caughtUp() const;
+    // The same, once at least Timing::caughtUpMs has passed since `since`.
+    bool caughtUpSince(qint64 since) const;
+    void findViews(QQuickWindow *window, Views &views) const;
+    void openSecondWindow();
+    bool secondReady() const;
+    WindowContext *contextOf(QQuickWindow *window) const;
+    void showView(QQuickWindow *window);
 
     QString m_output;
     QString m_label;
     Timing m_timing;
+    Options m_options;
+    QPointer<Backend> m_backend;
     QJsonObject m_out;
     std::shared_ptr<Frames> m_frames;
+    std::shared_ptr<Frames> m_otherFrames;
     std::vector<std::pair<int, std::function<void()>>> m_steps;
     size_t m_next = 0;
     bool m_done = false;
+    // A step waits for something before the next one runs.
+    bool m_holding = false;
     QTimer m_poll;
     QTimer m_watchdog;
 
@@ -110,16 +168,21 @@ private:
     QPointer<QQuickItem> m_pane;
     QPointer<QQuickItem> m_editor;
     QPointer<QQuickItem> m_flickable;
+    QPointer<QQuickItem> m_scrolled;
     QPointer<EditorBinding> m_binding;
     QPointer<Document> m_document;
     QPointer<QObject> m_scroller;
     QPointer<QObject> m_wrapper;
     QPointer<QQuickItem> m_control;
+    QPointer<QQuickWindow> m_second;
+    std::unique_ptr<Views> m_views;
+    std::unique_ptr<Views> m_secondViews;
 
     qint64 m_mainNs = 0;
     qint64 m_openedNs = 0;
     qint64 m_readyNs = 0;
     int m_units = 0;
+    int m_typed = 0;
     std::vector<qint64> m_widthChanges;
     std::vector<qint64> m_stepTimes;
     double m_rewrapBase = 0;

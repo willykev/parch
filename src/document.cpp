@@ -1,5 +1,6 @@
 #include "document.h"
 
+#include "documentparse.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
 
@@ -125,7 +126,8 @@ QString safeFileName(const QString &words)
 Document::Document(const QString &id, const QString &path, const QString &text, const TextConvention &convention,
                    const DiskVersion &version, bool readOnly, QObject *parent)
     : QObject(parent), m_id(id), m_buffer(new SourceBuffer(text, this)), m_path(path), m_convention(convention),
-      m_diskVersion(version), m_readOnly(readOnly), m_diskUnkept(!path.isEmpty() && version.exists)
+      m_diskVersion(version), m_readOnly(readOnly), m_diskUnkept(!path.isEmpty() && version.exists),
+      m_parse(new DocumentParse(this))
 {
     connect(m_buffer, &SourceBuffer::modifiedChanged, this, &Document::refresh);
     // Only a draft's title follows its text.
@@ -145,6 +147,7 @@ void Document::setSavedDialect(const Dialect::Layers &layers)
 
 QString Document::id() const { return m_id; }
 SourceBuffer *Document::buffer() const { return m_buffer; }
+DocumentParse *Document::parse() const { return m_parse; }
 QString Document::path() const { return m_path; }
 bool Document::isDraft() const { return m_path.isEmpty(); }
 QString Document::lastError() const { return m_lastError; }

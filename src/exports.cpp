@@ -30,6 +30,8 @@ struct Exports::Job {
     // What the notice calls it: the file's name, or the document's title when printing.
     QString name;
     bool printing = false;
+    // The document's text is parsed, and the export runs on it.
+    bool started = false;
 };
 
 struct Exports::Outcome {
@@ -52,19 +54,6 @@ QString canonical(const QString &path)
     return found.isEmpty() ? QDir::cleanPath(QFileInfo(path).absoluteFilePath()) : found;
 }
 
-std::shared_ptr<const DocumentReading::Reading> readText(const QString &text, const Dialect::Layers &layers,
-                                                         const QString &path, const QString &directory,
-                                                         const QString &library)
-{
-    md::FileIncludeResolver resolver;
-    md::Source source;
-    source.path = canonical(path);
-    source.directory = directory;
-    source.libraryRoot = library;
-    source.resolver = &resolver;
-    return std::make_shared<const DocumentReading::Reading>(DocumentReading::read(text, layers, source));
-}
-
 QString kindOf(const ExportOption &option)
 {
     if (option.valueName.isEmpty()) return QStringLiteral("switch");
@@ -79,7 +68,6 @@ Exports::Exports(const AppPaths &paths, FileRequests *files, QObject *parent)
     : QObject(parent), m_paths(paths), m_files(files), m_preview(new PrintPreview(this))
 {
     m_pool.setMaxThreadCount(1);
-    m_readPool.setMaxThreadCount(1);
     m_poll.setInterval(100);
     connect(&m_poll, &QTimer::timeout, this, &Exports::poll);
     if (m_files) {
@@ -102,7 +90,6 @@ Exports::~Exports()
 {
     if (m_job) m_job->cancelled = true;
     m_pool.waitForDone();
-    m_readPool.waitForDone();
 }
 
 void Exports::setPrinter(Printer *printer)
@@ -142,25 +129,12 @@ void Exports::setRenderOptions(const RenderService::Options &options)
     m_preview->setRenderOptions(options);
 }
 
-void Exports::setPlaces(std::function<std::pair<QString, QString>(Document *)> places)
-{
-    m_preview->setPlaces(places);
-    m_places = std::move(places);
-}
-
 QVariantMap Exports::paperDefaults(const QString &templateName) const
 {
     ExportRecipe recipe;
     recipe.options.insert(QStringLiteral("template"), templateName);
     const PaperOptions paper = PaperOptions::from(*Exporters::find(QStringLiteral("pdf")), recipe);
     return {{QStringLiteral("margins"), paper.margin}, {QStringLiteral("font-size"), paper.fontSize}};
-}
-
-std::pair<QString, QString> Exports::placesOf(Document *document) const
-{
-    if (m_places) return m_places(document);
-    const QString folder = document->path().isEmpty() ? QString() : QFileInfo(document->path()).absolutePath();
-    return {folder, document->libraryRoot()};
 }
 
 QVariantList Exports::formats() const
@@ -220,16 +194,21 @@ void Exports::read(Document *document)
     }
     m_reading = true;
     emit readChanged();
-    const auto [directory, library] = placesOf(document);
-    const QSharedPointer<const SourceSnapshot> snapshot = document->buffer()->snapshot();
-    QtConcurrent::run(&m_readPool, readText, snapshot->text, document->savedDialect(), document->path(), directory, library)
-        .then(this, [this, generation](const std::shared_ptr<const DocumentReading::Reading> &reading) {
-            if (generation != m_readGeneration) return;
-            m_read = reading;
-            m_reading = false;
-            ++m_revision;
-            emit readChanged();
-        });
+    // The document's parse of its text as it is now, which every view of it
+    // shares; a document that closes first is read no more.
+    connect(document, &QObject::destroyed, this, [this, generation] {
+        if (generation != m_readGeneration || !m_reading) return;
+        m_reading = false;
+        ++m_revision;
+        emit readChanged();
+    }, Qt::SingleShotConnection);
+    document->parse()->whenParsed(this, [this, generation](const ParsedTextPtr &parse) {
+        if (generation != m_readGeneration) return;
+        m_read = std::shared_ptr<const DocumentReading::Reading>(parse, &parse->reading);
+        m_reading = false;
+        ++m_revision;
+        emit readChanged();
+    });
 }
 
 QStringList Exports::limitations(const QString &format, const QVariantMap &options) const
@@ -321,14 +300,37 @@ void Exports::start(Document *document, const QString &format, const QHash<QStri
     emit progressChanged();
     m_poll.start();
 
-    const auto [directory, library] = placesOf(document);
-    // The text as it is now: what the export reads, whatever is typed meanwhile.
-    const QSharedPointer<const SourceSnapshot> snapshot = document->buffer()->snapshot();
-    const Dialect::Layers layers = document->savedDialect();
+    // The document's parse of its text, which every view of it shares: of
+    // the text as it is now, or, when that is not parsed yet, as it is once
+    // it is, a moment later. That is what the export reads, whatever is
+    // typed while it runs.
     const QString path = document->path();
     const QString documentId = document->id();
     const QString title = document->title();
     const RenderService::Options render = m_render;
+    // A document that closes before its text is parsed is not exported.
+    connect(document, &QObject::destroyed, this, [this, job, output, printing, token, documentId] {
+        if (m_job != job || job->started) return;
+        Outcome outcome;
+        outcome.documentId = documentId;
+        outcome.output = output;
+        outcome.printing = printing;
+        outcome.token = token;
+        outcome.result.error = QStringLiteral("the document closed before it was read");
+        done(outcome);
+    }, Qt::SingleShotConnection);
+    document->parse()->whenParsed(this, [=, this](const ParsedTextPtr &parse) {
+        if (m_job != job) return;
+        job->started = true;
+        exportParsed(job, parse, exporter, options, output, printing, token, path, documentId, title, render);
+    });
+}
+
+void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr &parse, const Exporter *exporter,
+                           const QHash<QString, QString> &options, const QString &output, bool printing,
+                           quint32 token, const QString &path, const QString &documentId, const QString &title,
+                           const RenderService::Options &render)
+{
     QtConcurrent::run(&m_pool, [=]() -> Outcome {
         Outcome outcome;
         outcome.documentId = documentId;
@@ -340,8 +342,15 @@ void Exports::start(Document *document, const QString &format, const QHash<QStri
             QMutexLocker lock(&job->mutex);
             job->step = QStringLiteral("Reading the document");
         }
-        const std::shared_ptr<const DocumentReading::Reading> reading =
-            readText(snapshot->text, layers, path, directory, library);
+        // The citations as the document's style formats them, kept with the
+        // parse they point into.
+        struct Read {
+            ParsedTextPtr parse;
+            DocumentCitations::Formatted formatted;
+        };
+        const auto read = std::make_shared<const Read>(
+            Read{parse, DocumentCitations::format(parse->reading.document, parse->reading.citations)});
+        const DocumentReading::Reading *reading = &parse->reading;
         if (reading->document.incomplete) {
             outcome.result.error = QStringLiteral("a file it includes could not be read, so it is not exported as if it were whole");
             return outcome;
@@ -357,7 +366,7 @@ void Exports::start(Document *document, const QString &format, const QHash<QStri
         recipe.output = output;
         recipe.dialect = reading->dialect;
         recipe.options = options;
-        recipe.citations = std::shared_ptr<const DocumentCitations::Formatted>(reading, &reading->formatted);
+        recipe.citations = std::shared_ptr<const DocumentCitations::Formatted>(read, &read->formatted);
         ExportRun run;
         run.cancelled = [job] { return job->cancelled.load(); };
         run.progress = [job](qreal done, const QString &step) {

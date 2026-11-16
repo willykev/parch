@@ -24,6 +24,7 @@ HEADERS += \
     exporttests.h \
     librarytests.h \
     previewtests.h \
+    parsetests.h \
     stylingtests.h \
     rendertesting.h \
     markdown_tests.h \
@@ -63,6 +64,7 @@ HEADERS += \
     ../src/documentcitations.h \
     ../src/documentfind.h \
     ../src/documentlinks.h \
+    ../src/documentparse.h \
     ../src/documentreading.h \
     ../src/documentreview.h \
     ../src/documentsettings.h \
@@ -152,6 +154,7 @@ SOURCES += \
     exporttests.cpp \
     librarytests.cpp \
     previewtests.cpp \
+    parsetests.cpp \
     stylingtests.cpp \
     rendertesting.cpp \
     citationtests.cpp \
@@ -190,6 +193,7 @@ SOURCES += \
     ../src/documentcitations.cpp \
     ../src/documentfind.cpp \
     ../src/documentlinks.cpp \
+    ../src/documentparse.cpp \
     ../src/documentreading.cpp \
     ../src/documentreview.cpp \
     ../src/documentsettings.cpp \

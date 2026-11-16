@@ -297,10 +297,12 @@ int main(int argc, char *argv[])
         qDeleteAll(std::exchange(windows, {}));
     });
     // A benchmark's window has the size of the whole-document measurement
-    // whatever the session around it, so that its runs compare; a picture's
-    // has the size asked for, and keeps it.
+    // whatever the session around it, so that its runs compare (beside its
+    // preview the text keeps a column that wide); a picture's has the size
+    // asked for, and keeps it.
     QVariantMap initial;
-    const QSize fixed = benchmarking ? QSize(1000, 800) : picture.size;
+    const QSize fixed = benchmarking ? QSize(launch.benchmarkView == QLatin1String("split") ? 1800 : 1000, 800)
+                                     : picture.size;
     if (fixed.isValid()) {
         for (const char *size : {"width", "minimumWidth", "maximumWidth"}) initial.insert(QLatin1String(size), fixed.width());
         for (const char *size : {"height", "minimumHeight", "maximumHeight"}) initial.insert(QLatin1String(size), fixed.height());
@@ -324,6 +326,8 @@ int main(int argc, char *argv[])
     std::unique_ptr<Benchmark> benchmark;
     if (benchmarking) {
         benchmark = std::make_unique<Benchmark>(benchmarkOutput, benchmarkLabel);
+        benchmark->setOptions({launch.benchmarkView, launch.benchmarkWindows, launch.benchmarkAdversarial});
+        benchmark->setBackend(&backend);
         benchmark->setLaunchTime(launched);
         benchmark->opening();
     }

@@ -61,6 +61,11 @@ QList<Heading> Outline::headings(const QString &text, const md::Options &options
     return headingsOf(text, md::parse(text, options, source));
 }
 
+QList<Heading> Outline::headings(const md::Document &document, const QString &text)
+{
+    return headingsOf(text, document);
+}
+
 OutlineModel::OutlineModel(QObject *parent) : QAbstractListModel(parent)
 {
     m_pool.setMaxThreadCount(1);
@@ -123,9 +128,15 @@ void OutlineModel::setDocument(Document *document)
     if (document == m_document) return;
     disconnect(m_edits);
     disconnect(m_dialect);
+    disconnect(m_parses);
     m_document = document;
     ++m_generation;
+    // A parse asked of the document before never comes.
+    if (std::exchange(m_waiting, false)) m_running = false;
     if (document) {
+        m_parses = connect(document->parse(), &DocumentParse::parsed, this, [this](const ParsedTextPtr &parse) {
+            if (std::exchange(m_waiting, false)) read(parse);
+        });
         m_edits = connect(document->buffer(), &SourceBuffer::sourceChanged, this, [this] {
             if (!m_active) return;
             setReady(false);
@@ -204,12 +215,19 @@ void OutlineModel::scan()
     }
     m_running = true;
     m_scanAgain = false;
+    // The text as it is now, parsed for every view of the document: at
+    // once when it is already, or else once it is.
+    m_waiting = true;
+    if (const ParsedTextPtr parse = m_document->parse()->request()) {
+        m_waiting = false;
+        read(parse);
+    }
+}
+
+void OutlineModel::read(const ParsedTextPtr &parse)
+{
     const quint64 generation = m_generation;
-    // The headings of included files are read from disk too, from the
-    // document's folder and its library root.
-    const QString path = m_document->path();
-    QtConcurrent::run(&m_pool, &OutlineModel::scanJob, m_document->buffer()->snapshot(), m_document->markdownOptions(),
-                      path, path.isEmpty() ? QString() : PathText::folderOf(path), m_document->libraryRoot())
+    QtConcurrent::run(&m_pool, &OutlineModel::scanJob, parse)
         .then(this, [this, generation](const Scan &result) {
             m_running = false;
             const bool again = std::exchange(m_scanAgain, false);
@@ -224,16 +242,9 @@ void OutlineModel::scan()
         });
 }
 
-OutlineModel::Scan OutlineModel::scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options,
-                                         QString path, QString directory, QString libraryRoot)
+OutlineModel::Scan OutlineModel::scanJob(ParsedTextPtr parse)
 {
-    md::FileIncludeResolver resolver;
-    md::Source source;
-    source.path = path;
-    source.directory = directory;
-    source.libraryRoot = libraryRoot;
-    if (!directory.isEmpty()) source.resolver = &resolver;
-    return {Outline::headings(snapshot->text, options, source), snapshot->revision};
+    return {Outline::headings(parse->document(), parse->text), parse->revision};
 }
 
 void OutlineModel::take(const QList<Heading> &headings)

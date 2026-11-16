@@ -3,6 +3,7 @@
 #include "attachments.h"
 #include "autosave.h"
 #include "document.h"
+#include "documentparse.h"
 #include "documentreview.h"
 #include "documentstore.h"
 #include "fileorganizer.h"
@@ -89,15 +90,20 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
       m_documentSettings(new DocumentSettingsStore(paths, this)),
       m_exports(new Exports(paths, m_files.get(), this))
 {
-    // An export reads the document from where it is, as the preview does.
-    m_exports->setPlaces([this](Document *document) {
+    // A document is read from where it is: its folder, and the library
+    // root its settings choose, or else the library folder holding it. Every
+    // view of it, Check document and an export read its shared parse
+    // (DocumentParse), which reads it so.
+    const auto places = [this](const Document *document) {
         QString library = document->libraryRoot();
         if (library.isEmpty()) library = m_attachments ? m_attachments->libraryOf(document) : QString();
         const QString folder = m_attachments ? m_attachments->documentFolder(document)
                                : document->path().isEmpty() ? QString()
                                                             : QFileInfo(document->path()).absolutePath();
         return std::pair{folder, library};
-    });
+    };
+    connect(m_store.get(), &DocumentStore::documentOpened, this,
+            [places](Document *document) { document->parse()->setPlaces(places); });
     connect(m_exports, &Exports::news, this, &Backend::inform);
     connect(m_exports, &Exports::problem, this, &Backend::notify);
     // Every document is read in the dialect its settings choose, kept

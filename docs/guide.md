@@ -1038,6 +1038,11 @@ With --screenshot:
   --scroll AMOUNT  Scroll that far down instead, from 0 (the top) to 1
   --select A,B     Select the text from offset A to offset B
 
+With --benchmark:
+  --view VIEW      As with --screenshot; source unless given
+  --windows N      1, or 2 windows showing the same FILE
+  --adversarial    Also a 1 MB paste and its undo, deep nesting and rapid keys
+
 Commands that need no display (parch help COMMAND for its options):
   check FILE...    Report what is wrong in documents, with file, line and column
   render FILE      Write a document's HTML, plain text, outline or semantic tree

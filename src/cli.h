@@ -43,6 +43,12 @@ struct Launch {
     bool defaultTheme = false;
     QString benchmarkOutput;
     Picture picture;
+    // What a benchmark measures, only with benchmarkOutput: the view
+    // ("source", "split" or "reading", from --view), how many windows show
+    // the document, and whether it edits as no writer does too.
+    QString benchmarkView = QStringLiteral("source");
+    int benchmarkWindows = 1;
+    bool benchmarkAdversarial = false;
     QString error;
     // The program's name, the command, and what follows it.
     QStringList commandArguments;

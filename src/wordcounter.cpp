@@ -1,5 +1,6 @@
 #include "wordcounter.h"
 
+#include "documentparse.h"
 #include "mdtree.h"
 #include "sourcebuffer.h"
 
@@ -32,7 +33,10 @@ WordCounter::WordCounter(QObject *parent) : QObject(parent)
     connect(&m_timer, &QTimer::timeout, this, &WordCounter::start);
     connect(&m_watcher, &QFutureWatcher<int>::finished, this, [this] {
         // Only the count of the text and selection as they still are.
-        if (m_running == m_generation && !m_watcher.isCanceled()) take(m_watcher.result(), m_runningSelection);
+        if (m_running == m_generation && !m_watcher.isCanceled()) {
+            take(m_watcher.result(), m_runningSelection);
+            m_counted = m_running;
+        }
     });
 }
 
@@ -78,8 +82,14 @@ void WordCounter::setDocument(Document *document)
     if (document == m_document) return;
     disconnect(m_edits);
     disconnect(m_dialect);
+    disconnect(m_parses);
     m_document = document;
+    // A parse asked of the document before never comes.
+    m_waiting = false;
     if (document) {
+        m_parses = connect(document->parse(), &DocumentParse::parsed, this, [this](const ParsedTextPtr &parse) {
+            if (std::exchange(m_waiting, false)) countParsed(parse);
+        });
         m_edits = connect(document->buffer(), &SourceBuffer::sourceChanged, this, [this] {
             ++m_generation;
             schedule(DelayMs);
@@ -128,25 +138,42 @@ void WordCounter::start()
         take(0, false);
         return;
     }
-    QString text = m_document->buffer()->text();
-    const int length = int(text.size());
+    // Counted already, as when the text was parsed while a count waited.
+    if (m_counted == m_generation) return;
+    // The text as it is now, parsed for every view of the document: at
+    // once when it is already, or else once it is.
+    m_waiting = true;
+    if (const ParsedTextPtr parse = m_document->parse()->request()) {
+        m_waiting = false;
+        countParsed(parse);
+    }
+}
+
+void WordCounter::countParsed(const ParsedTextPtr &parse)
+{
+    const int length = int(parse->text.size());
     const int first = qBound(0, qMin(m_selectionStart, m_selectionEnd), length);
     const int last = qBound(0, qMax(m_selectionStart, m_selectionEnd), length);
     const bool selection = first < last;
     // A selection is read as part of the whole text, so that what it holds
-    // means what it means there.
-    const md::Options options = m_document->markdownOptions();
-    const auto counted = [selection, first, last, options](const QString &text) {
-        return selection ? count(text, first, last, options) : count(text, options);
+    // means what it means there. Either way only the document's own text is
+    // counted, not what it includes.
+    const auto counted = [first, last, length, selection](const ParsedTextPtr &parse) {
+        md::PlainTextOptions plain;
+        if (selection) plain.range = md::Range{first, last};
+        else if (parse->document().files.size() > 1) plain.range = md::Range{0, length};
+        return countWords(parse->document().plainText(plain));
     };
+    const quint64 generation = m_generation;
     if (length <= ImmediateUnits) {
-        take(counted(text), selection);
+        take(counted(parse), selection);
+        m_counted = generation;
         return;
     }
     // A count still running is of older text; its result will be dropped.
-    m_running = m_generation;
+    m_running = generation;
     m_runningSelection = selection;
-    m_watcher.setFuture(QtConcurrent::run(&m_pool, [text = std::move(text), counted] { return counted(text); }));
+    m_watcher.setFuture(QtConcurrent::run(&m_pool, [parse, counted] { return counted(parse); }));
 }
 
 void WordCounter::take(int words, bool ofSelection)

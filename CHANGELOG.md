@@ -71,6 +71,11 @@ The first version: a native Markdown writing app for Omarchy.
   library folder and, in Preferences, for every document. The dialog shows
   where each setting comes from, and live formatting, spelling, the outline,
   the word count and Check document read the document as they say.
+- Live formatting, spelling, the preview, the word count, the outline and
+  Check document share one reading of each revision of a document, made off
+  the typing path with its included chapters and bibliography, so that they
+  agree with one another and a key costs one parse of the text, not one for
+  each.
 - Citations and bibliographies: Writer `[p. 23][#key]` and Pandoc
   `[@key, p. 23]` citations, with words before each key
   (`[see @doe99, p. 33; also @roe04]`), `[-@key]` without the author and

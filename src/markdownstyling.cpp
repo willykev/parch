@@ -1,6 +1,7 @@
 #include "markdownstyling.h"
 
 #include "document.h"
+#include "documentparse.h"
 #include "sourcebuffer.h"
 #include "theme.h"
 
@@ -328,24 +329,20 @@ std::vector<Part> partsOf(const md::Document &document, int length)
 struct MarkdownStyling::Pass {
     quint64 number = 0;
     Revision revision = 0;
-    // A copy of the text of its own, so that no later edit has to copy the buffer's.
-    QString text;
+    // The document's parse of the text, which every view of it shares.
+    ParsedTextPtr parse;
     SourceRange visible{0, 0};
-    // The dialect the text is read in.
-    md::Options options;
     std::vector<Applied> applied;
     std::shared_ptr<std::atomic_bool> cancelled;
     QPointer<MarkdownStyling> owner;
 };
 
-// A pass, on the worker: parses the text, styles it, and hands the parts
-// over that the view does not have, those in view first.
+// A pass, on the worker: styles the parsed text, and hands the parts over
+// that the view does not have, those in view first.
 void MarkdownStyling::run(Pass &pass)
 {
     if (pass.cancelled->load()) return;
-    const md::Document document = md::parse(pass.text, pass.options);
-    if (pass.cancelled->load()) return;
-    std::vector<Part> parts = partsOf(document, int(pass.text.size()));
+    std::vector<Part> parts = partsOf(pass.parse->document(), int(pass.parse->text.size()));
 
     // A part the view has as it is, which no edit has touched since, stays.
     const auto unchanged = [&](const Part &part) {
@@ -470,11 +467,19 @@ void MarkdownStyling::connectBinding()
 void MarkdownStyling::watchDialect()
 {
     disconnect(m_dialect);
+    disconnect(m_parses);
+    // A parse asked of another document never comes: this one is asked.
+    const bool waited = std::exchange(m_waiting, false);
     // Read in another dialect, the same text is styled otherwise.
-    if (Document *document = m_binding ? m_binding->document() : nullptr)
+    if (Document *document = m_binding ? m_binding->document() : nullptr) {
         m_dialect = connect(document, &Document::dialectChanged, this, [this] {
             if (active()) schedule(0);
         });
+        m_parses = connect(document->parse(), &DocumentParse::parsed, this, [this](const ParsedTextPtr &parse) {
+            if (std::exchange(m_waiting, false) && active()) style(parse);
+        });
+    }
+    if (waited && active()) schedule(0);
 }
 
 bool MarkdownStyling::active() const
@@ -609,6 +614,7 @@ void MarkdownStyling::cancel()
 {
     if (m_cancelled) m_cancelled->store(true);
     m_cancelled.reset();
+    m_waiting = false;
     m_settle.stop();
     m_stale = false;
     setRunning(false);
@@ -638,20 +644,30 @@ void MarkdownStyling::start()
         return;
     }
     if (m_reformat.isActive()) defineLayer();
-    // A pass still running reads text that has changed since.
+    // A pass still running reads text that has changed since: what it
+    // finds is not taken.
     if (m_cancelled) m_cancelled->store(true);
+    m_cancelled.reset();
+    ++m_pass;
+    setRunning(true);
+    // The text as it is now, parsed for every view of the document: at
+    // once when it is already, or else once it is.
+    m_waiting = true;
+    if (const ParsedTextPtr parse = m_binding->document()->parse()->request()) {
+        m_waiting = false;
+        style(parse);
+    }
+}
+
+void MarkdownStyling::style(const ParsedTextPtr &parse)
+{
     m_cancelled = std::make_shared<std::atomic_bool>(false);
     m_stale = false;
-    SourceBuffer *buffer = m_binding->document()->buffer();
     auto pass = std::make_shared<Pass>();
-    pass->number = ++m_pass;
-    pass->revision = buffer->revision();
-    {
-        const QString shared = buffer->text();
-        pass->text = QString(shared.constData(), shared.size());
-    }
+    pass->number = m_pass;
+    pass->revision = parse->revision;
+    pass->parse = parse;
     pass->visible = m_binding->visibleRange();
-    pass->options = m_binding->document()->markdownOptions();
     pass->applied = m_applied;
     pass->cancelled = m_cancelled;
     pass->owner = this;

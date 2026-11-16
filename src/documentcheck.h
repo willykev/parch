@@ -88,6 +88,16 @@ struct Problem {
 // otherwise, such as formulas a helper refused, put in their places.
 std::vector<Problem> problems(const Loaded &loaded, std::vector<Problem> more = {});
 
+// What problems() reads, wherever it is kept: as a Loaded holds it, or as
+// the window's shared parse of a document does (documentparse.h).
+struct Checked {
+    QString path; // canonical; empty for a draft
+    const Dialect::Choice &dialect;
+    const md::Document &document;
+    const DocumentCitations::Formatted &formatted;
+};
+std::vector<Problem> problems(const Checked &checked, std::vector<Problem> more = {});
+
 // Puts problems in file and source order, those of other files last.
 void order(std::vector<Problem> &problems);
 

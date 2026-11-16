@@ -44,6 +44,7 @@ HEADERS += \
     src/documentcitations.h \
     src/documentfind.h \
     src/documentlinks.h \
+    src/documentparse.h \
     src/documentreading.h \
     src/documentreview.h \
     src/documentsettings.h \
@@ -153,6 +154,7 @@ SOURCES += \
     src/documentcitations.cpp \
     src/documentfind.cpp \
     src/documentlinks.cpp \
+    src/documentparse.cpp \
     src/documentreading.cpp \
     src/documentreview.cpp \
     src/documentsettings.cpp \

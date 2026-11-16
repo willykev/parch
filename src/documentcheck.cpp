@@ -54,7 +54,7 @@ bool isMarkdownFile(const QString &path)
 // whoever can look at the disk.
 class LinkCheck {
 public:
-    explicit LinkCheck(const Loaded &loaded) : m_loaded(loaded) {}
+    explicit LinkCheck(const Checked &loaded) : m_loaded(loaded) {}
 
     void walk(const md::Node &node, std::vector<Problem> &found)
     {
@@ -156,7 +156,7 @@ private:
         found.push_back(problem);
     }
 
-    const Loaded &m_loaded;
+    const Checked &m_loaded;
     QHash<QString, std::shared_ptr<QSet<QString>>> m_slugs;
 };
 
@@ -261,6 +261,11 @@ void order(std::vector<Problem> &problems)
 }
 
 std::vector<Problem> problems(const Loaded &loaded, std::vector<Problem> more)
+{
+    return problems(Checked{loaded.path, loaded.dialect, loaded.document, loaded.formatted}, std::move(more));
+}
+
+std::vector<Problem> problems(const Checked &loaded, std::vector<Problem> more)
 {
     const md::Document &document = loaded.document;
     std::vector<Problem> found = std::move(more);

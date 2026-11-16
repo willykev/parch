@@ -4,6 +4,7 @@
 // types must be complete here.
 #include "backend.h"
 #include "document.h"
+#include "documentparse.h"
 #include "previewbuilder.h"
 #include "previewstyle.h"
 #include "sourcetypes.h"
@@ -92,7 +93,8 @@ private:
 // engine's tree by preview::Builder in a style taken from the live theme.
 //
 // It follows the document off the typing path. An edit starts a short wait;
-// then the text as it is then is parsed on a worker, and the result is
+// then the document's parse of the text as it is then (DocumentParse, shared
+// by every view of the document) is read on a worker, and the result is
 // taken only if the text has not changed since, so nothing stale is ever
 // shown over newer text. Of the result, only the parts whose key changed
 // are built again and put in place of the old ones, so the rest of the
@@ -312,13 +314,14 @@ private:
     struct IslandState;
     struct TopAnchor;
 
-    static Parsed parseJob(QSharedPointer<const SourceSnapshot> snapshot, const QString &path, const QString &directory,
-                           const QString &libraryRoot, const Dialect::Layers &dialect, quint64 generation);
+    static Parsed parseJob(ParsedTextPtr parse, quint64 generation);
     void attach();
     void edited();
     void dialectChanged();
     void schedule(int delayMs);
     void parse();
+    // Reads the document's parse of the text on the worker.
+    void read(const ParsedTextPtr &parse);
     void take(const Parsed &result);
     void plan(const Parsed &result);
     void work();
@@ -372,6 +375,9 @@ private:
     QPointer<QTextDocument> m_text;
     QMetaObject::Connection m_edits;
     QMetaObject::Connection m_dialect;
+    QMetaObject::Connection m_parses;
+    // A read waits for the document's parse of the text as it is now.
+    bool m_awaiting = false;
     bool m_active = false;
     QString m_family;
     qreal m_fontSize = 18;

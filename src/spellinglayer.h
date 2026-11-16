@@ -1,5 +1,6 @@
 #pragma once
 
+#include "documentparse.h"
 #include "editordecorations.h"
 #include "spellchecker.h"
 
@@ -15,10 +16,11 @@
 // The misspelled words of one view, as a decoration layer of wavy underlines
 // in the given colour. The text is checked on the spell checker's worker,
 // never as it is typed: once the view shows it, and again once typing has
-// paused for SettleMs. Each check reads a copy of the text, finds what is
-// prose there as the Markdown engine reads it (spellingProse), and checks it
-// a paragraph at a time, the paragraphs in view first, handing each
-// paragraph's words over as it goes.
+// paused for SettleMs. Each check reads the document's parse of the text as
+// it is then (DocumentParse, shared by every view of the document), finds
+// what is prose there (spellingProse), and checks it a paragraph at a time,
+// the paragraphs in view first, handing each paragraph's words over as it
+// goes.
 // A paragraph edited since the copy was taken is not taken; it is checked
 // again. A paragraph whose text and prose are unchanged since an earlier
 // check is not checked again. A word added to the dictionary or ignored
@@ -80,6 +82,7 @@ private:
     void refresh();
     void schedule(int delayMs);
     void start();
+    void checkText(const ParsedTextPtr &parse);
     void cancel();
     void take(quint64 check, Revision revision, const std::vector<Found> &found, bool last);
     void accepted(const QString &word);
@@ -89,6 +92,9 @@ private:
     QPointer<EditorBinding> m_binding;
     QList<QMetaObject::Connection> m_decorationConnections, m_bindingConnections, m_checkerConnections;
     QMetaObject::Connection m_dialect;
+    QMetaObject::Connection m_parses;
+    // A check waits for the document's parse of the text as it is now.
+    bool m_waiting = false;
     QColor m_color;
     QTimer m_settle;
     quint64 m_check = 0;

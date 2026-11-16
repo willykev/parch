@@ -32,10 +32,42 @@ should come with a test that shows the text cannot be lost.
 
 ## Measuring
 
-`bin/benchmark OUTDIR` measures launch, typing, scrolling, re-wrapping, idle
-time and memory in a real window on three generated documents (10,000 words,
-100,000 words, and one long paragraph), three runs each. Run it in a desktop
-session with the screen awake, and leave its window in front until it ends.
+`bin/benchmark OUTDIR` measures parch in its real window, with live
+formatting and spelling on, on generated documents: a typical 10,000-word
+document, a 100,000-word book, one 10,000-word paragraph, and a rich
+document with pictures, a 200-row table, 50 formulas, 10 diagrams, two
+included chapters and a bibliography. Each run records:
+
+- the launch to an editable window, and the restoring of a recovery draft;
+- typing at three places: each key's time to its frame and on the UI
+  thread, frames that missed the display's refresh, and the CPU time and
+  parses each key costs until every view of the text has caught up;
+- scrolling, jumps and re-wrapping, against a plain control scene, with
+  dropped frames;
+- a minute idle: frames besides the caret, CPU ticks and wakeups of every
+  thread, the helpers parch starts included;
+- memory, with those helpers.
+
+The standard matrix is the typical document, the book and the long
+paragraph as source and beside the preview, the rich document beside the
+preview, and the typical document beside the preview in two windows, and
+with adversarial edits (a 1 MB paste and its undo, nesting 200 deep, and
+keys faster than any view settles), three runs each, about 45 minutes in
+all. `OUTDIR/summary.md` has
+the medians against the performance gates. `--view source|split|reading`,
+`--windows 2`, `--adversarial`, `--document` and `--runs` measure one mode
+instead. The script needs Python 3.
+
+Run it in a desktop session with the screen awake, and leave its windows in
+front until it ends. `--offscreen` runs it without a display, on the
+software renderer: that checks the harness and compares two builds on one
+machine, but is no measure of the desktop.
+
+`--compare BASELINE` flags every gate figure more than 20 % worse than the
+baseline's, and exits with 3; `bin/benchmark --summary OUTDIR --compare
+BASELINE` compares runs already made. `tests/benchmark-baseline.json` holds
+the first baseline, offscreen figures from one aarch64 machine, so compare
+offscreen runs with it, and keep a desktop baseline of your own.
 
 ## Releases
 

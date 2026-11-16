@@ -40,5 +40,9 @@ Dialect::Layers withFrontMatter(Dialect::Layers layers, const QString &text, con
 // its library root, unless set, is the dialect's, and its include limits
 // are always the dialect's.
 Reading read(const QString &text, const Dialect::Layers &layers, md::Source source);
+// The same without formatting its citations, which leaves `formatted`
+// empty: what the views of the window share (documentparse.h), each of which
+// formats what it needs from it.
+Reading parse(const QString &text, const Dialect::Layers &layers, md::Source source);
 
 } // namespace DocumentReading

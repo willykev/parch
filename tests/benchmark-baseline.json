@@ -1,0 +1,369 @@
+{
+  "label": "Offscreen figures: QT_QPA_PLATFORM=offscreen and the software renderer, bin/benchmark --offscreen, on one aarch64 machine with 16 CPUs and Qt 6.12, while other builds ran on it. A reference for offscreen runs on comparable hardware; it is no measure of the desktop.",
+  "machine": {
+    "qt": "6.12.0",
+    "platform": "offscreen",
+    "graphicsApi": "software",
+    "refreshHz": 60,
+    "devicePixelRatio": 1,
+    "spellingActive": true,
+    "architecture": "aarch64",
+    "cpus": 16
+  },
+  "cases": {
+    "book-source": {
+      "document": "book",
+      "view": "source",
+      "windows": 1,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 17.078504,
+        "controlScrollP95": 17.078736,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 0,
+        "idleContextSwitches": 13,
+        "idleCpuTicks": 1,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 7,
+        "keyToFrameP95": 11.461892,
+        "launchMs": 327.206422,
+        "layoutsWhileMoving": 0,
+        "pssMiB": 126.94921875,
+        "recoveryRestoreMs": 125.701212,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 16.792741,
+        "rewrapSettleMs": 133.644803,
+        "scrollP95": 16.931539,
+        "typingCpuMsPerKey": 9.245616666666669,
+        "typingOtherThreadsCpuMsPerKey": 3.472304816666667,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 3.912517,
+        "typingUiThreadCpuMsPerKey": 5.767339699999999
+      }
+    },
+    "book-split": {
+      "document": "book",
+      "view": "split",
+      "windows": 1,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 17.131455,
+        "controlScrollP95": 17.358636,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 8,
+        "idleContextSwitches": 14,
+        "idleCpuTicks": 1,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 7,
+        "keyToFrameP95": 80.058088,
+        "launchMs": 346.528554,
+        "layoutsWhileMoving": 0,
+        "pssMiB": 172.9736328125,
+        "recoveryRestoreMs": 237.70803,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 17.03816,
+        "rewrapSettleMs": 89.495136,
+        "scrollP95": 17.71909,
+        "typingCpuMsPerKey": 34.778800000000004,
+        "typingOtherThreadsCpuMsPerKey": 3.3334288,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 4.06343,
+        "typingUiThreadCpuMsPerKey": 31.44753508333333
+      }
+    },
+    "long-paragraph-source": {
+      "document": "long-paragraph",
+      "view": "source",
+      "windows": 1,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 16.669881,
+        "controlScrollP95": 16.771475,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 60,
+        "idleContextSwitches": 18,
+        "idleCpuTicks": 2,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 4,
+        "keyToFrameP95": 47.479476,
+        "launchMs": 264.036593,
+        "layoutsWhileMoving": 154,
+        "pssMiB": 97.9013671875,
+        "recoveryRestoreMs": 66.246954,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 17.222157,
+        "scrollP95": 17.231282,
+        "typingCpuMsPerKey": 40.336400000000005,
+        "typingOtherThreadsCpuMsPerKey": 0.8299597166666667,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 24.855978,
+        "typingUiThreadCpuMsPerKey": 39.46963363333334
+      }
+    },
+    "long-paragraph-split": {
+      "document": "long-paragraph",
+      "view": "split",
+      "windows": 1,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 16.852028,
+        "controlScrollP95": 16.712273,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 60,
+        "idleContextSwitches": 29,
+        "idleCpuTicks": 2,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 12,
+        "keyToFrameP95": 60.122895,
+        "launchMs": 275.354162,
+        "layoutsWhileMoving": 147,
+        "pssMiB": 109.2548828125,
+        "recoveryRestoreMs": 62.685316,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 33.017583,
+        "scrollP95": 19.693817,
+        "typingCpuMsPerKey": 31.968600000000002,
+        "typingOtherThreadsCpuMsPerKey": 0.5901887333333333,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 24.889121,
+        "typingUiThreadCpuMsPerKey": 31.397539999999996
+      }
+    },
+    "rich-split": {
+      "document": "rich",
+      "view": "split",
+      "windows": 1,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 17.011825,
+        "controlScrollP95": 16.985415,
+        "droppedFramesScrolling": 3,
+        "droppedFramesTyping": 8,
+        "idleContextSwitches": 17,
+        "idleCpuTicks": 2,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 6,
+        "keyToFrameP95": 29.737257,
+        "launchMs": 276.527165,
+        "layoutsWhileMoving": 153,
+        "pssMiB": 134.2705078125,
+        "recoveryRestoreMs": 65.120947,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 18.897565,
+        "scrollP95": 18.435509,
+        "typingCpuMsPerKey": 31.564216666666656,
+        "typingOtherThreadsCpuMsPerKey": 2.67879295,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 1.449515,
+        "typingUiThreadCpuMsPerKey": 28.875874949999993
+      }
+    },
+    "typical-source": {
+      "document": "typical",
+      "view": "source",
+      "windows": 1,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 16.693641,
+        "controlScrollP95": 16.734116,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 0,
+        "idleContextSwitches": 22,
+        "idleCpuTicks": 1,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 4,
+        "keyToFrameP95": 7.110148,
+        "launchMs": 258.517791,
+        "layoutsWhileMoving": 156,
+        "pssMiB": 91.8193359375,
+        "recoveryRestoreMs": 21.33529,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 16.92199,
+        "scrollP95": 16.803835,
+        "typingCpuMsPerKey": 1.7508499999999998,
+        "typingOtherThreadsCpuMsPerKey": 0.5551317499999999,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 0.748234,
+        "typingUiThreadCpuMsPerKey": 1.2422866833333335
+      }
+    },
+    "typical-split": {
+      "document": "typical",
+      "view": "split",
+      "windows": 1,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 16.904138,
+        "controlScrollP95": 16.791902,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 5,
+        "idleContextSwitches": 20,
+        "idleCpuTicks": 2,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 6,
+        "keyToFrameP95": 17.681996,
+        "launchMs": 265.223178,
+        "layoutsWhileMoving": 156,
+        "pssMiB": 105.697265625,
+        "recoveryRestoreMs": 77.992196,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 17.546008,
+        "scrollP95": 17.104035,
+        "typingCpuMsPerKey": 5.944299999999999,
+        "typingOtherThreadsCpuMsPerKey": 0.6412570833333333,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 0.971673,
+        "typingUiThreadCpuMsPerKey": 5.387660516666667
+      }
+    },
+    "typical-split-2windows": {
+      "document": "typical",
+      "view": "split",
+      "windows": 2,
+      "adversarial": false,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 16.738172,
+        "controlScrollP95": 16.806665,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 9,
+        "idleContextSwitches": 42,
+        "idleCpuTicks": 2,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 8,
+        "keyToFrameP95": 24.280626,
+        "launchMs": 263.859384,
+        "layoutsWhileMoving": 155,
+        "pssMiB": 137.8603515625,
+        "recoveryRestoreMs": 50.466187,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 17.418811,
+        "scrollP95": 17.0521,
+        "secondWindowMs": 10.811388,
+        "typingCpuMsPerKey": 12.283333333333333,
+        "typingOtherThreadsCpuMsPerKey": 0.8747694333333332,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 1.773859,
+        "typingUiThreadCpuMsPerKey": 11.409405566666667
+      }
+    },
+    "typical-split-adversarial": {
+      "document": "typical",
+      "view": "split",
+      "windows": 1,
+      "adversarial": true,
+      "runs": 3,
+      "figures": {
+        "controlRewrapP95": 17.544382,
+        "controlScrollP95": 17.25218,
+        "droppedFramesScrolling": 0,
+        "droppedFramesTyping": 6,
+        "idleContextSwitches": 38,
+        "idleCpuTicks": 3,
+        "idleFramesBesidesCaret": 0,
+        "idleWakeups": 34,
+        "keyToFrameP95": 18.25822,
+        "launchMs": 276.727232,
+        "layoutsWhileMoving": 155,
+        "nestingCaughtUpMs": 402.972034,
+        "pasteCaughtUpMs": 2575.783148,
+        "pssMiB": 339.4228515625,
+        "rapidCaughtUpMs": 402.155478,
+        "rapidKeyToFrameP95": 9.260609,
+        "recoveryRestoreMs": 66.100231,
+        "refreshIntervalMs": 16.666666666666668,
+        "rewrapP95": 17.835764,
+        "scrollP95": 17.949194,
+        "typingCpuMsPerKey": 6.792266666666667,
+        "typingOtherThreadsCpuMsPerKey": 0.6773468333333333,
+        "typingParsesPerKey": 1,
+        "typingUiP95": 1.193774,
+        "typingUiThreadCpuMsPerKey": 6.0850908666666665,
+        "undoCaughtUpMs": 401.492892
+      }
+    }
+  },
+  "runs": {
+    "started": {
+      "time": "2026-11-16 11:52:32",
+      "load": [
+        1.61,
+        2.1,
+        3.38
+      ]
+    },
+    "ended": {
+      "time": "2026-11-16 12:34:46",
+      "load": [
+        2.05,
+        2.32,
+        2.61
+      ]
+    },
+    "offscreen": true,
+    "failures": {},
+    "matrix": [
+      [
+        "long-paragraph",
+        "source",
+        1,
+        false
+      ],
+      [
+        "long-paragraph",
+        "split",
+        1,
+        false
+      ],
+      [
+        "book",
+        "source",
+        1,
+        false
+      ],
+      [
+        "book",
+        "split",
+        1,
+        false
+      ],
+      [
+        "rich",
+        "split",
+        1,
+        false
+      ],
+      [
+        "typical",
+        "split",
+        1,
+        true
+      ],
+      [
+        "typical",
+        "split",
+        2,
+        false
+      ],
+      [
+        "typical",
+        "split",
+        1,
+        false
+      ],
+      [
+        "typical",
+        "source",
+        1,
+        false
+      ]
+    ]
+  }
+}

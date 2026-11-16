@@ -1,6 +1,7 @@
 #pragma once
 
 #include "document.h"
+#include "documentparse.h"
 
 #include <QFutureWatcher>
 #include <QObject>
@@ -20,10 +21,13 @@
 // apostrophes are one. Chinese and Japanese, written without spaces, count
 // each Han, Hiragana and Katakana character as a word.
 //
-// Edits are counted a moment after typing pauses. A short document is
-// counted at once; a long one on a worker thread of its own, from a copy of
-// the text, and its count is shown only while the text and selection are
-// still those it was made for, so a stale count never replaces a newer one.
+// Edits are counted a moment after typing pauses, from the document's parse
+// of the text (DocumentParse, shared by every view of the document; only
+// the document's own text is counted, not what it includes). A short
+// document is counted as soon as it is parsed; a long one on a worker
+// thread of its own, and its count is shown only while the text and
+// selection are still those it was made for, so a stale count never
+// replaces a newer one.
 class WordCounter : public QObject {
     Q_OBJECT
     Q_PROPERTY(Document *document READ document WRITE setDocument NOTIFY documentChanged)
@@ -59,8 +63,8 @@ public:
     bool ofSelection() const { return m_ofSelection; }
     QString summary() const;
     QString spoken() const;
-    // A count waits on the worker.
-    bool counting() const { return m_watcher.isRunning(); }
+    // A count waits for the text to be parsed, or on the worker.
+    bool counting() const { return m_waiting || m_watcher.isRunning(); }
     // The worker's pool, which a test can hold up.
     QThreadPool *pool() { return &m_pool; }
 
@@ -80,11 +84,17 @@ signals:
 private:
     void schedule(int delay);
     void start();
+    void countParsed(const ParsedTextPtr &parse);
     void take(int words, bool ofSelection);
 
     QPointer<Document> m_document;
     QMetaObject::Connection m_edits;
     QMetaObject::Connection m_dialect;
+    QMetaObject::Connection m_parses;
+    // A count waits for the document's parse of the text as it is now.
+    bool m_waiting = false;
+    // The generation of the text and selection last counted.
+    quint64 m_counted = 0;
     int m_selectionStart = 0;
     int m_selectionEnd = 0;
     int m_words = 0;

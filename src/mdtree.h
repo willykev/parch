@@ -397,6 +397,9 @@ QString plainText(const Node &node);
 Document parse(const QString &text, const Options &options = Options());
 // Parses a document and assembles the files it includes into its tree.
 Document parse(const QString &text, const Options &options, const Source &source);
+// How many texts parse() has read since the program started, on any
+// thread: for measuring, and for tests that count parses.
+quint64 parseCount();
 
 // The slug of a heading's text before duplicates are numbered: lower case,
 // punctuation and symbols removed, each run of white space one hyphen.

@@ -878,12 +878,12 @@ void typingWithLiveFormattingStaysWithinAFrame()
           given.median, given.p95, given.max, styling->stats().partsSent, styling->stats().partsKept);
     qInfo("live formatting, key to styled view: p50 %.2f ms, p95 %.2f ms, max %.2f ms", latency.median, latency.p95,
           latency.max);
-    const double frame = 1000.0 / 120;
+    const double frame = timeLimit(1000.0 / 120);
     QVERIFY2(fast.p95 < frame, qPrintable(QString::number(fast.p95)));
     QVERIFY2(slow.p95 < frame, qPrintable(QString::number(slow.p95)));
     QVERIFY2(given.p95 < frame, qPrintable(QString::number(given.p95)));
     QVERIFY2(opened.p95 < frame, qPrintable(QString::number(opened.p95)));
-    QVERIFY2(latency.p95 < 50, qPrintable(QString::number(latency.p95)));
+    QVERIFY2(latency.p95 < timeLimit(50), qPrintable(QString::number(latency.p95)));
     QVERIFY(view.settle());
     QCOMPARE(view.styledRuns(), markdownStyleRuns(md::parse(view.text())));
 }

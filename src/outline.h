@@ -1,5 +1,6 @@
 #pragma once
 
+#include "documentparse.h"
 #include "mdtree.h"
 #include "sourcetypes.h"
 // The document is a property QML reads, so its type must be complete here.
@@ -23,8 +24,9 @@ struct Heading {
     int position = 0;
     // Which line that is, from 0.
     int line = 0;
-    // The anchor a `#slug` link reaches it by, numbered as the document alone
-    // numbers its headings, and its Writer label, if it has one.
+    // The anchor a `#slug` link reaches it by, numbered as the parse it was
+    // found in numbers headings (see Outline::headings), and its Writer
+    // label, if it has one.
     QString slug;
     QString label;
     // A heading an include brought in: the file it is written in, and its
@@ -44,14 +46,19 @@ namespace Outline {
 QList<Heading> headings(const QString &text, const md::Options &options = {});
 // The same with the headings of the files it includes, which `source` reads.
 QList<Heading> headings(const QString &text, const md::Options &options, const md::Source &source);
+// The same of a parsed text, with the headings of the files it includes
+// when it was parsed with them (DocumentParse reads them), and the slugs the
+// parse numbered them with.
+QList<Heading> headings(const md::Document &document, const QString &text);
 } // namespace Outline
 
 // The headings of one document, for a list that goes to them: found off the
-// UI thread, from a snapshot of the text, once it has rested after an edit,
-// and taken only while the text is still at that revision. Nothing is
-// looked for while the model is not active, so that typing pays for nothing
-// while no list shows it. A filter keeps the headings whose text holds it,
-// ignoring case.
+// UI thread, from the document's parse of the text (DocumentParse, shared by
+// every view of the document, which reads it with its includes) once it has
+// rested after an edit, and taken only while the text is still at that
+// revision. Nothing is looked for while the model is not active, so that
+// typing pays for nothing while no list shows it. A filter keeps the
+// headings whose text holds it, ignoring case.
 class OutlineModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(Document *document READ document WRITE setDocument NOTIFY documentChanged)
@@ -106,10 +113,10 @@ private:
         QList<Heading> headings;
         Revision revision = 0;
     };
-    static Scan scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options, QString path,
-                        QString directory, QString libraryRoot);
+    static Scan scanJob(ParsedTextPtr parse);
     void schedule(int delayMs);
     void scan();
+    void read(const ParsedTextPtr &parse);
     void take(const QList<Heading> &headings);
     void show();
     void setReady(bool ready);
@@ -117,6 +124,9 @@ private:
     QPointer<Document> m_document;
     QMetaObject::Connection m_edits;
     QMetaObject::Connection m_dialect;
+    QMetaObject::Connection m_parses;
+    // A scan waits for the document's parse of the text as it is now.
+    bool m_waiting = false;
     bool m_active = false;
     QString m_filter;
     QList<Heading> m_all;

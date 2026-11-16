@@ -1,5 +1,6 @@
 #pragma once
 
+#include "documentparse.h"
 #include "editordecorations.h"
 #include "mdtree.h"
 
@@ -68,11 +69,11 @@ bool keepsAdvances(const QFont &font, bool designMetrics, const QTextCharFormat 
 // its plain glyphs; otherwise their text takes a colour instead.
 //
 // The text is styled on a worker, never as it is typed: once the view shows
-// it, and again once typing has paused for SettleMs. Each pass reads a copy
-// of the text, parses it with the Markdown engine, which has no partial
-// parse but reads a book in milliseconds, and hands the styling over in
-// parts that tile the text, one for each block: those in view first, at
-// once, then the rest. A part whose styling is what the view already has,
+// it, and again once typing has paused for SettleMs. Each pass reads the
+// document's parse of the text as it is then (DocumentParse, shared by every
+// view of the document; the engine has no partial parse but reads a book in
+// milliseconds), and hands the styling over in parts that tile the text,
+// one for each block: those in view first, at once, then the rest. A part whose styling is what the view already has,
 // and that no edit has touched since, is not handed over at all, and the
 // decorations format again only the paragraphs whose formatting changed. A
 // part edited while the pass ran is not taken; the next pass styles it.
@@ -200,6 +201,8 @@ private:
     void refresh();
     void schedule(int delayMs);
     void start();
+    // Styles the text as it is parsed, on a worker.
+    void style(const ParsedTextPtr &parse);
     void cancel();
     void edited(Revision revision, SourceRange range, int inserted);
     void take(quint64 pass, Revision revision, std::vector<Part> parts, bool visible, bool last, int kept);
@@ -210,6 +213,9 @@ private:
     QPointer<EditorBinding> m_binding;
     QList<QMetaObject::Connection> m_decorationConnections, m_bindingConnections;
     QMetaObject::Connection m_dialect;
+    QMetaObject::Connection m_parses;
+    // A pass waits for the document's parse of the text as it is now.
+    bool m_waiting = false;
     bool m_enabled = true;
     QFont m_font;
     QColor m_foreground, m_background, m_marker, m_link, m_code, m_codeFill, m_math, m_mark;

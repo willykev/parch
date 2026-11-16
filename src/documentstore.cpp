@@ -2,6 +2,7 @@
 
 #include "appservice.h"
 #include "document.h"
+#include "documentparse.h"
 #include "pathtext.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
@@ -1492,6 +1493,7 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
 
 Document *DocumentStore::adopt(Document *document)
 {
+    document->parse()->setDraftFolder(draftFolder(document->m_id));
     m_documents.append(document);
     watchPath(document->m_path);
     emit documentOpened(document);

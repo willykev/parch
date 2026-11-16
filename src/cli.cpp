@@ -47,7 +47,12 @@ QString openHelpText()
         "  --focus          Turn focus mode on\n"
         "  --line N         Put line N at the top of the text and of the preview\n"
         "  --scroll AMOUNT  Scroll that far down instead, from 0 (the top) to 1\n"
-        "  --select A,B     Select the text from offset A to offset B\n");
+        "  --select A,B     Select the text from offset A to offset B\n"
+        "\n"
+        "With --benchmark:\n"
+        "  --view VIEW      As with --screenshot; source unless given\n"
+        "  --windows N      1, or 2 windows showing the same FILE\n"
+        "  --adversarial    Also a 1 MB paste and its undo, deep nesting and rapid keys\n");
 }
 
 QString helpText()
@@ -165,11 +170,15 @@ Launch parseLaunch(const QStringList &given)
     static const QStringList valued = {
         QStringLiteral("--theme"), QStringLiteral("--benchmark"), QStringLiteral("--screenshot"),
         QStringLiteral("--size"),  QStringLiteral("--view"),      QStringLiteral("--show"),
-        QStringLiteral("--scroll"), QStringLiteral("--line"),     QStringLiteral("--select")};
+        QStringLiteral("--scroll"), QStringLiteral("--line"),     QStringLiteral("--select"),
+        QStringLiteral("--windows")};
     static const QStringList alone = {QStringLiteral("--default-theme"), QStringLiteral("--focus"),
-                                      QStringLiteral("--library"), QStringLiteral("--no-library")};
+                                      QStringLiteral("--library"), QStringLiteral("--no-library"),
+                                      QStringLiteral("--adversarial")};
     // The options given that set the window up for a picture, in order.
     QStringList forPicture;
+    // The options given that say how a benchmark measures.
+    QStringList forBenchmark;
     bool onlyFiles = false;
     // The first entry is the program name.
     for (qsizetype i = 1; i < arguments.size(); ++i) {
@@ -209,6 +218,11 @@ Launch parseLaunch(const QStringList &given)
                 launch.benchmarkOutput = value;
             } else if (name == QLatin1String("--screenshot")) {
                 launch.picture.file = value;
+            } else if (name == QLatin1String("--windows")) {
+                if (value != QLatin1String("1") && value != QLatin1String("2"))
+                    return refuse(QCoreApplication::translate("cli", "parch: --windows takes 1 or 2"));
+                launch.benchmarkWindows = value.toInt();
+                forBenchmark.append(name);
             } else {
                 const QString why = takePictureValue(launch.picture, name, value);
                 if (!why.isEmpty()) return refuse(why);
@@ -221,6 +235,9 @@ Launch parseLaunch(const QStringList &given)
                 return refuse(QCoreApplication::translate("cli", "parch: %1 takes no value").arg(name));
             if (name == QLatin1String("--default-theme")) {
                 launch.defaultTheme = true;
+            } else if (name == QLatin1String("--adversarial")) {
+                launch.benchmarkAdversarial = true;
+                forBenchmark.append(name);
             } else {
                 if (name == QLatin1String("--focus")) launch.picture.focus = true;
                 else launch.picture.library = name == QLatin1String("--library");
@@ -253,7 +270,19 @@ Launch parseLaunch(const QStringList &given)
         return together("--line", "--scroll");
     if (forPicture.contains(QLatin1String("--library")) && forPicture.contains(QLatin1String("--no-library")))
         return together("--library", "--no-library");
-    if (launch.picture.file.isEmpty() && !forPicture.isEmpty())
-        return refuse(QCoreApplication::translate("cli", "parch: %1 works only with --screenshot").arg(forPicture.first()));
+    // A benchmark shows the document in the view --view names too; what
+    // else measures it goes with it alone.
+    if (!launch.benchmarkOutput.isEmpty()) {
+        if (!launch.picture.view.isEmpty()) launch.benchmarkView = launch.picture.view;
+        forPicture.removeAll(QStringLiteral("--view"));
+    }
+    if (launch.picture.file.isEmpty() && !forPicture.isEmpty()) {
+        const QString first = forPicture.first();
+        return refuse(first == QLatin1String("--view")
+                          ? QCoreApplication::translate("cli", "parch: --view works only with --screenshot or --benchmark")
+                          : QCoreApplication::translate("cli", "parch: %1 works only with --screenshot").arg(first));
+    }
+    if (launch.benchmarkOutput.isEmpty() && !forBenchmark.isEmpty())
+        return refuse(QCoreApplication::translate("cli", "parch: %1 works only with --benchmark").arg(forBenchmark.first()));
     return launch;
 }

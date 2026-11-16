@@ -23,6 +23,8 @@ class Hunspell;
 // HTML, link destinations, labels and keys, and Markdown punctuation are
 // not prose.
 std::vector<md::Range> spellingProse(const QString &text, const md::Options &options = {});
+// The same of a parsed text: the prose of its own text, file 0.
+std::vector<md::Range> spellingProse(const md::Document &document);
 
 // The words in [from, to) of `text` within the ranges of prose (in order and
 // apart), as Unicode segments them: apostrophes inside a word, accents and

@@ -16,7 +16,13 @@
 // What one layout keeps: the reading, and the pages set from it, which live
 // and die on the preview's thread.
 struct PrintPreview::State {
-    std::shared_ptr<const DocumentReading::Reading> reading;
+    // The document's parse, and its citations as its style formats them,
+    // which point into it.
+    struct Read {
+        ParsedTextPtr parse;
+        DocumentCitations::Formatted formatted;
+    };
+    std::shared_ptr<const Read> read;
     std::unique_ptr<PdfExporter::Pages> pages;
 };
 
@@ -52,8 +58,6 @@ PrintPreview::~PrintPreview()
 }
 
 void PrintPreview::setRenderOptions(const RenderService::Options &options) { m_render = options; }
-
-void PrintPreview::setPlaces(std::function<std::pair<QString, QString>(Document *)> places) { m_places = std::move(places); }
 
 void PrintPreview::show(Document *document, const QString &mode, const QVariantMap &options)
 {
@@ -97,36 +101,44 @@ void PrintPreview::layOut()
         options.remove(QStringLiteral("page-size"));
         options.remove(QStringLiteral("landscape"));
     }
-    QString directory, library = document->libraryRoot();
-    if (m_places) std::tie(directory, library) = m_places(document);
-    else if (!document->path().isEmpty()) directory = QFileInfo(document->path()).absolutePath();
-    const QSharedPointer<const SourceSnapshot> snapshot = document->buffer()->snapshot();
-    const Dialect::Layers layers = document->savedDialect();
     const QString path = document->path();
     const RenderService::Options render = m_render;
+    // The document's parse of its text as it is now, which every view of it
+    // shares; a document that closes first is laid out no more.
+    connect(document, &QObject::destroyed, this, [this, generation] {
+        if (generation != *m_generation || !m_busy) return;
+        m_busy = false;
+        emit changed();
+    }, Qt::SingleShotConnection);
+    document->parse()->whenParsed(this, [=, this](const ParsedTextPtr &parse) {
+        if (*generations != generation) return;
+        lay(parse, generation, options, path, render);
+    });
+}
+
+void PrintPreview::lay(const ParsedTextPtr &parse, quint64 generation, const QHash<QString, QString> &options,
+                       const QString &path, const RenderService::Options &render)
+{
+    const auto generations = m_generation;
     // The layout comes back as a plain pointer, so that only the preview
     // owns it, and whatever lets go of it last deletes it on this thread.
     QtConcurrent::run(&m_pool, [=]() -> State * {
         if (*generations != generation) return nullptr;
         auto state = std::make_unique<State>();
-        md::FileIncludeResolver resolver;
-        md::Source source;
-        source.path = canonical(path);
-        source.directory = directory;
-        source.libraryRoot = library;
-        source.resolver = &resolver;
-        state->reading = std::make_shared<const DocumentReading::Reading>(DocumentReading::read(snapshot->text, layers, source));
+        const DocumentReading::Reading &reading = parse->reading;
+        state->read = std::make_shared<const State::Read>(
+            State::Read{parse, DocumentCitations::format(reading.document, reading.citations)});
         ExportRecipe recipe;
-        recipe.source = source.path;
+        recipe.source = canonical(path);
         recipe.format = QStringLiteral("pdf");
         recipe.options = options;
-        recipe.dialect = state->reading->dialect;
-        recipe.citations = std::shared_ptr<const DocumentCitations::Formatted>(state->reading, &state->reading->formatted);
+        recipe.dialect = reading.dialect;
+        recipe.citations = std::shared_ptr<const DocumentCitations::Formatted>(state->read, &state->read->formatted);
         ExportRun run;
         run.render = render;
         run.cancelled = [generations, generation] { return *generations != generation; };
         ExportResult result;
-        state->pages = pdfExporter()->setPages(state->reading->document, recipe, run, &result);
+        state->pages = pdfExporter()->setPages(reading.document, recipe, run, &result);
         if (!state->pages || *generations != generation) return nullptr;
         return state.release();
     }).then(this, [this, generation](State *made) {

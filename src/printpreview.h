@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dialectchoice.h"
+#include "documentparse.h"
 #include "renderservice.h"
 
 #include <QHash>
@@ -40,7 +41,6 @@ public:
 
     // Where the helpers are; as Exports::setRenderOptions().
     void setRenderOptions(const RenderService::Options &options);
-    void setPlaces(std::function<std::pair<QString, QString>(Document *)> places);
 
     int pageCount() const { return m_pageCount; }
     qreal pageAspect() const { return m_aspect; }
@@ -73,10 +73,11 @@ private:
         QVariantMap options;
     };
     void layOut();
+    void lay(const ParsedTextPtr &parse, quint64 generation, const QHash<QString, QString> &options,
+             const QString &path, const RenderService::Options &render);
     void release();
 
     RenderService::Options m_render;
-    std::function<std::pair<QString, QString>(Document *)> m_places;
     QThreadPool m_pool;
     QTimer m_delay;
     Request m_request;

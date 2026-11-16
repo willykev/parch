@@ -20,6 +20,13 @@ Dialect::Layers withFrontMatter(Dialect::Layers layers, const QString &text, con
 
 Reading read(const QString &text, const Dialect::Layers &layers, md::Source source)
 {
+    Reading reading = parse(text, layers, source);
+    reading.formatted = DocumentCitations::format(reading.document, reading.citations);
+    return reading;
+}
+
+Reading parse(const QString &text, const Dialect::Layers &layers, md::Source source)
+{
     Reading reading;
     const QString folder = !source.directory.isEmpty() ? source.directory
                            : source.path.contains(u'/') ? source.path.left(source.path.lastIndexOf(u'/'))
@@ -40,7 +47,6 @@ Reading read(const QString &text, const Dialect::Layers &layers, md::Source sour
         source.externalCitationKeys = reading.citations.keys();
         reading.document = md::parse(text, reading.dialect.options, source);
     }
-    reading.formatted = DocumentCitations::format(reading.document, reading.citations);
     return reading;
 }
 

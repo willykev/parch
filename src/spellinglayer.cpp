@@ -1,6 +1,7 @@
 #include "spellinglayer.h"
 
 #include "document.h"
+#include "documentparse.h"
 #include "sourcebuffer.h"
 
 #include <QCoreApplication>
@@ -49,16 +50,15 @@ std::vector<SourceRange> paragraphsOf(QStringView text)
 
 struct Check {
     Revision revision;
-    // A copy of the text of its own, made as the check starts once typing
-    // has paused, so that no later edit has to copy the buffer's text.
-    QString text;
+    // The document's parse of the text as it was when the check started,
+    // which every view of it shares: the text, and where its prose is in
+    // the dialect it is read in.
+    ParsedTextPtr parse;
     SourceRange visible;
     std::shared_ptr<SpellEngine> engine;
     std::shared_ptr<std::atomic_bool> cancelled;
     QPointer<SpellingLayer> layer;
     quint64 number;
-    // The dialect the text is read in, which says where its prose is.
-    md::Options options;
 };
 
 } // namespace
@@ -145,9 +145,17 @@ void SpellingLayer::connectBinding()
 void SpellingLayer::watchDialect()
 {
     disconnect(m_dialect);
+    disconnect(m_parses);
+    // A parse asked of another document never comes: this one is asked.
+    const bool waited = std::exchange(m_waiting, false);
     // Read in another dialect, other parts of the text are prose.
-    if (Document *document = m_binding ? m_binding->document() : nullptr)
+    if (Document *document = m_binding ? m_binding->document() : nullptr) {
         m_dialect = connect(document, &Document::dialectChanged, this, [this] { schedule(0); });
+        m_parses = connect(document->parse(), &DocumentParse::parsed, this, [this](const ParsedTextPtr &parse) {
+            if (std::exchange(m_waiting, false) && active()) checkText(parse);
+        });
+    }
+    if (waited) schedule(0);
 }
 
 bool SpellingLayer::active() const
@@ -184,6 +192,7 @@ void SpellingLayer::cancel()
     const bool was = checking();
     if (m_cancelled) m_cancelled->store(true);
     m_cancelled.reset();
+    m_waiting = false;
     m_settle.stop();
     m_running = false;
     if (was) emit checkingChanged();
@@ -198,20 +207,30 @@ void SpellingLayer::start()
     m_cancelled = std::make_shared<std::atomic_bool>(false);
     m_running = true;
     m_stale = false;
-    SourceBuffer *buffer = m_binding->document()->buffer();
-    QString text;
-    {
-        const QString shared = buffer->text();
-        text = QString(shared.constData(), shared.size());
+    // A check still running, or a parse still awaited, is for text that has
+    // changed since: what it finds is not taken.
+    ++m_check;
+    // The text as it is now, parsed for every view of the document: at
+    // once when it is already, or else once it is.
+    m_waiting = true;
+    if (const ParsedTextPtr parse = m_binding->document()->parse()->request()) {
+        m_waiting = false;
+        checkText(parse);
     }
-    Check check{buffer->revision(), std::move(text), m_binding->visibleRange(), m_checker->engine(), m_cancelled, this,
-                ++m_check, m_binding->document()->markdownOptions()};
+    emit checkingChanged();
+}
+
+// Checks the parsed text on the spell checker's worker, a paragraph at a
+// time, those in view first.
+void SpellingLayer::checkText(const ParsedTextPtr &parse)
+{
+    Check check{parse->revision, parse, m_binding->visibleRange(), m_checker->engine(), m_cancelled, this, m_check};
     auto cache = m_cache;
     m_checker->pool()->start([check = std::move(check), cache]() mutable {
         if (check.cancelled->load()) return;
         const Revision revision = check.revision;
-        const QString &text = check.text;
-        const std::vector<md::Range> prose = spellingProse(text, check.options);
+        const QString &text = check.parse->text;
+        const std::vector<md::Range> prose = spellingProse(check.parse->document());
         std::vector<SourceRange> paragraphs = paragraphsOf(text);
         // The paragraphs in view first, then the rest in order.
         const int top = check.visible.start, bottom = check.visible.start + check.visible.length;
@@ -271,7 +290,6 @@ void SpellingLayer::start()
         }
         send(true);
     });
-    emit checkingChanged();
 }
 
 void SpellingLayer::take(quint64 check, Revision revision, const std::vector<Found> &found, bool last)

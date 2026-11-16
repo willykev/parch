@@ -10,6 +10,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <atomic>
 
 namespace md {
 namespace detail {
@@ -700,8 +701,15 @@ Document parse(const QString &text, const Options &options)
     return parse(text, options, Source());
 }
 
+namespace {
+std::atomic<quint64> parsed{0};
+}
+
+quint64 parseCount() { return parsed.load(std::memory_order_relaxed); }
+
 Document parse(const QString &text, const Options &options, const Source &source)
 {
+    parsed.fetch_add(1, std::memory_order_relaxed);
     Document document;
     document.options = options;
     detail::ParseState state;

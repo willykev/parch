@@ -2,6 +2,7 @@
 
 #include "apppaths.h"
 #include "dialectchoice.h"
+#include "documentparse.h"
 #include "printpreview.h"
 #include "renderservice.h"
 
@@ -20,6 +21,7 @@
 #include <memory>
 
 class Document;
+class Exporter;
 class FileRequests;
 class Printer;
 class WindowContext;
@@ -28,9 +30,9 @@ struct Reading;
 }
 
 // The window's exports and printing, each in the background. An export
-// freezes the document's text as it is when it starts, and reads it, its
-// includes, bibliography and citations, in the document's own settings, on
-// a worker; then the format's exporter (exporter.h), the same code as `parch
+// takes the document's parse of its text as it is when it starts (which
+// every view of it shares: its includes, bibliography and front matter, in
+// the document's own settings) and formats its citations on a worker; then the format's exporter (exporter.h), the same code as `parch
 // export`, draws its formulas and diagrams and writes it, atomically, never
 // over the document or a file it includes. Its progress shows in the notice
 // bar, where it can be cancelled; when it ends the notice says what was
@@ -70,9 +72,6 @@ public:
     // Where the helpers are and drawings are kept; found as the application
     // finds them unless set.
     void setRenderOptions(const RenderService::Options &options);
-    // Where a document's relative paths and `/rooted` includes lead from:
-    // its folder and its library root.
-    void setPlaces(std::function<std::pair<QString, QString>(Document *)> places);
 
     QVariantList formats() const;
     bool busy() const { return m_job != nullptr; }
@@ -131,17 +130,19 @@ private:
     void remember(const QString &documentId, const QJsonObject &recipe);
     void loadRecipes();
     QString recipesFile() const;
-    std::pair<QString, QString> placesOf(Document *document) const;
+    // Exports the document's parse of its text, on the export's worker.
+    void exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr &parse, const Exporter *exporter,
+                      const QHash<QString, QString> &options, const QString &output, bool printing, quint32 token,
+                      const QString &path, const QString &documentId, const QString &title,
+                      const RenderService::Options &render);
 
     AppPaths m_paths;
     FileRequests *m_files;
     PrintPreview *m_preview;
     QPointer<Printer> m_printer;
     RenderService::Options m_render;
-    std::function<std::pair<QString, QString>(Document *)> m_places;
-    // Exports run one at a time; the dialog's readings beside them.
+    // Exports run one at a time.
     QThreadPool m_pool;
-    QThreadPool m_readPool;
     QTimer m_poll;
 
     std::shared_ptr<Job> m_job;

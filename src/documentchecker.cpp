@@ -1,6 +1,5 @@
 #include "documentchecker.h"
 
-#include "attachments.h"
 #include "documentreading.h"
 #include "mdinclude.h"
 #include "rendercheck.h"
@@ -40,6 +39,7 @@ struct DocumentChecker::Found {
     QStringList paths;
     QStringList texts;
     QString folder;
+    ParsedTextPtr parse;
 };
 
 DocumentChecker::DocumentChecker(QObject *parent) : QObject(parent)
@@ -93,48 +93,41 @@ void DocumentChecker::check(Document *document)
     setChecking(true);
     m_summary = tr("Checking…");
     emit checked();
-    // Where the document is, and where its settings find `/rooted` includes:
-    // the library folder holding it, unless they name another.
-    QString folder, library = document->libraryRoot();
-    if (m_backend) {
-        folder = m_backend->attachments()->documentFolder(document);
-        if (library.isEmpty()) library = m_backend->attachments()->libraryOf(document);
-    } else if (!document->isDraft()) {
-        folder = QFileInfo(document->path()).absolutePath();
-    }
+    // The document's parse of its text as it is now, which every view of it
+    // shares: read as every output reads it, from where it is.
     const quint64 request = m_request;
-    QtConcurrent::run(&m_pool, &DocumentChecker::work, document->buffer()->text(),
-                      document->isDraft() ? QString() : document->path(), folder, library, document->savedDialect())
-        .then(this, [this, request](const std::shared_ptr<Found> &found) { read(request, found); });
+    // A document that closes first is checked no more.
+    connect(document, &QObject::destroyed, this, [this, request] {
+        if (request != m_request || !m_checking || m_found) return;
+        cancel();
+        m_summary.clear();
+        emit checked();
+    }, Qt::SingleShotConnection);
+    document->parse()->whenParsed(this, [this, request](const ParsedTextPtr &parse) {
+        if (request != m_request) return;
+        QtConcurrent::run(&m_pool, &DocumentChecker::work, parse).then(this, [this, request](const std::shared_ptr<Found> &found) {
+            read(request, found);
+        });
+    });
 }
 
-std::shared_ptr<DocumentChecker::Found> DocumentChecker::work(QString text, QString path, QString folder,
-                                                              QString library, Dialect::Layers layers)
+std::shared_ptr<DocumentChecker::Found> DocumentChecker::work(ParsedTextPtr parse)
 {
     if (const int delay = workerDelay; delay > 0) QThread::msleep(delay);
-    md::FileIncludeResolver resolver;
-    md::Source source;
-    source.path = path.isEmpty() ? QString() : QFileInfo(path).canonicalFilePath();
-    source.directory = folder;
-    source.libraryRoot = library;
-    source.resolver = &resolver;
-    DocumentReading::Reading reading = DocumentReading::read(text, layers, source);
-    DocumentCheck::Loaded loaded;
-    loaded.path = source.path;
-    loaded.dialect = reading.dialect;
-    loaded.document = std::move(reading.document);
-    loaded.citations = std::move(reading.citations);
-    loaded.formatted = std::move(reading.formatted);
+    const DocumentReading::Reading &reading = parse->reading;
+    const md::Document &document = reading.document;
+    const DocumentCitations::Formatted formatted = DocumentCitations::format(document, reading.citations);
+    const QString path = document.files.empty() ? QString() : document.files.front().path;
     auto found = std::make_shared<Found>();
-    found->problems = DocumentCheck::problems(loaded);
-    found->items = RenderCheck::items(loaded.document);
-    for (const md::SourceFile &file : loaded.document.files) {
+    found->problems = DocumentCheck::problems(DocumentCheck::Checked{path, reading.dialect, document, formatted});
+    found->items = RenderCheck::items(document);
+    for (const md::SourceFile &file : document.files) {
         found->paths.append(file.path);
         found->texts.append(file.text);
     }
-    // A draft's text is no file.
-    if (!found->paths.isEmpty() && path.isEmpty()) found->paths.first().clear();
-    found->folder = folder;
+    found->folder = document.files.empty() ? QString() : document.files.front().directory;
+    // What the parse is held for while the formulas and diagrams are drawn.
+    found->parse = parse;
     return found;
 }
 

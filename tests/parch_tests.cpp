@@ -54,6 +54,7 @@
 #include "sourcebuffer.h"
 #include "spellchecker.h"
 #include "spellinglayer.h"
+#include "parsetests.h"
 #include "stylingtests.h"
 #include "tabmodel.h"
 #include "testfiles.h"
@@ -809,6 +810,11 @@ private slots:
     void liveFormattingTurnsOff() { StylingTests::liveFormattingTurnsOff(); }
     void liveFormattingIsAPreferenceAndACommand() { StylingTests::liveFormattingIsAPreferenceAndACommand(); }
     void typingWithLiveFormattingStaysWithinAFrame() { StylingTests::typingWithLiveFormattingStaysWithinAFrame(); }
+    void everyViewReadsOneParseOfEachRevision() { ParseTests::everyViewReadsOneParseOfEachRevision(); }
+    void staleParsesAreNeverHandedOver() { ParseTests::staleParsesAreNeverHandedOver(); }
+    void aChangeOfDialectParsesAgain() { ParseTests::aChangeOfDialectParsesAgain(); }
+    void viewsReadTheDocumentsOwnText() { ParseTests::viewsReadTheDocumentsOwnText(); }
+    void checkingAndExportingReadTheSharedParse() { ParseTests::checkingAndExportingReadTheSharedParse(); }
     void spellingSkipsWhatIsNotProse();
     void spellingSegmentsUnicodeWords();
     void spellCheckerUsesItsDictionaries();
@@ -1095,6 +1101,23 @@ void ParchTests::launchParsing()
     // A value can follow '='; an option is never taken as another's value.
     QCOMPARE(parseLaunch({"parch", "--theme=nord", "a.md"}).themeDirectory, QStringLiteral("nord"));
     QCOMPARE(parseLaunch({"parch", "--benchmark=out.json", "a.md"}).benchmarkOutput, QStringLiteral("out.json"));
+    // What a benchmark measures goes with --benchmark, and only with it.
+    const Launch measured =
+        parseLaunch({"parch", "open", "--benchmark", "out.json", "--view", "split", "--windows=2", "--adversarial", "a.md"});
+    QCOMPARE(measured.kind, Launch::Gui);
+    QCOMPARE(measured.benchmarkView, QStringLiteral("split"));
+    QCOMPARE(measured.benchmarkWindows, 2);
+    QVERIFY(measured.benchmarkAdversarial);
+    QCOMPARE(measured.files, QStringList{"a.md"});
+    const Launch plain = parseLaunch({"parch", "--benchmark", "out.json", "a.md"});
+    QCOMPARE(plain.benchmarkView, QStringLiteral("source"));
+    QCOMPARE(plain.benchmarkWindows, 1);
+    QVERIFY(!plain.benchmarkAdversarial);
+    QCOMPARE(parseLaunch({"parch", "--benchmark", "o.json", "--view=reading", "a.md"}).benchmarkView, QStringLiteral("reading"));
+    QCOMPARE(parseLaunch({"parch", "--view", "split", "a.md"}).kind, Launch::Invalid);
+    QCOMPARE(parseLaunch({"parch", "--adversarial", "a.md"}).kind, Launch::Invalid);
+    QCOMPARE(parseLaunch({"parch", "--benchmark", "o.json", "--view", "sideways", "a.md"}).kind, Launch::Invalid);
+    QCOMPARE(parseLaunch({"parch", "--benchmark", "o.json", "--windows", "3", "a.md"}).kind, Launch::Invalid);
     QCOMPARE(parseLaunch({"parch", "--theme", "--version"}).kind, Launch::Invalid);
     QCOMPARE(parseLaunch({"parch", "--theme="}).kind, Launch::Invalid);
     // A single dash is an option too, refused unless it is -h.
@@ -21590,60 +21613,169 @@ void ParchTests::benchmarkReportsEveryMeasure()
     QVERIFY(Benchmark::copyIn(documents.filePath(QStringLiteral("none.md")), documents.filePath(QStringLiteral("run2")), &error)
                 .isEmpty());
     QVERIFY(error.contains(QStringLiteral("none.md")));
-
-    ShellFixture shell;
-    QVERIFY2(shell.ok(), qPrintable(shell.error));
-    const QString output = documents.filePath(QStringLiteral("result.json"));
-    Benchmark benchmark(output, QStringLiteral("measured"),
-                        Benchmark::Timing{.settleMs = 200, .placeMs = 50, .keyMs = 10, .scrollMs = 300, .jumpMs = 20,
-                                          .rewrapMs = 300, .quietMs = 100, .idleMs = 300, .waitMs = 5000});
-    QSignalSpy finished(&benchmark, &Benchmark::finished);
-    benchmark.setLaunchTime(Benchmark::now());
-    benchmark.opening();
-    shell.backend->openFiles({copy});
-    activate(shell.window.get());
-    benchmark.start(shell.window.get());
-    QVERIFY(finished.wait(60000));
-    QCOMPARE(finished.first().at(1).toString(), QString());
-    QCOMPARE(finished.first().at(0).toInt(), 0);
-
-    const QJsonObject result = QJsonDocument::fromJson(readFile(output)).object();
-    // The whole-document measurement's fields, and the application's own.
-    for (const char *key : {"label", "utf16Units", "qt", "platform", "refreshHz", "devicePixelRatio", "pssEmptyMiB",
-                            "loadSetTextMs", "loadToFirstFrameMs", "pssLoadedMiB", "windowWidth", "windowHeight",
-                            "editorHeightPx", "lineCount", "typing", "lengthAfterTyping", "expectedLength",
-                            "scrollFrameMs", "scrolledToPx", "jumpToFrameMs", "rewrapFrameMs", "pssEndMiB",
-                            "launchToEditableMs", "mainToEditableMs", "idleFrames", "idleCaretChanges", "cursorFlashTimeMs", "idleCpuTicks", "control",
-                            "rewrapSettle", "peakRssMiB", "cpuTimeMs", "helperProcesses", "ownedProcessesEnd",
-                            "pssEndWithOwnedMiB", "graphicsApi"})
-        QVERIFY2(result.contains(QLatin1String(key)), key);
-    QCOMPARE(result["label"].toString(), QStringLiteral("measured"));
-    QCOMPARE(result["utf16Units"].toInt(), int(text.size()));
-    QCOMPARE(result["expectedLength"].toInt(), int(text.size()) + 60);
-    QCOMPARE(result["lengthAfterTyping"].toInt(), result["expectedLength"].toInt());
-    for (const char *place : {"start", "middle", "end"}) {
-        const QJsonObject typing = result["typing"].toObject()[QLatin1String(place)].toObject();
-        QCOMPARE(typing["dispatchMs"].toObject()["n"].toInt(), 20);
-        QVERIFY(typing["keyToFrameMs"].toObject()["n"].toInt() > 0);
+    // A document's included chapters, pictures and bibliography come with it,
+    // where they are beside it; nothing outside its folder does.
+    {
+        QTemporaryDir rich;
+        writeFile(rich.filePath(QStringLiteral("book/rich.md")),
+                  "---\nbibliography: refs.bib\n---\n# Rich\n\n![A figure](images/one.png)\n\nchapters/one.md\n\n"
+                  "![Outside](../outside.png)\n\nSee [@key].\n");
+        writeFile(rich.filePath(QStringLiteral("book/chapters/one.md")), "# One\n\n![Its own](pictures/two.png)\n");
+        writeFile(rich.filePath(QStringLiteral("book/chapters/pictures/two.png")), "png");
+        writeFile(rich.filePath(QStringLiteral("book/images/one.png")), "png");
+        writeFile(rich.filePath(QStringLiteral("book/refs.bib")), "@book{key, title = {A Book}, year = {2001}}\n");
+        writeFile(rich.filePath(QStringLiteral("book/unrelated.md")), "Not read.\n");
+        writeFile(rich.filePath(QStringLiteral("outside.png")), "png");
+        const QString richCopy = Benchmark::copyIn(rich.filePath(QStringLiteral("book/rich.md")),
+                                                   rich.filePath(QStringLiteral("run")), &error);
+        QCOMPARE(richCopy, rich.filePath(QStringLiteral("run/rich.md")));
+        for (const char *copied : {"run/chapters/one.md", "run/chapters/pictures/two.png", "run/images/one.png", "run/refs.bib"})
+            QVERIFY2(QFileInfo::exists(rich.filePath(QLatin1String(copied))), copied);
+        QVERIFY(!QFileInfo::exists(rich.filePath(QStringLiteral("run/unrelated.md"))));
+        // rich.md and refs.bib; the picture outside its folder stays there.
+        QCOMPARE(QDir(rich.filePath(QStringLiteral("run"))).entryList(QDir::Files).size(), 2);
     }
-    QCOMPARE(result["jumpToFrameMs"].toObject()["n"].toInt(), 10);
-    const QJsonObject control = result["control"].toObject();
-    QVERIFY(control["scrollFrameMs"].toObject()["n"].toInt() > 0);
-    QVERIFY(control["rewrapFrameMs"].toObject()["n"].toInt() > 0);
-    QVERIFY(result["scrollFrameMs"].toObject()["n"].toInt() > 0);
-    // A short document re-wraps as the column moves; nothing waits.
-    const QJsonObject settle = result["rewrapSettle"].toObject();
-    QCOMPARE(settle["deferred"].toBool(), false);
-    QVERIFY(settle["widthSteps"].toInt() > 0);
-    QVERIFY(settle["layoutsWhileMoving"].toInt() > 0);
-    QVERIFY(result["peakRssMiB"].toDouble() > 0);
-    // The window is left as it was found, with the text back in its place.
-    QVERIFY(shell.item(QStringLiteral("editorPane"))->isVisible());
-    QVERIFY(!findItem(shell.window->contentItem(), QStringLiteral("controlFlickable")));
-    // What main() does next: quit as parch always does, its text safe.
-    QSignalSpy quitting(shell.backend.get(), &Backend::quitRequested);
-    shell.backend->quit();
-    QVERIFY2(quitting.count() == 1, qPrintable(shell.backend->problem() + u' ' + shell.backend->problemDetail()));
+
+    // A short run of every part: the text beside its preview, a second
+    // window on the same document, and the adversarial edits.
+    const Benchmark::Timing quick{.settleMs = 200, .placeMs = 50, .keyMs = 10, .scrollMs = 300, .jumpMs = 20,
+                                  .rewrapMs = 300, .quietMs = 100, .idleMs = 300, .waitMs = 5000, .caughtUpMs = 150,
+                                  .catchUpMs = 10000, .rapidKeyMs = 2, .pasteUnits = 20000};
+    {
+        ShellFixture shell;
+        QVERIFY2(shell.ok(), qPrintable(shell.error));
+        resizeWindow(shell.window.get(), 1800);
+        const QString output = documents.filePath(QStringLiteral("result.json"));
+        Benchmark benchmark(output, QStringLiteral("measured"), quick);
+        benchmark.setOptions({QStringLiteral("split"), 2, true});
+        benchmark.setBackend(shell.backend.get());
+        QSignalSpy finished(&benchmark, &Benchmark::finished);
+        benchmark.setLaunchTime(Benchmark::now());
+        benchmark.opening();
+        shell.backend->openFiles({copy});
+        activate(shell.window.get());
+        benchmark.start(shell.window.get());
+        QVERIFY(finished.wait(120000));
+        QCOMPARE(finished.first().at(1).toString(), QString());
+        QCOMPARE(finished.first().at(0).toInt(), 0);
+
+        const QJsonObject result = QJsonDocument::fromJson(readFile(output)).object();
+        // The whole-document measurement's fields, and the application's own.
+        for (const char *key :
+             {"label", "utf16Units", "qt", "platform", "refreshHz", "devicePixelRatio", "pssEmptyMiB", "loadSetTextMs",
+              "loadToFirstFrameMs", "pssLoadedMiB", "windowWidth", "windowHeight", "editorHeightPx", "lineCount",
+              "typing", "lengthAfterTyping", "expectedLength", "scrollFrameMs", "scrolledToPx", "jumpToFrameMs",
+              "rewrapFrameMs", "pssEndMiB", "launchToEditableMs", "mainToEditableMs", "idleFrames", "idleCaretChanges",
+              "cursorFlashTimeMs", "idleCpuTicks", "control", "rewrapSettle", "peakRssMiB", "cpuTimeMs",
+              "helperProcesses", "ownedProcessesEnd", "pssEndWithOwnedMiB", "graphicsApi",
+              // What this application adds: the view and windows, what works beside typing,
+              // what typing costs, dropped frames, wakeups, the edits no writer makes, and a recovery.
+              "view", "windows", "adversarial", "panes", "liveFormatting", "spellingActive", "previewActive",
+              "typingCpuMsPerKey", "typingUiThreadCpuMsPerKey", "typingOtherThreadsCpuMsPerKey",
+              "typingParsesPerKey", "droppedFrames", "scrolled", "secondWindow",
+              "idleFramesSecondWindow", "idleChildCpuTicks", "idleOwnedCpuTicks", "idleCpuTicksWithHelpers",
+              "idleWakeups", "idleThreadsEnded", "idleContextSwitches", "adversarialEdits", "recoveryRestore"})
+            QVERIFY2(result.contains(QLatin1String(key)), key);
+        QCOMPARE(result["label"].toString(), QStringLiteral("measured"));
+        QCOMPARE(result["utf16Units"].toInt(), int(text.size()));
+        QCOMPARE(result["expectedLength"].toInt(), int(text.size()) + 60);
+        QCOMPARE(result["lengthAfterTyping"].toInt(), result["expectedLength"].toInt());
+        QCOMPARE(result["view"].toString(), QStringLiteral("split"));
+        QCOMPARE(result["windows"].toInt(), 2);
+        QVERIFY(result["adversarial"].toBool());
+        QVERIFY(result["panes"].toObject()["editor"].toBool());
+        QVERIFY(result["panes"].toObject()["preview"].toBool());
+        QVERIFY(result["previewActive"].toBool());
+        QVERIFY(result["liveFormatting"].toBool());
+        for (const char *place : {"start", "middle", "end"}) {
+            const QJsonObject typing = result["typing"].toObject()[QLatin1String(place)].toObject();
+            QCOMPARE(typing["dispatchMs"].toObject()["n"].toInt(), 20);
+            QVERIFY(typing["keyToFrameMs"].toObject()["n"].toInt() > 0);
+            QVERIFY(typing["cpuMsPerKey"].toDouble() > 0);
+            QVERIFY(typing["uiThreadCpuMsPerKey"].toDouble() > 0);
+            QVERIFY(typing.contains(QLatin1String("otherThreadsCpuMsPerKey")));
+            QVERIFY(typing["previewUpdates"].toInt() >= 1);
+            QVERIFY(typing.contains(QLatin1String("previewStale")));
+            QVERIFY(typing["parses"].toDouble() >= 1);
+            QVERIFY(typing["caughtUp"].toBool());
+            QVERIFY(typing.contains(QLatin1String("lateFrames")));
+            QVERIFY(typing["caughtUpMs"].toDouble() >= quick.caughtUpMs);
+        }
+        QVERIFY(result["typingCpuMsPerKey"].toDouble() > 0);
+        const QJsonObject dropped = result["droppedFrames"].toObject();
+        for (const char *key : {"refreshIntervalMs", "scroll", "typing"}) QVERIFY2(dropped.contains(QLatin1String(key)), key);
+        QVERIFY(dropped["refreshIntervalMs"].toDouble() > 0);
+        QCOMPARE(result["scrolled"].toString(), QStringLiteral("text"));
+        QCOMPARE(result["jumpToFrameMs"].toObject()["n"].toInt(), 10);
+        const QJsonObject control = result["control"].toObject();
+        QVERIFY(control["scrollFrameMs"].toObject()["n"].toInt() > 0);
+        QVERIFY(control["rewrapFrameMs"].toObject()["n"].toInt() > 0);
+        QVERIFY(result["scrollFrameMs"].toObject()["n"].toInt() > 0);
+        // A short document re-wraps as the column moves; nothing waits.
+        const QJsonObject settle = result["rewrapSettle"].toObject();
+        QCOMPARE(settle["deferred"].toBool(), false);
+        QVERIFY(settle["widthSteps"].toInt() > 0);
+        QVERIFY(settle["layoutsWhileMoving"].toInt() > 0);
+        QVERIFY(result["peakRssMiB"].toDouble() > 0);
+        QVERIFY(result["idleWakeups"].toInteger() > 0);
+        QVERIFY(result["secondWindow"].toObject().contains(QLatin1String("loadMs")));
+        // The edits no writer makes, each until every view caught up.
+        const QJsonObject edits = result["adversarialEdits"].toObject();
+        for (const char *edit : {"paste", "undo", "nesting", "rapid"}) {
+            const QJsonObject measuredEdit = edits[QLatin1String(edit)].toObject();
+            QVERIFY2(measuredEdit["caughtUp"].toBool(), edit);
+            QVERIFY2(measuredEdit.contains(QLatin1String("cpuMs")), edit);
+            QVERIFY2(measuredEdit.contains(QLatin1String("parses")), edit);
+        }
+        QCOMPARE(edits["paste"].toObject()["units"].toInt(), quick.pasteUnits);
+        QVERIFY(edits["paste"].toObject()["toFrameMs"].toDouble() > 0);
+        QVERIFY(edits["undo"].toObject()["undone"].toBool());
+        QCOMPARE(edits["nesting"].toObject()["depth"].toInt(), 200);
+        QCOMPARE(edits["rapid"].toObject()["keys"].toInt(), 200);
+        QCOMPARE(edits["rapid"].toObject()["keyToFrameMs"].toObject()["n"].toInt() > 0, true);
+        // A recovery draft of the text, restored, editable and drawn.
+        const QJsonObject restored = result["recoveryRestore"].toObject();
+        QVERIFY(restored["units"].toInt() > int(text.size()));
+        QVERIFY(restored["toEditableMs"].toDouble() > 0);
+        QVERIFY(restored["toFrameMs"].toDouble() >= restored["toEditableMs"].toDouble());
+        // The window is left as it was found, with the text back in its place.
+        QVERIFY(shell.item(QStringLiteral("editorPane"))->isVisible());
+        QVERIFY(!findItem(shell.window->contentItem(), QStringLiteral("controlFlickable")));
+        QCOMPARE(shell.context()->tabs()->activeDocument()->path(), QFileInfo(copy).canonicalFilePath());
+        QCOMPARE(int(shell.backend->windows().size()), 2);
+        // What main() does next: quit as parch always does, its text safe.
+        QSignalSpy quitting(shell.backend.get(), &Backend::quitRequested);
+        shell.backend->quit();
+        QVERIFY2(quitting.count() == 1, qPrintable(shell.backend->problem() + u' ' + shell.backend->problemDetail()));
+    }
+    // The preview alone: it is scrolled, and nothing is typed or re-wrapped.
+    {
+        ShellFixture shell;
+        QVERIFY2(shell.ok(), qPrintable(shell.error));
+        const QString output = documents.filePath(QStringLiteral("reading.json"));
+        Benchmark benchmark(output, QStringLiteral("measured"), quick);
+        benchmark.setOptions({QStringLiteral("reading"), 1, false});
+        benchmark.setBackend(shell.backend.get());
+        QSignalSpy finished(&benchmark, &Benchmark::finished);
+        benchmark.opening();
+        shell.backend->openFiles({copy});
+        activate(shell.window.get());
+        benchmark.start(shell.window.get());
+        QVERIFY(finished.wait(120000));
+        QCOMPARE(finished.first().at(1).toString(), QString());
+        const QJsonObject result = QJsonDocument::fromJson(readFile(output)).object();
+        QCOMPARE(result["view"].toString(), QStringLiteral("reading"));
+        QCOMPARE(result["scrolled"].toString(), QStringLiteral("preview"));
+        QVERIFY(result["panes"].toObject()["preview"].toBool());
+        QVERIFY(!result["panes"].toObject()["editor"].toBool());
+        QVERIFY(result["scrollFrameMs"].toObject()["n"].toInt() > 0);
+        QVERIFY(result["scrolledToPx"].toDouble() > 0);
+        QCOMPARE(result["jumpToFrameMs"].toObject()["n"].toInt(), 10);
+        for (const char *absent : {"typing", "rewrapFrameMs", "control", "adversarialEdits", "secondWindow"})
+            QVERIFY2(!result.contains(QLatin1String(absent)), absent);
+        for (const char *key : {"idleWakeups", "idleCpuTicksWithHelpers", "recoveryRestore", "pssEndWithOwnedMiB"})
+            QVERIFY2(result.contains(QLatin1String(key)), key);
+    }
 }
 
 void ParchTests::benchmarkThatCannotStartEndsTheLoop()

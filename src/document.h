@@ -9,6 +9,8 @@
 #include <QString>
 #include <optional>
 
+class DocumentParse;
+
 // One open document: its authoritative text, where it lives, and how its last
 // save went. Only DocumentStore creates documents and moves them, so that a
 // file never has two documents writing to it.
@@ -51,6 +53,9 @@ public:
     // A UUID, kept when a draft is named and across restarts.
     QString id() const;
     SourceBuffer *buffer() const;
+    // The text as the Markdown engine reads it, parsed once for each
+    // revision for every view of the document (documentparse.h).
+    DocumentParse *parse() const;
     // The canonical path of a named file; empty for a draft.
     QString path() const;
     bool isDraft() const;
@@ -210,4 +215,5 @@ private:
     Shown m_shown;
     Dialect::Layers m_dialect;
     Dialect::Choice m_choice;
+    DocumentParse *m_parse;
 };

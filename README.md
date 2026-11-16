@@ -34,13 +34,12 @@ files on your computer, and there is no account.
 parch runs on Omarchy and other Arch Linux systems, on x86_64 and ARM64.
 
 ```sh
-curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-$(uname -m).pkg.tar.zst"
-sudo pacman -U "parch-$(uname -m).pkg.tar.zst"
+curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-writer-$(uname -m).pkg.tar.zst"
+sudo pacman -U "parch-writer-$(uname -m).pkg.tar.zst"
 ```
 
 Then open **parch** from the app launcher, or run `parch` with the files to
-open. An unrelated AUR package, a pacman wrapper, is also called `parch`: if
-an AUR helper offers it as an update, decline it.
+open. The package is `parch-writer`; the command is `parch`.
 
 To build from source instead:
 
@@ -52,7 +51,7 @@ bin/install
 ```
 
 Update by running the two install commands again, or `git pull` and
-`bin/install` in your clone. Remove parch with `sudo pacman -R parch`; your
+`bin/install` in your clone. Remove parch with `sudo pacman -R parch-writer`; your
 documents stay where they are.
 
 ## Start writing

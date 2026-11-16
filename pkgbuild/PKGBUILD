@@ -1,5 +1,8 @@
 # Adapted from sprawl's pkgbuild/PKGBUILD (MIT).
-pkgname=parch
+# The package is parch-writer, since the AUR's `parch` is another program;
+# the command, its files and its folders are parch's.
+pkgname=parch-writer
+_app=parch
 # The same version as the VERSION file at the top of the source tree.
 pkgver=0.1.0
 pkgrel=1
@@ -30,6 +33,8 @@ optdepends=('qt6-imageformats: WebP and TIFF pictures in documents'
             'kimageformats: AVIF, HEIF and JPEG XL pictures in documents'
             'noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'
             'noto-fonts-emoji: emoji in diagrams')
+# The AUR's unrelated `parch` installs /usr/bin/parch as well.
+conflicts=('parch')
 makedepends=('gcc' 'make')
 # This recipe builds a checkout. bin/release also produces a standalone
 # download recipe with a versioned source URL and SHA-256 checksum.
@@ -56,26 +61,26 @@ build() {
 package() {
   cd "$startdir/.."
   install -Dm755 build/parch "$pkgdir/usr/bin/parch"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$_app/LICENSE"
   install -Dm644 "$startdir/parch.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/parch.svg"
   install -Dm644 "$startdir/parch.desktop" "$pkgdir/usr/share/applications/parch.desktop"
   # The English guide, which Help → User guide opens.
-  install -Dm644 docs/guide.md "$pkgdir/usr/share/doc/$pkgname/guide.md"
+  install -Dm644 docs/guide.md "$pkgdir/usr/share/doc/$_app/guide.md"
   # An example write-up with its bibliography, to open and try.
-  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname/examples/weather-station" examples/weather-station/*
+  install -Dm644 -t "$pkgdir/usr/share/doc/$_app/examples/weather-station" examples/weather-station/*
 
   # The helpers parch runs on demand, and their licences and notices.
   local ratex="$srcdir/ratex-cli-v$_ratex-$CARCH-unknown-linux-musl"
   local merman="$srcdir/merman-cli-$CARCH-unknown-linux-gnu"
-  install -Dm755 "$ratex/render-svg" "$pkgdir/usr/lib/$pkgname/render-svg"
-  install -Dm755 "$merman/merman-cli" "$pkgdir/usr/lib/$pkgname/merman-cli"
+  install -Dm755 "$ratex/render-svg" "$pkgdir/usr/lib/$_app/render-svg"
+  install -Dm755 "$merman/merman-cli" "$pkgdir/usr/lib/$_app/merman-cli"
   # Their versions, which parch check reports, in bin/fetch-helpers' format:
   # render-svg cannot say its own.
-  printf 'ratex %s\nmerman %s\n' "$_ratex" "$_merman" > "$pkgdir/usr/lib/$pkgname/.pins"
-  chmod 644 "$pkgdir/usr/lib/$pkgname/.pins"
-  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/ratex" licenses/ratex/*
-  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/merman" \
+  printf 'ratex %s\nmerman %s\n' "$_ratex" "$_merman" > "$pkgdir/usr/lib/$_app/.pins"
+  chmod 644 "$pkgdir/usr/lib/$_app/.pins"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$_app/ratex" licenses/ratex/*
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$_app/merman" \
     "$merman/LICENSE-MIT" "$merman/LICENSE-APACHE" "$merman/THIRD_PARTY_NOTICES.md"
-  cp -R --no-preserve=ownership "$merman/THIRD_PARTY_LICENSES" "$pkgdir/usr/share/licenses/$pkgname/merman/"
-  chmod -R u=rwX,go=rX "$pkgdir/usr/share/licenses/$pkgname/merman"
+  cp -R --no-preserve=ownership "$merman/THIRD_PARTY_LICENSES" "$pkgdir/usr/share/licenses/$_app/merman/"
+  chmod -R u=rwX,go=rX "$pkgdir/usr/share/licenses/$_app/merman"
 }

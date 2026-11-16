@@ -34,8 +34,9 @@ teaches the Markdown parch reads, with examples you can edit; see
 ## Install
 
 parch runs on Omarchy and other Arch Linux systems, on x86_64 and ARM64. It
-is installed from its GitHub releases, not from the AUR (see
-[Another package called parch](#another-package-called-parch)).
+is installed from its GitHub releases. The package is called `parch-writer`
+(see [Another package called parch](#another-package-called-parch)); the
+command is `parch`.
 
 ### From a package
 
@@ -43,8 +44,8 @@ Each release has a package for each architecture, under a name that stays
 the same from one release to the next:
 
 ```sh
-curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-$(uname -m).pkg.tar.zst"
-sudo pacman -U "parch-$(uname -m).pkg.tar.zst"
+curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-writer-$(uname -m).pkg.tar.zst"
+sudo pacman -U "parch-writer-$(uname -m).pkg.tar.zst"
 ```
 
 pacman installs what parch needs from the Arch repositories with it. Then
@@ -70,14 +71,11 @@ bibliography in `/usr/share/doc/parch/examples/weather-station`.
 
 ### Another package called parch
 
-The AUR has an unrelated package that is also named `parch`: a wrapper for
-paru and pacman, which installs its own `/usr/bin/parch`. The two cannot be
-installed together, and installing either one replaces the other. When
-that package's version number is the higher, an AUR helper such as `yay` or
-`paru` offers it as an update to this parch: decline it. To stop the
-question, add `parch` to the `IgnorePkg` line of `/etc/pacman.conf`, which
-AUR helpers respect; installing a new release with `pacman -U` is not
-affected.
+The AUR has an unrelated package named `parch`: a wrapper for paru and
+pacman, which installs its own `/usr/bin/parch`. This parch's package is
+named `parch-writer` so that AUR helpers such as `yay` never mistake one for
+the other. The two cannot be installed together, since both have a `parch`
+command: installing one asks to remove the other.
 
 ### Update
 
@@ -88,7 +86,7 @@ documents, drafts, history and settings are kept.
 ### Remove
 
 ```sh
-sudo pacman -R parch
+sudo pacman -R parch-writer
 ```
 
 Your documents stay where they are. parch's own folders stay too (see
@@ -1248,8 +1246,8 @@ programs that run on your computer, cut off from the network.
 
 ## Troubleshooting
 
-**An AUR helper wants to replace parch.** That is the unrelated AUR package
-of the same name; decline it. See
+**Installing says parch-writer and parch are in conflict.** The unrelated
+AUR package `parch` is installed; both have a `parch` command. See
 [Another package called parch](#another-package-called-parch).
 
 **A formula or diagram shows its source.** It is being drawn, or it cannot

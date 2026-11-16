@@ -225,3 +225,9 @@ The first version: a native Markdown writing app for Omarchy.
   `--default-theme` shows Omarchy's default theme whatever the desktop's is.
 - An example write-up with code, math, a table, a diagram, a footnote and
   citations, installed in `/usr/share/doc/parch/examples`.
+
+### Installing
+
+- Packages for x86_64 and ARM64 on each release, also under names without
+  the version for `releases/latest/download`. The package is `parch-writer`,
+  as the AUR's unrelated `parch` has that name; the command is `parch`.

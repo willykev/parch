@@ -130,6 +130,12 @@ public:
     Q_INVOKABLE int sourceToEditor(int utf16) const;
     Q_INVOKABLE int editorToSource(int position) const;
 
+    // The projection this view shows, once it shows the document.
+    QTextDocument *textDocument() const;
+    // The source from the first line in view to the last, which reach past
+    // the top and bottom of the view; empty while nothing is shown.
+    SourceRange visibleRange() const;
+
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void copy();
@@ -190,6 +196,14 @@ signals:
     // Answered with answerCopy().
     void copyAsked(const QStringList &names, qint64 bytes);
     void setextHeadingsChanged();
+    // The source changed, at `revision`, from `range` to `inserted` units.
+    // Sent once positions map to the new source and before the projection
+    // shows it, so that what decorates the projection follows the change
+    // before Qt lays the changed paragraphs out.
+    void sourceEdited(Revision revision, SourceRange range, int inserted);
+    // The projection was filled with the whole source anew, as when it is
+    // first shown or shown again after a write that did not come from it.
+    void projectionLoaded();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -205,7 +219,7 @@ private:
     void attach();
     void detach();
     void load();
-    void applySourceChange(SourceRange range, const QString &replacement);
+    void applySourceChange(Revision revision, SourceRange range, const QString &replacement);
     // The format every paragraph takes: lines lineHeight × the font's pixel size apart.
     QTextBlockFormat lineFormat() const;
     // Notices a change of the TextEdit's text that did not come from the source.

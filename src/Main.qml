@@ -34,6 +34,12 @@ ApplicationWindow {
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
+    // Focus mode dims all but the sentence or paragraph being written.
+    property bool focusMode: false
+    // Distraction-free writing shows the text alone: no library, tabs,
+    // header, toolbar or status line, the column centred in the whole window.
+    property bool distractionFree: false
+
     // The one way the keys go back to the text: never while a dialog is
     // open. A dialog that closes calls it in turn, so that the keys then go
     // to the text, which may be a tab the dialog's choice opened.
@@ -49,6 +55,8 @@ ApplicationWindow {
     function focusLibrary(path) {
         if (dialogOpen)
             return false
+        // Asking for the library ends distraction-free writing.
+        setDistractionFree(false)
         if (libraryDocked) {
             context.libraryOpen = true
             // A folder's row, once the library has its rows.
@@ -86,6 +94,29 @@ ApplicationWindow {
             focusText()
     }
 
+    function toggleFocusMode() {
+        focusMode = !focusMode
+    }
+
+    // Enters or leaves distraction-free writing, keeping the caret, the
+    // selection and the first line in view where they were.
+    function setDistractionFree(on) {
+        if (on === distractionFree)
+            return
+        const view = editorPane.viewState()
+        if (on && drawer.visible)
+            drawer.close()
+        distractionFree = on
+        Qt.callLater(() => {
+            if (window.document && editorPane.document === window.document)
+                editorPane.restoreView(view.cursor, view.anchor, view.top)
+            window.focusText()
+        })
+    }
+    function toggleDistractionFree() {
+        setDistractionFree(!distractionFree)
+    }
+
     // Shown, the library has the keys, in its field; hidden, the text has them back.
     function toggleLibrary() {
         if (libraryDocked && context.libraryOpen) {
@@ -109,9 +140,18 @@ ApplicationWindow {
     // window shows it, wrapped, once asked to.
     readonly property bool toolbarFits: writing.width >= toolbar.naturalWidth
     property bool toolbarAsked: false
+    // Distraction-free writing hides it too.
     readonly property bool toolbarShown: document !== null && settings.showToolbar && (toolbarFits || toolbarAsked)
+                                         && !distractionFree
 
     function toggleToolbar() {
+        // Asking for the toolbar ends distraction-free writing, which shows
+        // it again unless it was hidden before.
+        if (distractionFree) {
+            setDistractionFree(false)
+            if (toolbarShown)
+                return
+        }
         if (toolbarShown) {
             // Hidden here alone where it was only asked for; everywhere otherwise.
             if (toolbarFits)
@@ -429,6 +469,9 @@ ApplicationWindow {
         findDocument: () => window.findDocument(),
         library: () => window.toggleLibrary(),
         toolbar: () => window.toggleToolbar(),
+        // Focus mode and distraction-free writing are each window's own.
+        focusMode: () => window.toggleFocusMode(),
+        distractionFree: () => window.toggleDistractionFree(),
         menu: () => window.openMenu(),
         // Tabs step round the ends, and so do the window's regions.
         nextTab: () => window.stepTab(1),
@@ -478,7 +521,8 @@ ApplicationWindow {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: window.rowHeight
+        visible: !window.distractionFree
+        height: visible ? window.rowHeight : 0
         document: window.document
         title: window.tabs.activeTitle
         place: window.tabs.count > 0 ? backend.folderLabel(window.tabs.activePath, settings.libraryFolders) : ""
@@ -492,13 +536,17 @@ ApplicationWindow {
     WindowMenu {
         id: windowMenu
         objectName: "windowMenu"
-        parent: header
+        // The header holds it, or the window while the header is hidden.
+        parent: header.visible ? header : window.contentItem
         x: header.width - width - Math.round(theme.fontSize / 4)
         y: header.height
         commands: window.commands
         keys: window.keys
         libraryShown: header.libraryShown
         toolbarShown: window.toolbarShown
+        focusMode: window.focusMode
+        distractionFree: window.distractionFree
+        spellingWanted: backend.spelling.wanted
         canRun: window.canRun
         // Each command is this window's, whichever window the backend last
         // heard was in front. Finding a document gives the keys to the
@@ -523,7 +571,7 @@ ApplicationWindow {
 
             readonly property bool docked: window.libraryDocked
 
-            visible: docked && window.libraryOpen
+            visible: docked && window.libraryOpen && !window.distractionFree
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
@@ -554,6 +602,7 @@ ApplicationWindow {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
+                visible: !window.distractionFree && count > 1
                 height: visible ? window.rowHeight : 0
                 model: window.tabs
                 currentIndex: window.tabs.activeIndex
@@ -655,7 +704,8 @@ ApplicationWindow {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                height: window.rowHeight
+                visible: !window.distractionFree
+                height: visible ? window.rowHeight : 0
                 document: window.document
                 status: window.tabs.activeStatus
                 problem: backend.notice ? "" : backend.problem
@@ -681,14 +731,20 @@ ApplicationWindow {
                 setextHeadings: settings.setextHeadings
                 inputBlocked: window.dialogOpen
                 attachments: backend.attachments
+                spellChecker: backend.spelling
+                focusMode: window.focusMode
+                focusUnit: settings.focusUnit
                 onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
                 onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
                 onViewMoved: window.context.noteViewMoved()
-                // Escape in the text closes the find bar, or else dismisses a
-                // notice that has nothing behind it.
+                // Escape in the text closes the find bar, or else leaves
+                // distraction-free writing, or else dismisses a notice that
+                // has nothing behind it.
                 onEscapePressed: {
                     if (findBar.visible)
                         window.closeFind()
+                    else if (window.distractionFree)
+                        window.setDistractionFree(false)
                     else if (backend.notice)
                         backend.dismissNotice()
                 }

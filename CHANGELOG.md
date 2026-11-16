@@ -21,8 +21,13 @@ The first version: a native Markdown writing app for Omarchy.
   Tab, table formatting, and Shift+Enter for a hard line break.
 - Keys you can change, with refusals for keys that type and swapping for keys
   taken.
+- English spell checking as you write, with wavy underlines, suggestions, a
+  personal dictionary and Ignore, from a right click or the `Menu` key.
+- Focus mode, which dims all but the sentence or paragraph being written, and
+  distraction-free writing, which shows the text alone.
 - Preferences for the writing font, text size, line height, line length,
-  heading syntax and toolbar, applied at once in every window.
+  heading syntax, toolbar, spelling and focus mode, applied at once in every
+  window.
 - A word count and reading time for the document or the selection.
 
 ### Keeping text safe

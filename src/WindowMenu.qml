@@ -15,6 +15,9 @@ ThemedMenu {
     property var keys: ({})
     property bool libraryShown: false
     property bool toolbarShown: false
+    property bool focusMode: false
+    property bool distractionFree: false
+    property bool spellingWanted: false
     // Whether a command can run now, as the window says.
     property var canRun: function(command) { return true }
 
@@ -78,6 +81,11 @@ ThemedMenu {
         CommandEntry { command: "thematicBreak" }
         CommandEntry { command: "pageBreak" }
     }
+    CommandEntry {
+        objectName: "spellingEntry"
+        command: "checkSpelling"
+        text: windowMenu.spellingWanted ? qsTr("Stop checking spelling") : qsTr("Check spelling")
+    }
     MenuLine {}
     CommandEntry {
         command: "library"
@@ -88,12 +96,22 @@ ThemedMenu {
         command: "toolbar"
         text: windowMenu.toolbarShown ? qsTr("Hide toolbar") : qsTr("Show toolbar")
     }
+    CommandEntry {
+        objectName: "focusModeEntry"
+        command: "focusMode"
+        text: windowMenu.focusMode ? qsTr("Leave focus mode") : qsTr("Focus mode")
+    }
+    CommandEntry {
+        objectName: "distractionFreeEntry"
+        command: "distractionFree"
+        text: windowMenu.distractionFree ? qsTr("Leave distraction-free writing") : qsTr("Distraction-free writing")
+    }
     CommandEntry { command: "zoomIn" }
     CommandEntry { command: "zoomOut" }
     CommandEntry { command: "resetZoom" }
     MenuLine {}
     CommandEntry { command: "palette" }
-    CommandEntry { command: "preferences" }
+    CommandEntry { objectName: "preferencesEntry"; command: "preferences" }
     CommandEntry { command: "shortcuts" }
     MenuLine {}
     CommandEntry { command: "quit" }

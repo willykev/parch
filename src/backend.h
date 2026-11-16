@@ -11,6 +11,7 @@
 #include "history.h"
 #include "session.h"
 #include "settings.h"
+#include "spellchecker.h"
 
 #include <QList>
 #include <QObject>
@@ -75,6 +76,8 @@ class Backend : public QObject {
     Q_PROPERTY(Attachments *attachments READ attachments CONSTANT)
     // Makes, renames, moves and trashes the library's files and folders.
     Q_PROPERTY(FileOrganizer *organizer READ organizer CONSTANT)
+    // English spelling for every window.
+    Q_PROPERTY(SpellChecker *spelling READ spelling CONSTANT)
 
 public:
     enum NoticeTone { Failure, Warning, News };
@@ -114,6 +117,7 @@ public:
     DocumentReview *review() const;
     QVariantMap recoveryFailures() const;
     Attachments *attachments() const;
+    SpellChecker *spelling() const { return m_spelling; }
     QList<WindowContext *> windows() const;
     // The window that came to the front last, or the oldest window when none has yet.
     WindowContext *activeWindow() const;
@@ -258,6 +262,10 @@ public:
     Q_INVOKABLE void nameVersion(const QString &versionId, const QString &name);
     Q_INVOKABLE void removeVersion(const QString &versionId);
 
+    // Turns spelling on or off, as the writer's choice from now on. Turned
+    // on without a dictionary, it says so.
+    Q_INVOKABLE void setSpellchecking(bool on);
+
 signals:
     void problemChanged();
     void historyPausedChanged();
@@ -321,6 +329,11 @@ private:
     void rememberPositions(WindowContext *window) const;
 
     void forgetRecoveryFailure(const QString &documentId);
+    // Spelling is wanted as the settings say, or, until the writer chooses,
+    // whenever a dictionary is found.
+    void followSpelling();
+    // Says that spelling is wanted but there is no dictionary to check it with.
+    void sayDictionaryIsMissing();
 
     void setProblem(const QString &problem, const QString &detail);
     // A problem that the next action clears.
@@ -370,6 +383,9 @@ private:
     QVariantMap m_recoveryFailures;
     // The documents whose tab closes once their save lands, by id.
     QSet<QString> m_closing;
+    SpellChecker *m_spelling;
+    // A dictionary that is missing is said once in a run, unless spelling is turned on again.
+    bool m_dictionaryMissingSaid = false;
     // Declared last, so that it goes first and its copies end before the
     // documents they insert into do.
     std::unique_ptr<Attachments> m_attachments;

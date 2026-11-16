@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import QtQuick.Window
 import Parch
 
@@ -41,6 +42,12 @@ Rectangle {
     readonly property int cursorPosition: binding.cursorSource
     readonly property int anchorPosition: binding.anchorSource
     readonly property bool editable: binding.editable
+    // The application's spelling, which underlines the words it does not
+    // know; none, alone, checks nothing.
+    property SpellChecker spellChecker: null
+    // Focus mode dims all but the sentence or the paragraph with the caret.
+    property bool focusMode: false
+    property string focusUnit: "sentence"
 
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
@@ -97,6 +104,17 @@ Rectangle {
     readonly property string selectedText: editor.selectedText
     function selectSource(anchor, cursor) { binding.select(anchor, cursor) }
     function showAtTop(position) { binding.restore(position, position, position) }
+
+    // Opens the spelling menu on the misspelled word at a position of the
+    // editor's, at a point of it; false when no misspelled word is there.
+    function offerSpelling(position, point) {
+        const found = spelling.misspellingAt(binding.editorToSource(position))
+        if (found.word === undefined || !spellChecker)
+            return false
+        spellingMenu.offer(found.start, found.end, found.word, spellChecker.suggestions(found.word))
+        spellingMenu.popup(editor, point.x, point.y)
+        return true
+    }
 
     // The cursor moved or the text scrolled.
     signal viewMoved()
@@ -183,13 +201,17 @@ Rectangle {
         // Dragging with the mouse selects text; the wheel and touch still scroll.
         acceptedButtons: Qt.NoButton
         boundsBehavior: Flickable.StopAtBounds
-        onContentYChanged: pane.viewMoved()
+        onContentYChanged: {
+            pane.viewMoved()
+            decorations.viewMoved()
+        }
         // A notice bar, the tab strip or the window changes the height: a
         // caret that was in view stays in view.
         property real formerHeight: 0
         onHeightChanged: {
             binding.keepCursorInView(formerHeight)
             formerHeight = height
+            decorations.viewMoved()
         }
 
         TextEdit {
@@ -211,8 +233,16 @@ Rectangle {
             activeFocusOnTab: true
             // The binding takes Escape first while an input method composes.
             Keys.onEscapePressed: pane.escapePressed()
+            // The Menu key, or Shift+F10, opens the spelling menu on the word at the caret.
+            Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && event.modifiers === Qt.ShiftModifier)) {
+                    const caret = editor.cursorRectangle
+                    event.accepted = pane.offerSpelling(editor.cursorPosition, Qt.point(caret.x, caret.y + caret.height))
+                }
+            }
             Accessible.name: pane.title.length > 0 ? pane.title : qsTr("Text")
-            color: theme.foreground
+            // Focus mode draws the text dim and brightens the focus.
+            color: decorations.focusing ? focus.dim : theme.foreground
             selectionColor: theme.selection
             selectedTextColor: theme.foreground
             renderType: pane.nativeRendering ? TextEdit.NativeRendering : TextEdit.QtRendering
@@ -250,6 +280,51 @@ Rectangle {
                     dropMark.visible = true
                 }
             }
+
+            // A right click on a misspelled word opens the spelling menu; a
+            // left one goes to the text as ever.
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: (point) => pane.offerSpelling(editor.positionAt(point.position.x, point.position.y), point.position)
+            }
+
+            // The wavy underlines in and near the view, which Qt would draw
+            // straight, drawn here where the text has them.
+            Repeater {
+                model: decorations.waves
+
+                delegate: Shape {
+                    id: wave
+
+                    required property real markX
+                    required property real markY
+                    required property real markWidth
+                    required property real markHeight
+                    required property color markColor
+
+                    objectName: "wave"
+                    x: markX
+                    y: markY
+                    width: markWidth
+                    height: markHeight
+
+                    ShapePath {
+                        strokeColor: wave.markColor
+                        strokeWidth: Math.max(1, Math.round(pane.fontPixelSize / 14))
+                        fillColor: "transparent"
+                        joinStyle: ShapePath.RoundJoin
+                        PathPolyline {
+                            path: {
+                                const points = []
+                                const step = Math.max(2, wave.height)
+                                for (let x = 0, up = false; x < wave.width + step; x += step, up = !up)
+                                    points.push(Qt.point(Math.min(x, wave.width), up ? 0 : wave.height))
+                                return points
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -280,6 +355,41 @@ Rectangle {
             else
                 drop.accepted = false
         }
+    }
+
+    // What the view draws over its text: the layers of formatting the
+    // window's tools add, and the focus.
+    EditorDecorations {
+        id: decorations
+        objectName: "decorations"
+        binding: binding
+    }
+
+    SpellingLayer {
+        id: spelling
+        objectName: "spelling"
+        decorations: decorations
+        checker: pane.spellChecker
+        color: theme.danger
+    }
+
+    FocusMode {
+        id: focus
+        objectName: "focus"
+        decorations: decorations
+        enabled: pane.focusMode
+        unit: pane.focusUnit
+        dim: theme.muted
+        normal: theme.foreground
+    }
+
+    SpellingMenu {
+        id: spellingMenu
+        objectName: "spellingMenu"
+        onReplace: (start, end, word, replacement) => spelling.replaceWord(start, end, word, replacement)
+        onAddWord: (word) => pane.spellChecker.addToDictionary(word)
+        onIgnoreWord: (word) => pane.spellChecker.ignore(word)
+        onClosed: editor.forceActiveFocus()
     }
 
     EditorBinding {

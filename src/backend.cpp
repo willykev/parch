@@ -68,7 +68,8 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
       m_files(std::make_unique<FileRequests>(m_store.get(), m_settings)),
       m_review(std::make_unique<DocumentReview>(m_store.get())),
       m_positions(std::make_unique<ReadingPositions>(paths)),
-      m_organizer(std::make_unique<FileOrganizer>(m_store.get(), m_settings))
+      m_organizer(std::make_unique<FileOrganizer>(m_store.get(), m_settings)),
+      m_spelling(new SpellChecker(paths.personalDictionaryFile(), this))
 {
     // Two workers: enough to list a folder while another is slow, and few
     // enough that a folder that never answers costs little.
@@ -222,6 +223,10 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     connect(m_organizer.get(), &FileOrganizer::documentMoved, this, [this](Document *document) {
         if (document->buffer()->modified()) m_autosave->writeNow(document);
     });
+    connect(m_settings, &Settings::changed, this, &Backend::followSpelling);
+    connect(m_spelling, &SpellChecker::availabilityChanged, this, &Backend::followSpelling);
+    connect(m_spelling, &SpellChecker::problem, this,
+            [this](const QString &problem, const QString &detail) { post(problem, detail, Warning); });
     m_sessionTimer.setSingleShot(true);
     m_sessionTimer.setInterval(SessionDelayMs);
     connect(&m_sessionTimer, &QTimer::timeout, this, [this] { m_sessionWriter.write(collectSession()); });
@@ -275,6 +280,9 @@ void Backend::addCommands()
     m_commands->setAction(QStringLiteral("zoomIn"), [this](WindowContext *) { m_settings->zoom(1); });
     m_commands->setAction(QStringLiteral("zoomOut"), [this](WindowContext *) { m_settings->zoom(-1); });
     m_commands->setAction(QStringLiteral("resetZoom"), [this](WindowContext *) { m_settings->resetZoom(); });
+    // Spelling is checked in every window or in none.
+    m_commands->setAction(QStringLiteral("checkSpelling"),
+                          [this](WindowContext *) { setSpellchecking(!m_spelling->wanted()); });
 }
 RecentFiles *Backend::recentFiles() const { return m_recentFiles.get(); }
 ReadingPositions *Backend::readingPositions() const { return m_positions.get(); }
@@ -338,6 +346,8 @@ QString Backend::folderLabel(const QString &path, const QStringList &libraryFold
 
 void Backend::start(const QStringList &files)
 {
+    // The dictionary is read off the UI thread while the windows open.
+    m_spelling->load();
     bool onlyKept = false;
     const QStringList recovered = restoreSession(&onlyKept);
     if (m_windows.isEmpty()) {
@@ -1201,6 +1211,37 @@ void Backend::forgetUnsafe(const QString &documentId)
 {
     if (!m_unsafe.remove(documentId) || !m_unsafe.isEmpty()) return;
     setProblem({}, {});
+}
+
+void Backend::followSpelling()
+{
+    m_spelling->setWanted(m_settings->spellcheck().value_or(m_spelling->dictionaryFound()));
+    // Asked for, and none to be had: said once in a run.
+    if (m_spelling->settled() && !m_spelling->available() && m_settings->spellcheck().value_or(false)
+        && !m_dictionaryMissingSaid)
+        sayDictionaryIsMissing();
+}
+
+void Backend::setSpellchecking(bool on)
+{
+    // Asking again is answered again.
+    if (on) m_dictionaryMissingSaid = false;
+    m_settings->setSpellcheck(on);
+    followSpelling();
+}
+
+void Backend::sayDictionaryIsMissing()
+{
+    m_dictionaryMissingSaid = true;
+    const QString problem = tr("Spelling is not checked");
+    const QString detail = m_spelling->dictionaryFound()
+        ? tr("The English dictionary could not be read.")
+        : tr("No English dictionary is installed: parch looks for en_US.aff and en_US.dic in %1. "
+             "Install the hunspell-en_us package to check spelling.")
+              .arg(m_spelling->dictionaryFolders().join(QStringLiteral(", ")));
+    // Beside a notice already shown, which stays.
+    if (notice() && m_problem != problem) setProblem(m_problem, m_problemDetail + u'\n' + problem + u'.' + u' ' + detail);
+    else post(problem, detail, Warning);
 }
 
 void Backend::setProblem(const QString &problem, const QString &detail)

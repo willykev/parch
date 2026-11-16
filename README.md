@@ -9,6 +9,8 @@ A Markdown writing app for Omarchy. Open it and write: parch keeps every word
 safe and stays out of your way.
 
 - Write Markdown with its punctuation in view, in tabs and separate windows.
+- Check your spelling as you write, and dim all but the sentence you are on
+  in focus mode.
 - Save as you type, and get your text back after a crash.
 - Go back to an earlier version of any document from its history.
 - See when a file changes on disk, compare, and choose what to keep.
@@ -33,8 +35,9 @@ This builds and installs the app. Open **parch** from the app launcher, or run
 `parch` with the files you want to open.
 
 Building requires a C++ compiler, `make`, `qmake6`, and the `qt6-base`,
-`qt6-declarative`, `qt6-svg`, and `qt6-wayland` packages. File dialogs use
-`xdg-desktop-portal` and your desktop's portal backend.
+`qt6-declarative`, `qt6-svg`, `qt6-wayland`, `fontconfig` and `hunspell`
+packages. File dialogs use `xdg-desktop-portal` and your desktop's portal
+backend; spell checking uses the `hunspell-en_us` dictionary.
 
 ## Start writing
 
@@ -54,6 +57,8 @@ moment after you pause.
 | `Ctrl+W` | Close the tab |
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Larger / smaller / theme-sized text |
+| `Ctrl+Shift+D` | Focus mode |
+| `F11` | Distraction-free writing |
 | `F10` | Open the menu |
 | `Ctrl+Shift+P` | Find and run any command |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` | Bold / italic / link |
@@ -74,9 +79,10 @@ keeps its own things separately:
 
 - Drafts and version history in `~/.local/share/parch/`.
 - Crash recovery, your open tabs, and recent files in `~/.local/state/parch/`.
+- Words you add to the spelling dictionary in `~/.local/share/parch/dictionary.txt`.
 - Settings in `~/.config/parch/settings.json`.
 
-A formatted preview, spell checking, and export are not included yet.
+A formatted preview and export are not included yet.
 
 ## Development
 

@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
+#include <optional>
 
 class Theme;
 
@@ -50,6 +51,8 @@ class Settings : public QObject {
     Q_PROPERTY(QStringList libraryFolders READ libraryFolders NOTIFY changed)
     // The library shows the outline of the document in front beneath its folders.
     Q_PROPERTY(bool outlineShown READ outlineShown WRITE setOutlineShown NOTIFY changed)
+    // What focus mode keeps bright: "sentence" or "paragraph".
+    Q_PROPERTY(QString focusUnit READ focusUnit NOTIFY changed)
 
 public:
     static constexpr int MinFontPixelSize = 10, MaxFontPixelSize = 40;
@@ -82,6 +85,13 @@ public:
     void setLastFolder(const QString &folder);
     bool outlineShown() const { return m_outlineShown; }
     void setOutlineShown(bool shown);
+    // Whether spelling is checked, once the writer has chosen; until then
+    // nothing, and it is checked when a dictionary is found.
+    std::optional<bool> spellcheck() const { return m_spellcheck; }
+    Q_INVOKABLE void setSpellcheck(bool on);
+    QString focusUnit() const { return m_focusUnit; }
+    // Takes "sentence" or "paragraph"; anything else is ignored.
+    Q_INVOKABLE void setFocusUnit(const QString &unit);
 
     // Makes the text `steps` pixels larger, or smaller for a negative number,
     // within MinFontPixelSize and MaxFontPixelSize, and keeps that size. A
@@ -141,4 +151,6 @@ private:
     QStringList m_libraryFolders;
     QString m_lastFolder;
     bool m_outlineShown = false;
+    std::optional<bool> m_spellcheck;
+    QString m_focusUnit = QStringLiteral("sentence");
 };

@@ -1,8 +1,8 @@
 QT += core gui qml quick quickcontrols2 dbus svg concurrent network
 
 CONFIG += c++20 release link_pkgconfig
-# fontconfig picks the fonts diagrams are drawn with.
-PKGCONFIG += fontconfig
+# fontconfig picks the fonts diagrams are drawn with; Hunspell checks spelling.
+PKGCONFIG += fontconfig hunspell
 TARGET = parch
 TEMPLATE = app
 
@@ -27,10 +27,12 @@ HEADERS += \
     src/documentreview.h \
     src/documentstore.h \
     src/editorbinding.h \
+    src/editordecorations.h \
     src/fileorganizer.h \
     src/filepicker.h \
     src/filerequests.h \
     src/filewatch.h \
+    src/focusmode.h \
     src/foldersearch.h \
     src/history.h \
     src/htmlmarkdown.h \
@@ -59,6 +61,9 @@ HEADERS += \
     src/sourceboundaries.h \
     src/sourcebuffer.h \
     src/sourcetypes.h \
+    src/spellchecker.h \
+    src/spellingexclusions.h \
+    src/spellinglayer.h \
     src/tabmodel.h \
     src/textsearch.h \
     src/theme.h \
@@ -85,10 +90,12 @@ SOURCES += \
     src/documentreview.cpp \
     src/documentstore.cpp \
     src/editorbinding.cpp \
+    src/editordecorations.cpp \
     src/editorpaste.cpp \
     src/fileorganizer.cpp \
     src/filerequests.cpp \
     src/filewatch.cpp \
+    src/focusmode.cpp \
     src/foldersearch.cpp \
     src/history.cpp \
     src/htmlmarkdown.cpp \
@@ -116,6 +123,9 @@ SOURCES += \
     src/settings.cpp \
     src/sourceboundaries.cpp \
     src/sourcebuffer.cpp \
+    src/spellchecker.cpp \
+    src/spellingexclusions.cpp \
+    src/spellinglayer.cpp \
     src/tabmodel.cpp \
     src/textsearch.cpp \
     src/theme.cpp \

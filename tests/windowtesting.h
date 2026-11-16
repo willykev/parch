@@ -135,13 +135,16 @@ private:
 // What a window test can set before the window opens: the folder of a
 // FakeHyprland, the theme's shell.toml, the settings file, a folder of its
 // own for the application's files, so that a second fixture can start where
-// one ended, and the files and folders the launch names.
+// one ended, the files and folders the launch names, and the folder spelling
+// finds its dictionary in, which is none unless one is given: never the
+// system's.
 struct ShellOptions {
     QString hyprland = {};
     QByteArray shell = {};
     QByteArray settings = {};
     QString root = {};
     QStringList files = {};
+    QString dictionaries = {};
 };
 
 // The application as main() makes it: a theme on a temporary folder, a

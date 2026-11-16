@@ -2,6 +2,7 @@
     <qresource prefix="/">
         <file>Main.qml</file>
         <file>EditorPane.qml</file>
+        <file>SpellingMenu.qml</file>
         <file>HeaderBar.qml</file>
         <file>WindowMenu.qml</file>
         <file>LibraryPanel.qml</file>
@@ -32,6 +33,7 @@
         <file>PreferenceSection.qml</file>
         <file>PreferenceRow.qml</file>
         <file>WritingPreferences.qml</file>
+        <file>WritingAidsPreferences.qml</file>
         <file>FindBar.qml</file>
         <file>HeadingsDialog.qml</file>
         <file>FolderSearchDialog.qml</file>

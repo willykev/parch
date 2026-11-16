@@ -8,12 +8,16 @@
 #include "document.h"
 #include "documentfind.h"
 #include "editorbinding.h"
+#include "editordecorations.h"
 #include "fileorganizer.h"
+#include "focusmode.h"
 #include "foldersearch.h"
 #include "librarymodel.h"
 #include "outline.h"
 #include "settings.h"
 #include "sourcebuffer.h"
+#include "spellchecker.h"
+#include "spellinglayer.h"
 #include "tabmodel.h"
 #include "windowcontext.h"
 #include "wordcounter.h"
@@ -23,6 +27,10 @@
 void registerQmlTypes()
 {
     qmlRegisterType<EditorBinding>("Parch", 1, 0, "EditorBinding");
+    qmlRegisterType<EditorDecorations>("Parch", 1, 0, "EditorDecorations");
+    qmlRegisterType<SpellingLayer>("Parch", 1, 0, "SpellingLayer");
+    qmlRegisterType<FocusMode>("Parch", 1, 0, "FocusMode");
+    qmlRegisterUncreatableType<SpellChecker>("Parch", 1, 0, "SpellChecker", QStringLiteral("The backend keeps spelling"));
     qmlRegisterType<CaretRest>("Parch", 1, 0, "CaretRest");
     qmlRegisterType<CommandFilter>("Parch", 1, 0, "CommandFilter");
     qmlRegisterType<WordCounter>("Parch", 1, 0, "WordCounter");

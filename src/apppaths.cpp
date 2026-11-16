@@ -43,3 +43,5 @@ QString AppPaths::sessionFile() const { return state + QStringLiteral("/session.
 QString AppPaths::recentFile() const { return state + QStringLiteral("/recent.json"); }
 QString AppPaths::positionsFile() const { return state + QStringLiteral("/positions.json"); }
 QString AppPaths::settingsFile() const { return config + QStringLiteral("/settings.json"); }
+// The writer's own words, kept with their writing.
+QString AppPaths::personalDictionaryFile() const { return data + QStringLiteral("/dictionary.txt"); }

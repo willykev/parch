@@ -512,6 +512,8 @@ ShellFixture::ShellFixture(const ShellOptions &options) : m_root(options.root.is
     // A save dialog with no folder used last starts here, never in the real Documents or home.
     backend->fileRequests()->setFallbackFolders({m_root});
     backend->settings()->followTheme(theme.get());
+    backend->spelling()->setDictionaryFolders(
+        {options.dictionaries.isEmpty() ? m_root + QStringLiteral("/no-dictionaries") : options.dictionaries});
     engine.rootContext()->setContextProperty(QStringLiteral("theme"), theme.get());
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), backend.get());
     engine.rootContext()->setContextProperty(QStringLiteral("settings"), backend->settings());

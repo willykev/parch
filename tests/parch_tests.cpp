@@ -13,10 +13,12 @@
 #include "documentstore.h"
 #include "editingtests.h"
 #include "editorbinding.h"
+#include "editordecorations.h"
 #include "fileorganizer.h"
 #include "filepicker.h"
 #include "filerequests.h"
 #include "filewatch.h"
+#include "focusmode.h"
 #include "foldersearch.h"
 #include "history.h"
 #include "htmlmarkdown.h"
@@ -41,6 +43,9 @@
 #include "settings.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
+#include "spellchecker.h"
+#include "spellingexclusions.h"
+#include "spellinglayer.h"
 #include "tabmodel.h"
 #include "testfiles.h"
 #include "textsearch.h"
@@ -500,6 +505,24 @@ private slots:
     void textFieldsRestTheirCaretToo();
     void columnHoldsTheLineLength();
     void linesSitTheLineHeightApart();
+    void decorationsMapThroughCrlfAndSurrogates();
+    void staleDecorationResultsAreDropped();
+    void decorationsFormatOnlyTheParagraphsTheyChange();
+    void decorationsKeepTextLinesAndCaret();
+    void typingWithDecorationsStaysWithinAFrame();
+    void spellingSkipsWhatIsNotProse();
+    void spellingSegmentsUnicodeWords();
+    void spellCheckerUsesItsDictionaries();
+    void theEnglishDictionaryLoads();
+    void misspellingsAreUnderlinedAndOfferSuggestions();
+    void wordsAddedOrIgnoredApplyEverywhereAtOnce();
+    void spellingStaysOffTheTypingPath();
+    void missingDictionaryIsSaid();
+    void spellingTurnsOnAndOff();
+    void focusFindsTheSentenceOrParagraph();
+    void focusModeDimsAllButTheCaretsPart();
+    void distractionFreeWritingKeepsTheView();
+    void writingAidsAreNamedAndReachable();
     void bindingOutlivesItsEditor();
     void bindingOutlivesItsDocument();
     void editorLookupsFailVisibly();
@@ -8774,6 +8797,1240 @@ void ParchTests::linesSitTheLineHeightApart()
         QCOMPARE(block.blockFormat().lineHeightType(), int(QTextBlockFormat::FixedHeight));
         QCOMPARE(block.blockFormat().lineHeight(), qreal(52));
     }
+}
+
+namespace {
+// The book of the benchmark (bin/benchmark): its seed, then the ten words of
+// the prose list over and over to 100,000 words, with a paragraph break
+// every 1,000.
+QString benchmarkBook()
+{
+    QString text = QStringLiteral("# The generated book\n\nA chapter with [references][reading] and a footnote[^note].\n\n"
+                                  "[reading]: https://example.org/book\n[^note]: A deterministic note.\n\n");
+    // The seed's words, counted as the benchmark counts them.
+    int used = 0;
+    for (auto words = QRegularExpression(QStringLiteral("[A-Za-z0-9]+('[A-Za-z0-9]+)*")).globalMatch(text);
+         words.hasNext(); words.next())
+        ++used;
+    const QStringList prose = QStringLiteral("the quiet writer keeps each ordinary word and reads again").split(u' ');
+    for (int i = used; i < 100000; ++i) {
+        if (i > used) text += (i - used) % 1000 == 0 ? QStringLiteral("\n\n") : QStringLiteral(" ");
+        text += prose.at((i - used) % 10);
+    }
+    return text;
+}
+
+EditorDecorations *decorationsOf(const EditorView &view)
+{
+    return view.pane->findChild<EditorDecorations *>(QStringLiteral("decorations"));
+}
+
+// The formatting Qt lays a paragraph out with, as "start+length:what", where
+// what names a colour, bold and a background.
+QStringList formatsOf(const QTextBlock &block)
+{
+    QStringList found;
+    for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
+        QStringList what;
+        if (range.format.hasProperty(QTextFormat::ForegroundBrush)) what << range.format.foreground().color().name();
+        if (range.format.fontWeight() >= QFont::Bold) what << QStringLiteral("bold");
+        if (range.format.hasProperty(QTextFormat::BackgroundBrush)) what << QStringLiteral("background");
+        found << QStringLiteral("%1+%2:%3").arg(range.start).arg(range.length).arg(what.join(u','));
+    }
+    return found;
+}
+
+QTextCharFormat coloured(const QColor &color)
+{
+    QTextCharFormat format;
+    format.setForeground(color);
+    return format;
+}
+
+// The editor's caret rectangle at a position of its own.
+QRectF caretAt(QQuickItem *editor, int position)
+{
+    QRectF rectangle;
+    QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, rectangle), Q_ARG(int, position));
+    return rectangle;
+}
+} // namespace
+
+void ParchTests::decorationsMapThroughCrlfAndSurrogates()
+{
+    // A layer's ranges are source offsets: CRLF pairs, which the view shows
+    // as one separator, and surrogate pairs, two units in both, map exactly,
+    // and the ranges follow edits, also edits that split or make a pair.
+    EditorFixture fixture;
+    const QString source = QStringLiteral("a😀b mark\r\nword 😀 end\r\n\r\nlast😀word");
+    Document *document = fixture.open("decorated.md", source);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 600, 300);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    EditorDecorations *decorations = decorationsOf(view);
+    QVERIFY(decorations);
+    QTextCharFormat bold;
+    bold.setFontWeight(QFont::Bold);
+    decorations->defineLayer(QStringLiteral("test"), {coloured(QColor(0xff, 0, 0)), bold});
+    SourceBuffer *buffer = document->buffer();
+    const int emoji = int(source.indexOf(QStringLiteral("😀")));
+    const int word = int(source.indexOf(QStringLiteral("word")));
+    const int last = int(source.lastIndexOf(QStringLiteral("😀")));
+    QVERIFY(decorations->setSpans(QStringLiteral("test"), buffer->revision(),
+                                  {{emoji, emoji + 2, 0}, {word, word + 4, 1}, {last, last + 6, 0}}));
+    decorations->flush();
+    QTextDocument *shown = view.textDocument();
+    const auto expect = [&](int block, const QStringList &formats) {
+        QCOMPARE(formatsOf(shown->findBlockByNumber(block)), formats);
+    };
+    expect(0, {QStringLiteral("1+2:#ff0000")});
+    expect(1, {QStringLiteral("0+4:bold")});
+    expect(2, {});
+    expect(3, {QStringLiteral("4+6:#ff0000")});
+    // Formatting changes nothing of the text, or of where positions map.
+    verifyProjection(view, source);
+
+    // A paragraph added at the start moves every range by its four units.
+    QCOMPARE(buffer->replace({0, 0}, QStringLiteral("XY\r\n")), SourceBuffer::EditOutcome::Applied);
+    const std::vector<DecorationSpan> moved = decorations->spans(QStringLiteral("test"));
+    QCOMPARE(moved.size(), size_t(3));
+    QCOMPARE(buffer->text().mid(moved[0].start, moved[0].end - moved[0].start), QStringLiteral("😀"));
+    QCOMPARE(buffer->text().mid(moved[1].start, moved[1].end - moved[1].start), QStringLiteral("word"));
+    QCOMPARE(buffer->text().mid(moved[2].start, moved[2].end - moved[2].start), QStringLiteral("😀word"));
+    expect(0, {});
+    expect(1, {QStringLiteral("1+2:#ff0000")});
+    expect(2, {QStringLiteral("0+4:bold")});
+    expect(4, {QStringLiteral("4+6:#ff0000")});
+
+    // A character put between the CR and LF of a pair splits it into two
+    // separators with a paragraph between: the ranges after it still cover
+    // their own text.
+    const int pair = int(buffer->text().indexOf(QStringLiteral("\r\nword")));
+    QCOMPARE(buffer->replace({pair, 2}, QStringLiteral("\rZ\n")), SourceBuffer::EditOutcome::Applied);
+    verifyProjection(view, buffer->text());
+    expect(2, {});
+    expect(3, {QStringLiteral("0+4:bold")});
+    expect(5, {QStringLiteral("4+6:#ff0000")});
+    // Removing it makes the pair again.
+    buffer->undo();
+    verifyProjection(view, buffer->text());
+    expect(2, {QStringLiteral("0+4:bold")});
+    expect(4, {QStringLiteral("4+6:#ff0000")});
+    // Typing inside a range grows it; typing at either end does not.
+    const DecorationSpan words = decorations->spans(QStringLiteral("test"))[1];
+    buffer->replace({words.start + 2, 0}, QStringLiteral("rr"));
+    buffer->replace({words.start, 0}, QStringLiteral("<"));
+    buffer->replace({words.end + 3, 0}, QStringLiteral(">"));
+    const DecorationSpan grown = decorations->spans(QStringLiteral("test"))[1];
+    QCOMPARE(buffer->text().mid(grown.start, grown.end - grown.start), QStringLiteral("worrrd"));
+    expect(2, {QStringLiteral("1+6:bold")});
+    verifyProjection(view, buffer->text());
+}
+
+void ParchTests::staleDecorationResultsAreDropped()
+{
+    // A result found for an older revision still applies where nothing has
+    // been edited since, moved by the edits before it; where an edit has
+    // touched what it covers, or it covers the whole text, it is dropped.
+    EditorFixture fixture;
+    const QString source = QStringLiteral("one two three\n\nfour five six\n\nseven eight\n");
+    Document *document = fixture.open("stale.md", source);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 600, 300);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    EditorDecorations *decorations = decorationsOf(view);
+    QVERIFY(decorations);
+    const QString name = QStringLiteral("test");
+    QVERIFY(!decorations->setSpans(name, document->buffer()->revision(), {}));
+    decorations->defineLayer(name, {coloured(QColor(0xff, 0, 0))});
+    SourceBuffer *buffer = document->buffer();
+    const auto text = [&](const DecorationSpan &span) { return buffer->text().mid(span.start, span.end - span.start); };
+    const auto paragraph = [&](const QString &first) {
+        const SourceRange range = sourceParagraphRange(buffer->text(), int(buffer->text().indexOf(first)));
+        return std::pair{range, int(buffer->text().indexOf(first))};
+    };
+
+    // Found for this revision; then a word is typed before the paragraph.
+    const Revision found = buffer->revision();
+    const auto [second, four] = paragraph(QStringLiteral("four"));
+    buffer->replace({0, 0}, QStringLiteral("zero "));
+    QVERIFY(decorations->replaceSpans(name, found, second, {{four, four + 4, 0}}));
+    QCOMPARE(decorations->spans(name).size(), size_t(1));
+    QCOMPARE(text(decorations->spans(name)[0]), QStringLiteral("four"));
+    QCOMPARE(decorations->revision(), buffer->revision());
+
+    // An edit inside the paragraph, or at its edge, makes a result for it stale.
+    const Revision before = buffer->revision();
+    const auto [again, five] = paragraph(QStringLiteral("four"));
+    buffer->replace({again.start + 5, 0}, QStringLiteral("x"));
+    QVERIFY(!decorations->replaceSpans(name, before, again, {}));
+    QCOMPARE(text(decorations->spans(name)[0]), QStringLiteral("four"));
+    const Revision edge = buffer->revision();
+    const auto [last, ignored] = paragraph(QStringLiteral("four"));
+    buffer->replace({last.start + last.length, 0}, QStringLiteral("!"));
+    QVERIFY(!decorations->replaceSpans(name, edge, last, {}));
+    // An edit after it changes nothing of it.
+    const Revision after = buffer->revision();
+    const auto [now, at] = paragraph(QStringLiteral("four"));
+    buffer->replace({buffer->length(), 0}, QStringLiteral("nine\n"));
+    QVERIFY(decorations->replaceSpans(name, after, now, {{at + 5, at + 10, 0}}));
+    QCOMPARE(text(decorations->spans(name)[0]), QStringLiteral("xfive"));
+    // A whole layer found before an edit, or for a revision not yet made, is stale.
+    const Revision whole = buffer->revision();
+    buffer->replace({0, 0}, QStringLiteral("."));
+    QVERIFY(!decorations->setSpans(name, whole, {}));
+    QVERIFY(!decorations->setSpans(name, buffer->revision() + 1, {}));
+    QCOMPARE(decorations->spans(name).size(), size_t(1));
+    // One found before more edits than are remembered is stale too.
+    const Revision ancient = buffer->revision();
+    const auto [far, start] = paragraph(QStringLiteral("seven"));
+    for (int i = 0; i < 1100; ++i) buffer->replace({0, 0}, QStringLiteral("-"));
+    QVERIFY(!decorations->replaceSpans(name, ancient, far, {{start, start + 5, 0}}));
+    QVERIFY(decorations->setSpans(name, buffer->revision(), {}));
+    QVERIFY(decorations->spans(name).empty());
+    // A layer that is not defined takes nothing.
+    QVERIFY(!decorations->setSpans(QStringLiteral("other"), buffer->revision(), {{0, 1, 0}}));
+}
+
+void ParchTests::decorationsFormatOnlyTheParagraphsTheyChange()
+{
+    // Changing a layer formats again the paragraphs whose formatting changed
+    // and no others: those in view at once, the rest while the event loop is
+    // otherwise idle.
+    EditorFixture fixture;
+    QString source;
+    for (int i = 0; i < 200; ++i) source += QStringLiteral("Paragraph %1 has a few words in it.\n\n").arg(i);
+    Document *document = fixture.open("paragraphs.md", source);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 600, 300);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    EditorDecorations *decorations = decorationsOf(view);
+    QVERIFY(decorations);
+    // A view alone opens at the end of its text; this one starts at the top.
+    view.binding->restore(0, 0, 0);
+    const QString name = QStringLiteral("test");
+    decorations->defineLayer(name, {coloured(QColor(0, 0x80, 0))});
+    QTest::qWait(20);
+    SourceBuffer *buffer = document->buffer();
+    const auto range = [&](int paragraph) {
+        const int at = int(buffer->text().indexOf(QStringLiteral("Paragraph %1 ").arg(paragraph)));
+        return sourceParagraphRange(buffer->text(), at);
+    };
+    const auto blockOf = [&](int paragraph) { return view.textDocument()->findBlockByNumber(2 * paragraph); };
+    int formatted = decorations->formattedParagraphs();
+
+    // One word in a paragraph in view: that paragraph alone, at once.
+    const SourceRange third = range(2);
+    QVERIFY(decorations->replaceSpans(name, buffer->revision(), third, {{third.start, third.start + 9, 0}}));
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 1);
+    QVERIFY(!decorations->pending());
+    QCOMPARE(formatsOf(blockOf(2)), QStringList{QStringLiteral("0+9:#008000")});
+    // The same again formats nothing.
+    QVERIFY(decorations->replaceSpans(name, buffer->revision(), third, {{third.start, third.start + 9, 0}}));
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 1);
+
+    // A paragraph far out of view waits for the event loop.
+    const SourceRange far = range(150);
+    QVERIFY(decorations->replaceSpans(name, buffer->revision(), far, {{far.start, far.start + 9, 0}}));
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 1);
+    QVERIFY(decorations->pending());
+    QTRY_VERIFY(!decorations->pending());
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 2);
+    QCOMPARE(formatsOf(blockOf(150)), QStringList{QStringLiteral("0+9:#008000")});
+
+    // A whole layer that differs from the last in one range formats only that range's paragraph.
+    formatted = decorations->formattedParagraphs();
+    std::vector<DecorationSpan> spans = decorations->spans(name);
+    const SourceRange fifth = range(4);
+    spans.push_back({fifth.start, fifth.start + 9, 0});
+    QVERIFY(decorations->setSpans(name, buffer->revision(), spans));
+    decorations->flush();
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 1);
+    QCOMPARE(decorations->spans(name).size(), size_t(3));
+
+    // Typing in a paragraph formats it, and only it, as Qt lays it out.
+    formatted = decorations->formattedParagraphs();
+    view.cursor(third.start + 3);
+    sendKey(&view.window, 'x');
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 1);
+    QCOMPARE(formatsOf(blockOf(2)), QStringList{QStringLiteral("0+10:#008000")});
+
+    // Clearing the layer formats each of its paragraphs once.
+    formatted = decorations->formattedParagraphs();
+    decorations->clearLayer(name);
+    decorations->flush();
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 3);
+    QCOMPARE(formatsOf(blockOf(2)), QStringList{});
+    QCOMPARE(formatsOf(blockOf(150)), QStringList{});
+}
+
+void ParchTests::decorationsKeepTextLinesAndCaret()
+{
+    // Formatting changes the look of the text and nothing else: not the
+    // text, not the line height the binding sets or where lines break, and
+    // not where the caret and the selection are drawn. A format that would
+    // change the size or spacing of glyphs loses those properties, and a
+    // wavy underline is drawn by the view, under its own text.
+    EditorFixture fixture;
+    QString text;
+    for (int i = 0; i < 60; ++i) text += QStringLiteral("word ");
+    const QString source = text + QStringLiteral("\nnext paragraph\n");
+    Document *document = fixture.open("geometry.md", source);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 360, 600);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    EditorDecorations *decorations = decorationsOf(view);
+    QVERIFY(decorations);
+    QTRY_VERIFY(view.textDocument()->begin().layout()->lineCount() >= 3);
+    const auto geometry = [&] {
+        QStringList found;
+        for (QTextBlock block = view.textDocument()->begin(); block.isValid(); block = block.next()) {
+            QTextLayout *layout = block.layout();
+            for (int i = 0; i < layout->lineCount(); ++i)
+                found << QStringLiteral("line %1 %2 %3").arg(layout->lineAt(i).textStart()).arg(layout->lineAt(i).y())
+                             .arg(layout->lineAt(i).ascent());
+            found << QStringLiteral("format %1 %2").arg(block.blockFormat().lineHeight())
+                         .arg(block.blockFormat().lineHeightType());
+        }
+        for (int position = 0; position <= view.editor->property("length").toInt(); position += 7) {
+            const QRectF caret = caretAt(view.editor, position);
+            found << QStringLiteral("caret %1 %2 %3 %4").arg(position).arg(caret.x()).arg(caret.y()).arg(caret.height());
+        }
+        return found;
+    };
+    view.select(10, 40);
+    const QStringList plain = geometry();
+    const QRectF selected = view.editor->property("cursorRectangle").toRectF();
+
+    QTextCharFormat everything;
+    everything.setForeground(QColor(0x20, 0x60, 0xa0));
+    everything.setBackground(QColor(0xe0, 0xe0, 0x20));
+    everything.setFontWeight(QFont::Bold);
+    everything.setProperty(QTextFormat::FontPixelSize, 60);
+    everything.setFontLetterSpacing(300);
+    everything.setFontWordSpacing(40);
+    everything.setVerticalAlignment(QTextCharFormat::AlignSuperScript);
+    QTextCharFormat wavy;
+    wavy.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+    wavy.setUnderlineColor(QColor(0xc0, 0, 0));
+    decorations->defineLayer(QStringLiteral("look"), {everything});
+    decorations->defineLayer(QStringLiteral("waves"), {wavy}, {.z = 1});
+    std::vector<DecorationSpan> words, waves;
+    for (int i = 0; i < 60; i += 2) words.push_back({5 * i, 5 * i + 4, 0});
+    for (int i = 1; i < 60; i += 3) waves.push_back({5 * i, 5 * i + 4, 0});
+    QVERIFY(decorations->setSpans(QStringLiteral("look"), document->buffer()->revision(), words));
+    QVERIFY(decorations->setSpans(QStringLiteral("waves"), document->buffer()->revision(), waves));
+    decorations->setFocusColors(QColor(0x80, 0x80, 0x80), QColor(0x10, 0x10, 0x10));
+    decorations->setFocus({0, 120});
+    decorations->flush();
+    QCoreApplication::processEvents();
+    QCOMPARE(formatsOf(view.textDocument()->begin()).first(), QStringLiteral("0+4:#2060a0,bold,background"));
+    QCOMPARE(geometry(), plain);
+    QCOMPARE(view.editor->property("cursorRectangle").toRectF(), selected);
+    QCOMPARE(view.selectionStart(), 10);
+    QCOMPARE(view.selectionEnd(), 40);
+    verifyProjection(view, source);
+    // No wavy underline reaches Qt's own drawing, which would draw it straight.
+    for (QTextBlock block = view.textDocument()->begin(); block.isValid(); block = block.next())
+        for (const QTextLayout::FormatRange &range : block.layout()->formats())
+            QVERIFY(range.format.underlineStyle() == QTextCharFormat::NoUnderline);
+    // The view draws each one under its own word, inside its line.
+    const auto *marks = decorations->marks();
+    QTRY_COMPARE(marks->marks().size(), waves.size());
+    QList<QQuickItem *> drawn;
+    for (QQuickItem *child : view.editor->childItems())
+        if (child->objectName() == QStringLiteral("wave") && child->isVisible()) drawn << child;
+    QCOMPARE(drawn.size(), qsizetype(waves.size()));
+    QCOMPARE(drawn.first()->position(), QPointF(marks->marks()[0].x, marks->marks()[0].y));
+    for (size_t i = 0; i < waves.size(); ++i) {
+        const DecorationMarks::Mark &mark = marks->marks()[i];
+        const QRectF start = caretAt(view.editor, waves[i].start);
+        const QRectF end = caretAt(view.editor, waves[i].end);
+        QCOMPARE(mark.x, start.x());
+        QCOMPARE(mark.width, end.x() - start.x());
+        QVERIFY2(mark.y >= start.y() + start.height() * 0.6 && mark.y + mark.height <= start.y() + start.height() + 4,
+                 qPrintable(QStringLiteral("%1+%2 against %3+%4").arg(mark.y).arg(mark.height).arg(start.y()).arg(start.height())));
+        QCOMPARE(mark.color, QColor(0xc0, 0, 0));
+    }
+    // Typing before them moves them with their words at once.
+    view.cursor(0);
+    sendKey(&view.window, 'w');
+    QCOMPARE(marks->marks()[0].x, caretAt(view.editor, waves[0].start + 1).x());
+    // Clearing the focus and the layers leaves the lines as they were.
+    view.binding->undo();
+    decorations->clearFocus();
+    decorations->clearLayer(QStringLiteral("look"));
+    decorations->clearLayer(QStringLiteral("waves"));
+    decorations->flush();
+    view.select(10, 40);
+    QCOMPARE(geometry(), plain);
+    QCOMPARE(marks->rowCount(), 0);
+}
+
+void ParchTests::typingWithDecorationsStaysWithinAFrame()
+{
+    // On the benchmark's 100,000-word book, with a layer of styling over one
+    // word in six, more than live Markdown styling gives ordinary prose, a
+    // layer of wavy underlines and focus mode on, each key is handled, the
+    // paragraph it changes formatted again, the focus followed and the
+    // underlines in view moved within one frame at 120 Hz, at the start, the
+    // middle and the end. The same with every word styled is measured and
+    // reported: there Qt's own layout of a paragraph of a thousand runs of
+    // formatting is what costs.
+    EditorFixture fixture;
+    const QString book = benchmarkBook();
+    Document *document = fixture.open("book.md", book);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 1000, 800);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    EditorDecorations *decorations = decorationsOf(view);
+    QVERIFY(decorations);
+    view.window.requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(&view.window));
+    view.editor->forceActiveFocus();
+
+    // Each key at three places, with the time from the key to the end of
+    // what it set going, in milliseconds.
+    const auto typing = [&](const char *label) {
+        std::vector<double> times;
+        for (const double place : {0.0, 0.5, 1.0}) {
+            const int at = int(place * (document->buffer()->length() - 10));
+            view.cursor(view.binding->sourceToEditor(at));
+            QTest::qWait(50);
+            for (int i = 0; i < 20; ++i) {
+                QElapsedTimer timer;
+                timer.start();
+                sendKey(&view.window, QChar(u'a' + i % 26));
+                QCoreApplication::processEvents();
+                times.push_back(timer.nsecsElapsed() / 1e6);
+            }
+        }
+        std::sort(times.begin(), times.end());
+        const double median = times[times.size() / 2], p95 = times[times.size() * 95 / 100];
+        qInfo("typing %s: key to done p50 %.2f ms, p95 %.2f ms, max %.2f ms", label, median, p95, times.back());
+        return std::pair{median, p95};
+    };
+    const auto bare = typing("without decorations");
+
+    QTextCharFormat strong;
+    strong.setForeground(QColor(0x30, 0x50, 0x90));
+    strong.setFontWeight(QFont::Bold);
+    QTextCharFormat wavy;
+    wavy.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+    wavy.setUnderlineColor(QColor(0xc0, 0, 0));
+    decorations->defineLayer(QStringLiteral("styling"), {coloured(QColor(0x60, 0x60, 0x60)), strong});
+    decorations->defineLayer(QStringLiteral("underlines"), {wavy}, {.z = 1, .dropEdited = true});
+    // Every `every`th word of the text as it is now.
+    const auto words = [&](int every) {
+        std::vector<DecorationSpan> spans;
+        const QString text = document->buffer()->text();
+        int index = 0;
+        for (auto word = QRegularExpression(QStringLiteral("\\w+")).globalMatch(text); word.hasNext(); ++index) {
+            const QRegularExpressionMatch match = word.next();
+            if (index % every == 0) spans.push_back({int(match.capturedStart()), int(match.capturedEnd()), (index / every) % 2});
+        }
+        return spans;
+    };
+    QVERIFY(decorations->setSpans(QStringLiteral("styling"), document->buffer()->revision(), words(6)));
+    std::vector<DecorationSpan> underlines = words(37);
+    for (DecorationSpan &span : underlines) span.style = 0;
+    QVERIFY(decorations->setSpans(QStringLiteral("underlines"), document->buffer()->revision(), underlines));
+    view.pane->setProperty("focusMode", true);
+    QVERIFY(decorations->focusing());
+    decorations->flush();
+    QVERIFY(decorations->marks()->rowCount() > 0);
+    const auto decorated = typing("with one word in six styled, underlines and focus mode");
+    QVERIFY2(decorated.first < 1000.0 / 120, qPrintable(QString::number(decorated.first)));
+    QVERIFY2(decorated.second < 1000.0 / 120, qPrintable(QString::number(decorated.second)));
+    // What the layers add is little beside what typing costs without them.
+    QVERIFY2(decorated.first < bare.first + 3, qPrintable(QStringLiteral("%1 against %2").arg(decorated.first).arg(bare.first)));
+
+    QVERIFY(decorations->setSpans(QStringLiteral("styling"), document->buffer()->revision(), words(1)));
+    QVERIFY(decorations->spans(QStringLiteral("styling")).size() > 100000);
+    decorations->flush();
+    typing("with every word styled");
+}
+
+namespace {
+// A small English dictionary for Hunspell, written as en_US.aff and
+// en_US.dic into `folder`, so that no test depends on the system's.
+void writeDictionary(const QString &folder)
+{
+    writeFile(folder + QStringLiteral("/en_US.aff"),
+              "SET UTF-8\nTRY esianrtolcdugmphbyfvkwzESIANRTOLCDUGMPHBYFVKWZ'\nWORDCHARS '\n\nSFX S Y 1\nSFX S 0 s .\n");
+    const QStringList words = QString::fromUtf8(
+        "a an and another art brown café code continued dog/S don't English fox here inline item it known lazy line/S "
+        "naïve note/S of one over paragraph/S prose quick résumé sentence/S state text the this three two well word/S "
+        "writer/S")
+                                  .split(u' ');
+    writeFile(folder + QStringLiteral("/en_US.dic"),
+              (QString::number(words.size()) + u'\n' + words.join(u'\n') + u'\n').toUtf8());
+}
+
+// The words a decoration layer of spelling underlines, in order.
+QStringList underlinedWords(const EditorDecorations *decorations, const Document *document)
+{
+    QStringList words;
+    const QString text = document->buffer()->text();
+    for (const DecorationSpan &span : decorations->spans(SpellingLayer::layerName()))
+        words << text.mid(span.start, span.end - span.start);
+    return words;
+}
+
+QQuickItem *menuItemAt(QObject *menu, int index)
+{
+    QQuickItem *item = nullptr;
+    QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, item), Q_ARG(int, index));
+    return item;
+}
+
+QStringList menuTexts(QObject *menu)
+{
+    QStringList texts;
+    for (int i = 0; i < menu->property("count").toInt(); ++i)
+        if (QQuickItem *item = menuItemAt(menu, i)) texts << item->property("text").toString();
+    return texts;
+}
+
+// Moves a menu's highlight down to the entry with this name and presses Enter on it.
+void chooseFromMenu(QQuickWindow *window, QObject *menu, const QString &name)
+{
+    for (int i = 0; i < 12; ++i) {
+        QQuickItem *current = menuItemAt(menu, menu->property("currentIndex").toInt());
+        if (current && current->objectName() == name) break;
+        QTest::keyClick(window, Qt::Key_Down);
+    }
+    QQuickItem *current = menuItemAt(menu, menu->property("currentIndex").toInt());
+    QVERIFY2(current && current->objectName() == name, qPrintable(current ? current->objectName() : QString()));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+}
+
+// Runs a command of the registry in a window, as its keys, menu and palette do.
+bool runCommand(QQuickWindow *window, const char *command)
+{
+    return QMetaObject::invokeMethod(window, "run", Q_ARG(QVariant, QString::fromLatin1(command)));
+}
+
+// A spell checker of a test's own, with the small dictionary, read and wanted.
+struct SpellingFixture {
+    QTemporaryDir root;
+    std::unique_ptr<SpellChecker> checker;
+
+    SpellingFixture()
+    {
+        writeDictionary(root.filePath(QStringLiteral("dictionaries")));
+        checker = std::make_unique<SpellChecker>(root.filePath(QStringLiteral("data/dictionary.txt")));
+        checker->setDictionaryFolders({root.filePath(QStringLiteral("dictionaries"))});
+        checker->load();
+        checker->setWanted(true);
+    }
+    QString personalFile() const { return checker->personalFile(); }
+};
+} // namespace
+
+void ParchTests::spellingSkipsWhatIsNotProse()
+{
+    // Only prose is checked: front matter, code of every kind, URLs and email
+    // addresses, HTML comments and tags, math, link destinations, labels and
+    // reference definitions, Writer comment lines and words with digits are
+    // left alone; currency stays prose, and so does a list item's
+    // continuation, and an inline footnote's words.
+    const QString text = QStringLiteral(
+        "---\ntitle: frontword\n---\n\n"
+        "Prose wordone.\n\n"
+        "```\ncodeword\n```\n\n"
+        "~~~ text\ntildeword\n~~~\n\n"
+        "    indentword\n\n"
+        "Inline `spanword` text and https://example.org/urlword and <https://auto.example/autoword>"
+        " and www.wwwword.org and mail@mailword.org.\n"
+        "<!-- commentword --> after <span class=\"tagword\">inside</span>.\n"
+        "<!-- multi\ncommentline\n\nstill -->\n"
+        "Math $mathword$ and $$displayword$$ and $5 and $10 dollars.\n"
+        "$$\nblockword\n$$\n\n"
+        "A [linktext](https://destword.org \"titleword\") and [ref text][refword] and note[^noteword] "
+        "and [^inline note words] and [#citeword] and [%varword] and {{TOC}}.\n\n"
+        "[refword]: https://defword.org \"deftitle\"\n"
+        "[^noteword]: Footnote prose.\n"
+        "// lineword\n"
+        "abc123 x\n\n"
+        "- item\n\n    continued\n");
+    const QList<SourceRange> excluded = spellingExclusions(text);
+    for (qsizetype i = 1; i < excluded.size(); ++i)
+        QVERIFY(excluded[i].start > excluded[i - 1].start + excluded[i - 1].length);
+    QStringList words;
+    for (const SourceRange &word : spellingWords(text, 0, int(text.size()), excluded)) words << text.mid(word.start, word.length);
+    QCOMPARE(words, (QStringList{"Prose", "wordone", "Inline", "text", "and", "and", "and", "and", "after", "inside",
+                                 "Math", "and", "and", "and", "dollars", "linktext", "and", "ref", "text", "and", "note",
+                                 "and", "inline", "note", "words", "and", "and", "and", "Footnote", "prose", "item",
+                                 "continued"}));
+    // The same with CRLF line breaks and a byte order mark.
+    QString crlf = text;
+    crlf.replace(QStringLiteral("\n"), QStringLiteral("\r\n"));
+    crlf.prepend(QChar(0xfeff));
+    QStringList again;
+    const QList<SourceRange> excludedAgain = spellingExclusions(crlf);
+    for (const SourceRange &word : spellingWords(crlf, 0, int(crlf.size()), excludedAgain))
+        again << crlf.mid(word.start, word.length);
+    QCOMPARE(again, words);
+    // Only within the range asked for.
+    const int from = int(text.indexOf(QStringLiteral("Math")));
+    QStringList part;
+    for (const SourceRange &word : spellingWords(text, from, from + 20, excluded)) part << text.mid(word.start, word.length);
+    QCOMPARE(part, (QStringList{"Math", "and"}));
+}
+
+void ParchTests::spellingSegmentsUnicodeWords()
+{
+    // Words as Unicode segments them: an apostrophe inside a word, straight
+    // or curly, and accents, composed or not, belong to it; words joined by
+    // a hyphen are one; underscores part words; and words with no Latin
+    // letter, single letters, abbreviations and file names are left alone.
+    const QString text = QString::fromUtf8("The writer’s well-known café, don't state-of-the-art e.g. naïve résumé "
+                                           "snake_case Ελληνικά 東京 x2y file.txt a I ")
+        + QStringLiteral("café au‑pair");
+    QStringList words;
+    for (const SourceRange &word : spellingWords(text, 0, int(text.size()), {})) words << text.mid(word.start, word.length);
+    QCOMPARE(words, (QStringList{QStringLiteral("The"), QString::fromUtf8("writer’s"), QStringLiteral("well-known"),
+                                 QString::fromUtf8("café"), QStringLiteral("don't"), QStringLiteral("state-of-the-art"),
+                                 QString::fromUtf8("naïve"), QString::fromUtf8("résumé"), QStringLiteral("snake"),
+                                 QStringLiteral("case"), QStringLiteral("café"), QStringLiteral("au‑pair")}));
+}
+
+void ParchTests::spellCheckerUsesItsDictionaries()
+{
+    // The dictionary is found in the first folder that has it and read off
+    // the UI thread; words are checked as the dictionary spells them, curly
+    // apostrophes and decomposed accents too; suggestions are at most five;
+    // a word added is taken at once and kept in the personal dictionary, a
+    // word ignored only until the end of the run.
+    SpellingFixture fixture;
+    SpellChecker &checker = *fixture.checker;
+    QVERIFY(checker.dictionaryFound());
+    QTRY_VERIFY(checker.settled());
+    QVERIFY(checker.available());
+    QVERIFY(checker.active());
+    const std::shared_ptr<SpellEngine> engine = checker.engine();
+    for (const QString &word : {QStringLiteral("quick"), QStringLiteral("Quick"), QStringLiteral("dogs"),
+                                QString::fromUtf8("don’t"), QStringLiteral("café"), QStringLiteral("well-known")})
+        QVERIFY2(engine->check(word), qPrintable(word));
+    for (const QString &word : {QStringLiteral("quikc"), QStringLiteral("wel-known"), QStringLiteral("lazzy")})
+        QVERIFY2(!engine->check(word), qPrintable(word));
+    const QStringList suggestions = checker.suggestions(QStringLiteral("quikc"));
+    QVERIFY2(suggestions.contains(QStringLiteral("quick")), qPrintable(suggestions.join(u',')));
+    QVERIFY(checker.suggestions(QStringLiteral("tex")).size() <= SpellChecker::MaxSuggestions);
+    QCOMPARE(checker.suggestions(QString::fromUtf8("don’tt")).value(0), QString::fromUtf8("don’t"));
+
+    QSignalSpy accepted(&checker, &SpellChecker::wordAccepted);
+    QVERIFY(checker.addToDictionary(QStringLiteral("parch")));
+    QCOMPARE(accepted.count(), 1);
+    QVERIFY(engine->check(QStringLiteral("parch")));
+    QVERIFY(engine->check(QStringLiteral("Parch")));
+    QCOMPARE(readFile(fixture.personalFile()), QByteArray("parch\n"));
+    QVERIFY(checker.addToDictionary(QStringLiteral("Omarchy")));
+    QCOMPARE(readFile(fixture.personalFile()), QByteArray("parch\nOmarchy\n"));
+    QVERIFY(!checker.addToDictionary(QStringLiteral("two words")));
+    checker.ignore(QStringLiteral("zzyx"));
+    QCOMPARE(accepted.count(), 3);
+    QVERIFY(engine->check(QStringLiteral("zzyx")));
+    QCOMPARE(readFile(fixture.personalFile()), QByteArray("parch\nOmarchy\n"));
+
+    // The next run takes what was added, and not what was ignored.
+    SpellChecker next(fixture.personalFile());
+    next.setDictionaryFolders(checker.dictionaryFolders());
+    next.load();
+    QTRY_VERIFY(next.available());
+    QCOMPARE(next.personalWords(), (QStringList{"parch", "Omarchy"}));
+    QVERIFY(next.engine()->check(QStringLiteral("Omarchy")));
+    QVERIFY(!next.engine()->check(QStringLiteral("zzyx")));
+
+    // Without a dictionary nothing is checked, wanted or not.
+    QTemporaryDir empty;
+    SpellChecker none(empty.filePath(QStringLiteral("dictionary.txt")));
+    none.setDictionaryFolders({empty.filePath(QStringLiteral("none"))});
+    none.load();
+    QVERIFY(none.settled());
+    QVERIFY(!none.dictionaryFound());
+    QVERIFY(!none.available());
+    none.setWanted(true);
+    QVERIFY(!none.active());
+    QVERIFY(none.suggestions(QStringLiteral("quikc")).isEmpty());
+}
+
+void ParchTests::theEnglishDictionaryLoads()
+{
+    // The system's English dictionary, where it is installed, is found in
+    // the system's folders, reads, and knows ordinary English.
+    const QString folder = QStringLiteral("/usr/share/hunspell");
+    if (!QFileInfo::exists(folder + QStringLiteral("/en_US.aff")) || !QFileInfo::exists(folder + QStringLiteral("/en_US.dic")))
+        QSKIP("The English dictionary (hunspell-en_us) is not installed");
+    if (qEnvironmentVariableIsEmpty("XDG_DATA_DIRS")) QVERIFY(SpellChecker::systemDictionaryFolders().contains(folder));
+    QTemporaryDir root;
+    SpellChecker checker(root.filePath(QStringLiteral("dictionary.txt")));
+    checker.setDictionaryFolders({folder});
+    checker.load();
+    QTRY_VERIFY_WITH_TIMEOUT(checker.settled(), 10000);
+    QVERIFY(checker.available());
+    const QString prose = QString::fromUtf8(
+        "The writer’s ordinary English: don't stop, keep a well-known café open, and read the paragraphs again.");
+    for (const SourceRange &word : spellingWords(prose, 0, int(prose.size()), {}))
+        QVERIFY2(checker.engine()->check(prose.mid(word.start, word.length)), qPrintable(prose.mid(word.start, word.length)));
+    QVERIFY(!checker.engine()->check(QStringLiteral("speling")));
+    QVERIFY(checker.suggestions(QStringLiteral("speling")).contains(QStringLiteral("spelling")));
+}
+
+void ParchTests::misspellingsAreUnderlinedAndOfferSuggestions()
+{
+    // Misspelled prose is underlined with a wavy line in the theme's danger
+    // colour, and code is not. A right click on the word opens a menu of
+    // suggestions, the first highlighted; Enter puts it in place as one step
+    // to undo. The Menu key opens the same menu on the word at the caret.
+    EditorFixture fixture;
+    SpellingFixture spelling;
+    QTRY_VERIFY(spelling.checker->active());
+    const QString source = QStringLiteral("The quikc brown fox.\n\nCode `quikc` here.\n\nAnother lazzy dog.\n");
+    Document *document = fixture.open("spelling.md", source);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 600, 300);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.binding->restore(0, 0, 0);
+    view.pane->setProperty("spellChecker", QVariant::fromValue(spelling.checker.get()));
+    EditorDecorations *decorations = decorationsOf(view);
+    QTRY_COMPARE(underlinedWords(decorations, document), (QStringList{"quikc", "lazzy"}));
+    QCOMPARE(decorations->spans(SpellingLayer::layerName())[0].start, 4);
+    QTRY_COMPARE(decorations->marks()->rowCount(), 2);
+    QCOMPARE(decorations->marks()->marks()[0].color, fixture.theme->danger());
+    // Typing in a misspelled word takes its underline away at once.
+    view.window.requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(&view.window));
+    view.editor->forceActiveFocus();
+    view.cursor(9);
+    sendKey(&view.window, 'z');
+    QCOMPARE(underlinedWords(decorations, document), QStringList{"lazzy"});
+    QTRY_COMPARE(underlinedWords(decorations, document), (QStringList{"quikcz", "lazzy"}));
+    view.binding->undo();
+    QTRY_COMPARE(underlinedWords(decorations, document), (QStringList{"quikc", "lazzy"}));
+
+    QObject *menu = view.pane->findChild<QObject *>(QStringLiteral("spellingMenu"));
+    QVERIFY(menu);
+    const QRectF word = caretAt(view.editor, 6);
+    QTest::mouseClick(&view.window, Qt::RightButton, Qt::NoModifier, view.editor->mapToScene(word.center()).toPoint());
+    QTRY_VERIFY(menu->property("opened").toBool());
+    const QStringList entries = menuTexts(menu);
+    QCOMPARE(entries.first(), QStringLiteral("quick"));
+    QVERIFY(entries.size() <= SpellChecker::MaxSuggestions + 3);
+    QCOMPARE(entries.mid(entries.size() - 2), (QStringList{"Add to dictionary", "Ignore"}));
+    QCOMPARE(menu->property("currentIndex").toInt(), 0);
+    QTest::keyClick(&view.window, Qt::Key_Return);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QCOMPARE(document->buffer()->text(), QString(source).replace(4, 5, QStringLiteral("quick")));
+    QTRY_COMPARE(underlinedWords(decorations, document), QStringList{"lazzy"});
+    QTRY_COMPARE(view.window.activeFocusItem(), view.editor);
+    // One step to undo.
+    view.binding->undo();
+    QCOMPARE(document->buffer()->text(), source);
+    view.binding->redo();
+    QCOMPARE(document->buffer()->text(), QString(source).replace(4, 5, QStringLiteral("quick")));
+
+    // The Menu key, on the word at the caret.
+    const int lazzy = int(document->buffer()->text().indexOf(QStringLiteral("lazzy")));
+    view.cursor(view.binding->sourceToEditor(lazzy + 2));
+    QTest::keyClick(&view.window, Qt::Key_Menu);
+    QTRY_VERIFY(menu->property("opened").toBool());
+    QCOMPARE(menuTexts(menu).first(), QStringLiteral("lazy"));
+    QTest::keyClick(&view.window, Qt::Key_Escape);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QCOMPARE(document->buffer()->text(), QString(source).replace(4, 5, QStringLiteral("quick")));
+    // Shift+F10 too; and nowhere near a misspelled word, no menu opens.
+    QTRY_COMPARE(view.window.activeFocusItem(), view.editor);
+    QTest::keyClick(&view.window, Qt::Key_F10, Qt::ShiftModifier);
+    QTRY_VERIFY(menu->property("opened").toBool());
+    QTest::keyClick(&view.window, Qt::Key_Escape);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QTRY_COMPARE(view.window.activeFocusItem(), view.editor);
+    view.cursor(1);
+    QTest::keyClick(&view.window, Qt::Key_Menu);
+    QTest::qWait(50);
+    QVERIFY(!menu->property("visible").toBool());
+}
+
+void ParchTests::wordsAddedOrIgnoredApplyEverywhereAtOnce()
+{
+    // A word added to the dictionary from one view loses its underline at
+    // once in every view, and is kept in the personal dictionary; a word
+    // ignored loses it too, but only until parch ends.
+    EditorFixture fixture;
+    SpellingFixture spelling;
+    QTRY_VERIFY(spelling.checker->active());
+    Document *first = fixture.open("first.md", QStringLiteral("A lazzy dog and wrods.\n"));
+    Document *second = fixture.open("second.md", QStringLiteral("Another lazzy fox, more wrods.\n"));
+    EditorView one(fixture.engine, first, 600, 300);
+    EditorView two(fixture.engine, second, 600, 300);
+    QVERIFY2(one.ok() && two.ok(), qPrintable(one.error + two.error));
+    for (EditorView *view : {&one, &two}) view->pane->setProperty("spellChecker", QVariant::fromValue(spelling.checker.get()));
+    QTRY_COMPARE(underlinedWords(decorationsOf(one), first), (QStringList{"lazzy", "wrods"}));
+    QTRY_COMPARE(underlinedWords(decorationsOf(two), second), (QStringList{"lazzy", "more", "wrods"}));
+
+    one.window.requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(&one.window));
+    one.editor->forceActiveFocus();
+    QObject *menu = one.pane->findChild<QObject *>(QStringLiteral("spellingMenu"));
+    one.cursor(4);
+    QTest::keyClick(&one.window, Qt::Key_Menu);
+    QTRY_VERIFY(menu->property("opened").toBool());
+    chooseFromMenu(&one.window, menu, QStringLiteral("addToDictionary"));
+    // At once, without waiting for a check.
+    QCOMPARE(underlinedWords(decorationsOf(one), first), QStringList{"wrods"});
+    QCOMPARE(underlinedWords(decorationsOf(two), second), (QStringList{"more", "wrods"}));
+    QCOMPARE(readFile(spelling.personalFile()), QByteArray("lazzy\n"));
+
+    QTRY_COMPARE(one.window.activeFocusItem(), one.editor);
+    one.cursor(int(first->buffer()->text().indexOf(QStringLiteral("wrods"))));
+    QTest::keyClick(&one.window, Qt::Key_Menu);
+    QTRY_VERIFY(menu->property("opened").toBool());
+    chooseFromMenu(&one.window, menu, QStringLiteral("ignoreWord"));
+    QCOMPARE(underlinedWords(decorationsOf(one), first), QStringList{});
+    QCOMPARE(underlinedWords(decorationsOf(two), second), QStringList{"more"});
+    QCOMPARE(readFile(spelling.personalFile()), QByteArray("lazzy\n"));
+    // And after the checks that follow, still nothing.
+    QTRY_VERIFY(!one.pane->findChild<SpellingLayer *>(QStringLiteral("spelling"))->checking());
+    QTRY_VERIFY(!two.pane->findChild<SpellingLayer *>(QStringLiteral("spelling"))->checking());
+    QCOMPARE(underlinedWords(decorationsOf(two), second), QStringList{"more"});
+    // A view opened later knows both.
+    Document *third = fixture.open("third.md", QStringLiteral("Lazzy wrods and lazzy dogs.\n"));
+    EditorView three(fixture.engine, third, 600, 300);
+    QVERIFY2(three.ok(), qPrintable(three.error));
+    three.pane->setProperty("spellChecker", QVariant::fromValue(spelling.checker.get()));
+    QTRY_VERIFY(!three.pane->findChild<SpellingLayer *>(QStringLiteral("spelling"))->checking());
+    QCOMPARE(underlinedWords(decorationsOf(three), third), QStringList{});
+    // The next run keeps the added word, not the ignored one.
+    SpellChecker next(spelling.personalFile());
+    next.setDictionaryFolders(spelling.checker->dictionaryFolders());
+    next.load();
+    QTRY_VERIFY(next.available());
+    QVERIFY(next.engine()->check(QStringLiteral("lazzy")));
+    QVERIFY(!next.engine()->check(QStringLiteral("wrods")));
+}
+
+void ParchTests::spellingStaysOffTheTypingPath()
+{
+    // Spelling is checked on its worker once typing pauses, never as a key
+    // is handled: with the worker held up, typing goes on and nothing is
+    // checked. A paragraph edited while its check waited has that check's
+    // result dropped and is checked again; the others' results are taken.
+    EditorFixture fixture;
+    SpellingFixture spelling;
+    QTRY_VERIFY(spelling.checker->active());
+    Document *document = fixture.open("typing.md", QStringLiteral("One quikc line.\n\nTwo lazzy line.\n"));
+    EditorView view(fixture.engine, document, 600, 300);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.pane->setProperty("spellChecker", QVariant::fromValue(spelling.checker.get()));
+    EditorDecorations *decorations = decorationsOf(view);
+    auto *layer = view.pane->findChild<SpellingLayer *>(QStringLiteral("spelling"));
+    QTRY_COMPARE(underlinedWords(decorations, document), (QStringList{"quikc", "lazzy"}));
+    QTRY_VERIFY(!layer->checking());
+    view.window.requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(&view.window));
+    view.editor->forceActiveFocus();
+    QSignalSpy checks(layer, &SpellingLayer::checkingChanged);
+    {
+        PoolBlock busy(spelling.checker->pool());
+        view.cursor(14);
+        typeText(&view.window, QStringLiteral(" wrogn"));
+        QVERIFY(layer->checking());
+        // The check starts once typing pauses, and waits for the worker.
+        QTest::qWait(SpellingLayer::SettleMs + 200);
+        QCOMPARE(document->buffer()->text(), QStringLiteral("One quikc line wrogn.\n\nTwo lazzy line.\n"));
+        QCOMPARE(underlinedWords(decorations, document), (QStringList{"quikc", "lazzy"}));
+        // Typing goes on in the paragraph the waiting check read before.
+        typeText(&view.window, QStringLiteral("x"));
+        QCOMPARE(document->buffer()->text(), QStringLiteral("One quikc line wrognx.\n\nTwo lazzy line.\n"));
+    }
+    QTRY_COMPARE(underlinedWords(decorations, document), (QStringList{"quikc", "wrognx", "lazzy"}));
+    QTRY_VERIFY(!layer->checking());
+}
+
+void ParchTests::missingDictionaryIsSaid()
+{
+    // With no dictionary installed, spelling is off until the writer turns it
+    // on, and then a notice says there is no dictionary, where parch looked,
+    // and what to install; turned on in an earlier run, it says so once as
+    // parch starts. With a dictionary, spelling is on and nothing is said.
+    {
+        ShellFixture shell;
+        QVERIFY2(shell.ok(), qPrintable(shell.error));
+        SpellChecker *spelling = shell.backend->spelling();
+        QTRY_VERIFY(spelling->settled());
+        QVERIFY(!spelling->dictionaryFound());
+        QVERIFY(!spelling->wanted());
+        QVERIFY(shell.backend->problem().isEmpty());
+        shell.backend->setSpellchecking(true);
+        QCOMPARE(shell.backend->problem(), QStringLiteral("Spelling is not checked"));
+        QVERIFY(shell.backend->problemDetail().contains(QStringLiteral("hunspell-en_us")));
+        QVERIFY(shell.backend->problemDetail().contains(spelling->dictionaryFolders().first()));
+        QCOMPARE(shell.backend->noticeTone(), Backend::Warning);
+        QCOMPARE(shell.settings()->spellcheck(), std::optional<bool>(true));
+        QTRY_VERIFY(shell.item(QStringLiteral("noticeBar"))->isVisible());
+        shell.backend->dismissNotice();
+        // Asked again, it answers again.
+        shell.backend->setSpellchecking(false);
+        QVERIFY(shell.backend->problem().isEmpty());
+        shell.backend->setSpellchecking(true);
+        QCOMPARE(shell.backend->problem(), QStringLiteral("Spelling is not checked"));
+    }
+    {
+        ShellFixture shell({.settings = "{\"spellcheck\": true}"});
+        QVERIFY2(shell.ok(), qPrintable(shell.error));
+        QTRY_COMPARE(shell.backend->problem(), QStringLiteral("Spelling is not checked"));
+        shell.backend->dismissNotice();
+        // Once in a run: other changes of the settings say nothing more.
+        shell.settings()->zoom(1);
+        shell.settings()->setFocusUnit(QStringLiteral("paragraph"));
+        QVERIFY(shell.backend->problem().isEmpty());
+    }
+    {
+        QTemporaryDir dictionaries;
+        writeDictionary(dictionaries.path());
+        ShellFixture shell({.dictionaries = dictionaries.path()});
+        QVERIFY2(shell.ok(), qPrintable(shell.error));
+        QTRY_VERIFY(shell.backend->spelling()->active());
+        QVERIFY(shell.backend->problem().isEmpty());
+        QCOMPARE(shell.settings()->spellcheck(), std::nullopt);
+    }
+}
+
+void ParchTests::spellingTurnsOnAndOff()
+{
+    // The window's command and the Preferences checkbox turn spelling off
+    // and on for every window, and the choice is kept.
+    QTemporaryDir files, dictionaries;
+    writeDictionary(dictionaries.path());
+    const QString file = files.filePath(QStringLiteral("notes.md"));
+    writeFile(file, "A quikc note.\n");
+    ShellFixture shell({.files = {file}, .dictionaries = dictionaries.path()});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    auto *decorations = shell.item(QStringLiteral("editorPane"))->findChild<EditorDecorations *>(QStringLiteral("decorations"));
+    QVERIFY(decorations);
+    QTRY_COMPARE(underlinedWords(decorations, shell.document()), QStringList{"quikc"});
+    QObject *entry = shell.object(QStringLiteral("spellingEntry"));
+    QVERIFY(entry);
+    QCOMPARE(entry->property("text").toString(), QStringLiteral("Stop checking spelling"));
+    QCOMPARE(entry->property("command").toString(), QStringLiteral("checkSpelling"));
+    QVERIFY(runCommand(window, "checkSpelling"));
+    QVERIFY(!shell.backend->spelling()->wanted());
+    QCOMPARE(underlinedWords(decorations, shell.document()), QStringList{});
+    QCOMPARE(entry->property("text").toString(), QStringLiteral("Check spelling"));
+    QCOMPARE(shell.settings()->spellcheck(), std::optional<bool>(false));
+    QVERIFY(readFile(shell.paths().settingsFile()).contains("\"spellcheck\": false"));
+    // Preferences shows it, and turns it on again.
+    QVERIFY(runCommand(window, "preferences"));
+    QObject *dialog = shell.object(QStringLiteral("preferencesDialog"));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QQuickItem *check = shell.item(QStringLiteral("spellingCheck"));
+    QVERIFY(check);
+    QVERIFY(!check->property("checked").toBool());
+    check->forceActiveFocus(Qt::TabFocusReason);
+    QTRY_COMPARE(window->activeFocusItem(), check);
+    QTest::keyClick(window, Qt::Key_Space);
+    QVERIFY(shell.backend->spelling()->wanted());
+    QVERIFY(check->property("checked").toBool());
+    QTRY_COMPARE(underlinedWords(decorations, shell.document()), QStringList{"quikc"});
+    // The command again, with the dialog closed: the checkbox follows it.
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QVERIFY(runCommand(window, "checkSpelling"));
+    QVERIFY(!check->property("checked").toBool());
+    QVERIFY(runCommand(window, "checkSpelling"));
+    QVERIFY(check->property("checked").toBool());
+}
+
+void ParchTests::focusFindsTheSentenceOrParagraph()
+{
+    using Unit = FocusMode::Unit;
+    const QString text = QStringLiteral("# Heading here\nFirst sentence. Second one\ncontinues here. Third?\n\n"
+                                        "- item one. More\n- item two\n  goes on\n\nLast para.\r\nSame para line.");
+    const auto focus = [&](const QString &at, int offset, Unit unit) {
+        const SourceRange range = FocusMode::rangeAt(text, int(text.indexOf(at)) + offset, unit);
+        return text.mid(range.start, range.length);
+    };
+    QCOMPARE(focus("Second", 0, Unit::Paragraph), QStringLiteral("First sentence. Second one\ncontinues here. Third?"));
+    QCOMPARE(focus("Second", 2, Unit::Sentence), QStringLiteral("Second one\ncontinues here. "));
+    QCOMPARE(focus("continues", 0, Unit::Sentence), QStringLiteral("Second one\ncontinues here. "));
+    QCOMPARE(focus("First", 0, Unit::Sentence), QStringLiteral("First sentence. "));
+    // At a sentence's end, before the space after it, the caret is in it;
+    // after the space, in the next one.
+    QCOMPARE(focus("sentence.", 9, Unit::Sentence), QStringLiteral("First sentence. "));
+    QCOMPARE(focus("Second", 0, Unit::Sentence), QStringLiteral("Second one\ncontinues here. "));
+    QCOMPARE(focus("Third?", 6, Unit::Sentence), QStringLiteral("Third?"));
+    // A heading is a paragraph of its own.
+    QCOMPARE(focus("Heading", 0, Unit::Paragraph), QStringLiteral("# Heading here"));
+    QCOMPARE(focus("Heading", 0, Unit::Sentence), QStringLiteral("# Heading here"));
+    // Each list item is one, its continuation with it.
+    QCOMPARE(focus("one.", 0, Unit::Paragraph), QStringLiteral("- item one. More"));
+    QCOMPARE(focus("goes", 0, Unit::Paragraph), QStringLiteral("- item two\n  goes on"));
+    QCOMPARE(focus("More", 0, Unit::Sentence), QStringLiteral("More"));
+    // A blank line has nothing to keep bright.
+    const SourceRange blank = FocusMode::rangeAt(text, int(text.indexOf(QStringLiteral("\n\n- item"))) + 1, Unit::Paragraph);
+    QCOMPARE(blank.length, 0);
+    // CRLF breaks, the position between CR and LF included.
+    QCOMPARE(focus("Same", 0, Unit::Paragraph), QStringLiteral("Last para.\r\nSame para line."));
+    QCOMPARE(focus("Same", 0, Unit::Sentence), QStringLiteral("Same para line."));
+    QCOMPARE(focus("\r\nSame", 1, Unit::Paragraph), QStringLiteral("Last para.\r\nSame para line."));
+    // At the very end and the very start.
+    QCOMPARE(FocusMode::rangeAt(text, int(text.size()), Unit::Sentence).start, int(text.indexOf(QStringLiteral("Same"))));
+    QCOMPARE(FocusMode::rangeAt(text, 0, Unit::Paragraph).length, 14);
+}
+
+void ParchTests::focusModeDimsAllButTheCaretsPart()
+{
+    // Focus mode draws the text in the theme's muted colour and the sentence
+    // or paragraph with the caret in its foreground; it follows the caret,
+    // formatting again only the parts it leaves and enters, and leaves the
+    // text, the caret and undo as they were.
+    EditorFixture fixture;
+    const QString source = QStringLiteral("One. Two sentences here.\n\nAnother paragraph.\n\nThird paragraph.\n");
+    Document *document = fixture.open("focus.md", source);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 600, 300);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.binding->restore(7, 7, 0);
+    EditorDecorations *decorations = decorationsOf(view);
+    const Theme &theme = *fixture.theme;
+    const auto bright = [&] { return theme.foreground().name(); };
+    const auto block = [&](int number) { return formatsOf(view.textDocument()->findBlockByNumber(number)); };
+    QCOMPARE(view.editor->property("color").value<QColor>(), theme.foreground());
+    view.pane->setProperty("focusMode", true);
+    QVERIFY(decorations->focusing());
+    QCOMPARE(view.editor->property("color").value<QColor>(), theme.muted());
+    QCOMPARE(block(0), QStringList{QStringLiteral("5+19:%1").arg(bright())});
+    QCOMPARE(block(2), QStringList{});
+    // Into another paragraph: the two formatted again, no others.
+    const int formatted = decorations->formattedParagraphs();
+    view.cursor(int(source.indexOf(QStringLiteral("paragraph."))));
+    QCOMPARE(block(0), QStringList{});
+    QCOMPARE(block(2), QStringList{QStringLiteral("0+18:%1").arg(bright())});
+    QCOMPARE(decorations->formattedParagraphs(), formatted + 2);
+    // What is typed in the focus is bright as it is typed; a new sentence
+    // takes the focus.
+    view.window.requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(&view.window));
+    view.editor->forceActiveFocus();
+    const int end = int(source.indexOf(QStringLiteral(".\n\nThird")));
+    view.cursor(end);
+    typeText(&view.window, QStringLiteral(" More"));
+    QCOMPARE(block(2), QStringList{QStringLiteral("0+23:%1").arg(bright())});
+    view.cursor(end + 6);
+    typeText(&view.window, QStringLiteral(" Next"));
+    QCOMPARE(block(2), QStringList{QStringLiteral("24+4:%1").arg(bright())});
+    view.binding->undo();
+    QCOMPARE(block(2), QStringList{QStringLiteral("0+23:%1").arg(bright())});
+    // The paragraph, rather than the sentence.
+    view.pane->setProperty("focusUnit", QStringLiteral("paragraph"));
+    view.cursor(1);
+    QCOMPARE(block(0), QStringList{QStringLiteral("0+24:%1").arg(bright())});
+    QCOMPARE(block(2), QStringList{});
+    // A theme's new colours are followed.
+    replaceTheme(fixture.themeFolder.path(), "light", "#F8F1E3", "#342B27", "#A7353A");
+    QTRY_COMPARE(view.editor->property("color").value<QColor>(), theme.muted());
+    QTRY_COMPARE(block(0), QStringList{QStringLiteral("0+24:#342b27")});
+    // Off: no formatting at all, and the text as typed, with its undo.
+    view.pane->setProperty("focusMode", false);
+    decorations->flush();
+    QCOMPARE(view.editor->property("color").value<QColor>(), theme.foreground());
+    for (int i = 0; i < view.textDocument()->blockCount(); ++i) QCOMPARE(block(i), QStringList{});
+    QCOMPARE(document->buffer()->text(), QString(source).insert(end, QStringLiteral(" More")));
+    view.binding->undo();
+    QCOMPARE(document->buffer()->text(), source);
+}
+
+void ParchTests::distractionFreeWritingKeepsTheView()
+{
+    // F11 hides the library, the tabs, the header, the toolbar and the
+    // status line, and the column of text is centred in the whole window;
+    // F11 or Escape brings them back. The caret, the selection, the first line in view
+    // and undo stay as they were. The window's keys still work, Ctrl+Shift+D
+    // for focus mode among them.
+    QTemporaryDir files;
+    const QString file = files.filePath(QStringLiteral("long.md"));
+    QByteArray text;
+    for (int line = 1; line <= 200; ++line) text += "Line " + QByteArray::number(line) + " of the text\n";
+    writeFile(file, text);
+    ShellFixture shell({.files = {file}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    resizeWindow(window, 1440);
+    activate(window);
+    Document *document = shell.document();
+    TabModel *tabs = shell.context()->tabs();
+    Document *other = shell.backend->store()->newDraft();
+    other->buffer()->replace({0, 0}, QStringLiteral("Other"));
+    tabs->openDocument(other);
+    tabs->setActiveIndex(tabs->indexOf(document));
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    QQuickItem *pane = shell.item(QStringLiteral("editorPane"));
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    QTRY_VERIFY(shell.item(QStringLiteral("library"))->isVisible());
+    editor->forceActiveFocus();
+    EditorBinding *binding = shell.binding();
+    typeText(window, QStringLiteral("edited "));
+    const QString typed = document->buffer()->text();
+    const int start = int(typed.indexOf(QStringLiteral("Line 100 "))) + 7;
+    binding->restore(start + 9, start, int(typed.indexOf(QStringLiteral("Line 90 "))));
+    const int cursor = binding->cursorSource(), anchor = binding->anchorSource();
+    QTRY_VERIFY(binding->topSourcePosition() > 0);
+    const int top = binding->topSourcePosition();
+    const QStringList chrome{"header", "tabStrip", "toolbar", "statusLine", "library"};
+    for (const QString &name : chrome) QVERIFY2(shell.item(name)->isVisible(), qPrintable(name));
+
+    QTest::keyClick(window, Qt::Key_F11);
+    QVERIFY(window->property("distractionFree").toBool());
+    for (const QString &name : chrome) QTRY_VERIFY2(!shell.item(name)->isVisible(), qPrintable(name));
+    QCOMPARE(pane->mapToScene(QPointF(0, 0)), QPointF(0, 0));
+    QCOMPARE(pane->width(), qreal(window->width()));
+    QCOMPARE(pane->height(), qreal(window->height()));
+    QVERIFY(qAbs(editor->x() + editor->width() / 2 - pane->width() / 2) <= 1);
+    QTRY_COMPARE(binding->topSourcePosition(), top);
+    QCOMPARE(binding->cursorSource(), cursor);
+    QCOMPARE(binding->anchorSource(), anchor);
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    // The window menu still opens from the keyboard, over the text.
+    QTest::keyClick(window, Qt::Key_F10);
+    QObject *menu = shell.object(QStringLiteral("windowMenu"));
+    QTRY_VERIFY(menu->property("opened").toBool());
+    QCOMPARE(shell.object(QStringLiteral("distractionFreeEntry"))->property("text").toString(),
+             QStringLiteral("Leave distraction-free writing"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    // Focus mode, from its key.
+    QTest::keyClick(window, Qt::Key_D, Qt::ControlModifier | Qt::ShiftModifier);
+    QVERIFY(window->property("focusMode").toBool());
+    QVERIFY(pane->findChild<EditorDecorations *>(QStringLiteral("decorations"))->focusing());
+    QTest::keyClick(window, Qt::Key_D, Qt::ControlModifier | Qt::ShiftModifier);
+    QVERIFY(!window->property("focusMode").toBool());
+    // Escape in the text leaves.
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(!window->property("distractionFree").toBool());
+    for (const QString &name : chrome) QTRY_VERIFY2(shell.item(name)->isVisible(), qPrintable(name));
+    QTRY_COMPARE(binding->topSourcePosition(), top);
+    QCOMPARE(binding->cursorSource(), cursor);
+    QCOMPARE(binding->anchorSource(), anchor);
+    // And F11 again, both ways.
+    QTest::keyClick(window, Qt::Key_F11);
+    QTRY_VERIFY(!shell.item(QStringLiteral("header"))->isVisible());
+    QTest::keyClick(window, Qt::Key_F11);
+    QTRY_VERIFY(shell.item(QStringLiteral("header"))->isVisible());
+    QTRY_COMPARE(binding->topSourcePosition(), top);
+    QCOMPARE(binding->cursorSource(), cursor);
+    // Asking for the library leaves it too.
+    QTest::keyClick(window, Qt::Key_F11);
+    QTRY_VERIFY(!shell.item(QStringLiteral("library"))->isVisible());
+    QTest::keyClick(window, Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier);
+    QVERIFY(!window->property("distractionFree").toBool());
+    QTRY_VERIFY(shell.item(QStringLiteral("library"))->isVisible());
+    // So does asking for the toolbar, which shows again.
+    QTest::keyClick(window, Qt::Key_F11);
+    QTRY_VERIFY(!shell.item(QStringLiteral("toolbar"))->isVisible());
+    QVERIFY(runCommand(window, "toolbar"));
+    QVERIFY(!window->property("distractionFree").toBool());
+    QTRY_VERIFY(shell.item(QStringLiteral("toolbar"))->isVisible());
+    QVERIFY(shell.settings()->showToolbar());
+    // Undo undoes what was typed before.
+    binding->undo();
+    QCOMPARE(document->buffer()->text(), QString::fromUtf8(text));
+}
+
+void ParchTests::writingAidsAreNamedAndReachable()
+{
+    // Every control the writing aids add has a name for assistive
+    // technology and is reached from the keyboard: the Preferences dialog,
+    // the spelling menu, and the window in distraction-free writing.
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    QTemporaryDir files, dictionaries;
+    writeDictionary(dictionaries.path());
+    const QString file = files.filePath(QStringLiteral("aids.md"));
+    writeFile(file, "A quikc note.\n");
+    ShellFixture shell({.files = {file}, .dictionaries = dictionaries.path()});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    for (int width : {360, 1440}) {
+        resizeWindow(window, width);
+        QVERIFY(runCommand(window, "preferences"));
+        QObject *dialog = shell.object(QStringLiteral("preferencesDialog"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTest::qWait(50);
+        QStringList problems;
+        QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join("; ")));
+        const QStringList unnamed = unnamedAccessibleItems(window);
+        QVERIFY2(unnamed.isEmpty(), qPrintable(unnamed.join(", ")));
+        // The dialog opens on Close. Tab goes round its controls and reaches
+        // the writing aids' after the writing surface's, each drawing its
+        // focus, and then Close again.
+        QQuickItem *close = shell.item(QStringLiteral("closePreferences"));
+        QTRY_COMPARE(window->activeFocusItem(), close);
+        QQuickItem *first = shell.item(QStringLiteral("spellingCheck"));
+        for (int i = 0; i < 30 && window->activeFocusItem() != first; ++i) QTest::keyClick(window, Qt::Key_Tab);
+        QCOMPARE(window->activeFocusItem(), first);
+        QStringList reached;
+        for (int i = 0; i < 8; ++i) {
+            QQuickItem *now = window->activeFocusItem();
+            reached << now->objectName();
+            QVERIFY2(now->property("visualFocus").toBool(), qPrintable(now->objectName()));
+            auto *background = now->property("background").value<QQuickItem *>();
+            QVERIFY(background && background->property("border").value<QObject *>()->property("width").toReal() > 0);
+            if (now == close) break;
+            QTest::keyClick(window, Qt::Key_Tab);
+        }
+        QCOMPARE(reached, (QStringList{"spellingCheck", "focusSentence", "focusParagraph", "closePreferences"}));
+        for (const char *name : {"spellingCheck", "focusSentence", "focusParagraph", "closePreferences"}) {
+            QAccessibleInterface *access = QAccessible::queryAccessibleInterface(shell.item(QString::fromLatin1(name)));
+            QVERIFY2(access && !access->text(QAccessible::Name).isEmpty(), name);
+        }
+        // The arrows choose what focus mode keeps bright.
+        shell.item(QStringLiteral("focusSentence"))->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(window, Qt::Key_Down);
+        QTRY_COMPARE(shell.settings()->focusUnit(), QStringLiteral("paragraph"));
+        QTest::keyClick(window, Qt::Key_Up);
+        QTRY_COMPARE(shell.settings()->focusUnit(), QStringLiteral("sentence"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+    }
+    // The spelling menu, from the Menu key.
+    auto *decorations = shell.item(QStringLiteral("editorPane"))->findChild<EditorDecorations *>(QStringLiteral("decorations"));
+    QTRY_COMPARE(underlinedWords(decorations, shell.document()), QStringList{"quikc"});
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    editor->setProperty("cursorPosition", 4);
+    QTest::keyClick(window, Qt::Key_Menu);
+    QObject *menu = shell.object(QStringLiteral("spellingMenu"));
+    QTRY_VERIFY(menu->property("opened").toBool());
+    // Each entry is named. (The menu itself, as the window's, takes no name
+    // from Qt Quick's Menu.)
+    for (int i = 0; i < menu->property("count").toInt(); ++i) {
+        QAccessibleInterface *access = QAccessible::queryAccessibleInterface(menuItemAt(menu, i));
+        if (access && access->role() != QAccessible::Separator)
+            QVERIFY2(!access->text(QAccessible::Name).isEmpty(), qPrintable(QString::number(i)));
+    }
+    // The arrows go from the suggestion to what else can be done.
+    QTest::keyClick(window, Qt::Key_Down);
+    QCOMPARE(menuItemAt(menu, menu->property("currentIndex").toInt())->objectName(), QStringLiteral("addToDictionary"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    // Distraction-free writing.
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    QTest::keyClick(window, Qt::Key_F11);
+    QTRY_VERIFY(!shell.item(QStringLiteral("header"))->isVisible());
+    QVERIFY2(unnamedAccessibleItems(window).isEmpty(), qPrintable(unnamedAccessibleItems(window).join(", ")));
+    QStringList problems;
+    QVERIFY2(tabKeyReachesEveryControl(window, &problems), qPrintable(problems.join("; ")));
+    // The window menu's new entries are named.
+    QTest::keyClick(window, Qt::Key_F11);
+    for (const char *name : {"focusModeEntry", "distractionFreeEntry", "spellingEntry", "preferencesEntry"})
+        QVERIFY2(!shell.object(QString::fromLatin1(name))->property("text").toString().isEmpty(), name);
 }
 
 void ParchTests::caretStaysInViewAsTheTextAreaShrinks()

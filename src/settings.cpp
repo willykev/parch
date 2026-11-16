@@ -30,6 +30,10 @@ const auto shortcutsKey = QStringLiteral("shortcuts");
 // font is set through.
 const auto themeFamily = QStringLiteral("monospace");
 const auto outlineShownKey = QStringLiteral("outlineShown");
+const auto spellcheckKey = QStringLiteral("spellcheck");
+const auto focusUnitKey = QStringLiteral("focusUnit");
+
+bool isFocusUnit(const QString &unit) { return unit == u"sentence" || unit == u"paragraph"; }
 // More folders than anyone lists, so that a damaged file costs little.
 constexpr qsizetype maxLibraryFolders = 1000;
 
@@ -218,6 +222,24 @@ void Settings::setOutlineShown(bool shown)
     emit changed();
 }
 
+void Settings::setSpellcheck(bool on)
+{
+    if (m_spellcheck == on) return;
+    m_spellcheck = on;
+    m_stored.insert(spellcheckKey, on);
+    write();
+    emit changed();
+}
+
+void Settings::setFocusUnit(const QString &unit)
+{
+    if (!isFocusUnit(unit) || unit == m_focusUnit) return;
+    m_focusUnit = unit;
+    m_stored.insert(focusUnitKey, unit);
+    write();
+    emit changed();
+}
+
 void Settings::load()
 {
     QFile file(m_file);
@@ -331,6 +353,18 @@ void Settings::load()
             m_outlineShown = m_stored.value(outlineShownKey).toBool();
         else
             ignored << outlineShownKey;
+    }
+    if (present(spellcheckKey)) {
+        if (m_stored.value(spellcheckKey).isBool())
+            m_spellcheck = m_stored.value(spellcheckKey).toBool();
+        else
+            ignored << spellcheckKey;
+    }
+    if (present(focusUnitKey)) {
+        if (isFocusUnit(m_stored.value(focusUnitKey).toString()))
+            m_focusUnit = m_stored.value(focusUnitKey).toString();
+        else
+            ignored << focusUnitKey;
     }
     if (!ignored.isEmpty())
         qWarning("parch: ignoring settings out of range in %s: %s", qPrintable(m_file), qPrintable(ignored.join(", ")));

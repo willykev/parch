@@ -45,6 +45,7 @@ the document's line endings.
   into `assets` beside the file.
 - **Check links…** in the menu lists the links, images and includes whose
   files are not there.
+
 ## Writing and formatting
 
 Every formatting command writes plain Markdown into the text, and each is one
@@ -108,9 +109,10 @@ another command has can be swapped. **Remove** leaves a command without keys,
 
 **Preferences…** (`Ctrl+,`) sets the writing font, any installed family or
 the theme's; the text size; the line height; the longest line, in
-characters; how headings are written; and whether the formatting toolbar
-shows. A window too narrow for the toolbar hides it until you ask for it with
-**Show toolbar**. Every change applies at once in every window.
+characters; how headings are written; whether the formatting toolbar shows;
+whether spelling is checked; and what focus mode keeps bright. A window too
+narrow for the toolbar hides it until you ask for it with **Show toolbar**.
+Every change applies at once in every window.
 
 ## Saving
 
@@ -227,6 +229,24 @@ parch draws everything from your Omarchy theme and follows it as you switch
 themes, light or dark, along with the theme's font. `Ctrl+=` and `Ctrl+-`
 change the text size, and `Ctrl+0` returns to the theme's size.
 
+## Spelling and focus
+
+parch checks English spelling as you write, once a pause lets it, and
+underlines misspelled words with a wavy line. Code, URLs and email addresses,
+math, HTML, front matter and link destinations are not checked. Right-click a
+misspelled word, or press the `Menu` key or `Shift+F10` with the caret on it,
+for up to five suggestions, **Add to dictionary** (kept for good) and
+**Ignore** (until parch ends). **Check spelling**, in the menu or the command
+palette, or **Preferences…**, turns spell checking on or off. It needs the
+`hunspell-en_us` dictionary; without it, spelling is off and parch says so
+when you turn it on.
+
+**Focus mode** (`Ctrl+Shift+D`) dims everything but the sentence you are
+writing; **Preferences…** switches it to the paragraph. **Distraction-free
+writing** (`F11`) hides the library, the tabs, the header, the toolbar and the
+status line, and leaves only the text, centred. `F11` or `Esc` brings them
+back, and so does asking for the library or the toolbar.
+
 ## Keys
 
 | Key | Action |
@@ -253,8 +273,11 @@ change the text size, and `Ctrl+0` returns to the theme's size.
 | `Ctrl+=` / `Ctrl+-` | Larger / smaller text |
 | `Ctrl+0` | Theme text size |
 | `F6` / `Shift+F6` | Move between the library, tabs, text and notices |
+| `Ctrl+Shift+D` | Focus mode |
+| `F11` | Distraction-free writing |
+| `Menu` / `Shift+F10` | Spelling suggestions for the word at the caret |
 | `F10` | Open the menu |
-| `Esc` | Dismiss a notice |
+| `Esc` | Close the find bar, leave distraction-free writing, or dismiss a notice |
 | `Ctrl+Shift+P` | Command palette |
 | `Ctrl+,` | Preferences |
 | `Ctrl+B` / `Ctrl+I` | Bold / italic |
@@ -272,7 +295,7 @@ change the text size, and `Ctrl+0` returns to the theme's size.
 | `Ctrl+Enter` | Page break |
 | `Shift+Enter` | Hard line break |
 
-Every key can be changed with **Keyboard shortcuts…**.
+The keys of every command can be changed with **Keyboard shortcuts…**.
 
 ## Command line
 
@@ -296,6 +319,7 @@ window. A folder is added to the library.
 | `~/.local/share/parch/drafts/` | Drafts, one folder each |
 | `~/.local/share/parch/history/` | Version history, one folder per document |
 | `~/.local/share/parch/documents.json` | Which history belongs to which file |
+| `~/.local/share/parch/dictionary.txt` | Words added to the spelling dictionary |
 | `~/.local/state/parch/recovery/` | Text not yet in its file |
 | `~/.local/state/parch/session.json` | Open windows and tabs |
 | `~/.local/state/parch/recent.json` | Recent files |

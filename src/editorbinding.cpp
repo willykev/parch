@@ -255,7 +255,9 @@ void EditorBinding::attach()
     m_editor->installEventFilter(this);
     m_connections = {
         connect(m_buffer, &SourceBuffer::sourceChanged, this,
-                [this](Revision, SourceRange range, const QString &replacement) { applySourceChange(range, replacement); }),
+                [this](Revision revision, SourceRange range, const QString &replacement) {
+                    applySourceChange(revision, range, replacement);
+                }),
         connect(m_document, &Document::changed, this, &EditorBinding::refreshEditable),
         connect(m_textDocument, &QTextDocument::contentsChange, this, &EditorBinding::checkNativeChange),
         // Qt makes and keeps this document itself; should it go on its own, the projection goes with it.
@@ -337,9 +339,10 @@ void EditorBinding::load()
     m_projecting = false;
     refreshCursor();
     refreshEditable();
+    emit projectionLoaded();
 }
 
-void EditorBinding::applySourceChange(SourceRange range, const QString &replacement)
+void EditorBinding::applySourceChange(Revision revision, SourceRange range, const QString &replacement)
 {
     if (!m_loaded || !m_editor || !m_textDocument) return;
     // From here to the end the buffer holds the new text while the projection
@@ -374,6 +377,7 @@ void EditorBinding::applySourceChange(SourceRange range, const QString &replacem
     const int shownAfterEnd = oldEnd < oldLength ? m_pairs.toEditor(oldEnd + 1) : shownEnd;
 
     m_pairs.update(source, range, inserted);
+    emit sourceEdited(revision, range, inserted);
     // Qt shows CRLF as one separator, so where the edit joins or splits a
     // pair, before or after, the whole pair is replaced: one unit more of the
     // source, and the separator it shows.
@@ -1045,6 +1049,23 @@ void EditorBinding::keepCursorInView(qreal formerHeight)
     const qreal top = view->property("contentY").toReal();
     if (caret.top() < top || caret.bottom() > top + formerHeight) return;
     revealCursor();
+}
+
+QTextDocument *EditorBinding::textDocument() const { return m_loaded ? m_textDocument.data() : nullptr; }
+
+SourceRange EditorBinding::visibleRange() const
+{
+    if (!m_loaded) return {0, 0};
+    QQuickItem *view = viewport();
+    // Without a view that scrolls, the whole text is in view.
+    if (!view) return {0, m_buffer->length()};
+    const qreal top = view->property("contentY").toReal() - m_editor->y();
+    int first = 0, last = 0;
+    m_positionAt.invoke(m_editor, Q_RETURN_ARG(int, first), Q_ARG(qreal, 0), Q_ARG(qreal, qMax<qreal>(0, top)));
+    m_positionAt.invoke(m_editor, Q_RETURN_ARG(int, last), Q_ARG(qreal, m_editor->width()),
+                        Q_ARG(qreal, qMax<qreal>(0, top + view->height())));
+    const int start = m_pairs.toSource(qMin(first, last));
+    return {start, m_pairs.toSource(qMax(first, last)) - start};
 }
 
 int EditorBinding::topSourcePosition() const

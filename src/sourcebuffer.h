@@ -24,6 +24,15 @@ public:
     Revision revision() const;
     enum class EditOutcome { Rejected, Unchanged, Applied };
     EditOutcome replace(SourceRange range, const QString &replacement, EditKind kind = EditKind::Other);
+    // Several replacements as one undo step, as a command that edits in more
+    // than one place makes them. Each range addresses the text as it is now;
+    // they are sorted and do not overlap. Either all are applied or, should
+    // one of them split a grapheme or the ranges be out of order, none.
+    EditOutcome replace(const QList<SourceEdit> &edits);
+    // Every edit from beginStep() to the matching endStep() undoes and redoes
+    // as one step, whatever its kind; steps begun inside another join it.
+    void beginStep();
+    void endStep();
     bool canUndo() const;
     bool canRedo() const;
     void undo();
@@ -61,6 +70,8 @@ private:
         bool hasLineBreak;
     };
     bool joinsLastStep(const Transaction &edit, EditKind kind, bool lineBreak, qint64 now) const;
+    // Records an edit already checked and applies it.
+    void record(SourceRange range, const QString &removed, const QString &replacement, EditKind kind);
     void apply(SourceRange range, const QString &replacement);
 
     QString m_text;
@@ -71,5 +82,8 @@ private:
     qsizetype m_savedPosition = 0;
     // An undo or redo ends grouping, since the last step is no longer the latest edit.
     bool m_canJoin = false;
+    // How deep beginStep() calls are, and whether the step they make has its first edit yet.
+    int m_stepDepth = 0;
+    bool m_stepStarted = false;
     std::function<qint64()> m_clock;
 };

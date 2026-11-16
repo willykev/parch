@@ -15,6 +15,15 @@ The first version: a native Markdown writing app for Omarchy.
 - Pasted images and dropped files go into an `assets` folder beside the
   document; a dropped Markdown document can be linked or included.
 - Check links lists the links and images whose files are missing.
+- Formatting commands that write and toggle Markdown, each one undo step, from
+  the menu, a formatting toolbar, a command palette and their keys.
+- Lists that continue on Enter and indent with Tab, table cells reached with
+  Tab, table formatting, and Shift+Enter for a hard line break.
+- Keys you can change, with refusals for keys that type and swapping for keys
+  taken.
+- Preferences for the writing font, text size, line height, line length,
+  heading syntax and toolbar, applied at once in every window.
+- A word count and reading time for the document or the selection.
 
 ### Keeping text safe
 

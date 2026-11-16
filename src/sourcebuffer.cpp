@@ -57,7 +57,46 @@ SourceBuffer::EditOutcome SourceBuffer::replace(SourceRange range, const QString
     if (!sourceGraphemeRange(m_text, range)) return EditOutcome::Rejected;
     const auto removed = m_text.mid(range.start, range.length);
     if (removed == replacement) return EditOutcome::Unchanged;
+    record(range, removed, replacement, kind);
+    return EditOutcome::Applied;
+}
 
+SourceBuffer::EditOutcome SourceBuffer::replace(const QList<SourceEdit> &edits)
+{
+    // Every range is checked against the text as it is, before anything
+    // changes, so that the edits apply all together or not at all.
+    int end = 0;
+    bool changes = false;
+    for (const SourceEdit &edit : edits) {
+        if (edit.range.start < end || !sourceGraphemeRange(m_text, edit.range)) return EditOutcome::Rejected;
+        end = edit.range.start + edit.range.length;
+        changes = changes || QStringView(m_text).mid(edit.range.start, edit.range.length) != edit.replacement;
+    }
+    if (!changes) return EditOutcome::Unchanged;
+    // From the last to the first, so that each range still addresses the
+    // text it was given for.
+    beginStep();
+    for (qsizetype i = edits.size(); i-- > 0;) {
+        const SourceEdit &edit = edits.at(i);
+        const QString removed = m_text.mid(edit.range.start, edit.range.length);
+        if (removed != edit.replacement) record(edit.range, removed, edit.replacement, EditKind::Other);
+    }
+    endStep();
+    return EditOutcome::Applied;
+}
+
+void SourceBuffer::beginStep()
+{
+    if (m_stepDepth++ == 0) m_stepStarted = false;
+}
+
+void SourceBuffer::endStep()
+{
+    if (m_stepDepth > 0 && --m_stepDepth == 0) m_stepStarted = false;
+}
+
+void SourceBuffer::record(SourceRange range, const QString &removed, const QString &replacement, EditKind kind)
+{
     const bool wasModified = modified();
     const Transaction edit{range.start, removed, replacement};
     const bool lineBreak = hasLineBreak(removed) || hasLineBreak(replacement);
@@ -68,18 +107,25 @@ SourceBuffer::EditOutcome SourceBuffer::replace(SourceRange range, const QString
         // The saved text was among the discarded redo steps and can no longer be reached.
         if (m_savedPosition > m_historyPosition) m_savedPosition = -1;
     }
-    if (joinsLastStep(edit, kind, lineBreak, now)) {
+    if (m_stepDepth > 0 && m_stepStarted) {
+        // Inside a step that has its first edit already.
+        auto &step = m_history.last();
+        step.edits.append(edit);
+        step.lastTime = now;
+        step.hasLineBreak = step.hasLineBreak || lineBreak;
+    } else if (m_stepDepth == 0 && joinsLastStep(edit, kind, lineBreak, now)) {
         auto &step = m_history.last();
         step.edits.append(edit);
         step.lastTime = now;
     } else {
-        m_history.append({{edit}, kind, now, lineBreak});
+        // A step begun with beginStep() is never joined by typing afterwards.
+        m_history.append({{edit}, m_stepDepth > 0 ? EditKind::Other : kind, now, lineBreak});
         ++m_historyPosition;
+        m_stepStarted = m_stepDepth > 0;
     }
     m_canJoin = true;
     apply(range, replacement);
     if (modified() != wasModified) emit modifiedChanged();
-    return EditOutcome::Applied;
 }
 
 void SourceBuffer::undo()
@@ -87,6 +133,7 @@ void SourceBuffer::undo()
     if (m_historyPosition == 0) return;
     const bool wasModified = modified();
     m_canJoin = false;
+    m_stepStarted = false;
     const auto &step = m_history.at(--m_historyPosition);
     // Replay recorded edits exactly, newest first: insertion can have joined adjacent graphemes.
     for (qsizetype i = step.edits.size(); i-- > 0;) {
@@ -101,6 +148,7 @@ void SourceBuffer::redo()
     if (m_historyPosition == m_history.size()) return;
     const bool wasModified = modified();
     m_canJoin = false;
+    m_stepStarted = false;
     const auto &step = m_history.at(m_historyPosition++);
     for (const auto &transaction : step.edits)
         apply({transaction.start, int(transaction.removed.size())}, transaction.inserted);

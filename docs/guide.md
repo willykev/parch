@@ -45,6 +45,72 @@ the document's line endings.
   into `assets` beside the file.
 - **Check links…** in the menu lists the links, images and includes whose
   files are not there.
+## Writing and formatting
+
+Every formatting command writes plain Markdown into the text, and each is one
+step for `Ctrl+Z` to take back. Find them under **Format** in the menu
+(`F10`), on the toolbar under the tabs, in the command palette, or by their
+keys.
+
+- **Bold**, **Italic**, **Strikethrough**, **Highlight** (`==`), **Inline
+  code**, **Inline math** (`$`) and **Comment** (`<!-- -->`) wrap the
+  selection, or the text of each line in a selection over several lines.
+  Used again on text that has them, they take the markers away. Without a
+  selection they take away the markers around the caret, or put a pair
+  there with the caret between them.
+- **Heading 1** to **Heading 6** and **Paragraph** change every line the
+  selection touches; a heading at the level chosen becomes a paragraph again.
+  Headings are marked with `#`, or, if you choose so in **Preferences**,
+  levels one and two are underlined with `===` and `---`.
+- **Quote**, **Bulleted list**, **Numbered list** and **Task list** mark each
+  line, or take the marks away when every line has them. **Check or uncheck
+  task** (`Ctrl+L`) ticks the task boxes on the caret's lines.
+- **Code block** and **Display math** put the lines between fences, or take
+  the fences away.
+- **Link** (`Ctrl+K`) and **Image** wrap the selection and select `url` to
+  type over. A selected web address becomes the link's destination. Used
+  inside a link, **Link** takes the link away and keeps its text.
+- **Footnote** inserts the next `[^n]` and its definition at the end of the
+  document, where the caret goes for you to write the note.
+- **Table** inserts a two-column table; **Format table** lines up a table's
+  pipes and padding by its alignment row without changing a cell, and keeps
+  wide characters, escaped pipes and pipes in code in their place.
+- **Thematic break** and **Page break** (`+++`) go on a line of their own,
+  with a blank line before them.
+
+While you type:
+
+- `Enter` in a list item starts the next item: the same bullet, the next
+  number, or an unchecked box. `Enter` on an empty item ends the list.
+- `Tab` and `Shift+Tab` indent and outdent a list item, or every line of a
+  selection; elsewhere `Tab` types a tab.
+- In a table, `Tab` and `Shift+Tab` go to the next and previous cell, and
+  `Tab` in the last cell adds a row.
+- `Shift+Enter` ends the line with a Markdown hard line break.
+
+The status line counts the words of the document, or of the selection, and
+how many minutes they take to read at 200 words a minute. Chinese and
+Japanese count each character as a word.
+
+## Commands and keys
+
+The command palette (`Ctrl+Shift+P`) lists everything parch can do. Type a
+few letters of a command's name, in order, to find it; the arrows choose and
+`Enter` runs it.
+
+**Keyboard shortcuts…** in the menu lists every command and its keys. Choose
+one and press **Change…** (or `Enter`), then the keys you want. Keys that
+type text, and keys kept for editing such as `Ctrl+C`, are refused; keys
+another command has can be swapped. **Remove** leaves a command without keys,
+**Reset** gives it its own back, and **Reset all** every command.
+
+## Preferences
+
+**Preferences…** (`Ctrl+,`) sets the writing font, any installed family or
+the theme's; the text size; the line height; the longest line, in
+characters; how headings are written; and whether the formatting toolbar
+shows. A window too narrow for the toolbar hides it until you ask for it with
+**Show toolbar**. Every change applies at once in every window.
 
 ## Saving
 
@@ -118,7 +184,7 @@ parch watches the files you have open.
 
 ## The library
 
-`Ctrl+B` shows or hides the library beside the text.
+`F9` shows or hides the library beside the text.
 
 - **Drafts** lists your drafts. **Recent** lists the files you opened last.
 - **Open folder** adds a folder. Its `.md`, `.markdown` and `.txt` files are
@@ -150,12 +216,30 @@ change the text size, and `Ctrl+0` returns to the theme's size.
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo |
 | `Ctrl+Tab` / `Ctrl+PageDown` | Next tab |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Previous tab |
-| `Ctrl+B` | Show or hide the library |
+| `F9` | Show or hide the library |
 | `Ctrl+=` / `Ctrl+-` | Larger / smaller text |
 | `Ctrl+0` | Theme text size |
 | `F6` / `Shift+F6` | Move between the library, tabs, text and notices |
 | `F10` | Open the menu |
 | `Esc` | Dismiss a notice |
+| `Ctrl+Shift+P` | Command palette |
+| `Ctrl+,` | Preferences |
+| `Ctrl+B` / `Ctrl+I` | Bold / italic |
+| `Ctrl+Shift+X` / `Ctrl+Shift+H` | Strikethrough / highlight |
+| `Ctrl+E` / `Ctrl+/` | Inline code / comment |
+| `Ctrl+1` … `Ctrl+6` | Heading 1 to 6 |
+| `Ctrl+'` | Quote |
+| `Ctrl+Shift+L` / `Ctrl+Alt+L` | Bulleted / numbered list |
+| `Ctrl+L` | Check or uncheck task |
+| `Ctrl+Shift+K` | Code block |
+| `Ctrl+K` / `Ctrl+Shift+I` | Link / image |
+| `Ctrl+Alt+F` | Footnote |
+| `Ctrl+T` | Table |
+| `Ctrl+M` / `Ctrl+Shift+M` | Inline / display math |
+| `Ctrl+Enter` | Page break |
+| `Shift+Enter` | Hard line break |
+
+Every key can be changed with **Keyboard shortcuts…**.
 
 ## Command line
 
@@ -182,7 +266,7 @@ window. A folder is added to the library.
 | `~/.local/state/parch/recovery/` | Text not yet in its file |
 | `~/.local/state/parch/session.json` | Open windows and tabs |
 | `~/.local/state/parch/recent.json` | Recent files |
-| `~/.config/parch/settings.json` | Settings, such as library folders and text size |
+| `~/.config/parch/settings.json` | Settings, such as library folders, text size and your own keys |
 
 These follow `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CONFIG_HOME` when they
 are set.

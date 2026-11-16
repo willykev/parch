@@ -48,12 +48,14 @@ moment after you pause.
 | `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Find a document |
 | `Ctrl+S` / `Ctrl+Shift+S` | Save now / save as |
-| `Ctrl+B` | Show or hide the library |
+| `F9` | Show or hide the library |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+W` | Close the tab |
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Larger / smaller / theme-sized text |
 | `F10` | Open the menu |
+| `Ctrl+Shift+P` | Find and run any command |
+| `Ctrl+B` / `Ctrl+I` / `Ctrl+K` | Bold / italic / link |
 
 ## Use the terminal
 

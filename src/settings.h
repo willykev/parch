@@ -1,9 +1,11 @@
 #pragma once
 
+#include <QHash>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantMap>
 
 class Theme;
 
@@ -30,6 +32,18 @@ class Settings : public QObject {
     Q_PROPERTY(qreal lineHeight READ lineHeight NOTIFY changed)
     Q_PROPERTY(int maxLineLength READ maxLineLength NOTIFY changed)
     Q_PROPERTY(QString editorFontFamily READ editorFontFamily NOTIFY changed)
+    // True while the editor's family is the theme's, the default.
+    Q_PROPERTY(bool themeFontFamily READ themeFontFamily NOTIFY changed)
+    // The heading commands underline levels one and two (Setext) rather
+    // than marking them with # (ATX), which they always do for three to six.
+    Q_PROPERTY(bool setextHeadings READ setextHeadings NOTIFY changed)
+    // Whether windows show the formatting toolbar; a narrow window still
+    // hides it until asked.
+    Q_PROPERTY(bool showToolbar READ showToolbar NOTIFY changed)
+    // The ranges of the writing settings, for controls that set them:
+    // minFontPixelSize, maxFontPixelSize, minLineHeight, maxLineHeight,
+    // minLineLength and maxLineLength.
+    Q_PROPERTY(QVariantMap limits READ limits CONSTANT)
     Q_PROPERTY(bool freshDraftOnLaunch READ freshDraftOnLaunch NOTIFY changed)
     Q_PROPERTY(int libraryWidth READ libraryWidth NOTIFY changed)
     // The folders the library lists, in the order they were added.
@@ -37,6 +51,8 @@ class Settings : public QObject {
 
 public:
     static constexpr int MinFontPixelSize = 10, MaxFontPixelSize = 40;
+    static constexpr int MinLineLength = 20, MaxLineLength = 200;
+    static constexpr qreal MinLineHeight = 1.0, MaxLineHeight = 3.0;
     // How much larger the editor's text is than the shell's.
     static constexpr int ThemeFontOffset = 4;
 
@@ -69,6 +85,30 @@ public:
     Q_INVOKABLE void zoom(int steps);
     // Returns the text size to following the theme.
     Q_INVOKABLE void resetZoom();
+    // Zooms to a size, within the same limits.
+    Q_INVOKABLE void setFontPixelSize(int size);
+
+    bool themeFontFamily() const;
+    QVariantMap limits() const;
+    bool setextHeadings() const { return m_setextHeadings; }
+    bool showToolbar() const { return m_showToolbar; }
+    // Each setter keeps a value within its range, ignores one outside it,
+    // and writes nothing when nothing changes. An empty family, or the
+    // theme's own, returns the editor to the theme's family.
+    Q_INVOKABLE void setEditorFontFamily(const QString &family);
+    Q_INVOKABLE void setLineHeight(qreal lineHeight);
+    Q_INVOKABLE void setMaxLineLength(int characters);
+    Q_INVOKABLE void setSetextHeadings(bool setext);
+    Q_INVOKABLE void setShowToolbar(bool show);
+
+    // The writer's own key bindings, by command id, each replacing all of
+    // that command's default keys; an empty list leaves the command without
+    // keys. Kept as portable key sequence text, ids this version does not
+    // know included.
+    QHash<QString, QStringList> shortcutOverrides() const { return m_shortcutOverrides; }
+    void setShortcutOverride(const QString &command, const QStringList &sequences);
+    void clearShortcutOverride(const QString &command);
+    void clearShortcutOverrides();
 
 signals:
     void changed();
@@ -76,6 +116,7 @@ signals:
 private:
     void load();
     void write();
+    void writeShortcuts();
 
     QString m_file;
     // What the file held, kept whole and written back with each change.
@@ -88,6 +129,9 @@ private:
     qreal m_lineHeight = 1.5;
     int m_maxLineLength = 72;
     QString m_editorFontFamily = QStringLiteral("monospace");
+    bool m_setextHeadings = false;
+    bool m_showToolbar = true;
+    QHash<QString, QStringList> m_shortcutOverrides;
     bool m_freshDraftOnLaunch = false;
     int m_libraryWidth = 260;
     QStringList m_libraryFolders;

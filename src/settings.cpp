@@ -23,6 +23,12 @@ const auto freshDraftOnLaunchKey = QStringLiteral("freshDraftOnLaunch");
 const auto libraryWidthKey = QStringLiteral("libraryWidth");
 const auto libraryFoldersKey = QStringLiteral("libraryFolders");
 const auto lastFolderKey = QStringLiteral("lastFolder");
+const auto headingSyntaxKey = QStringLiteral("headingSyntax");
+const auto toolbarKey = QStringLiteral("toolbar");
+const auto shortcutsKey = QStringLiteral("shortcuts");
+// The family the editor has until another is chosen: the alias the theme's
+// font is set through.
+const auto themeFamily = QStringLiteral("monospace");
 // More folders than anyone lists, so that a damaged file costs little.
 constexpr qsizetype maxLibraryFolders = 1000;
 
@@ -84,6 +90,100 @@ void Settings::resetZoom()
     if (!zoomed()) return;
     m_zoomedSize = 0;
     m_stored.remove(fontPixelSizeKey);
+    write();
+    emit changed();
+}
+
+void Settings::setFontPixelSize(int size)
+{
+    zoom(qBound(MinFontPixelSize, size, MaxFontPixelSize) - fontPixelSize());
+}
+
+bool Settings::themeFontFamily() const { return !m_stored.contains(editorFontFamilyKey); }
+
+QVariantMap Settings::limits() const
+{
+    return {{QStringLiteral("minFontPixelSize"), MinFontPixelSize}, {QStringLiteral("maxFontPixelSize"), MaxFontPixelSize},
+            {QStringLiteral("minLineHeight"), MinLineHeight},       {QStringLiteral("maxLineHeight"), MaxLineHeight},
+            {QStringLiteral("minLineLength"), MinLineLength},       {QStringLiteral("maxLineLength"), MaxLineLength}};
+}
+
+void Settings::setEditorFontFamily(const QString &family)
+{
+    const QString chosen = family.trimmed();
+    const bool theme = chosen.isEmpty() || chosen == themeFamily;
+    if (theme == themeFontFamily() && (theme || chosen == m_editorFontFamily)) return;
+    m_editorFontFamily = theme ? themeFamily : chosen;
+    if (theme) m_stored.remove(editorFontFamilyKey);
+    else m_stored.insert(editorFontFamilyKey, chosen);
+    write();
+    emit changed();
+}
+
+void Settings::setLineHeight(qreal lineHeight)
+{
+    if (!(lineHeight >= MinLineHeight && lineHeight <= MaxLineHeight) || qFuzzyCompare(lineHeight, m_lineHeight)) return;
+    m_lineHeight = lineHeight;
+    m_stored.insert(lineHeightKey, lineHeight);
+    write();
+    emit changed();
+}
+
+void Settings::setMaxLineLength(int characters)
+{
+    if (characters < MinLineLength || characters > MaxLineLength || characters == m_maxLineLength) return;
+    m_maxLineLength = characters;
+    m_stored.insert(maxLineLengthKey, characters);
+    write();
+    emit changed();
+}
+
+void Settings::setSetextHeadings(bool setext)
+{
+    if (setext == m_setextHeadings) return;
+    m_setextHeadings = setext;
+    m_stored.insert(headingSyntaxKey, setext ? QStringLiteral("setext") : QStringLiteral("atx"));
+    write();
+    emit changed();
+}
+
+void Settings::setShowToolbar(bool show)
+{
+    if (show == m_showToolbar) return;
+    m_showToolbar = show;
+    m_stored.insert(toolbarKey, show);
+    write();
+    emit changed();
+}
+
+void Settings::setShortcutOverride(const QString &command, const QStringList &sequences)
+{
+    if (command.isEmpty() || (m_shortcutOverrides.contains(command) && m_shortcutOverrides.value(command) == sequences))
+        return;
+    m_shortcutOverrides.insert(command, sequences);
+    writeShortcuts();
+}
+
+void Settings::clearShortcutOverride(const QString &command)
+{
+    if (m_shortcutOverrides.remove(command) > 0) writeShortcuts();
+}
+
+void Settings::clearShortcutOverrides()
+{
+    if (m_shortcutOverrides.isEmpty()) return;
+    m_shortcutOverrides.clear();
+    writeShortcuts();
+}
+
+void Settings::writeShortcuts()
+{
+    // Ids this version does not know were loaded with the rest, so they stay.
+    QJsonObject stored;
+    for (auto it = m_shortcutOverrides.cbegin(); it != m_shortcutOverrides.cend(); ++it)
+        stored.insert(it.key(), QJsonArray::fromStringList(it.value()));
+    if (stored.isEmpty()) m_stored.remove(shortcutsKey);
+    else m_stored.insert(shortcutsKey, stored);
     write();
     emit changed();
 }
@@ -158,6 +258,36 @@ void Settings::load()
             m_editorFontFamily = family;
         else
             ignored << editorFontFamilyKey;
+    }
+    if (present(headingSyntaxKey)) {
+        const QString syntax = m_stored.value(headingSyntaxKey).toString();
+        if (syntax == u"atx" || syntax == u"setext")
+            m_setextHeadings = syntax == u"setext";
+        else
+            ignored << headingSyntaxKey;
+    }
+    if (present(toolbarKey)) {
+        if (m_stored.value(toolbarKey).isBool())
+            m_showToolbar = m_stored.value(toolbarKey).toBool();
+        else
+            ignored << toolbarKey;
+    }
+    if (present(shortcutsKey)) {
+        // Each command's keys on their own: a list of strings, or nothing of it.
+        const QJsonObject shortcuts = m_stored.value(shortcutsKey).toObject();
+        bool dropped = !m_stored.value(shortcutsKey).isObject();
+        for (auto it = shortcuts.constBegin(); it != shortcuts.constEnd(); ++it) {
+            const QJsonArray list = it.value().toArray();
+            QStringList sequences;
+            for (const QJsonValue &sequence : list)
+                if (sequence.isString()) sequences.append(sequence.toString());
+            if (!it.value().isArray() || sequences.size() != list.size()) {
+                dropped = true;
+                continue;
+            }
+            m_shortcutOverrides.insert(it.key(), sequences);
+        }
+        if (dropped) ignored << shortcutsKey;
     }
     if (present(freshDraftOnLaunchKey)) {
         if (m_stored.value(freshDraftOnLaunchKey).isBool())

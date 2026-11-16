@@ -1,0 +1,1490 @@
+#include "markdownediting.h"
+
+#include <QHash>
+#include <QRegularExpression>
+#include <QTextBoundaryFinder>
+#include <algorithm>
+#include <functional>
+#include <map>
+
+namespace MarkdownEditing {
+
+namespace {
+
+// ---- Lines ---------------------------------------------------------------
+
+bool isBreak(QChar c) { return c == u'\n' || c == u'\r'; }
+
+// One line of the text: [start, end) is its text, and next is where the
+// line after it starts, past its line break; at the end of the text, end.
+struct Line {
+    int start = 0;
+    int end = 0;
+    int next = 0;
+    int length() const { return end - start; }
+    bool hasBreak() const { return next > end; }
+};
+
+Line lineAt(QStringView text, int position)
+{
+    const int size = int(text.size());
+    position = qBound(0, position, size);
+    // Between the CR and the LF of a pair is the end of the line before.
+    if (position > 0 && position < size && text[position - 1] == u'\r' && text[position] == u'\n') --position;
+    int start = position;
+    while (start > 0 && !isBreak(text[start - 1])) --start;
+    int end = position;
+    while (end < size && !isBreak(text[end])) ++end;
+    int next = end;
+    if (next < size) next += (text[next] == u'\r' && next + 1 < size && text[next + 1] == u'\n') ? 2 : 1;
+    return {start, end, next};
+}
+
+// The line before, or nothing for the first.
+std::optional<Line> lineBefore(QStringView text, const Line &line)
+{
+    if (line.start == 0) return std::nullopt;
+    return lineAt(text, line.start - 1);
+}
+
+// The line after, or nothing for the last.
+std::optional<Line> lineAfter(QStringView text, const Line &line)
+{
+    if (!line.hasBreak()) return std::nullopt;
+    return lineAt(text, line.next);
+}
+
+// The lines a selection touches. A selection that ends where a line starts
+// does not touch that line.
+QList<Line> linesOf(QStringView text, int start, int end)
+{
+    QList<Line> lines{lineAt(text, start)};
+    while (lines.last().hasBreak() && lines.last().next < end) lines.append(lineAt(text, lines.last().next));
+    return lines;
+}
+
+QStringView textOf(QStringView text, const Line &line) { return text.mid(line.start, line.length()); }
+
+bool isBlank(QStringView text)
+{
+    return std::all_of(text.begin(), text.end(), [](QChar c) { return c == u' ' || c == u'\t'; });
+}
+
+int leadingSpaces(QStringView text, int from = 0)
+{
+    int i = from;
+    while (i < text.size() && (text[i] == u' ' || text[i] == u'\t')) ++i;
+    return i - from;
+}
+
+// ---- Positions through edits ---------------------------------------------
+
+// Where a position of the text before the edits is in the text after them.
+// With `after`, a position where text is inserted ends up after it.
+int mapPosition(int position, const QList<SourceEdit> &edits, bool after = true)
+{
+    int shift = 0;
+    for (const SourceEdit &edit : edits) {
+        const int start = edit.range.start, end = start + edit.range.length;
+        const int size = int(edit.replacement.size());
+        if (end < position || (end == position && (edit.range.length > 0 || after))) {
+            shift += size - edit.range.length;
+            continue;
+        }
+        if (start < position) return start + shift + qMin(position - start, size);
+        break;
+    }
+    return position + shift;
+}
+
+void sortEdits(QList<SourceEdit> &edits)
+{
+    std::stable_sort(edits.begin(), edits.end(),
+                     [](const SourceEdit &a, const SourceEdit &b) { return a.range.start < b.range.start; });
+}
+
+// The change, with the selection mapped through its edits: a caret moves
+// past what is inserted where it is; a selection keeps what is inserted at
+// its start outside it and at its end inside it.
+// Positions `staysBefore` names stay before what is inserted there.
+TextChange mapped(QList<SourceEdit> edits, int anchor, int cursor, const std::function<bool(int)> &staysBefore = {})
+{
+    sortEdits(edits);
+    const auto map = [&](int position, bool after) {
+        return mapPosition(position, edits, after && !(staysBefore && staysBefore(position)));
+    };
+    TextChange change;
+    if (anchor == cursor) {
+        change.anchor = change.cursor = map(cursor, true);
+    } else {
+        const bool forward = anchor < cursor;
+        const int start = map(qMin(anchor, cursor), false);
+        const int end = map(qMax(anchor, cursor), true);
+        change.anchor = forward ? start : end;
+        change.cursor = forward ? end : start;
+    }
+    change.edits = std::move(edits);
+    return change;
+}
+
+// The same for edits that wrap a selection: what is inserted at its edges
+// stays outside it.
+TextChange mappedInside(QList<SourceEdit> edits, int anchor, int cursor)
+{
+    sortEdits(edits);
+    const bool forward = anchor <= cursor;
+    const int start = mapPosition(qMin(anchor, cursor), edits, true);
+    const int end = qMax(start, mapPosition(qMax(anchor, cursor), edits, false));
+    return {std::move(edits), forward ? start : end, forward ? end : start};
+}
+
+TextChange selecting(QList<SourceEdit> edits, int start, int end, bool forward = true)
+{
+    sortEdits(edits);
+    return {std::move(edits), forward ? start : end, forward ? end : start};
+}
+
+// ---- Block structure of a line -------------------------------------------
+
+// The parts of a line's start that give it its block structure, as offsets
+// into the line: block quote markers, indentation, a list marker with the
+// spaces after it, and a task box. Headings are read separately.
+struct Parts {
+    int quoteEnd = 0;
+    int indentEnd = 0;
+    // -1 for a line that is no list item.
+    int markerStart = -1;
+    int markerEnd = -1;
+    QChar bullet;
+    qint64 number = 0;
+    QChar delimiter;
+    int spaceEnd = 0;
+    bool task = false;
+    bool checked = false;
+    int boxStart = -1;
+    int contentStart = 0;
+
+    bool item() const { return markerStart >= 0; }
+    bool ordered() const { return item() && bullet.isNull(); }
+    // The indentation, counted after the quote markers.
+    int indent() const { return indentEnd - quoteEnd; }
+};
+
+// Three or more of one of * - _, with nothing but spaces between.
+bool isThematicBreak(QStringView text)
+{
+    QChar mark;
+    int count = 0;
+    for (const QChar c : text) {
+        if (c == u' ' || c == u'\t') continue;
+        if (c != u'*' && c != u'-' && c != u'_') return false;
+        if (!mark.isNull() && c != mark) return false;
+        mark = c;
+        ++count;
+    }
+    return count >= 3;
+}
+
+Parts partsOf(QStringView line)
+{
+    Parts parts;
+    const int size = int(line.size());
+    // Quote markers, each after at most three spaces and with one space after it.
+    for (;;) {
+        int i = parts.quoteEnd;
+        int spaces = 0;
+        while (i < size && line[i] == u' ' && spaces < 3) {
+            ++i;
+            ++spaces;
+        }
+        if (i >= size || line[i] != u'>') break;
+        ++i;
+        if (i < size && line[i] == u' ') ++i;
+        parts.quoteEnd = i;
+    }
+    parts.indentEnd = parts.quoteEnd + leadingSpaces(line, parts.quoteEnd);
+    parts.contentStart = parts.indentEnd;
+    parts.spaceEnd = parts.indentEnd;
+    if (isThematicBreak(line.mid(parts.quoteEnd))) return parts;
+    const int at = parts.indentEnd;
+    const auto spaceOrEnd = [&](int i) { return i >= size || line[i] == u' ' || line[i] == u'\t'; };
+    int markerEnd = -1;
+    if (at < size && (line[at] == u'-' || line[at] == u'*' || line[at] == u'+') && spaceOrEnd(at + 1)) {
+        parts.bullet = line[at];
+        markerEnd = at + 1;
+    } else {
+        int digits = 0;
+        while (at + digits < size && line[at + digits].isDigit() && line[at + digits].unicode() < 128 && digits < 10)
+            ++digits;
+        if (digits >= 1 && digits <= 9 && at + digits < size && (line[at + digits] == u'.' || line[at + digits] == u')')
+            && spaceOrEnd(at + digits + 1)) {
+            parts.number = line.mid(at, digits).toLongLong();
+            parts.delimiter = line[at + digits];
+            markerEnd = at + digits + 1;
+        }
+    }
+    if (markerEnd < 0) return parts;
+    parts.markerStart = at;
+    parts.markerEnd = markerEnd;
+    // Up to four spaces separate the marker from the text; an item with
+    // nothing after it takes all of them.
+    const int spaces = leadingSpaces(line, markerEnd);
+    parts.spaceEnd = markerEnd + (markerEnd + spaces >= size ? spaces : qMin(spaces, 4));
+    parts.contentStart = parts.spaceEnd;
+    const int box = parts.spaceEnd;
+    if (box + 2 < size && line[box] == u'[' && line[box + 2] == u']'
+        && (line[box + 1] == u' ' || line[box + 1] == u'x' || line[box + 1] == u'X') && spaceOrEnd(box + 3)) {
+        parts.task = true;
+        parts.checked = line[box + 1] != u' ';
+        parts.boxStart = box;
+        parts.contentStart = box + 3 + (box + 3 < size ? 1 : 0);
+    }
+    return parts;
+}
+
+// An ATX heading's level, and where its text starts, after the quote
+// markers; level 0 for a line that is no ATX heading.
+struct Atx {
+    int level = 0;
+    int markStart = 0;
+    int textStart = 0;
+};
+
+Atx atxOf(QStringView line, int from)
+{
+    Atx atx;
+    int i = from;
+    int spaces = 0;
+    while (i < line.size() && line[i] == u' ' && spaces < 3) {
+        ++i;
+        ++spaces;
+    }
+    int hashes = 0;
+    while (i + hashes < line.size() && line[i + hashes] == u'#') ++hashes;
+    if (hashes < 1 || hashes > 6) return atx;
+    const int after = i + hashes;
+    if (after < line.size() && line[after] != u' ' && line[after] != u'\t') return atx;
+    atx.level = hashes;
+    atx.markStart = i;
+    atx.textStart = after + leadingSpaces(line, after);
+    return atx;
+}
+
+// A Setext underline's level: 1 for =, 2 for -, 0 for a line that is none.
+int underlineLevel(QStringView line)
+{
+    const int spaces = leadingSpaces(line);
+    if (spaces > 3) return 0;
+    const QStringView rest = line.mid(spaces);
+    if (rest.isEmpty() || (rest[0] != u'=' && rest[0] != u'-')) return 0;
+    const QChar mark = rest[0];
+    int i = 0;
+    while (i < rest.size() && rest[i] == mark) ++i;
+    if (!isBlank(rest.mid(i))) return 0;
+    return mark == u'=' ? 1 : 2;
+}
+
+// A fence of three or more backticks or tildes, as it opens or closes a code block.
+struct Fence {
+    QChar mark;
+    int length = 0;
+    bool hasInfo = false;
+};
+
+std::optional<Fence> fenceOf(QStringView line)
+{
+    const int spaces = leadingSpaces(line);
+    if (spaces > 3 || spaces >= line.size()) return std::nullopt;
+    const QChar mark = line[spaces];
+    if (mark != u'`' && mark != u'~') return std::nullopt;
+    int length = 0;
+    while (spaces + length < line.size() && line[spaces + length] == mark) ++length;
+    if (length < 3) return std::nullopt;
+    const QStringView info = line.mid(spaces + length);
+    if (mark == u'`' && info.contains(u'`')) return std::nullopt;
+    return Fence{mark, length, !isBlank(info)};
+}
+
+bool isDisplayMathFence(QStringView line) { return line.trimmed() == u"$$"; }
+
+// The fence lines of the text that open a code block, each with the line
+// that closes it, or with -1 when nothing does.
+std::map<int, int> fencedBlocks(QStringView text)
+{
+    std::map<int, int> blocks;
+    int open = -1;
+    Fence opening;
+    for (Line line = lineAt(text, 0);; line = lineAt(text, line.next)) {
+        const auto fence = fenceOf(textOf(text, line));
+        if (fence) {
+            if (open < 0) {
+                open = line.start;
+                opening = *fence;
+                blocks[open] = -1;
+            } else if (fence->mark == opening.mark && fence->length >= opening.length && !fence->hasInfo) {
+                blocks[open] = line.start;
+                open = -1;
+            }
+        }
+        if (!line.hasBreak()) break;
+    }
+    return blocks;
+}
+
+// ---- Inline delimiters ---------------------------------------------------
+
+int runBefore(QStringView text, int position, QChar c)
+{
+    int i = position;
+    while (i > 0 && text[i - 1] == c) --i;
+    return position - i;
+}
+
+int runAfter(QStringView text, int position, QChar c)
+{
+    int i = position;
+    while (i < text.size() && text[i] == c) ++i;
+    return i - position;
+}
+
+// An inline style written with a repeated character: the marker it writes,
+// the characters that can make it, and how long a run of them must be to be it.
+struct Style {
+    QString marker;
+    QString characters;
+    enum Rule { AtLeastTwo, Odd, One } rule;
+
+    bool fits(int run) const
+    {
+        switch (rule) {
+        case AtLeastTwo:
+            return run >= 2;
+        case Odd:
+            return run % 2 == 1;
+        case One:
+            return run == 1;
+        }
+        return false;
+    }
+    int length() const { return int(marker.size()); }
+};
+
+std::optional<Style> styleOf(const QString &command)
+{
+    if (command == u"bold") return Style{QStringLiteral("**"), QStringLiteral("*_"), Style::AtLeastTwo};
+    if (command == u"italic") return Style{QStringLiteral("*"), QStringLiteral("*_"), Style::Odd};
+    if (command == u"strikethrough") return Style{QStringLiteral("~~"), QStringLiteral("~"), Style::AtLeastTwo};
+    if (command == u"highlight") return Style{QStringLiteral("=="), QStringLiteral("="), Style::AtLeastTwo};
+    if (command == u"inlineMath") return Style{QStringLiteral("$"), QStringLiteral("$"), Style::One};
+    return std::nullopt;
+}
+
+// How one inline command wraps and unwraps a span of a line.
+struct InlineKind {
+    // The edits that take the markers around or at the edges of [start, end)
+    // away, when it has them.
+    std::function<std::optional<QList<SourceEdit>>(QStringView, int, int)> unwrap;
+    std::function<QList<SourceEdit>(QStringView, int, int)> wrap;
+    // Without a selection: the edits that take away the markers of the span
+    // the caret is in, with where the caret goes; or the text inserted, with
+    // the caret's place in it.
+    std::function<std::optional<TextChange>(QStringView, int)> remove;
+    std::function<std::pair<QString, int>()> insert;
+    // Wraps a selection over several lines as one span rather than line by line.
+    bool spansLines = false;
+};
+
+// Runs of one character on a line, outside code spans, as [start, end).
+QList<std::pair<int, int>> runsOn(QStringView text, const Line &line, QChar c)
+{
+    QList<std::pair<int, int>> runs;
+    for (int i = line.start; i < line.end;) {
+        if (text[i] == u'\\') {
+            i += 2;
+            continue;
+        }
+        if (text[i] != c) {
+            ++i;
+            continue;
+        }
+        const int start = i;
+        while (i < line.end && text[i] == c) ++i;
+        runs.append({start, i});
+    }
+    return runs;
+}
+
+InlineKind styleKind(const Style &style)
+{
+    const int m = style.length();
+    InlineKind kind;
+    kind.unwrap = [style, m](QStringView text, int start, int end) -> std::optional<QList<SourceEdit>> {
+        for (const QChar c : style.characters) {
+            // Markers just outside.
+            const int before = runBefore(text, start, c), after = runAfter(text, end, c);
+            if (before > 0 && after > 0 && style.fits(before) && style.fits(after))
+                return QList<SourceEdit>{{{start - m, m}, {}}, {{end, m}, {}}};
+            // Markers at the edges of the selection itself.
+            const int first = qMin(runAfter(text, start, c), end - start);
+            const int last = qMin(runBefore(text, end, c), end - start);
+            if (first > 0 && last > 0 && first + last < end - start && style.fits(first) && style.fits(last))
+                return QList<SourceEdit>{{{start, m}, {}}, {{end - m, m}, {}}};
+        }
+        return std::nullopt;
+    };
+    kind.wrap = [style](QStringView, int start, int end) {
+        return QList<SourceEdit>{{{start, 0}, style.marker}, {{end, 0}, style.marker}};
+    };
+    kind.remove = [style, m](QStringView text, int caret) -> std::optional<TextChange> {
+        for (const QChar c : style.characters) {
+            // An empty pair with the caret in it.
+            const int before = runBefore(text, caret, c), after = runAfter(text, caret, c);
+            if (before > 0 && after > 0 && style.fits(before) && style.fits(after))
+                return TextChange{{{{caret - m, 2 * m}, {}}}, caret - m, caret - m};
+            // The span the caret is in: the nearest runs on either side that
+            // can make the style, the one before opening a span.
+            const Line line = lineAt(text, caret);
+            QList<std::pair<int, int>> runs;
+            for (const auto &run : runsOn(text, line, c))
+                if (style.fits(run.second - run.first)) runs.append(run);
+            int opener = -1;
+            for (int i = 0; i < runs.size(); ++i)
+                if (runs[i].second <= caret) opener = i;
+            if (opener < 0 || opener % 2 != 0 || opener + 1 >= runs.size()) continue;
+            const auto open = runs[opener], close = runs[opener + 1];
+            if (close.first < caret) continue;
+            if (open.second < line.end && text[open.second].isSpace()) continue;
+            if (close.first > line.start && text[close.first - 1].isSpace()) continue;
+            const int at = caret - m;
+            return TextChange{{{{open.second - m, m}, {}}, {{close.first, m}, {}}}, at, at};
+        }
+        return std::nullopt;
+    };
+    kind.insert = [style, m] { return std::pair{style.marker + style.marker, m}; };
+    return kind;
+}
+
+InlineKind codeKind()
+{
+    InlineKind kind;
+    kind.unwrap = [](QStringView text, int start, int end) -> std::optional<QList<SourceEdit>> {
+        const int before = runBefore(text, start, u'`'), after = runAfter(text, end, u'`');
+        if (before > 0 && before == after) return QList<SourceEdit>{{{start - before, before}, {}}, {{end, after}, {}}};
+        const int first = runAfter(text, start, u'`'), last = runBefore(text, end, u'`');
+        if (first > 0 && first == last && first + last < end - start) {
+            // A space either side of the content belongs to the delimiters.
+            const bool padded = text[start + first] == u' ' && text[end - last - 1] == u' ' && end - start - 2 * first > 2;
+            const int pad = padded ? 1 : 0;
+            return QList<SourceEdit>{{{start, first + pad}, {}}, {{end - last - pad, last + pad}, {}}};
+        }
+        return std::nullopt;
+    };
+    kind.wrap = [](QStringView text, int start, int end) {
+        int longest = 0;
+        for (int i = start; i < end;) {
+            const int run = runAfter(text, i, u'`');
+            longest = qMax(longest, run);
+            i += qMax(1, run);
+        }
+        const QString fence(longest + 1, u'`');
+        const bool pad = text[start] == u'`' || text[end - 1] == u'`';
+        return QList<SourceEdit>{{{start, 0}, pad ? fence + u' ' : fence}, {{end, 0}, pad ? u' ' + fence : fence}};
+    };
+    kind.remove = [](QStringView text, int caret) -> std::optional<TextChange> {
+        const int before = runBefore(text, caret, u'`'), after = runAfter(text, caret, u'`');
+        if (before > 0 && before == after)
+            return TextChange{{{{caret - before, before + after}, {}}}, caret - before, caret - before};
+        // Code spans on the line: each run of backticks closed by the next run as long.
+        const Line line = lineAt(text, caret);
+        const auto runs = runsOn(text, line, u'`');
+        for (int i = 0; i < runs.size(); ++i) {
+            const int length = runs[i].second - runs[i].first;
+            int j = i + 1;
+            while (j < runs.size() && runs[j].second - runs[j].first != length) ++j;
+            if (j >= runs.size()) continue;
+            if (runs[i].second <= caret && runs[j].first >= caret) {
+                const int at = caret - length;
+                return TextChange{{{{runs[i].first, length}, {}}, {{runs[j].first, length}, {}}}, at, at};
+            }
+            i = j;
+        }
+        return std::nullopt;
+    };
+    kind.insert = [] { return std::pair{QStringLiteral("``"), 1}; };
+    return kind;
+}
+
+InlineKind commentKind()
+{
+    static const QString open = QStringLiteral("<!--"), close = QStringLiteral("-->");
+    InlineKind kind;
+    kind.unwrap = [](QStringView text, int start, int end) -> std::optional<QList<SourceEdit>> {
+        // Outside: "<!--" and an optional space before, an optional space and "-->" after.
+        int openAt = start;
+        if (openAt > 0 && text[openAt - 1] == u' ') --openAt;
+        int closeEnd = end;
+        if (closeEnd < text.size() && text[closeEnd] == u' ') ++closeEnd;
+        if (openAt >= 4 && text.mid(openAt - 4, 4) == open && text.mid(closeEnd).startsWith(close))
+            return QList<SourceEdit>{{{openAt - 4, start - openAt + 4}, {}}, {{end, closeEnd - end + 3}, {}}};
+        // Inside: the selection starts with "<!--" and ends with "-->".
+        const QStringView selected = text.mid(start, end - start);
+        if (selected.size() >= 7 && selected.startsWith(open) && selected.endsWith(close)) {
+            const int openLength = 4 + (selected[4] == u' ' ? 1 : 0);
+            const int closeLength = 3 + (selected[selected.size() - 4] == u' ' && selected.size() > 8 ? 1 : 0);
+            return QList<SourceEdit>{{{start, openLength}, {}}, {{end - closeLength, closeLength}, {}}};
+        }
+        return std::nullopt;
+    };
+    kind.wrap = [](QStringView, int start, int end) {
+        return QList<SourceEdit>{{{start, 0}, open + u' '}, {{end, 0}, u' ' + close}};
+    };
+    kind.remove = [](QStringView text, int caret) -> std::optional<TextChange> {
+        const Line line = lineAt(text, caret);
+        const QStringView before = text.mid(line.start, caret - line.start);
+        const int openAt = int(before.lastIndexOf(open));
+        if (openAt < 0 || before.mid(openAt).contains(close)) return std::nullopt;
+        const int closeAt = int(text.mid(caret, line.end - caret).indexOf(close));
+        if (closeAt < 0) return std::nullopt;
+        const int openStart = line.start + openAt;
+        int openLength = 4;
+        if (openStart + 4 < caret && text[openStart + 4] == u' ') ++openLength;
+        int closeStart = caret + closeAt, closeLength = 3;
+        if (closeStart > caret && text[closeStart - 1] == u' ') {
+            --closeStart;
+            ++closeLength;
+        }
+        const int at = caret - openLength;
+        return TextChange{{{{openStart, openLength}, {}}, {{closeStart, closeLength}, {}}}, at, at};
+    };
+    kind.insert = [] { return std::pair{QStringLiteral("<!--  -->"), 5}; };
+    kind.spansLines = true;
+    return kind;
+}
+
+std::optional<InlineKind> inlineKindOf(const QString &command)
+{
+    if (const auto style = styleOf(command)) return styleKind(*style);
+    if (command == u"code") return codeKind();
+    if (command == u"comment") return commentKind();
+    return std::nullopt;
+}
+
+// The spans of a selection an inline command acts on: on each line it
+// touches, the selected text after the line's block markers, without the
+// spaces at its ends.
+QList<std::pair<int, int>> segmentsOf(QStringView text, int start, int end)
+{
+    QList<std::pair<int, int>> segments;
+    for (const Line &line : linesOf(text, start, end)) {
+        const QStringView own = textOf(text, line);
+        const Parts parts = partsOf(own);
+        int from = line.start + parts.contentStart;
+        const Atx atx = atxOf(own, parts.quoteEnd);
+        if (atx.level > 0) from = line.start + atx.textStart;
+        int first = qMax(start, from);
+        int last = qMin(end, line.end);
+        while (first < last && text[first].isSpace()) ++first;
+        while (last > first && text[last - 1].isSpace()) --last;
+        if (first < last) segments.append({first, last});
+    }
+    return segments;
+}
+
+std::optional<TextChange> toggleInline(const InlineKind &kind, QStringView text, int anchor, int cursor)
+{
+    const int start = qMin(anchor, cursor), end = qMax(anchor, cursor);
+    if (start == end) {
+        if (auto removed = kind.remove(text, start)) return removed;
+        const auto [inserted, caret] = kind.insert();
+        return TextChange{{{{start, 0}, inserted}}, start + caret, start + caret};
+    }
+    auto segments = segmentsOf(text, start, end);
+    if (segments.isEmpty()) return std::nullopt;
+    if (kind.spansLines) segments = {{segments.first().first, segments.last().second}};
+    QList<std::optional<QList<SourceEdit>>> unwraps;
+    bool allWrapped = true;
+    for (const auto &[first, last] : segments) {
+        unwraps.append(kind.unwrap(text, first, last));
+        allWrapped = allWrapped && unwraps.last().has_value();
+    }
+    QList<SourceEdit> edits;
+    for (int i = 0; i < segments.size(); ++i) {
+        if (allWrapped) edits += *unwraps[i];
+        else if (!unwraps[i]) edits += kind.wrap(text, segments[i].first, segments[i].second);
+    }
+    sortEdits(edits);
+    // The text of the segments stays selected, without the markers.
+    const int newStart = mapPosition(segments.first().first, edits, !allWrapped);
+    const int newEnd = mapPosition(segments.last().second, edits, allWrapped);
+    return selecting(edits, newStart, newEnd, anchor <= cursor);
+}
+
+// ---- Links and images ----------------------------------------------------
+
+std::optional<TextChange> toggleLink(QStringView text, int anchor, int cursor, bool image)
+{
+    const int start = qMin(anchor, cursor), end = qMax(anchor, cursor);
+    // A link or image the selection is in loses its markup and keeps its text.
+    static const QRegularExpression link(QStringLiteral("(!?)\\[([^\\]\\n\\r]*)\\]\\(([^)\\n\\r]*)\\)"));
+    const Line line = lineAt(text, start);
+    if (end <= line.end) {
+        const QString own = textOf(text, line).toString();
+        for (auto match = link.globalMatch(own); match.hasNext();) {
+            const auto found = match.next();
+            if (found.captured(1).isEmpty() == image) continue;
+            const int from = line.start + int(found.capturedStart()), to = line.start + int(found.capturedEnd());
+            if (start < from || end > to || (start == from && end == from) || (start == to && end == to)) continue;
+            const QString label = found.captured(2);
+            const int labelStart = line.start + int(found.capturedStart(2));
+            const auto place = [&](int position) {
+                return from + qBound(0, position - labelStart, int(label.size()));
+            };
+            return TextChange{{{{from, to - from}, label}}, place(anchor), place(cursor)};
+        }
+    }
+    const QString prefix = image ? QStringLiteral("![") : QStringLiteral("[");
+    if (start == end) {
+        const QString label = image ? QStringLiteral("alt text") : QStringLiteral("text");
+        const int url = start + int(prefix.size() + label.size()) + 2;
+        return TextChange{{{{start, 0}, prefix + label + QStringLiteral("](url)")}}, url, url + 3};
+    }
+    const QString selected = text.mid(start, end - start).toString();
+    static const QRegularExpression address(QStringLiteral("^(https?://|mailto:|www\\.)\\S+$"));
+    if (!image && address.match(selected).hasMatch()) {
+        const int label = start + 1;
+        return TextChange{{{{start, end - start}, QStringLiteral("[text](") + selected + u')'}}, label, label + 4};
+    }
+    const int url = start + int(prefix.size() + selected.size()) + 2;
+    return TextChange{{{{start, end - start}, prefix + selected + QStringLiteral("](url)")}}, url, url + 3};
+}
+
+// ---- Headings ------------------------------------------------------------
+
+// A line's heading level: by its # marks, or by the underline on the line
+// after it. 0 for a line that is no heading.
+struct HeadingAt {
+    int level = 0;
+    Atx atx;
+    // The underline of a Setext heading.
+    std::optional<Line> underline;
+};
+
+HeadingAt headingAt(QStringView text, const Line &line)
+{
+    HeadingAt heading;
+    const QStringView own = textOf(text, line);
+    const Parts parts = partsOf(own);
+    heading.atx = atxOf(own, parts.quoteEnd);
+    if (heading.atx.level > 0) {
+        heading.level = heading.atx.level;
+        return heading;
+    }
+    if (isBlank(own) || parts.item() || fenceOf(own) || underlineLevel(own) || isThematicBreak(own)) return heading;
+    if (const auto next = lineAfter(text, line)) {
+        if (const int level = underlineLevel(textOf(text, *next))) {
+            heading.level = level;
+            heading.underline = next;
+        }
+    }
+    return heading;
+}
+
+std::optional<TextChange> setHeading(QStringView text, int anchor, int cursor, int level, const Options &options)
+{
+    const int start = qMin(anchor, cursor), end = qMax(anchor, cursor);
+    struct Target {
+        Line line;
+        HeadingAt heading;
+    };
+    QList<Target> targets;
+    int underlineEnd = -1;
+    for (const Line &line : linesOf(text, start, end)) {
+        // The underline of a heading already taken is part of that heading.
+        if (line.start == underlineEnd || isBlank(textOf(text, line))) continue;
+        const HeadingAt heading = headingAt(text, line);
+        if (heading.underline) underlineEnd = heading.underline->start;
+        targets.append({line, heading});
+    }
+    if (targets.isEmpty()) {
+        // A blank line becomes an empty heading.
+        if (level == 0) return std::nullopt;
+        targets.append({lineAt(text, start), {}});
+    }
+    // Every line at this level already: they become paragraphs again.
+    if (level > 0 && std::all_of(targets.begin(), targets.end(), [&](const Target &t) { return t.heading.level == level; }))
+        level = 0;
+    QList<SourceEdit> edits;
+    // A caret at the end of a heading stays there, before its new underline.
+    QList<int> underlined;
+    for (const Target &target : targets) {
+        const Line &line = target.line;
+        const QStringView own = textOf(text, line);
+        const Parts parts = partsOf(own);
+        const HeadingAt &heading = target.heading;
+        // Where the heading's text starts, and what comes before it to keep.
+        const int textStart = heading.atx.level > 0 ? heading.atx.textStart : parts.quoteEnd + leadingSpaces(own, parts.quoteEnd);
+        const bool underline = level > 0 && level <= 2 && options.setextHeadings;
+        const QString marks = level > 0 && !underline ? QString(level, u'#') + u' ' : QString();
+        if (own.mid(parts.quoteEnd, textStart - parts.quoteEnd) != marks)
+            edits.append(SourceEdit{{line.start + parts.quoteEnd, textStart - parts.quoteEnd}, marks});
+        const QString underlineText =
+            underline ? QString(qMax(3, displayWidth(own.mid(textStart).trimmed())), level == 1 ? u'=' : u'-') : QString();
+        if (heading.underline) {
+            if (underline) {
+                // Only the underline's character changes, so its width stays the writer's.
+                const QStringView old = textOf(text, *heading.underline);
+                if (heading.level != level) {
+                    QString changed = old.toString();
+                    changed.replace(old[leadingSpaces(old)], level == 1 ? u'=' : u'-');
+                    edits.append(SourceEdit{{heading.underline->start, heading.underline->length()}, changed});
+                }
+            } else {
+                edits.append(SourceEdit{{line.end, heading.underline->end - line.end}, {}});
+            }
+        } else if (underline) {
+            edits.append(SourceEdit{{line.end, 0}, options.newline + underlineText});
+            underlined.append(line.end);
+        }
+    }
+    if (edits.isEmpty()) return std::nullopt;
+    return mapped(edits, anchor, cursor, [&](int position) { return underlined.contains(position); });
+}
+
+// ---- Quotes and lists ----------------------------------------------------
+
+std::optional<TextChange> toggleQuote(QStringView text, int anchor, int cursor)
+{
+    const auto lines = linesOf(text, qMin(anchor, cursor), qMax(anchor, cursor));
+    const auto quoted = [&](const Line &line) {
+        const QStringView own = textOf(text, line);
+        const int spaces = leadingSpaces(own);
+        return spaces <= 3 && spaces < own.size() && own[spaces] == u'>';
+    };
+    bool all = false;
+    for (const Line &line : lines) {
+        if (isBlank(textOf(text, line))) continue;
+        all = true;
+        if (!quoted(line)) {
+            all = false;
+            break;
+        }
+    }
+    QList<SourceEdit> edits;
+    for (const Line &line : lines) {
+        const QStringView own = textOf(text, line);
+        if (all) {
+            if (!quoted(line)) continue;
+            const int at = leadingSpaces(own);
+            const int length = 1 + (at + 1 < own.size() && own[at + 1] == u' ' ? 1 : 0);
+            edits.append(SourceEdit{{line.start + at, length}, {}});
+        } else {
+            const bool blankInside = own.isEmpty() && lines.size() > 1;
+            edits.append(SourceEdit{{line.start, 0}, blankInside ? QStringLiteral(">") : QStringLiteral("> ")});
+        }
+    }
+    return mapped(edits, anchor, cursor);
+}
+
+enum class ListKind { None, Bullet, Ordered, Task };
+
+ListKind kindOf(const Parts &parts)
+{
+    if (!parts.item()) return ListKind::None;
+    if (parts.task) return ListKind::Task;
+    return parts.ordered() ? ListKind::Ordered : ListKind::Bullet;
+}
+
+std::optional<TextChange> toggleList(QStringView text, int anchor, int cursor, ListKind wanted)
+{
+    const auto all = linesOf(text, qMin(anchor, cursor), qMax(anchor, cursor));
+    QList<Line> lines;
+    for (const Line &line : all)
+        if (!isBlank(textOf(text, line))) lines.append(line);
+    if (lines.isEmpty()) lines.append(all.first());
+    const bool off = std::all_of(lines.begin(), lines.end(), [&](const Line &line) {
+        return kindOf(partsOf(textOf(text, line))) == wanted;
+    });
+    // Numbers count on from a numbered item just above, at each indentation.
+    QHash<int, qint64> next;
+    QHash<int, QChar> delimiters;
+    if (const auto above = lineBefore(text, lines.first())) {
+        const Parts parts = partsOf(textOf(text, *above));
+        if (parts.ordered()) {
+            next[parts.indent()] = parts.number + 1;
+            delimiters[parts.indent()] = parts.delimiter;
+        }
+    }
+    QList<SourceEdit> edits;
+    for (const Line &line : lines) {
+        const QStringView own = textOf(text, line);
+        const Parts parts = partsOf(own);
+        const SourceRange marker{line.start + parts.indentEnd, parts.contentStart - parts.indentEnd};
+        if (off) {
+            edits.append(SourceEdit{marker, {}});
+            continue;
+        }
+        // A shallower line ends the numbering of deeper ones.
+        for (auto it = next.begin(); it != next.end();) {
+            if (it.key() > parts.indent()) it = next.erase(it);
+            else ++it;
+        }
+        QString prefix;
+        switch (wanted) {
+        case ListKind::Bullet:
+            prefix = QString(parts.item() && !parts.ordered() ? parts.bullet : u'-') + u' ';
+            break;
+        case ListKind::Ordered: {
+            const qint64 number = next.value(parts.indent(), 1);
+            next[parts.indent()] = number + 1;
+            prefix = QString::number(number) + delimiters.value(parts.indent(), u'.') + u' ';
+            break;
+        }
+        case ListKind::Task:
+            if (parts.task) continue;
+            prefix = parts.item() ? own.mid(parts.markerStart, parts.markerEnd - parts.markerStart).toString() + u' '
+                                  : QStringLiteral("- ");
+            prefix += QStringLiteral("[ ] ");
+            break;
+        case ListKind::None:
+            break;
+        }
+        if (own.mid(parts.indentEnd, parts.contentStart - parts.indentEnd) != prefix) edits.append(SourceEdit{marker, prefix});
+    }
+    if (edits.isEmpty()) return std::nullopt;
+    return mapped(edits, anchor, cursor);
+}
+
+std::optional<TextChange> toggleTask(QStringView text, int anchor, int cursor)
+{
+    const auto lines = linesOf(text, qMin(anchor, cursor), qMax(anchor, cursor));
+    bool anyOpen = false;
+    for (const Line &line : lines) {
+        const Parts parts = partsOf(textOf(text, line));
+        anyOpen = anyOpen || (parts.task && !parts.checked);
+    }
+    QList<SourceEdit> edits;
+    for (const Line &line : lines) {
+        const QStringView own = textOf(text, line);
+        const Parts parts = partsOf(own);
+        if (parts.task) {
+            if (parts.checked != anyOpen) edits.append(SourceEdit{{line.start + parts.boxStart + 1, 1}, anyOpen ? QStringLiteral("x") : QStringLiteral(" ")});
+        } else if (lines.size() == 1 || !isBlank(own)) {
+            if (parts.item()) edits.append(SourceEdit{{line.start + parts.spaceEnd, 0}, QStringLiteral("[ ] ")});
+            else edits.append(SourceEdit{{line.start + parts.indentEnd, 0}, QStringLiteral("- [ ] ")});
+        }
+    }
+    if (edits.isEmpty()) return std::nullopt;
+    return mapped(edits, anchor, cursor);
+}
+
+// ---- Fenced blocks ---------------------------------------------------------
+
+// Removes a whole line together with one of the line breaks beside it: the
+// one before it for a line that closes something, where there is one.
+SourceEdit removeLine(QStringView text, const Line &line, bool closing = false)
+{
+    const auto before = lineBefore(text, line);
+    if (line.hasBreak() && !(closing && before)) return {{line.start, line.next - line.start}, {}};
+    if (before) return {{before->end, line.end - before->end}, {}};
+    return {{line.start, line.length()}, {}};
+}
+
+// Wraps the lines a selection touches between fence lines, or takes the
+// fences away from lines that have them; a caret on a blank line gets an
+// empty block to write in.
+std::optional<TextChange> toggleFencedBlock(QStringView text, int anchor, int cursor, const Options &options, bool math)
+{
+    const int start = qMin(anchor, cursor), end = qMax(anchor, cursor);
+    const auto lines = linesOf(text, start, end);
+    const QString &nl = options.newline;
+    const auto opensAndCloses = [&](const Line &open, const Line &close) {
+        if (math) return isDisplayMathFence(textOf(text, open)) && isDisplayMathFence(textOf(text, close));
+        const auto blocks = fencedBlocks(text);
+        const auto found = blocks.find(open.start);
+        return found != blocks.end() && found->second == close.start;
+    };
+    // The selection holds the fences, or the lines around it are fences.
+    if (lines.size() >= 2 && opensAndCloses(lines.first(), lines.last()))
+        return mapped({removeLine(text, lines.first()), removeLine(text, lines.last(), true)}, anchor, cursor);
+    const auto above = lineBefore(text, lines.first());
+    const auto below = lineAfter(text, lines.last());
+    if (above && below && opensAndCloses(*above, *below))
+        return mapped({removeLine(text, *above), removeLine(text, *below, true)}, anchor, cursor);
+
+    QString fence = math ? QStringLiteral("$$") : QStringLiteral("```");
+    if (lines.size() == 1 && isBlank(textOf(text, lines.first()))) {
+        const Line &line = lines.first();
+        const int caret = line.start + int(fence.size() + nl.size());
+        return TextChange{{{{line.start, line.length()}, fence + nl + nl + fence}}, caret, caret};
+    }
+    if (!math) {
+        // Longer than any fence inside, so that none of them closes it.
+        int longest = 0;
+        for (const Line &line : lines)
+            if (const auto inner = fenceOf(textOf(text, line)); inner && inner->mark == u'`')
+                longest = qMax(longest, inner->length);
+        if (longest >= 3) fence = QString(longest + 1, u'`');
+    }
+    return mappedInside({{{lines.first().start, 0}, fence + nl}, {{lines.last().end, 0}, nl + fence}}, anchor, cursor);
+}
+
+// Display math: $$ around a selection within one line, or a block of lines.
+std::optional<TextChange> toggleDisplayMath(QStringView text, int anchor, int cursor, const Options &options)
+{
+    const int start = qMin(anchor, cursor), end = qMax(anchor, cursor);
+    const Line line = lineAt(text, start);
+    const QStringView own = textOf(text, line);
+    if (start < end && end <= line.end && !isDisplayMathFence(own)) {
+        const QStringView selected = text.mid(start, end - start);
+        if (runBefore(text, start, u'$') == 2 && runAfter(text, end, u'$') == 2)
+            return selecting({{{start - 2, 2}, {}}, {{end, 2}, {}}}, start - 2, end - 2, anchor <= cursor);
+        if (selected.size() > 4 && selected.startsWith(u"$$") && selected.endsWith(u"$$"))
+            return selecting({{{start, 2}, {}}, {{end - 2, 2}, {}}}, start, end - 4, anchor <= cursor);
+        if (selected.trimmed() != own.trimmed())
+            return selecting({{{start, 0}, QStringLiteral("$$")}, {{end, 0}, QStringLiteral("$$")}}, start + 2, end + 2,
+                             anchor <= cursor);
+    }
+    return toggleFencedBlock(text, anchor, cursor, options, true);
+}
+
+// ---- Insertions -----------------------------------------------------------
+
+// A block of its own after the line the selection ends on, or in place of
+// that line when it is blank, with a blank line before it and after it
+// where there is text. The caret goes to the line after the block, or the
+// block's own text from `select` for `length` is selected.
+TextChange insertBlock(QStringView text, int position, const QString &block, int select, int length,
+                       const Options &options)
+{
+    const QString &nl = options.newline;
+    const Line line = lineAt(text, position);
+    QString before, after;
+    int at = line.end, removed = 0;
+    if (isBlank(textOf(text, line))) {
+        at = line.start;
+        removed = line.length();
+        if (const auto above = lineBefore(text, line); above && !isBlank(textOf(text, *above))) before = nl;
+    } else {
+        before = nl + nl;
+    }
+    if (!line.hasBreak()) {
+        after = nl;
+    } else if (const auto below = lineAfter(text, line); below && !isBlank(textOf(text, *below))) {
+        after = nl;
+    }
+    const int blockStart = at + int(before.size());
+    TextChange change;
+    change.edits = {{{at, removed}, before + block + after}};
+    if (select >= 0) {
+        change.anchor = blockStart + select;
+        change.cursor = change.anchor + length;
+    } else {
+        change.anchor = change.cursor = blockStart + int(block.size() + nl.size());
+    }
+    return change;
+}
+
+TextChange insertTable(QStringView text, int position, const Options &options)
+{
+    const QString &nl = options.newline;
+    const QString block = QStringLiteral("| Column 1 | Column 2 |") + nl + QStringLiteral("| -------- | -------- |") + nl
+                          + QStringLiteral("|          |          |");
+    return insertBlock(text, position, block, 2, 8, options);
+}
+
+TextChange insertFootnote(QStringView text, int anchor, int cursor, const Options &options)
+{
+    const QString &nl = options.newline;
+    static const QRegularExpression label(QStringLiteral("\\[\\^(\\d{1,9})\\]"));
+    qint64 highest = 0;
+    for (auto match = label.globalMatch(text); match.hasNext();) highest = qMax(highest, match.next().captured(1).toLongLong());
+    const QString reference = QStringLiteral("[^%1]").arg(highest + 1);
+    const int end = qMax(anchor, cursor);
+    // The definition goes at the end, after a blank line, or straight after
+    // other definitions.
+    const int size = int(text.size());
+    QString lead;
+    const bool endsWithBreak = size > 0 && isBreak(text[size - 1]);
+    if (size > 0) {
+        const Line last = lineAt(text, endsWithBreak ? size - 1 : size);
+        static const QRegularExpression definition(QStringLiteral("^ {0,3}\\[\\^[^\\]]+\\]:"));
+        const QString lastText = textOf(text, last).toString();
+        const bool afterDefinition = definition.match(lastText).hasMatch();
+        if (!endsWithBreak) lead = afterDefinition ? nl : nl + nl;
+        else if (!isBlank(lastText) && !afterDefinition) lead = nl;
+    }
+    const QString note = lead + reference + QStringLiteral(": ") + (endsWithBreak ? nl : QString());
+    const int caret = size + int(reference.size() + lead.size() + reference.size()) + 2;
+    return TextChange{{{{end, 0}, reference}, {{size, 0}, note}}, caret, caret};
+}
+
+// ---- Tables ----------------------------------------------------------------
+
+// A cell of a table row: [start, end) between its pipes, and its text
+// without the spaces around it, all as offsets into the row's line.
+struct Cell {
+    int start = 0;
+    int end = 0;
+    int textStart = 0;
+    int textEnd = 0;
+};
+
+struct Row {
+    Line line;
+    // Quote markers and indentation, kept as they are.
+    int prefix = 0;
+    QList<Cell> cells;
+};
+
+// Splits a row at its pipes. A pipe escaped with a backslash or inside a
+// code span is text.
+std::optional<Row> rowOf(QStringView text, const Line &line)
+{
+    const QStringView own = textOf(text, line);
+    Row row;
+    row.line = line;
+    const Parts parts = partsOf(own);
+    row.prefix = parts.quoteEnd + leadingSpaces(own, parts.quoteEnd);
+    QList<int> pipes;
+    const int size = int(own.size());
+    for (int i = row.prefix; i < size;) {
+        const QChar c = own[i];
+        if (c == u'\\') {
+            i += 2;
+        } else if (c == u'`') {
+            const int length = runAfter(own, i, u'`');
+            int close = -1;
+            for (int j = i + length; j < size;) {
+                const int run = runAfter(own, j, u'`');
+                if (run == length) {
+                    close = j;
+                    break;
+                }
+                j += qMax(1, run);
+            }
+            i = close >= 0 ? close + length : i + length;
+        } else {
+            if (c == u'|') pipes.append(i);
+            ++i;
+        }
+    }
+    if (pipes.isEmpty()) return std::nullopt;
+    int contentEnd = size;
+    while (contentEnd > row.prefix && (own[contentEnd - 1] == u' ' || own[contentEnd - 1] == u'\t')) --contentEnd;
+    const bool leading = pipes.first() == row.prefix;
+    const bool trailing = pipes.last() == contentEnd - 1 && (!leading || pipes.size() > 1);
+    QList<std::pair<int, int>> spans;
+    int from = leading ? row.prefix + 1 : row.prefix;
+    for (int pipe : pipes) {
+        if (leading && pipe == row.prefix) continue;
+        spans.append({from, pipe});
+        from = pipe + 1;
+    }
+    if (!trailing) spans.append({from, contentEnd});
+    for (const auto &[start, end] : spans) {
+        Cell cell{start, end, start, end};
+        while (cell.textStart < cell.textEnd && own[cell.textStart].isSpace()) ++cell.textStart;
+        while (cell.textEnd > cell.textStart && own[cell.textEnd - 1].isSpace()) --cell.textEnd;
+        row.cells.append(cell);
+    }
+    return row;
+}
+
+enum class Align { None, Left, Center, Right };
+
+std::optional<QList<Align>> delimiterRow(QStringView text, const Row &row)
+{
+    QList<Align> aligns;
+    for (const Cell &cell : row.cells) {
+        const QStringView own = text.mid(row.line.start + cell.textStart, cell.textEnd - cell.textStart);
+        if (own.isEmpty()) return std::nullopt;
+        const bool left = own.startsWith(u':'), right = own.endsWith(u':');
+        const QStringView dashes = own.mid(left ? 1 : 0, own.size() - (left ? 1 : 0) - (right ? 1 : 0));
+        if (dashes.isEmpty() || !std::all_of(dashes.begin(), dashes.end(), [](QChar c) { return c == u'-'; }))
+            return std::nullopt;
+        aligns.append(left && right ? Align::Center : right ? Align::Right : left ? Align::Left : Align::None);
+    }
+    return aligns;
+}
+
+// The pipe table holding a position: its header, its delimiter row and the
+// rows after it, up to a line with no pipe.
+struct Table {
+    QList<Row> rows;
+    int delimiter = 1;
+    QList<Align> aligns;
+};
+
+std::optional<Table> tableAt(QStringView text, int position)
+{
+    const Line here = lineAt(text, position);
+    if (!rowOf(text, here)) return std::nullopt;
+    Line first = here;
+    while (const auto above = lineBefore(text, first)) {
+        if (isBlank(textOf(text, *above)) || !rowOf(text, *above)) break;
+        first = *above;
+    }
+    QList<Row> rows;
+    for (std::optional<Line> line = first; line; line = lineAfter(text, *line)) {
+        if (isBlank(textOf(text, *line))) break;
+        const auto row = rowOf(text, *line);
+        if (!row) break;
+        rows.append(*row);
+    }
+    // The header is the row just above the first delimiter row.
+    for (int i = 1; i < rows.size(); ++i) {
+        const auto aligns = delimiterRow(text, rows[i]);
+        if (!aligns) continue;
+        Table table;
+        table.rows = rows.mid(i - 1);
+        table.delimiter = 1;
+        table.aligns = *aligns;
+        if (table.rows.first().line.start > here.start) return std::nullopt;
+        return table;
+    }
+    return std::nullopt;
+}
+
+// Which cell of a row a position is in: the one whose pipes surround it,
+// or the nearest.
+int cellIndexAt(const Row &row, int position)
+{
+    const int offset = position - row.line.start;
+    for (int i = 0; i < row.cells.size(); ++i)
+        if (offset <= row.cells[i].end) return i;
+    return int(row.cells.size()) - 1;
+}
+
+// The cell's text selected, or a caret inside an empty cell.
+TextChange selectCell(const Row &row, int index)
+{
+    const Cell &cell = row.cells[index];
+    const int start = row.line.start + cell.textStart, end = row.line.start + cell.textEnd;
+    if (start < end) return {{}, start, end};
+    const int caret = row.line.start + qMin(cell.start + 1, cell.end);
+    return {{}, caret, caret};
+}
+
+QString padded(const QString &cell, int width, Align align)
+{
+    const int room = qMax(0, width - displayWidth(cell));
+    switch (align) {
+    case Align::Right:
+        return QString(room, u' ') + cell;
+    case Align::Center:
+        return QString(room / 2, u' ') + cell + QString(room - room / 2, u' ');
+    default:
+        return cell + QString(room, u' ');
+    }
+}
+
+QString dashes(int width, Align align)
+{
+    switch (align) {
+    case Align::Left:
+        return u':' + QString(width - 1, u'-');
+    case Align::Right:
+        return QString(width - 1, u'-') + u':';
+    case Align::Center:
+        return u':' + QString(width - 2, u'-') + u':';
+    default:
+        return QString(width, u'-');
+    }
+}
+
+// ---- Display width -------------------------------------------------------
+
+int codePointWidth(char32_t c)
+{
+    switch (QChar::category(c)) {
+    case QChar::Mark_NonSpacing:
+    case QChar::Mark_Enclosing:
+    case QChar::Other_Format:
+    case QChar::Other_Control:
+        return 0;
+    default:
+        break;
+    }
+    // East Asian Wide and Fullwidth characters, and emoji shown as wide.
+    static const std::pair<char32_t, char32_t> wide[] = {
+        {0x1100, 0x115F},   {0x231A, 0x231B},   {0x2329, 0x232A},   {0x23E9, 0x23EC},   {0x23F0, 0x23F0},
+        {0x23F3, 0x23F3},   {0x25FD, 0x25FE},   {0x2614, 0x2615},   {0x2648, 0x2653},   {0x267F, 0x267F},
+        {0x2693, 0x2693},   {0x26A1, 0x26A1},   {0x26AA, 0x26AB},   {0x26BD, 0x26BE},   {0x26C4, 0x26C5},
+        {0x26CE, 0x26CE},   {0x26D4, 0x26D4},   {0x26EA, 0x26EA},   {0x26F2, 0x26F3},   {0x26F5, 0x26F5},
+        {0x26FA, 0x26FA},   {0x26FD, 0x26FD},   {0x2705, 0x2705},   {0x270A, 0x270B},   {0x2728, 0x2728},
+        {0x274C, 0x274C},   {0x274E, 0x274E},   {0x2753, 0x2755},   {0x2757, 0x2757},   {0x2795, 0x2797},
+        {0x27B0, 0x27B0},   {0x27BF, 0x27BF},   {0x2B1B, 0x2B1C},   {0x2B50, 0x2B50},   {0x2B55, 0x2B55},
+        {0x2E80, 0x303E},   {0x3041, 0x33FF},   {0x3400, 0x4DBF},   {0x4E00, 0x9FFF},   {0xA000, 0xA4CF},
+        {0xA960, 0xA97F},   {0xAC00, 0xD7A3},   {0xF900, 0xFAFF},   {0xFE10, 0xFE19},   {0xFE30, 0xFE6F},
+        {0xFF00, 0xFF60},   {0xFFE0, 0xFFE6},   {0x16FE0, 0x16FE4}, {0x17000, 0x18AFF}, {0x1B000, 0x1B2FF},
+        {0x1F004, 0x1F004}, {0x1F0CF, 0x1F0CF}, {0x1F18E, 0x1F18E}, {0x1F191, 0x1F19A}, {0x1F200, 0x1F251},
+        {0x1F300, 0x1F64F}, {0x1F680, 0x1F6FF}, {0x1F7E0, 0x1F7EB}, {0x1F90C, 0x1F9FF}, {0x1FA70, 0x1FAFF},
+        {0x20000, 0x2FFFD}, {0x30000, 0x3FFFD},
+    };
+    for (const auto &[first, last] : wide)
+        if (c >= first && c <= last) return 2;
+    return 1;
+}
+
+} // namespace
+
+// ---- Public ----------------------------------------------------------------
+
+QStringList commands()
+{
+    return {QStringLiteral("bold"),        QStringLiteral("italic"),       QStringLiteral("strikethrough"),
+            QStringLiteral("highlight"),   QStringLiteral("code"),         QStringLiteral("comment"),
+            QStringLiteral("heading1"),    QStringLiteral("heading2"),     QStringLiteral("heading3"),
+            QStringLiteral("heading4"),    QStringLiteral("heading5"),     QStringLiteral("heading6"),
+            QStringLiteral("paragraph"),   QStringLiteral("quote"),        QStringLiteral("bulletList"),
+            QStringLiteral("numberedList"), QStringLiteral("taskList"),    QStringLiteral("toggleTask"),
+            QStringLiteral("codeBlock"),   QStringLiteral("link"),         QStringLiteral("image"),
+            QStringLiteral("footnote"),    QStringLiteral("table"),        QStringLiteral("formatTable"),
+            QStringLiteral("inlineMath"),  QStringLiteral("displayMath"),  QStringLiteral("thematicBreak"),
+            QStringLiteral("pageBreak")};
+}
+
+bool isCommand(const QString &id)
+{
+    static const QStringList all = commands();
+    return all.contains(id);
+}
+
+std::optional<TextChange> format(const QString &command, QStringView text, int anchor, int cursor, const Options &options)
+{
+    const int size = int(text.size());
+    if (anchor < 0 || cursor < 0 || anchor > size || cursor > size) return std::nullopt;
+    if (const auto kind = inlineKindOf(command)) return toggleInline(*kind, text, anchor, cursor);
+    if (command.startsWith(u"heading") && command.size() == 8) {
+        const int level = command.back().digitValue();
+        if (level >= 1 && level <= 6) return setHeading(text, anchor, cursor, level, options);
+    }
+    const int end = qMax(anchor, cursor);
+    if (command == u"paragraph") return setHeading(text, anchor, cursor, 0, options);
+    if (command == u"quote") return toggleQuote(text, anchor, cursor);
+    if (command == u"bulletList") return toggleList(text, anchor, cursor, ListKind::Bullet);
+    if (command == u"numberedList") return toggleList(text, anchor, cursor, ListKind::Ordered);
+    if (command == u"taskList") return toggleList(text, anchor, cursor, ListKind::Task);
+    if (command == u"toggleTask") return toggleTask(text, anchor, cursor);
+    if (command == u"codeBlock") return toggleFencedBlock(text, anchor, cursor, options, false);
+    if (command == u"displayMath") return toggleDisplayMath(text, anchor, cursor, options);
+    if (command == u"link") return toggleLink(text, anchor, cursor, false);
+    if (command == u"image") return toggleLink(text, anchor, cursor, true);
+    if (command == u"thematicBreak") return insertBlock(text, end, QStringLiteral("---"), -1, 0, options);
+    if (command == u"pageBreak") return insertBlock(text, end, QStringLiteral("+++"), -1, 0, options);
+    if (command == u"table") return insertTable(text, end, options);
+    if (command == u"footnote") return insertFootnote(text, anchor, cursor, options);
+    if (command == u"formatTable") return formatTable(text, anchor, cursor, options);
+    return std::nullopt;
+}
+
+std::optional<TextChange> newLine(QStringView text, int anchor, int cursor, const Options &options)
+{
+    if (anchor != cursor) return std::nullopt;
+    const Line line = lineAt(text, cursor);
+    const QStringView own = textOf(text, line);
+    const Parts parts = partsOf(own);
+    if (!parts.item() || cursor < line.start + parts.contentStart) return std::nullopt;
+    if (isBlank(own.mid(parts.contentStart))) {
+        // An empty item ends the list; the line keeps its quote markers.
+        const int at = line.start + parts.quoteEnd;
+        return TextChange{{{{at, line.end - at}, {}}}, at, at};
+    }
+    QString prefix = own.left(parts.indentEnd).toString();
+    if (parts.ordered()) prefix += QString::number(parts.number + 1) + parts.delimiter;
+    else prefix += parts.bullet;
+    const QStringView spacing = own.mid(parts.markerEnd, parts.spaceEnd - parts.markerEnd);
+    prefix += spacing.isEmpty() ? QStringLiteral(" ") : spacing.toString();
+    if (parts.task) prefix += QStringLiteral("[ ] ");
+    // The text after the caret moves to the new item, without the spaces before it.
+    const int moved = leadingSpaces(text.mid(cursor, line.end - cursor));
+    const QString inserted = options.newline + prefix;
+    const int caret = cursor + int(inserted.size());
+    return TextChange{{{{cursor, moved}, inserted}}, caret, caret};
+}
+
+TextChange hardBreak(QStringView, int anchor, int cursor, const Options &options)
+{
+    const int start = qMin(anchor, cursor), end = qMax(anchor, cursor);
+    const QString inserted = QStringLiteral("  ") + options.newline;
+    const int caret = start + int(inserted.size());
+    return {{{{start, end - start}, inserted}}, caret, caret};
+}
+
+std::optional<TextChange> indent(QStringView text, int anchor, int cursor, bool outdent, const Options &)
+{
+    const auto lines = linesOf(text, qMin(anchor, cursor), qMax(anchor, cursor));
+    if (lines.size() == 1 && !partsOf(textOf(text, lines.first())).item()) return std::nullopt;
+    // The list item above at an indentation, the nearest one: the item a
+    // deeper item belongs to and what it lines up with.
+    const auto itemAbove = [&](const Line &line, const std::function<bool(const Parts &)> &wanted) -> std::optional<Parts> {
+        for (auto above = lineBefore(text, line); above; above = lineBefore(text, *above)) {
+            const QStringView own = textOf(text, *above);
+            if (isBlank(own)) continue;
+            const Parts parts = partsOf(own);
+            if (parts.item() && wanted(parts)) return parts;
+            if (!parts.item() && parts.indent() == 0) break;
+        }
+        return std::nullopt;
+    };
+    QList<SourceEdit> edits;
+    for (const Line &line : lines) {
+        const QStringView own = textOf(text, line);
+        if (isBlank(own)) continue;
+        const Parts parts = partsOf(own);
+        const int at = line.start + parts.quoteEnd;
+        const bool tabbed = parts.indent() > 0 && own[parts.quoteEnd] == u'\t';
+        if (!outdent) {
+            QString unit = QStringLiteral("\t");
+            if (parts.item() && !tabbed) {
+                // As deep as the text of the item above at this depth, so that this one belongs to it.
+                const auto sibling = itemAbove(line, [&](const Parts &p) { return p.indent() == parts.indent(); });
+                const Parts &like = sibling ? *sibling : parts;
+                unit = QString(like.spaceEnd - like.indentEnd, u' ');
+            }
+            edits.append(SourceEdit{{at, 0}, unit});
+            continue;
+        }
+        if (parts.indent() == 0) continue;
+        int removed = 0;
+        if (tabbed) {
+            removed = 1;
+        } else if (parts.item()) {
+            const auto parent = itemAbove(line, [&](const Parts &p) { return p.indent() < parts.indent(); });
+            removed = parts.indent() - (parent ? parent->indent() : 0);
+        } else {
+            removed = qMin(4, leadingSpaces(own.mid(parts.quoteEnd)));
+        }
+        edits.append(SourceEdit{{at, removed}, {}});
+    }
+    if (edits.isEmpty()) return lines.size() > 1 ? std::optional<TextChange>(TextChange{{}, anchor, cursor}) : std::nullopt;
+    return mapped(edits, anchor, cursor);
+}
+
+std::optional<TextChange> moveToCell(QStringView text, int anchor, int cursor, bool backwards, const Options &options)
+{
+    const auto table = tableAt(text, cursor);
+    if (!table) return std::nullopt;
+    const Line here = lineAt(text, cursor);
+    int rowIndex = 0;
+    while (rowIndex < table->rows.size() && table->rows[rowIndex].line.start != here.start) ++rowIndex;
+    if (rowIndex >= table->rows.size()) return std::nullopt;
+    int cell = cellIndexAt(table->rows[rowIndex], cursor);
+    const auto skip = [&](int row) { return row == table->delimiter; };
+    if (!backwards) {
+        if (cell + 1 < table->rows[rowIndex].cells.size()) return selectCell(table->rows[rowIndex], cell + 1);
+        int row = rowIndex + 1;
+        if (row < table->rows.size() && skip(row)) ++row;
+        if (row < table->rows.size()) return selectCell(table->rows[row], 0);
+        // Past the last cell: a new row as wide as the header.
+        const Row &last = table->rows.last();
+        const int columns = int(table->rows.first().cells.size());
+        QString added = text.mid(last.line.start, last.prefix).toString() + u'|';
+        for (int i = 0; i < columns; ++i) added += QStringLiteral("  |");
+        const int caret = last.line.end + int(options.newline.size()) + last.prefix + 2;
+        return TextChange{{{{last.line.end, 0}, options.newline + added}}, caret, caret};
+    }
+    if (cell > 0) return selectCell(table->rows[rowIndex], cell - 1);
+    int row = rowIndex - 1;
+    if (row >= 0 && skip(row)) --row;
+    if (row < 0) return TextChange{{}, anchor, cursor};
+    return selectCell(table->rows[row], int(table->rows[row].cells.size()) - 1);
+}
+
+std::optional<TextChange> formatTable(QStringView text, int anchor, int cursor, const Options &)
+{
+    const auto table = tableAt(text, cursor);
+    if (!table) return std::nullopt;
+    const int columns = int(table->aligns.size());
+    // Each column as wide as its widest cell, and at least three.
+    QList<int> widths;
+    for (int r = 0; r < table->rows.size(); ++r) {
+        if (r == table->delimiter) continue;
+        const Row &row = table->rows[r];
+        for (int c = 0; c < row.cells.size(); ++c) {
+            const Cell &cell = row.cells[c];
+            const int width = displayWidth(text.mid(row.line.start + cell.textStart, cell.textEnd - cell.textStart));
+            if (c >= widths.size()) widths.append(3);
+            widths[c] = qMax(widths[c], width);
+        }
+    }
+    while (widths.size() < columns) widths.append(3);
+    const auto alignOf = [&](int c) { return c < columns ? table->aligns[c] : Align::None; };
+
+    QList<SourceEdit> edits;
+    // Where the cursor and the anchor were, as a cell and an offset into its text.
+    struct Place {
+        int row = -1;
+        int cell = 0;
+        int offset = 0;
+    };
+    const auto placeOf = [&](int position) {
+        Place place;
+        for (int r = 0; r < table->rows.size(); ++r) {
+            const Row &row = table->rows[r];
+            if (position < row.line.start || position > row.line.end) continue;
+            place.row = r;
+            place.cell = cellIndexAt(row, position);
+            const Cell &cell = row.cells[place.cell];
+            place.offset = qBound(0, position - row.line.start - cell.textStart, cell.textEnd - cell.textStart);
+        }
+        return place;
+    };
+    const Place anchorPlace = placeOf(anchor), cursorPlace = placeOf(cursor);
+    QHash<int, QList<int>> cellStarts;
+    for (int r = 0; r < table->rows.size(); ++r) {
+        const Row &row = table->rows[r];
+        const int count = r == table->delimiter ? columns : qMax(columns, int(row.cells.size()));
+        QString line = text.mid(row.line.start, row.prefix).toString() + u'|';
+        QList<int> starts;
+        for (int c = 0; c < count; ++c) {
+            line += u' ';
+            QString cell;
+            if (r == table->delimiter) {
+                cell = dashes(widths[c], alignOf(c));
+            } else {
+                const QString own = c < row.cells.size()
+                    ? text.mid(row.line.start + row.cells[c].textStart, row.cells[c].textEnd - row.cells[c].textStart).toString()
+                    : QString();
+                cell = padded(own, widths[c], alignOf(c));
+                const int room = qMax(0, widths[c] - displayWidth(own));
+                const int lead = alignOf(c) == Align::Right ? room : alignOf(c) == Align::Center ? room / 2 : 0;
+                starts.append(int(line.size()) + lead);
+            }
+            line += cell + QStringLiteral(" |");
+        }
+        cellStarts[r] = starts;
+        if (textOf(text, row.line) != line) edits.append(SourceEdit{{row.line.start, row.line.length()}, line});
+    }
+    if (edits.isEmpty()) return std::nullopt;
+    // The selection keeps its cells, at the same place in their text.
+    TextChange change = mapped(edits, anchor, cursor);
+    const auto reposition = [&](const Place &place, int fallback) {
+        if (place.row < 0) return fallback;
+        const QList<int> &starts = cellStarts[place.row];
+        if (place.cell >= starts.size()) return fallback;
+        // The new start of the row's line is the mapped start of its old line.
+        const int lineStart = mapPosition(table->rows[place.row].line.start, change.edits, false);
+        return lineStart + starts[place.cell] + place.offset;
+    };
+    change.anchor = reposition(anchorPlace, change.anchor);
+    change.cursor = reposition(cursorPlace, change.cursor);
+    return change;
+}
+
+int displayWidth(QStringView text)
+{
+    int width = 0;
+    QTextBoundaryFinder graphemes(QTextBoundaryFinder::Grapheme, text);
+    int start = 0;
+    for (qsizetype end = graphemes.toNextBoundary(); end > 0; end = graphemes.toNextBoundary()) {
+        int widest = 0;
+        const QStringView grapheme = text.mid(start, end - start);
+        for (char32_t c : grapheme.toUcs4()) widest = qMax(widest, codePointWidth(c));
+        width += widest;
+        start = int(end);
+    }
+    return width;
+}
+
+} // namespace MarkdownEditing

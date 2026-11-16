@@ -420,6 +420,58 @@ void EditorBinding::setBlocked(bool blocked)
     emit blockedChanged();
 }
 
+void EditorBinding::setSetextHeadings(bool setext)
+{
+    if (setext == m_setextHeadings) return;
+    m_setextHeadings = setext;
+    emit setextHeadingsChanged();
+}
+
+MarkdownEditing::Options EditorBinding::editingOptions() const
+{
+    MarkdownEditing::Options options;
+    options.setextHeadings = m_setextHeadings;
+    if (m_document) options.newline = m_document->newline();
+    return options;
+}
+
+bool EditorBinding::format(const QString &command)
+{
+    if (!MarkdownEditing::isCommand(command)) return false;
+    const MarkdownEditing::Options options = editingOptions();
+    return applyEditing([&](QStringView text, int anchor, int cursor) {
+        return MarkdownEditing::format(command, text, anchor, cursor, options);
+    });
+}
+
+bool EditorBinding::applyEditing(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation)
+{
+    if (!editable() || m_projecting || m_blocked) return false;
+    cancelComposition();
+    // The selection as whole graphemes, keeping its direction.
+    const SourceRange range = selection();
+    const bool backwards = editorCursor() < editorAnchor();
+    const int anchor = backwards ? range.start + range.length : range.start;
+    const int cursor = backwards ? range.start : range.start + range.length;
+    std::optional<TextChange> change;
+    {
+        // The copy of the text is gone before the edit, or the buffer would copy all of it to change it.
+        const QString text = m_buffer->text();
+        change = operation(text, anchor, cursor);
+    }
+    return change && apply(*change);
+}
+
+bool EditorBinding::apply(const TextChange &change)
+{
+    if (!editable() || m_projecting || m_blocked) return false;
+    if (!change.edits.isEmpty() && m_buffer->replace(change.edits) == SourceBuffer::EditOutcome::Rejected) return false;
+    const int length = m_buffer->length();
+    selectEditor(m_pairs.toEditor(qBound(0, change.anchor, length)), m_pairs.toEditor(qBound(0, change.cursor, length)));
+    revealCursor();
+    return true;
+}
+
 QTextBlockFormat EditorBinding::lineFormat() const
 {
     // A fixed height, in pixels, of the font's own size, as the font is set
@@ -877,9 +929,35 @@ bool EditorBinding::handleKey(QKeyEvent *key)
         paste();
     } else if (key->key() == Qt::Key_V && key->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
         pastePlainText();
-    } else if (key->matches(QKeySequence::InsertParagraphSeparator) || key->matches(QKeySequence::InsertLineSeparator)) {
-        // A line break in the document's own convention; Markdown gives U+2028 no meaning.
-        if (m_document) insertText(m_document->newline(), EditKind::Typing);
+    } else if (key->matches(QKeySequence::InsertLineSeparator)) {
+        // A Markdown hard line break: two spaces and the document's own line break.
+        const MarkdownEditing::Options options = editingOptions();
+        applyEditing([&](QStringView text, int anchor, int cursor) {
+            return std::optional(MarkdownEditing::hardBreak(text, anchor, cursor, options));
+        });
+    } else if (key->matches(QKeySequence::InsertParagraphSeparator)) {
+        // A list goes on with a new item; anywhere else this is a line break
+        // in the document's own convention, since Markdown gives U+2028 no meaning.
+        const MarkdownEditing::Options options = editingOptions();
+        if (!applyEditing([&](QStringView text, int anchor, int cursor) {
+                return MarkdownEditing::newLine(text, anchor, cursor, options);
+            })
+            && m_document)
+            insertText(m_document->newline(), EditKind::Typing);
+    } else if ((key->key() == Qt::Key_Tab && key->modifiers() == Qt::NoModifier)
+               || key->key() == Qt::Key_Backtab || (key->key() == Qt::Key_Tab && key->modifiers() == Qt::ShiftModifier)) {
+        // In a table, from cell to cell; on a list item or lines selected,
+        // indenting; elsewhere Tab types a tab, and Shift+Tab is Qt's.
+        const bool back = key->key() == Qt::Key_Backtab || key->modifiers() & Qt::ShiftModifier;
+        const MarkdownEditing::Options options = editingOptions();
+        const bool done = applyEditing([&](QStringView text, int anchor, int cursor) {
+            if (auto moved = MarkdownEditing::moveToCell(text, anchor, cursor, back, options)) return moved;
+            return MarkdownEditing::indent(text, anchor, cursor, back, options);
+        });
+        if (!done) {
+            if (back) return false;
+            insertText(QStringLiteral("\t"), EditKind::Typing);
+        }
     } else if (key->key() == Qt::Key_Backspace && !(key->modifiers() & ~Qt::ShiftModifier)) {
         deleteTo(Extent::PreviousGrapheme);
     } else if (key->matches(QKeySequence::Delete)) {

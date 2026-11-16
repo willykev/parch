@@ -10,6 +10,7 @@
 #include "document.h"
 #include "documentreview.h"
 #include "documentstore.h"
+#include "editingtests.h"
 #include "editorbinding.h"
 #include "filepicker.h"
 #include "filerequests.h"
@@ -455,6 +456,27 @@ private slots:
     void nativeWritesReturnToSource();
     void imeCommitsLandOnGraphemes();
     void keysEditWholeGraphemes();
+    // Editing commands, the command registry, the palette, the toolbar, word
+    // counts and the writing surface's settings, written in editingtests.cpp.
+    void sourceEditsGroupIntoOneUndoStep() { EditingTests::sourceEditsGroupIntoOneUndoStep(); }
+    void inlineFormattingWrapsAndToggles() { EditingTests::inlineFormattingWrapsAndToggles(); }
+    void linksAndImagesSelectWhatComesNext() { EditingTests::linksAndImagesSelectWhatComesNext(); }
+    void headingsFollowTheChosenSyntax() { EditingTests::headingsFollowTheChosenSyntax(); }
+    void blockFormattingTogglesEveryLine() { EditingTests::blockFormattingTogglesEveryLine(); }
+    void insertionsKeepTheirBlankLines() { EditingTests::insertionsKeepTheirBlankLines(); }
+    void smartKeysContinueAndIndentLists() { EditingTests::smartKeysContinueAndIndentLists(); }
+    void tablesNavigateAndFormat() { EditingTests::tablesNavigateAndFormat(); }
+    void everyCommandIsOneStepOrNothing() { EditingTests::everyCommandIsOneStepOrNothing(); }
+    void editorRunsCommandsAsOneUndoStep() { EditingTests::editorRunsCommandsAsOneUndoStep(); }
+    void editorKeysContinueListsAndTables() { EditingTests::editorKeysContinueListsAndTables(); }
+    void registryGivesEveryKeyOneCommand() { EditingTests::registryGivesEveryKeyOneCommand(); }
+    void registryReadsDamagedKeysAndRunsActions() { EditingTests::registryReadsDamagedKeysAndRunsActions(); }
+    void paletteFindsAndRunsCommands() { EditingTests::paletteFindsAndRunsCommands(); }
+    void shortcutsDialogRebindsSwapsAndResets() { EditingTests::shortcutsDialogRebindsSwapsAndResets(); }
+    void preferencesApplyLiveToEveryWindow() { EditingTests::preferencesApplyLiveToEveryWindow(); }
+    void toolbarShowsHidesAndRunsCommands() { EditingTests::toolbarShowsHidesAndRunsCommands(); }
+    void formattingCommandsRunFromEveryEntryPoint() { EditingTests::formattingCommandsRunFromEveryEntryPoint(); }
+    void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
     void editorDrawsFromTheme();
     void caretBlinksThenRestsAndDrawsNothing();
     void caretIsSteadyWithoutMotionOrFlash();
@@ -7759,9 +7781,10 @@ void ParchTests::enterUsesDocumentNewline()
     sendKey(&view.window, Qt::Key_Return);
     QVERIFY(document->buffer()->text().startsWith(QStringLiteral("\r\n")));
     QVERIFY(!document->buffer()->text().contains(QRegularExpression("(?<!\r)\n")));
-    // Shift+Enter is a line break too, never an invisible U+2028.
+    // Shift+Enter is a Markdown hard line break, two spaces and the
+    // document's line break, never an invisible U+2028.
     sendKey(&view.window, Qt::Key_Return, Qt::ShiftModifier);
-    QCOMPARE(document->buffer()->text(), QStringLiteral("\r\n\r\na\r\nb\r\n"));
+    QCOMPARE(document->buffer()->text(), QStringLiteral("\r\n  \r\na\r\nb\r\n"));
     verifyProjection(view, document->buffer()->text());
 
     Document *lfDocument = fixture.open("lf.md", QStringLiteral("a\nb\n"));
@@ -8995,11 +9018,16 @@ void ParchTests::singleTabHidesStrip()
     // The strip holds the window's one tab, and hides it.
     QCOMPARE(tabStrip->property("count").toInt(), 1);
     QVERIFY(!tabStrip->isVisible());
-    // The editor takes the strip's place, right below the header.
+    // The editor takes the strip's place, right below the header and the
+    // formatting toolbar, which comes up under it.
     QQuickItem *header = shell.item(QStringLiteral("header"));
+    QQuickItem *toolbar = shell.item(QStringLiteral("toolbar"));
     QQuickItem *pane = shell.item(QStringLiteral("editorPane"));
-    QVERIFY(header);
-    QVERIFY(pane->mapToScene(QPointF(0, 0)).y() <= header->mapToScene(QPointF(0, header->height())).y() + 1);
+    QVERIFY(header && toolbar);
+    const qreal headerBottom = header->mapToScene(QPointF(0, header->height())).y();
+    QVERIFY(toolbar->mapToScene(QPointF(0, 0)).y() <= headerBottom + 1);
+    const qreal above = toolbar->isVisible() ? toolbar->mapToScene(QPointF(0, toolbar->height())).y() : headerBottom;
+    QVERIFY(pane->mapToScene(QPointF(0, 0)).y() <= above + 1);
 }
 
 void ParchTests::tabStripKeepsTabsReadableAndScrolls()
@@ -9281,7 +9309,7 @@ void ParchTests::everyControlHasAccessibleNameAndFocus()
     QObject *drawer = shell.object(QStringLiteral("libraryDrawer"));
     QVERIFY(drawer);
     shell.item(QStringLiteral("editor"))->forceActiveFocus();
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(drawer->property("opened").toBool());
     const QStringList unnamed = unnamedAccessibleItems(window);
     QVERIFY2(unnamed.isEmpty(), qPrintable(unnamed.join(", ")));
@@ -9305,7 +9333,7 @@ void ParchTests::shortcutsAlwaysCarryAModifier()
     }
     for (const char *wanted : {"Ctrl+N", "Ctrl+Shift+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+W", "Ctrl+Z",
                                "Ctrl+Shift+Z", "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+PgDown", "Ctrl+PgUp", "Ctrl+=",
-                               "Ctrl+-", "Ctrl+0", "Ctrl+B", "Ctrl+Q"})
+                               "Ctrl+-", "Ctrl+0", "F9", "Ctrl+Q"})
         QVERIFY2(all.contains(QKeySequence(QString::fromLatin1(wanted))), wanted);
     // No key is claimed twice, which would leave Qt to pick neither.
     QCOMPARE(QSet<QKeySequence>(all.begin(), all.end()).size(), all.size());
@@ -9378,7 +9406,9 @@ void ParchTests::undoAndRedoKeysActOnceWhereverFocusIs()
 void ParchTests::windowShortcutsReachPastTheEditor()
 {
     // Every other shortcut reaches the window while the editor has focus, and
-    // none of them puts anything into the text.
+    // none of them puts anything into the text but the commands that edit it,
+    // the formatting commands among them, and undo and redo, which the
+    // editor takes itself.
     ShellFixture shell;
     QVERIFY2(shell.ok(), qPrintable(shell.error));
     QQuickWindow *window = shell.window.get();
@@ -9387,10 +9417,8 @@ void ParchTests::windowShortcutsReachPastTheEditor()
     QSignalSpy quits(shell.backend.get(), &Backend::quitRequested);
     int tried = 0;
     for (QObject *shortcut : shortcutsIn(window)) {
+        if (shell.backend->commands()->needs(shortcut->property("commandId").toString()) == u"text") continue;
         for (const QKeySequence &sequence : shortcutSequences(shortcut)) {
-            if (sequence == QKeySequence(QStringLiteral("Ctrl+Z")) || sequence == QKeySequence(QStringLiteral("Ctrl+Shift+Z"))
-                || sequence == QKeySequence(QStringLiteral("Ctrl+Y")))
-                continue;
             // Ctrl+Shift+N opens a window that comes to the front, and only
             // the window in front answers keys.
             activate(window);
@@ -9400,6 +9428,10 @@ void ParchTests::windowShortcutsReachPastTheEditor()
             QTest::keySequence(window, sequence);
             QVERIFY2(activated.count() == 1, qPrintable(sequence.toString()));
             QVERIFY2(shell.document()->buffer()->text().isEmpty(), qPrintable(sequence.toString()));
+            // A dialog a shortcut opened, such as the palette, has the keys
+            // until Escape closes it.
+            if (window->property("dialogOpen").toBool()) QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY2(!window->property("dialogOpen").toBool(), qPrintable(sequence.toString()));
             ++tried;
         }
     }
@@ -9667,7 +9699,7 @@ void ParchTests::libraryDocksOrOpensAsDrawer()
     QVERIFY(library->property("docked").toBool());
     QVERIFY(library->isVisible());
     const qreal beside = pane->width();
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(!library->isVisible());
     QVERIFY(pane->width() > beside);
     QCOMPARE(window->activeFocusItem(), editor);
@@ -9691,13 +9723,13 @@ void ParchTests::libraryDocksOrOpensAsDrawer()
     QTest::keyClick(window, Qt::Key_Escape);
     QTRY_VERIFY(!drawer->property("visible").toBool());
     QTRY_COMPARE(window->activeFocusItem(), editor);
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(drawer->property("opened").toBool());
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(!drawer->property("visible").toBool());
 
     // Widening the window with the drawer open docks the library instead.
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(drawer->property("opened").toBool());
     resizeWindow(window, 1440);
     QTRY_VERIFY(!drawer->property("visible").toBool());
@@ -10066,7 +10098,7 @@ void ParchTests::libraryDrawerShowsItsEdgeAndCorners()
             replaceTheme(shell.themeFolder.path(), "dark", "#1a1b26", "#a9b1d6", "#7aa2f7");
             QTRY_COMPARE(window->color(), QColor("#1a1b26"));
         }
-        QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+        QTest::keyClick(window, Qt::Key_F9);
         QTRY_VERIFY(drawer->property("opened").toBool());
         QTest::qWait(50);
         const int right = qCeil(drawer->property("width").toReal()) - 1;
@@ -11796,7 +11828,7 @@ void ParchTests::newWindowHasItsOwnTabsAndKeys()
     QCOMPARE(firstContext->tabs()->rowCount(), 2);
     QCOMPARE(secondContext->tabs()->rowCount(), 2);
     // Each window has its own library and size.
-    QTest::keyClick(first, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(first, Qt::Key_F9);
     QCOMPARE(firstContext->libraryOpen(), !secondContext->libraryOpen());
     second->resize(700, 500);
     QTRY_COMPARE(secondContext->size(), QSize(700, 500));
@@ -11857,8 +11889,15 @@ void ParchTests::pageKeysSwitchTabsAsTabKeysDo()
     QVERIFY(library->hasActiveFocus());
     QTest::keyClick(window, Qt::Key_PageDown, Qt::ControlModifier);
     QCOMPARE(tabs->activeIndex(), 2);
-    // The window's menu lists no tab switching, so it shows neither key.
-    QVERIFY(!shell.window->property("keys").toMap().contains(QStringLiteral("nextTab")));
+    // The window's menu lists no tab switching, so it shows neither key; the
+    // command palette lists every command, with its keys.
+    QObject *menu = shell.object(QStringLiteral("windowMenu"));
+    QVERIFY(menu);
+    for (int i = 0; i < menu->property("count").toInt(); ++i) {
+        QQuickItem *entry = nullptr;
+        QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, entry), Q_ARG(int, i));
+        QVERIFY(entry && entry->property("text").toString() != QStringLiteral("Next tab"));
+    }
 }
 
 void ParchTests::tabKeysCycleAndCloseInTheWindow()
@@ -13325,7 +13364,7 @@ void ParchTests::libraryDrawerClosesOnOpening()
     QQuickItem *editor = shell.item(QStringLiteral("editor"));
     QVERIFY(drawer && editor);
     editor->forceActiveFocus();
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(drawer->property("opened").toBool());
     QQuickItem *search = shell.item(QStringLiteral("librarySearch"));
     QQuickItem *tree = shell.item(QStringLiteral("libraryTree"));
@@ -13338,7 +13377,7 @@ void ParchTests::libraryDrawerClosesOnOpening()
     QCOMPARE(search->property("text").toString(), QString());
     QTRY_VERIFY(!drawer->property("visible").toBool());
     QTRY_COMPARE(window->activeFocusItem(), editor);
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(drawer->property("opened").toBool());
     QTRY_COMPARE(window->activeFocusItem(), search);
     // A document opened from the drawer closes it, and the text has focus.
@@ -13367,7 +13406,7 @@ void ParchTests::libraryDrawerClosesOnOpening()
     QTRY_VERIFY(!drawer->property("visible").toBool());
     QTRY_COMPARE(window->activeFocusItem(), editor);
     // A click does the same.
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(drawer->property("opened").toBool());
     QQuickItem *row = nullptr;
     QTRY_VERIFY((row = libraryRow(window, QStringLiteral("Ordinary things.md"))));
@@ -13655,13 +13694,13 @@ void ParchTests::libraryKeyGoesToTheFieldAndBack()
     QVERIFY(editor && search && library);
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(editor));
     QCOMPARE(window->activeFocusItem(), editor);
-    // Docked and shown, Ctrl+B hides the library and the text keeps the keys.
+    // Docked and shown, F9 hides the library and the text keeps the keys.
     QVERIFY(library->isVisible());
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(!library->isVisible());
     QCOMPARE(window->activeFocusItem(), editor);
     // Shown again, the library takes the keys in its field.
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(library->isVisible());
     QCOMPARE(window->activeFocusItem(), search);
     typeText(window, QStringLiteral("draft"));
@@ -13673,9 +13712,9 @@ void ParchTests::libraryKeyGoesToTheFieldAndBack()
     typeText(window, QStringLiteral("Q"));
     QVERIFY2(shell.document()->buffer()->text().contains(u'Q'), qPrintable(shell.document()->buffer()->text()));
     // So does Escape from the tree.
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(!library->isVisible());
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_COMPARE(window->activeFocusItem(), search);
     QTest::keyClick(window, Qt::Key_Tab);
     QCOMPARE(window->activeFocusItem(), shell.item(QStringLiteral("libraryTree")));
@@ -16159,7 +16198,7 @@ void ParchTests::dialogsKeepTheKeysUntilTheyClose()
     QObject *drawer = shell.object(QStringLiteral("libraryDrawer"));
     QVERIFY(!drawer->property("visible").toBool());
     editor->forceActiveFocus();
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QVERIFY(drawer->property("visible").toBool() && !drawer->property("opened").toBool());
     QVERIFY(QMetaObject::invokeMethod(window, "showHistory"));
     QTRY_VERIFY(isOpen(history));
@@ -16175,7 +16214,7 @@ void ParchTests::dialogsKeepTheKeysUntilTheyClose()
     // A folder forwarded on the slide is shown once the library is open,
     // without the keys, which its row has once the dialog closes.
     editor->forceActiveFocus();
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QVERIFY(drawer->property("visible").toBool() && !drawer->property("opened").toBool());
     shell.backend->openFiles({folder});
     QVERIFY(QMetaObject::invokeMethod(window, "showHistory"));
@@ -16255,7 +16294,7 @@ void ParchTests::keysReachEveryRegionAndNotice()
     step(true, editor, "back round to the text");
     if (QTest::currentTestFailed()) return;
     // A hidden library is passed over.
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(!shell.item(QStringLiteral("library"))->isVisible());
     QTRY_COMPARE(focused(), editor);
     step(false, dismiss, "the notice, with the library hidden");
@@ -16299,7 +16338,7 @@ void ParchTests::keysReachEveryRegionAndNotice()
     QObject *drawer = shell.object(QStringLiteral("libraryDrawer"));
     step(false, noticeButton(shell, QStringLiteral("conflict")), "the conflict, narrow");
     step(false, editor, "the text, narrow");
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(drawer->property("opened").toBool());
     QTRY_COMPARE(focused(), search);
     step(false, noticeButton(shell, QStringLiteral("conflict")), "the conflict, from the drawer");
@@ -16365,7 +16404,7 @@ void ParchTests::windowMenuOpensFromTheKeyboard()
     // Find a document shows the library, hidden or not, with the keys in its field.
     QQuickItem *library = shell.item(QStringLiteral("library"));
     QQuickItem *search = shell.item(QStringLiteral("librarySearch"));
-    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_F9);
     QTRY_VERIFY(!library->isVisible());
     QTRY_COMPARE(window->activeFocusItem(), editor);
     QTest::keyClick(window, Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier);
@@ -16418,12 +16457,12 @@ void ParchTests::windowMenuActsOnItsOwnWindow()
     QVERIFY(menu);
     // The first window is the one the backend has in front.
     shell.backend->activate(first);
-    QVERIFY(QMetaObject::invokeMethod(menu, "save"));
+    QVERIFY(QMetaObject::invokeMethod(menu, "commandChosen", Q_ARG(QString, QStringLiteral("save"))));
     QCOMPARE(picker.saves, 0);
     QVERIFY(named->isSaving());
     QTRY_COMPARE(readFile(file), QByteArray("more beta\n"));
     shell.backend->activate(first);
-    QVERIFY(QMetaObject::invokeMethod(menu, "closeTab"));
+    QVERIFY(QMetaObject::invokeMethod(menu, "commandChosen", Q_ARG(QString, QStringLiteral("closeTab"))));
     QTRY_COMPARE(second->tabs()->rowCount(), 1);
     QCOMPARE(first->tabs()->rowCount(), 2);
 }

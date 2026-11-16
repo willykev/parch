@@ -1,219 +1,106 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import Parch
 
-// The window's menu: its actions with the keys that do the same, so that
-// every action can be found without knowing its keys. The keys are the
-// window's own shortcuts' text, so the two cannot disagree.
-Menu {
-    id: menu
+// The window's menu: its commands with the keys that do the same, so that
+// every command can be found without knowing its keys. Each entry is a
+// command of the registry, named and keyed as the registry has it, and
+// chosen through commandChosen(), as the window's shortcuts and palette
+// run it. The formatting commands are in a Format section of their own.
+ThemedMenu {
+    id: windowMenu
 
-    // The text of the window's shortcuts, by action.
+    property CommandRegistry commands: null
+    // The text of each command's keys, by command id.
     property var keys: ({})
     property bool libraryShown: false
-    // Whether the front tab has a document a second view can show.
-    property bool canNewView: true
-    // Whether the front tab has a document to save or look back through.
-    property bool hasDocument: true
+    property bool toolbarShown: false
+    // Whether a command can run now, as the window says.
+    property var canRun: function(command) { return true }
 
-    signal newDraft()
-    signal newWindow()
-    signal newView()
-    signal openFiles()
-    signal openFolder()
-    signal save()
-    signal saveAs()
-    signal showHistory()
-    signal checkLinks()
-    signal closeTab()
-    signal findDocument()
-    signal toggleLibrary()
-    signal zoomIn()
-    signal zoomOut()
-    signal resetZoom()
-    signal quit()
+    signal commandChosen(string command)
 
-    readonly property real gap: Math.round(theme.fontSize * 2 / 3)
-    readonly property real inset: Math.round(theme.fontSize / 4)
-    // The advance of "0" in the interface font.
-    readonly property TextMetrics zero: TextMetrics {
-        font.family: theme.fontFamily
-        font.pixelSize: theme.fontSize
-        text: "0"
-    }
-
-    padding: Math.max(1, theme.controlBorderWidth)
-    topPadding: inset
-    bottomPadding: inset
-    font.family: theme.fontFamily
-    font.pixelSize: theme.fontSize
-
-    // The Basic menu's own list fades its scroll indicator in and out at a
-    // fixed pace; this one has none, and scrolls only if it must.
-    contentItem: ListView {
-        // As wide as the widest entry, so that none is cut short.
-        implicitWidth: {
-            let widest = 0
-            for (let i = 0; i < menu.count; ++i)
-                widest = Math.max(widest, menu.itemAt(i).implicitWidth)
-            return widest
-        }
-        implicitHeight: contentHeight
-        model: menu.contentModel
-        interactive: Window.window ? contentHeight + menu.topPadding + menu.bottomPadding > menu.height : false
-        clip: true
-        currentIndex: menu.currentIndex
-    }
-
-    background: Rectangle {
-        implicitWidth: 20 * menu.zero.advanceWidth
-        color: theme.menuBackground
-        radius: theme.radius
-        border.width: Math.max(1, theme.controlBorderWidth)
-        border.color: theme.menuBorder
-    }
-
-    MenuEntry {
-        text: qsTr("New draft")
-        keys: menu.keys.newDraft || ""
-        onTriggered: menu.newDraft()
-    }
-    MenuEntry {
-        text: qsTr("New window")
-        keys: menu.keys.newWindow || ""
-        onTriggered: menu.newWindow()
-    }
+    CommandEntry { command: "newDraft" }
+    CommandEntry { command: "newWindow" }
     // A second tab on the document in front, with a cursor and scroll of its own.
-    MenuEntry {
-        objectName: "newViewEntry"
-        text: qsTr("New view")
-        enabled: menu.canNewView
-        onTriggered: menu.newView()
+    CommandEntry { objectName: "newViewEntry"; command: "newView" }
+    MenuLine {}
+    CommandEntry { command: "open" }
+    CommandEntry { command: "openFolder" }
+    CommandEntry { command: "findDocument" }
+    CommandEntry { command: "save" }
+    CommandEntry { command: "saveAs" }
+    CommandEntry { objectName: "historyEntry"; command: "history" }
+    CommandEntry { objectName: "checkLinksEntry"; command: "checkLinks" }
+    CommandEntry { command: "closeTab" }
+    MenuLine {}
+    ThemedMenu {
+        objectName: "formatMenu"
+        title: qsTr("Format")
+
+        CommandEntry { command: "bold" }
+        CommandEntry { command: "italic" }
+        CommandEntry { command: "strikethrough" }
+        CommandEntry { command: "highlight" }
+        CommandEntry { command: "code" }
+        CommandEntry { command: "comment" }
+        MenuLine {}
+        ThemedMenu {
+            objectName: "headingMenu"
+            title: qsTr("Heading")
+
+            CommandEntry { command: "heading1" }
+            CommandEntry { command: "heading2" }
+            CommandEntry { command: "heading3" }
+            CommandEntry { command: "heading4" }
+            CommandEntry { command: "heading5" }
+            CommandEntry { command: "heading6" }
+            CommandEntry { command: "paragraph" }
+        }
+        CommandEntry { command: "quote" }
+        CommandEntry { command: "bulletList" }
+        CommandEntry { command: "numberedList" }
+        CommandEntry { command: "taskList" }
+        CommandEntry { command: "toggleTask" }
+        CommandEntry { command: "codeBlock" }
+        CommandEntry { command: "formatTable" }
+        MenuLine {}
+        CommandEntry { command: "link" }
+        CommandEntry { command: "image" }
+        CommandEntry { command: "footnote" }
+        CommandEntry { command: "table" }
+        CommandEntry { command: "inlineMath" }
+        CommandEntry { command: "displayMath" }
+        CommandEntry { command: "thematicBreak" }
+        CommandEntry { command: "pageBreak" }
     }
     MenuLine {}
-    MenuEntry {
-        text: qsTr("Open…")
-        keys: menu.keys.open || ""
-        onTriggered: menu.openFiles()
+    CommandEntry {
+        command: "library"
+        text: windowMenu.libraryShown ? qsTr("Hide library") : qsTr("Show library")
     }
-    MenuEntry {
-        text: qsTr("Open folder…")
-        onTriggered: menu.openFolder()
+    CommandEntry {
+        objectName: "toolbarEntry"
+        command: "toolbar"
+        text: windowMenu.toolbarShown ? qsTr("Hide toolbar") : qsTr("Show toolbar")
     }
-    MenuEntry {
-        text: qsTr("Find a document…")
-        keys: menu.keys.find || ""
-        onTriggered: menu.findDocument()
-    }
-    MenuEntry {
-        text: qsTr("Save")
-        keys: menu.keys.save || ""
-        enabled: menu.hasDocument
-        onTriggered: menu.save()
-    }
-    MenuEntry {
-        text: qsTr("Save as…")
-        keys: menu.keys.saveAs || ""
-        enabled: menu.hasDocument
-        onTriggered: menu.saveAs()
-    }
-    MenuEntry {
-        objectName: "historyEntry"
-        text: qsTr("Version history…")
-        enabled: menu.hasDocument
-        onTriggered: menu.showHistory()
-    }
-    MenuEntry {
-        objectName: "checkLinksEntry"
-        text: qsTr("Check links…")
-        enabled: menu.hasDocument
-        onTriggered: menu.checkLinks()
-    }
-    MenuEntry {
-        text: qsTr("Close tab")
-        keys: menu.keys.closeTab || ""
-        onTriggered: menu.closeTab()
-    }
+    CommandEntry { command: "zoomIn" }
+    CommandEntry { command: "zoomOut" }
+    CommandEntry { command: "resetZoom" }
     MenuLine {}
-    MenuEntry {
-        text: menu.libraryShown ? qsTr("Hide library") : qsTr("Show library")
-        keys: menu.keys.library || ""
-        onTriggered: menu.toggleLibrary()
-    }
-    MenuEntry {
-        text: qsTr("Larger text")
-        keys: menu.keys.zoomIn || ""
-        onTriggered: menu.zoomIn()
-    }
-    MenuEntry {
-        text: qsTr("Smaller text")
-        keys: menu.keys.zoomOut || ""
-        onTriggered: menu.zoomOut()
-    }
-    MenuEntry {
-        text: qsTr("Theme text size")
-        keys: menu.keys.resetZoom || ""
-        onTriggered: menu.resetZoom()
-    }
+    CommandEntry { command: "palette" }
+    CommandEntry { command: "preferences" }
+    CommandEntry { command: "shortcuts" }
     MenuLine {}
-    MenuEntry {
-        text: qsTr("Quit")
-        keys: menu.keys.quit || ""
-        onTriggered: menu.quit()
-    }
+    CommandEntry { command: "quit" }
 
-    // A row of the menu: what it does on the left, its keys on the right.
-    component MenuEntry: MenuItem {
-        id: entry
+    // A command's entry: its title, or a text of its own, and its keys.
+    component CommandEntry: MenuEntry {
+        property string command
 
-        property string keys
-
-        implicitHeight: Math.round(theme.fontSize * 2.2)
-        leftPadding: menu.gap
-        rightPadding: menu.gap
-        font.family: theme.fontFamily
-        font.pixelSize: theme.fontSize
-
-        contentItem: Item {
-            implicitWidth: name.implicitWidth + 3 * menu.zero.advanceWidth + shortcut.implicitWidth
-            implicitHeight: name.implicitHeight
-
-            Text {
-                id: name
-                anchors.left: parent.left
-                anchors.right: shortcut.left
-                anchors.rightMargin: menu.zero.advanceWidth
-                anchors.verticalCenter: parent.verticalCenter
-                text: entry.text
-                textFormat: Text.PlainText
-                font: entry.font
-                color: !entry.enabled ? theme.dim : entry.highlighted ? theme.bright : theme.foreground
-                elide: Text.ElideRight
-            }
-
-            Text {
-                id: shortcut
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: entry.keys
-                textFormat: Text.PlainText
-                font: entry.font
-                color: theme.dim
-            }
-        }
-
-        background: Rectangle {
-            radius: theme.radius
-            color: entry.down ? theme.pressedFill : entry.highlighted ? theme.hoverFill : "transparent"
-        }
-    }
-
-    component MenuLine: MenuSeparator {
-        topPadding: menu.inset
-        bottomPadding: menu.inset
-
-        contentItem: Rectangle {
-            implicitHeight: Math.max(1, theme.controlBorderWidth)
-            color: theme.controlBorder
-        }
+        text: windowMenu.commands ? windowMenu.commands.title(command) : ""
+        keys: windowMenu.keys[command] || ""
+        enabled: windowMenu.canRun(command)
+        onTriggered: windowMenu.commandChosen(command)
     }
 }

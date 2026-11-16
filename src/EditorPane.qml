@@ -34,6 +34,13 @@ Rectangle {
     signal copyAsked(var names, real bytes)
     function answerInclude(choice) { binding.answerInclude(choice) }
     function answerCopy(copy) { binding.answerCopy(copy) }
+    // The heading commands underline levels one and two rather than marking them with #.
+    property bool setextHeadings: false
+    // The view's selection, from anchor to cursor, as source offsets, and
+    // whether the text takes edits.
+    readonly property int cursorPosition: binding.cursorSource
+    readonly property int anchorPosition: binding.anchorSource
+    readonly property bool editable: binding.editable
 
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
@@ -72,6 +79,8 @@ Rectangle {
     function undo() { binding.undo() }
     function redo() { binding.redo() }
     function focusText() { editor.forceActiveFocus() }
+    // A formatting command, by id, on this view's selection.
+    function format(command) { return binding.format(command) }
 
     // Where this view is, as source offsets, and putting it back there. The
     // binding keeps positions inside the text and at grapheme boundaries.
@@ -271,6 +280,7 @@ Rectangle {
         editor: editor
         blocked: pane.inputBlocked
         attachments: pane.attachments
+        setextHeadings: pane.setextHeadings
         onCursorChanged: {
             pane.viewMoved()
             pane.wakeCaret()

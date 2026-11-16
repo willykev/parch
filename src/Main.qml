@@ -29,6 +29,7 @@ ApplicationWindow {
     // the window's shortcuts wait.
     readonly property bool dialogOpen: conflictDialog.visible || historyDialog.visible || closeConfirmation.visible
                                        || attachmentDialog.visible || linkCheckDialog.visible
+                                       || commandPalette.visible || preferencesDialog.visible || shortcutsDialog.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -100,6 +101,25 @@ ApplicationWindow {
     // field, to find a document by name.
     function findDocument() {
         focusLibrary("")
+    }
+
+    // The formatting toolbar shows while the setting has it shown and the
+    // writing area is wide enough for its buttons on one line; a narrower
+    // window shows it, wrapped, once asked to.
+    readonly property bool toolbarFits: writing.width >= toolbar.naturalWidth
+    property bool toolbarAsked: false
+    readonly property bool toolbarShown: document !== null && settings.showToolbar && (toolbarFits || toolbarAsked)
+
+    function toggleToolbar() {
+        if (toolbarShown) {
+            // Hidden here alone where it was only asked for; everywhere otherwise.
+            if (toolbarFits)
+                settings.setShowToolbar(false)
+            toolbarAsked = false
+        } else {
+            settings.setShowToolbar(true)
+            toolbarAsked = !toolbarFits
+        }
     }
 
     // The window's menu, from the keyboard: its first entry is highlighted
@@ -306,62 +326,76 @@ ApplicationWindow {
         Qt.callLater(window.showFolder)
     }
 
-    // The text of the shortcuts, by action, for the menu and the tooltips.
-    readonly property var keys: ({
-        newDraft: newDraftKey.nativeText,
-        newWindow: newWindowKey.nativeText,
-        open: openKey.nativeText,
-        save: saveKey.nativeText,
-        saveAs: saveAsKey.nativeText,
-        closeTab: closeTabKey.nativeText,
-        find: findKey.nativeText,
-        menu: menuKey.nativeText,
-        library: libraryKey.nativeText,
-        zoomIn: zoomInKey.nativeText,
-        zoomOut: zoomOutKey.nativeText,
-        resetZoom: resetZoomKey.nativeText,
-        quit: quitKey.nativeText
+    // Everything the window can do, from the one list the menu, the
+    // palette, the toolbar and the shortcuts all come from.
+    readonly property CommandRegistry commands: backend.commands
+    // The text of each command's keys, by command id, for the menu and the tooltips.
+    readonly property var keys: commands.keys
+
+    // Whether a command can run in this window now: one that edits needs
+    // text that takes edits, one about a document needs one in front.
+    function canRun(command) {
+        switch (commands.needs(command)) {
+        case "text":
+            return document !== null && editorPane.editable
+        case "document":
+            return document !== null
+        default:
+            return true
+        }
+    }
+
+    // What this window does for the commands whose action is not the
+    // application's. A formatting command acts on the editor's selection.
+    readonly property var windowActions: ({
+        save: () => window.save(),
+        history: () => window.showHistory(),
+        checkLinks: () => window.checkLinks(),
+        findDocument: () => window.findDocument(),
+        library: () => window.toggleLibrary(),
+        toolbar: () => window.toggleToolbar(),
+        menu: () => window.openMenu(),
+        // Tabs step round the ends, and so do the window's regions.
+        nextTab: () => window.stepTab(1),
+        previousTab: () => window.stepTab(-1),
+        nextRegion: () => window.stepRegion(1),
+        previousRegion: () => window.stepRegion(-1),
+        undo: () => editorPane.undo(),
+        redo: () => editorPane.redo(),
+        palette: () => commandPalette.show(),
+        preferences: () => preferencesDialog.open(),
+        shortcuts: () => shortcutsDialog.show()
     })
 
-    // Every window has these shortcuts, and only the one in front answers
-    // them, while none of its dialogs is open.
-    Shortcut { id: newDraftKey; sequence: "Ctrl+N"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.act(() => backend.newDraft()) }
-    Shortcut { id: newWindowKey; sequence: "Ctrl+Shift+N"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.act(() => backend.newWindow()) }
-    Shortcut { id: openKey; sequence: "Ctrl+O"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.act(() => backend.open()) }
-    Shortcut { id: saveKey; sequence: "Ctrl+S"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.save() }
-    Shortcut { id: saveAsKey; sequence: "Ctrl+Shift+S"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.act(() => backend.saveAs()) }
-    Shortcut {
-        id: closeTabKey
-        sequence: "Ctrl+W"
-        context: Qt.ApplicationShortcut
-        enabled: window.shortcutsOn
-        onActivated: window.act(() => backend.requestCloseTab(window.tabs.activeIndex))
+    // Runs a command in this window, however it was asked for.
+    function run(command) {
+        if (!canRun(command) || commands.run(command, window.context))
+            return
+        const action = windowActions[command]
+        if (action) {
+            action()
+        } else if (editorPane.format(command)) {
+            // Chosen from a button or the menu, the text has the keys again.
+            window.focusText()
+        }
     }
-    // The editor takes these keys itself while it has focus, so the window's
-    // shortcuts act only when it does not: one step for each press either way.
-    Shortcut { sequence: "Ctrl+Z"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: editorPane.undo() }
-    Shortcut { sequence: "Ctrl+Shift+Z"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: editorPane.redo() }
-    Shortcut { sequence: "Ctrl+Y"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: editorPane.redo() }
-    // Tabs step with Ctrl+Tab and Ctrl+Shift+Tab, or Ctrl+PageDown and
-    // Ctrl+PageUp, as in other tabbed applications.
-    Shortcut { sequence: "Ctrl+Tab"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.stepTab(1) }
-    Shortcut { sequence: "Ctrl+Shift+Tab"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.stepTab(-1) }
-    Shortcut { sequence: "Ctrl+PgDown"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.stepTab(1) }
-    Shortcut { sequence: "Ctrl+PgUp"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.stepTab(-1) }
-    // Ctrl+= is Ctrl and + without Shift on a US keyboard; Ctrl++ is the same
-    // on keyboards with a + key of its own.
-    Shortcut { id: zoomInKey; sequence: "Ctrl+="; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: settings.zoom(1) }
-    Shortcut { sequence: "Ctrl++"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: settings.zoom(1) }
-    Shortcut { id: zoomOutKey; sequence: "Ctrl+-"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: settings.zoom(-1) }
-    Shortcut { id: resetZoomKey; sequence: "Ctrl+0"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: settings.resetZoom() }
-    Shortcut { id: findKey; sequence: "Ctrl+Shift+O"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.findDocument() }
-    Shortcut { id: menuKey; sequence: "F10"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.openMenu() }
-    Shortcut { id: libraryKey; sequence: "Ctrl+B"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.toggleLibrary() }
-    // F6 and Shift+F6 move the keys between the window's regions, as GTK
-    // applications do.
-    Shortcut { sequences: ["F6"]; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.stepRegion(1) }
-    Shortcut { sequences: ["Shift+F6"]; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.stepRegion(-1) }
-    Shortcut { id: quitKey; sequence: "Ctrl+Q"; context: Qt.ApplicationShortcut; enabled: window.shortcutsOn; onActivated: window.act(() => backend.quit()) }
+
+    // Every key of every command is a shortcut of every window, and only the
+    // window in front answers it, while none of its dialogs is open. The
+    // editor takes its own editing keys, such as Ctrl+Z, while it has focus,
+    // so those act here only when it does not: one step for each press.
+    Instantiator {
+        model: window.commands.bound
+        delegate: Shortcut {
+            required property string commandId
+            required property string keySequence
+
+            sequence: keySequence
+            context: Qt.ApplicationShortcut
+            enabled: window.shortcutsOn && window.canRun(commandId)
+            onActivated: window.run(commandId)
+        }
+    }
 
     HeaderBar {
         id: header
@@ -386,28 +420,16 @@ ApplicationWindow {
         parent: header
         x: header.width - width - Math.round(theme.fontSize / 4)
         y: header.height
+        commands: window.commands
         keys: window.keys
         libraryShown: header.libraryShown
-        canNewView: window.document !== null
-        hasDocument: window.document !== null
-        // Each action is this window's, whichever the backend last heard was in front.
-        onNewDraft: window.act(() => backend.newDraft())
-        onNewWindow: window.act(() => backend.newWindow())
-        onNewView: window.act(() => backend.newView())
-        onOpenFiles: window.act(() => backend.open())
-        onOpenFolder: window.act(() => backend.openFolder())
-        onSave: window.save()
-        onSaveAs: window.act(() => backend.saveAs())
-        onShowHistory: window.showHistory()
-        onCheckLinks: window.checkLinks()
-        onCloseTab: window.act(() => backend.requestCloseTab(window.tabs.activeIndex))
-        // Once the menu has closed and given the keys back to the text.
-        onFindDocument: Qt.callLater(window.findDocument)
-        onToggleLibrary: window.toggleLibrary()
-        onZoomIn: settings.zoom(1)
-        onZoomOut: settings.zoom(-1)
-        onResetZoom: settings.resetZoom()
-        onQuit: window.act(() => backend.quit())
+        toolbarShown: window.toolbarShown
+        canRun: window.canRun
+        // Each command is this window's, whichever window the backend last
+        // heard was in front. Finding a document gives the keys to the
+        // library, so it waits until the menu has closed and given them back
+        // to the text.
+        onCommandChosen: (command) => command === "findDocument" ? Qt.callLater(window.run, command) : window.run(command)
         onClosed: window.focusText()
     }
 
@@ -473,6 +495,22 @@ ApplicationWindow {
                 }
             }
 
+            // Under the tabs, in the layout, its buttons before the editor
+            // for Tab; a click on them leaves the keys in the text.
+            FormatToolbar {
+                id: toolbar
+                objectName: "toolbar"
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: tabStrip.bottom
+                visible: window.toolbarShown
+                height: visible ? implicitHeight : 0
+                commands: window.commands
+                keys: window.keys
+                canRun: window.canRun
+                onCommandChosen: (command) => window.run(command)
+            }
+
             // Above the editor and in the layout, so it never covers the
             // text. Its buttons come before the editor for Tab, which types
             // in the editor; a click on them leaves the keys in the text.
@@ -481,7 +519,7 @@ ApplicationWindow {
                 objectName: "noticeBar"
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.top: tabStrip.bottom
+                anchors.top: toolbar.bottom
                 height: implicitHeight
                 document: window.document
                 historyPaused: backend.historyPaused
@@ -532,6 +570,8 @@ ApplicationWindow {
                 status: window.tabs.activeStatus
                 problem: backend.notice ? "" : backend.problem
                 problemDetail: backend.notice ? "" : backend.shownText(backend.problemDetail)
+                selectionStart: editorPane.anchorPosition
+                selectionEnd: editorPane.cursorPosition
             }
 
             EditorPane {
@@ -548,6 +588,7 @@ ApplicationWindow {
                 fontPixelSize: settings.fontPixelSize
                 lineHeight: settings.lineHeight
                 fontFamily: settings.editorFontFamily
+                setextHeadings: settings.setextHeadings
                 inputBlocked: window.dialogOpen
                 attachments: backend.attachments
                 onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
@@ -724,6 +765,28 @@ ApplicationWindow {
     LinkCheckDialog {
         id: linkCheckDialog
         objectName: "linkCheckDialog"
+        onClosed: window.dialogClosed()
+    }
+
+    CommandPalette {
+        id: commandPalette
+        objectName: "commandPalette"
+        commands: window.commands
+        canRun: window.canRun
+        runCommand: window.run
+        onClosed: window.dialogClosed()
+    }
+
+    PreferencesDialog {
+        id: preferencesDialog
+        objectName: "preferencesDialog"
+        onClosed: window.dialogClosed()
+    }
+
+    ShortcutsDialog {
+        id: shortcutsDialog
+        objectName: "shortcutsDialog"
+        commands: window.commands
         onClosed: window.dialogClosed()
     }
 }

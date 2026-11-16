@@ -18,5 +18,19 @@
         <file>FieldCaret.qml</file>
         <file>Icon.qml</file>
         <file>icons.js</file>
+        <file>ThemedField.qml</file>
+        <file>ThemedCheck.qml</file>
+        <file>ThemedComboBox.qml</file>
+        <file>ThemedSpinBox.qml</file>
+        <file>ThemedMenu.qml</file>
+        <file>MenuEntry.qml</file>
+        <file>MenuLine.qml</file>
+        <file>FormatToolbar.qml</file>
+        <file>CommandPalette.qml</file>
+        <file>ShortcutsDialog.qml</file>
+        <file>PreferencesDialog.qml</file>
+        <file>PreferenceSection.qml</file>
+        <file>PreferenceRow.qml</file>
+        <file>WritingPreferences.qml</file>
     </qresource>
 </RCC>

@@ -1,9 +1,10 @@
 #pragma once
 
 #include "apppaths.h"
-// The attachments, documents, the settings and the review are properties
-// QML reads, so their types must be complete here.
+// The attachments, documents, the settings, the commands and the review are
+// properties QML reads, so their types must be complete here.
 #include "attachments.h"
+#include "commandregistry.h"
 #include "document.h"
 #include "documentreview.h"
 #include "history.h"
@@ -41,6 +42,9 @@ class WindowContext;
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(Settings *settings READ settings CONSTANT)
+    // Everything a window can do, with its keys; the application's own
+    // actions run here, for the window that asks.
+    Q_PROPERTY(CommandRegistry *commands READ commands CONSTANT)
     // Why the last action could not be done, in a few words; empty when
     // nothing is wrong. A refused quit stays until every text it found
     // unsafe is in its file or in recovery; anything else is a notice, which
@@ -84,6 +88,7 @@ public:
     Autosave *autosave() const;
     History *history() const;
     Settings *settings() const;
+    CommandRegistry *commands() const;
     // The files opened, saved and named most recently.
     RecentFiles *recentFiles() const;
     // Where the libraries ask the file system, apart from where documents
@@ -250,6 +255,8 @@ signals:
     void windowRemoved(WindowContext *window);
 
 private:
+    // Registers every command, with the actions that are the application's.
+    void addCommands();
     WindowContext *makeWindow();
     void announce(WindowContext *window);
     void watch(Document *document);
@@ -317,6 +324,7 @@ private:
     std::unique_ptr<DocumentStore> m_store;
     std::unique_ptr<Autosave> m_autosave;
     Settings *m_settings;
+    std::unique_ptr<CommandRegistry> m_commands;
     std::unique_ptr<RecentFiles> m_recentFiles;
     std::unique_ptr<QThreadPool> m_libraryPool;
     SessionWriter m_sessionWriter;

@@ -16,6 +16,8 @@ HEADERS += \
     src/benchmark.h \
     src/caretrest.h \
     src/cli.h \
+    src/commandfilter.h \
+    src/commandregistry.h \
     src/diskfile.h \
     src/document.h \
     src/documentreview.h \
@@ -29,6 +31,7 @@ HEADERS += \
     src/hyprland.h \
     src/librarymodel.h \
     src/linktargets.h \
+    src/markdownediting.h \
     src/pathtext.h \
     src/portalfilepicker.h \
     src/qmltypes.h \
@@ -43,7 +46,8 @@ HEADERS += \
     src/tabmodel.h \
     src/theme.h \
     src/themefolder.h \
-    src/windowcontext.h
+    src/windowcontext.h \
+    src/wordcounter.h
 
 SOURCES += \
     src/main.cpp \
@@ -55,6 +59,8 @@ SOURCES += \
     src/benchmark.cpp \
     src/caretrest.cpp \
     src/cli.cpp \
+    src/commandfilter.cpp \
+    src/commandregistry.cpp \
     src/diskfile.cpp \
     src/document.cpp \
     src/documentreview.cpp \
@@ -68,6 +74,7 @@ SOURCES += \
     src/hyprland.cpp \
     src/librarymodel.cpp \
     src/linktargets.cpp \
+    src/markdownediting.cpp \
     src/pathtext.cpp \
     src/portalfilepicker.cpp \
     src/qmltypes.cpp \
@@ -80,6 +87,7 @@ SOURCES += \
     src/sourcebuffer.cpp \
     src/tabmodel.cpp \
     src/theme.cpp \
-    src/windowcontext.cpp
+    src/windowcontext.cpp \
+    src/wordcounter.cpp
 
 RESOURCES += src/resources.qrc

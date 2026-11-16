@@ -2,6 +2,7 @@
 
 #include "attachments.h"
 #include "document.h"
+#include "markdownediting.h"
 #include "sourcebuffer.h"
 #include "sourcetypes.h"
 
@@ -13,7 +14,9 @@
 #include <QString>
 #include <QStringView>
 #include <QUrl>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QInputMethodEvent;
@@ -91,6 +94,9 @@ class EditorBinding : public QObject {
     // Where pasted images and dropped files are placed; without it, files
     // are not attached, and images in pasted HTML keep only their alt text.
     Q_PROPERTY(Attachments *attachments READ attachments WRITE setAttachments NOTIFY attachmentsChanged)
+    // The heading commands underline headings of levels one and two rather
+    // than marking them with #.
+    Q_PROPERTY(bool setextHeadings READ setextHeadings WRITE setSetextHeadings NOTIFY setextHeadingsChanged)
 
 public:
     // What the writer chose for a dropped Markdown file.
@@ -111,6 +117,14 @@ public:
     void setLineHeight(qreal lineHeight);
     bool blocked() const { return m_blocked; }
     void setBlocked(bool blocked);
+    bool setextHeadings() const { return m_setextHeadings; }
+    void setSetextHeadings(bool setext);
+
+    // Runs one of MarkdownEditing's formatting commands on this view's
+    // selection, as one undo step, and selects what the command leaves
+    // selected. False when the command is unknown, changes nothing, or the
+    // view takes no edits now.
+    Q_INVOKABLE bool format(const QString &command);
 
     // UTF-16 positions; -1 for a position outside the text.
     Q_INVOKABLE int sourceToEditor(int utf16) const;
@@ -172,6 +186,7 @@ signals:
     // Dropped files larger than the large-file size are to be copied.
     // Answered with answerCopy().
     void copyAsked(const QStringList &names, qint64 bytes);
+    void setextHeadingsChanged();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -222,6 +237,11 @@ private:
     void deleteTo(Extent extent);
     // Edits the source from this view; with placeCaret the caret ends after the new text.
     bool replace(SourceRange range, const QString &text, EditKind kind, bool placeCaret = true);
+    // Applies a command's edits as one step and selects as it says.
+    bool apply(const TextChange &change);
+    // An editing key's change, run on this view's selection; false when the key does nothing special here.
+    bool applyEditing(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation);
+    MarkdownEditing::Options editingOptions() const;
     void cancelComposition();
 
     // The selection in source offsets, widened to whole graphemes.
@@ -253,6 +273,7 @@ private:
     bool m_loaded = false;
     bool m_editable = false;
     bool m_blocked = false;
+    bool m_setextHeadings = false;
     // The projection is being changed to follow the source.
     bool m_projecting = false;
     // An event this binding made is going to the TextEdit unfiltered.

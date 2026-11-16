@@ -58,7 +58,8 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     : QObject(parent), m_paths(paths), m_recovery(std::make_unique<Recovery>(paths)),
       m_store(std::make_unique<DocumentStore>(paths)),
       m_autosave(std::make_unique<Autosave>(m_store.get(), m_recovery.get())),
-      m_settings(new Settings(paths.settingsFile(), this)), m_recentFiles(std::make_unique<RecentFiles>(paths)),
+      m_settings(new Settings(paths.settingsFile(), this)), m_commands(std::make_unique<CommandRegistry>(m_settings)),
+      m_recentFiles(std::make_unique<RecentFiles>(paths)),
       m_libraryPool(std::make_unique<QThreadPool>()), m_sessionWriter(paths),
       m_files(std::make_unique<FileRequests>(m_store.get(), m_settings)),
       m_review(std::make_unique<DocumentReview>(m_store.get()))
@@ -66,6 +67,7 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     // Two workers: enough to list a folder while another is slow, and few
     // enough that a folder that never answers costs little.
     m_libraryPool->setMaxThreadCount(2);
+    addCommands();
     // Text in recovery is safe, but only a write started after a refused quit
     // shows that the text it refused is; a document closes only once it is clean.
     connect(m_autosave.get(), &Autosave::recoveryWritten, this, [this](const QString &documentId, quint64 write) {
@@ -220,6 +222,35 @@ Recovery *Backend::recovery() const { return m_recovery.get(); }
 Autosave *Backend::autosave() const { return m_autosave.get(); }
 History *Backend::history() const { return m_store->history(); }
 Settings *Backend::settings() const { return m_settings; }
+
+CommandRegistry *Backend::commands() const { return m_commands.get(); }
+
+void Backend::addCommands()
+{
+    for (const CommandInfo &info : standardCommands()) m_commands->add(info);
+    // Each acts for the window that asked, whichever window the backend last
+    // heard came to the front; the rest are the window's own.
+    const auto inWindow = [this](void (Backend::*action)()) {
+        return [this, action](WindowContext *window) {
+            if (window) activate(window);
+            (this->*action)();
+        };
+    };
+    m_commands->setAction(QStringLiteral("newDraft"), inWindow(&Backend::newDraft));
+    m_commands->setAction(QStringLiteral("newWindow"), inWindow(&Backend::newWindow));
+    m_commands->setAction(QStringLiteral("newView"), inWindow(&Backend::newView));
+    m_commands->setAction(QStringLiteral("open"), inWindow(&Backend::open));
+    m_commands->setAction(QStringLiteral("openFolder"), inWindow(&Backend::openFolder));
+    m_commands->setAction(QStringLiteral("saveAs"), inWindow(&Backend::saveAs));
+    m_commands->setAction(QStringLiteral("quit"), inWindow(&Backend::quit));
+    m_commands->setAction(QStringLiteral("closeTab"), [this](WindowContext *window) {
+        if (window) activate(window);
+        if (WindowContext *active = activeWindow()) requestCloseTab(active->tabs()->activeIndex());
+    });
+    m_commands->setAction(QStringLiteral("zoomIn"), [this](WindowContext *) { m_settings->zoom(1); });
+    m_commands->setAction(QStringLiteral("zoomOut"), [this](WindowContext *) { m_settings->zoom(-1); });
+    m_commands->setAction(QStringLiteral("resetZoom"), [this](WindowContext *) { m_settings->resetZoom(); });
+}
 RecentFiles *Backend::recentFiles() const { return m_recentFiles.get(); }
 QThreadPool *Backend::libraryPool() const { return m_libraryPool.get(); }
 QString Backend::problem() const { return m_problem; }

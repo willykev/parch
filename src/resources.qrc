@@ -42,5 +42,7 @@
         <file>MoveDialog.qml</file>
         <file>TrashDialog.qml</file>
         <file>LinkUpdateDialog.qml</file>
+        <file>skill.md</file>
+        <file>export.css</file>
     </qresource>
 </RCC>

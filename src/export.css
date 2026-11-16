@@ -1,0 +1,120 @@
+/* The typography of parch's HTML export: a plain, readable page that does
+   not depend on the desktop's theme, on screen and on paper. */
+
+:root {
+  color-scheme: light;
+  --text: #1f2328;
+  --muted: #59636e;
+  --rule: #d1d9e0;
+  --tint: #f6f8fa;
+  --link: #0b57d0;
+  --mark: #fff3a3;
+}
+
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--text);
+  font-family: "Iowan Old Style", "Charter", "Bitstream Charter", "Source Serif 4", "Noto Serif", Georgia, serif;
+  font-size: 1.125rem;
+  line-height: 1.6;
+  font-kerning: normal;
+  hyphens: auto;
+  overflow-wrap: break-word;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 4rem;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Inter", "Source Sans 3", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.25;
+  margin: 2em 0 0.6em;
+  hyphens: manual;
+  break-after: avoid;
+}
+h1 { font-size: 2rem; margin-top: 0.5em; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+h4, h5, h6 { font-size: 1.05rem; }
+h6 { color: var(--muted); }
+
+p, ul, ol, dl, blockquote, pre, table, figure { margin: 0 0 1em; }
+ul, ol { padding-left: 1.6em; }
+li > ul, li > ol { margin-bottom: 0; }
+li > p { margin-bottom: 0.5em; }
+li:has(> input[type="checkbox"]) { list-style: none; }
+li > input[type="checkbox"] { margin: 0 0.4em 0 -1.4em; }
+
+a { color: var(--link); text-decoration-thickness: 0.06em; text-underline-offset: 0.15em; }
+
+blockquote {
+  margin-left: 0;
+  padding: 0 0 0 1em;
+  border-left: 0.25em solid var(--rule);
+  color: var(--muted);
+}
+
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2em 0; }
+
+code, kbd, pre, .math, pre.mermaid {
+  font-family: "JetBrains Mono", "Source Code Pro", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+  font-size: 0.875em;
+}
+code, kbd { background: var(--tint); border-radius: 0.25em; padding: 0.1em 0.3em; }
+pre {
+  background: var(--tint);
+  border-radius: 0.4em;
+  padding: 0.9em 1em;
+  overflow-x: auto;
+  line-height: 1.45;
+  hyphens: none;
+}
+pre code { background: none; padding: 0; font-size: 1em; }
+
+mark { background: var(--mark); color: inherit; padding: 0 0.1em; }
+
+img { max-width: 100%; height: auto; }
+
+table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
+th, td { border: 1px solid var(--rule); padding: 0.35em 0.7em; vertical-align: top; }
+th { background: var(--tint); }
+
+dt { font-weight: 600; }
+dd { margin: 0 0 0.5em 1.5em; }
+
+.math { white-space: pre-wrap; }
+div.math.display { display: block; margin: 0 0 1em; padding: 0.5em 1em; background: var(--tint); border-radius: 0.4em; }
+pre.mermaid { color: var(--muted); }
+
+nav.toc { margin: 0 0 2em; font-family: "Inter", "Source Sans 3", "Noto Sans", "Helvetica Neue", Arial, sans-serif; font-size: 0.95em; }
+nav.toc ul { list-style: none; padding-left: 1.2em; margin: 0; }
+nav.toc > ul { padding-left: 0; }
+
+sup.footnote-ref a { text-decoration: none; }
+section.footnotes, section.bibliography {
+  margin-top: 3em;
+  padding-top: 1em;
+  border-top: 1px solid var(--rule);
+  font-size: 0.9em;
+}
+a.footnote-backref { text-decoration: none; }
+.citation a { text-decoration: none; }
+
+.page-break { break-after: page; }
+
+@media print {
+  body { font-size: 11pt; background: none; }
+  main { max-width: none; padding: 0; }
+  a { color: inherit; }
+  pre, blockquote, table, figure, img { break-inside: avoid; }
+}

@@ -20,6 +20,7 @@ HEADERS += \
     src/caretrest.h \
     src/citations.h \
     src/cli.h \
+    src/clicommands.h \
     src/commandfilter.h \
     src/commandregistry.h \
     src/diagramrender.h \
@@ -27,13 +28,17 @@ HEADERS += \
     src/cslreference.h \
     src/cslrichtext.h \
     src/cslstyle.h \
+    src/dialectchoice.h \
     src/diskfile.h \
     src/document.h \
+    src/documentcheck.h \
     src/documentfind.h \
     src/documentreview.h \
+    src/documentsettings.h \
     src/documentstore.h \
     src/editorbinding.h \
     src/editordecorations.h \
+    src/exporter.h \
     src/fileorganizer.h \
     src/filepicker.h \
     src/filerequests.h \
@@ -42,11 +47,13 @@ HEADERS += \
     src/foldersearch.h \
     src/frontmatter.h \
     src/history.h \
+    src/htmlexport.h \
     src/htmlmarkdown.h \
     src/hyprland.h \
     src/librarymodel.h \
     src/linktargets.h \
     src/markdownediting.h \
+    src/markdownexport.h \
     src/librarywalk.h \
     src/markdownlines.h \
     src/outline.h \
@@ -78,6 +85,7 @@ HEADERS += \
     src/tabmodel.h \
     src/textsearch.h \
     src/theme.h \
+    src/treejson.h \
     src/themefolder.h \
     src/windowcontext.h \
     src/wordcounter.h
@@ -94,6 +102,7 @@ SOURCES += \
     src/caretrest.cpp \
     src/citations.cpp \
     src/cli.cpp \
+    src/clicommands.cpp \
     src/commandfilter.cpp \
     src/commandregistry.cpp \
     src/diagramrender.cpp \
@@ -101,13 +110,17 @@ SOURCES += \
     src/cslreference.cpp \
     src/cslrichtext.cpp \
     src/cslstyle.cpp \
+    src/dialectchoice.cpp \
     src/diskfile.cpp \
     src/document.cpp \
+    src/documentcheck.cpp \
     src/documentfind.cpp \
     src/documentreview.cpp \
+    src/documentsettings.cpp \
     src/documentstore.cpp \
     src/editorbinding.cpp \
     src/editordecorations.cpp \
+    src/exporter.cpp \
     src/editorpaste.cpp \
     src/fileorganizer.cpp \
     src/filerequests.cpp \
@@ -116,11 +129,13 @@ SOURCES += \
     src/foldersearch.cpp \
     src/frontmatter.cpp \
     src/history.cpp \
+    src/htmlexport.cpp \
     src/htmlmarkdown.cpp \
     src/hyprland.cpp \
     src/librarymodel.cpp \
     src/linktargets.cpp \
     src/markdownediting.cpp \
+    src/markdownexport.cpp \
     src/librarywalk.cpp \
     src/markdownlines.cpp \
     src/outline.cpp \
@@ -156,6 +171,7 @@ SOURCES += \
     src/tabmodel.cpp \
     src/textsearch.cpp \
     src/theme.cpp \
+    src/treejson.cpp \
     src/windowcontext.cpp \
     src/wordcounter.cpp
 

@@ -52,6 +52,13 @@ struct HtmlOptions {
     RawHtml rawHtml = RawHtml::Safe;
     bool headingIds = true;
     bool endnotes = true; // the notes and the bibliography after the text
+    // Where a link or an image leads in the output, for a page written
+    // somewhere other than beside its source: called with the Link,
+    // Autolink or Image node, or the `a` or `img` HtmlElement, and the
+    // destination (href or src) as the document has it, it returns the one
+    // to write. A script URL it returns is still emptied in Safe mode. When
+    // unset, every destination is written as the document has it.
+    std::function<QString(const Node &node, const QString &destination)> destination;
 
     // The plain CommonMark rendering the specification's examples show.
     static HtmlOptions commonMark();

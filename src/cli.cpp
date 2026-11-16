@@ -1,5 +1,6 @@
 #include "cli.h"
 
+#include "clicommands.h"
 #include "diskfile.h"
 
 #include <QCoreApplication>
@@ -11,7 +12,7 @@ QString versionLine()
     return QStringLiteral("parch ") + QStringLiteral(PARCH_VERSION);
 }
 
-QString helpText()
+QString openHelpText()
 {
     // Translated as one block so a catalog can keep the columns aligned.
     return QCoreApplication::translate("cli",
@@ -22,6 +23,14 @@ QString helpText()
         "  --benchmark OUT  Measure the window on a copy of one FILE; write JSON to OUT\n"
         "  --version        Print the version and exit\n"
         "  --help           Print this help and exit\n");
+}
+
+QString helpText()
+{
+    QString text = openHelpText();
+    text.insert(text.indexOf(u'\n'), QCoreApplication::translate("cli", "\n       parch COMMAND [options]"));
+    return text + QCoreApplication::translate("cli", "\nCommands that need no display (parch help COMMAND for its options):\n") +
+           Cli::summary();
 }
 
 QStringList absoluteFiles(const QStringList &files, const QString &workingDirectory)
@@ -123,6 +132,12 @@ Launch parseLaunch(const QStringList &given)
         // The "open" word is only a subcommand before any file; afterwards it is a file name.
         if (argument == QLatin1String("open") && i == 1)
             continue;
+        // So is a command's name, which runs it.
+        if (i == 1 && Cli::isCommand(argument)) {
+            launch.kind = Launch::Command;
+            launch.commandArguments = arguments;
+            return launch;
+        }
         launch.files.append(argument);
     }
     return launch;

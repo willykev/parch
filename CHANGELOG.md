@@ -53,3 +53,22 @@ The first version: a native Markdown writing app for Omarchy.
 - Find a document by name across every library folder.
 - Open files from the terminal, in the running window when there is one.
 - The session reopens your windows and tabs where you left them.
+
+### From the terminal
+
+- `parch check` reports what is wrong in documents and the files they
+  include, with file, line and column: includes, references, footnotes,
+  citations and variables that lead nowhere, missing images, links to files
+  or headings that are not there, and more.
+- `parch render` writes a document's HTML, plain text, outline or semantic
+  tree, and `parch stats` counts its words, characters, reading time and
+  headings.
+- `parch export` writes a document as one Markdown file with its includes in
+  place, or as a standalone HTML page, never over the document and never
+  over another file unless asked. PDF, DOCX and EPUB are not available from
+  the terminal yet.
+- Every command needs no display, takes `--json`, and reads the Writer
+  profile unless `--profile`, `--extension` or `--use-saved-settings` say
+  otherwise.
+- `parch skill install` installs a skill that teaches coding agents to use
+  parch.

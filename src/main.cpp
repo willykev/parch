@@ -3,6 +3,7 @@
 #include "backend.h"
 #include "benchmark.h"
 #include "cli.h"
+#include "clicommands.h"
 #include "portalfilepicker.h"
 #include "qmltypes.h"
 #include "quitsignals.h"
@@ -50,6 +51,18 @@ int main(int argc, char *argv[])
     case Launch::Invalid:
         QTextStream(stderr) << launch.error << Qt::endl;
         return 1;
+    case Launch::Command: {
+        // The commands that read, render and export documents need no
+        // display, so no GUI application is made for them.
+        QCoreApplication app(argc, argv);
+        app.setApplicationName(QStringLiteral("parch"));
+        QFile out, err;
+        if (!out.open(STDOUT_FILENO, QIODevice::WriteOnly) ||
+            !err.open(STDERR_FILENO, QIODevice::WriteOnly | QIODevice::Unbuffered))
+            return Cli::Io;
+        const Cli::Context context{QDir::currentPath(), QDir::homePath(), AppPaths::standard(), &out, &err};
+        return Cli::run(launch.commandArguments, context);
+    }
     case Launch::Gui:
         break;
     }

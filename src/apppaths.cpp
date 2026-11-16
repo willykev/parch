@@ -38,6 +38,7 @@ AppPaths AppPaths::under(const QString &root)
 QString AppPaths::drafts() const { return data + QStringLiteral("/drafts"); }
 QString AppPaths::history() const { return data + QStringLiteral("/history"); }
 QString AppPaths::registryFile() const { return data + QStringLiteral("/documents.json"); }
+QString AppPaths::documentSettingsFile() const { return data + QStringLiteral("/document-settings.json"); }
 QString AppPaths::recovery() const { return state + QStringLiteral("/recovery"); }
 QString AppPaths::sessionFile() const { return state + QStringLiteral("/session.json"); }
 QString AppPaths::recentFile() const { return state + QStringLiteral("/recent.json"); }

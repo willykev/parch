@@ -66,11 +66,17 @@ moment after you pause.
 ## Use the terminal
 
 ```sh
-parch notes.md ideas.md   # Open files, in the running parch if there is one
-parch ~/Writing           # Add a folder to the library
+parch notes.md ideas.md            # Open files, in the running parch if there is one
+parch ~/Writing                    # Add a folder to the library
+parch check notes.md               # Find broken links, missing images, notes and includes
+parch render notes.md --to text    # The HTML, text, outline or semantic tree
+parch export book.md -o book.html  # A web page, or Markdown with its includes in place
+parch stats notes.md               # Words, characters and reading time
+parch skill install                # Teach your coding agents to use parch
 ```
 
-Run `parch --help` for all options.
+The commands need no display and take `--json`. Run `parch --help` for
+everything, and `parch help COMMAND` for one command's options.
 
 ## Your data
 
@@ -82,7 +88,8 @@ keeps its own things separately:
 - Words you add to the spelling dictionary in `~/.local/share/parch/dictionary.txt`.
 - Settings in `~/.config/parch/settings.json`.
 
-A formatted preview and export are not included yet.
+A formatted preview and exporting from the window are not included yet; the
+terminal exports Markdown and HTML.
 
 ## Development
 

@@ -301,16 +301,103 @@ The keys of every command can be changed with **Keyboard shortcuts…**.
 
 ```text
 Usage: parch [open] [--theme DIR] [--benchmark OUT] [FILE...]
+       parch COMMAND [options]
 
   open             Open the files that follow (optional; bare files also open)
   --theme DIR      Read theme tokens from DIR instead of the Omarchy theme
   --benchmark OUT  Measure the window on a copy of one FILE; write JSON to OUT
   --version        Print the version and exit
   --help           Print this help and exit
+
+Commands that need no display (parch help COMMAND for its options):
+  check FILE...    Report what is wrong in documents, with file, line and column
+  render FILE      Write a document's HTML, plain text, outline or semantic tree
+  export FILE      Write a document as Markdown with its includes, or as an HTML page
+  stats FILE       Count words and characters, reading time and headings
+  skill [install]  Print the skill for coding agents, or install it
+  help [COMMAND]   Print this help, or a command's options
 ```
 
 Files and folders given to `parch` while it is running open in the running
-window. A folder is added to the library.
+window. A folder is added to the library. A file named like a command opens
+with `parch open check` or `parch -- check`.
+
+### Checking, rendering and exporting
+
+The commands read a document together with the files it includes. They need
+no display, never change the document, and print text for people or, with
+`--json`, JSON for scripts. `parch help COMMAND` lists a command's options.
+
+```sh
+parch check notes.md chapters/*.md   # What is wrong, file by file
+parch render notes.md --to outline   # html, text, outline or json-tree
+parch export book.md -o book.html    # A page of its own
+parch export book.md -o whole.md     # One Markdown file with its includes in place
+parch stats book.md                  # Words, characters, reading time, headings
+```
+
+- **check** reports each problem as `file:line:column: severity: message
+  [code]`: includes that cannot be read, references, footnotes, citations and
+  variables that lead nowhere, images whose files are missing, links to files
+  or headings that are not there, malformed table rows, unclosed math, front
+  matter it cannot read, and HTML that is shown as text. Notes of severity
+  `info` (HTML shown as text, a footnote nothing refers to) are listed but do
+  not count as problems.
+- **render** writes the HTML fragment the preview and exports are made from
+  (`html`, the default), the text a reader sees (`text`), the headings
+  indented by level (`outline`), or the whole semantic tree with source ranges
+  (`json-tree`). Relative links and images lead from the folder the HTML is
+  written to, or from the document's.
+- **export** writes `md`, the document as one file with each include in
+  place (an included file's front matter left out and its variables written
+  out, its footnote and link labels kept apart from the document's, and its
+  paths written from the new file's folder), or `html`, a standalone page with
+  typography of its own that does not follow the desktop theme (`--title`
+  sets its title). Math and Mermaid diagrams are written as their source in
+  the page, and its notes say so. The format follows `-o`'s name unless `--to`
+  gives one. PDF, DOCX and EPUB cannot be exported from the terminal yet.
+- **stats** counts the words, characters (with and without spaces) and
+  headings a reader reads, and the reading time at 200 words a minute.
+
+An export never writes over the document or a file it includes, replaces a
+file that is there only with `--force`, and is not made at all when a file
+the document includes cannot be read. `--quiet` prints nothing but errors.
+`render -o` follows the same rules.
+
+### The dialect
+
+Every command reads the Writer profile with all of its extensions, whatever
+the window was last set to, so a command gives the same result on any
+machine. These options change it, the highest first:
+
+- `--profile writer|standard`, `--extension NAME` and `--no-extension NAME`
+  (given again for more); `parch help check` lists the extensions.
+- `--library DIR`: the folder `/rooted` includes are found in.
+- `--use-saved-settings`: read the document as parch keeps it, with the
+  Markdown settings kept for the document and its library folder, and the
+  library folder for `/rooted` includes. What the options say still wins.
+
+JSON results report the profile, the extensions, where each came from, the
+dialect version, and the version of what drew the result.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Done, and nothing wrong |
+| 1 | The command line is wrong |
+| 2 | `check` found problems; `export` was given a document whose includes cannot all be read |
+| 3 | A file could not be read or written, or is there and `--force` was not given |
+| 4 | The export could not be made, as for a format that is not available yet |
+
+### For coding agents
+
+`parch skill` prints a skill that tells coding agents how to write, check,
+render and export your documents with these commands. `parch skill install`
+installs it as `~/.agents/skills/parch/SKILL.md`, with a link to it from
+`~/.claude/skills/parch` when `~/.claude` exists. Running it again updates
+it; other skills, and a file or link there that is not parch's, are left
+alone.
 
 ## Files parch keeps
 

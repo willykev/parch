@@ -29,6 +29,8 @@ struct AppPaths {
     QString sessionFile() const;
     // Maps canonical file paths to document ids.
     QString registryFile() const;
+    // The Markdown settings kept for documents and library folders.
+    QString documentSettingsFile() const;
     QString settingsFile() const;
     QString recentFile() const;
     // Where the writer was in each file, beside the recent files.

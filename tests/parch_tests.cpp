@@ -12,6 +12,7 @@
 #include "documentfind.h"
 #include "documentreview.h"
 #include "documentstore.h"
+#include "clitests.h"
 #include "editingtests.h"
 #include "editorbinding.h"
 #include "editordecorations.h"
@@ -304,6 +305,29 @@ private slots:
     void markdownParsesOnAnyThread() { MarkdownTests::parsesOnAnyThread(); }
     void markdownPerformance() { MarkdownTests::performance(); }
     void markdownPathologicalInput() { MarkdownTests::pathologicalInput(); }
+    // The commands run from the terminal. The tests themselves are in clitests.cpp.
+    void cliLaunchFindsCommands() { CliTests::launchFindsCommands(); }
+    void cliHelpExplainsEveryCommand() { CliTests::helpExplainsEveryCommand(); }
+    void cliUsageErrorsExitOne() { CliTests::usageErrorsExitOne(); }
+    void cliCheckReportsEveryKindOfProblem() { CliTests::checkReportsEveryKindOfProblem(); }
+    void cliCheckPassesACleanDocument() { CliTests::checkPassesACleanDocument(); }
+    void cliCheckSaysWhatCannotBeRead() { CliTests::checkSaysWhatCannotBeRead(); }
+    void cliProfileAndExtensionsFollowTheFlags() { CliTests::profileAndExtensionsFollowTheFlags(); }
+    void cliSavedSettingsApplyOnlyWhenAsked() { CliTests::savedSettingsApplyOnlyWhenAsked(); }
+    void cliRenderWritesEveryForm() { CliTests::renderWritesEveryForm(); }
+    void cliRenderWritesFilesOnlyWhereAllowed() { CliTests::renderWritesFilesOnlyWhereAllowed(); }
+    void cliExportAssemblesMarkdown() { CliTests::exportAssemblesMarkdown(); }
+    void cliExportAssemblyKeepsMeaning() { CliTests::exportAssemblyKeepsMeaning(); }
+    void cliExportWritesAStandalonePage() { CliTests::exportWritesAStandalonePage(); }
+    void cliExportRefusesWhatItMustNot() { CliTests::exportRefusesWhatItMustNot(); }
+    void cliExportLeavesTheSourceAlone() { CliTests::exportLeavesTheSourceAlone(); }
+    void cliExportFormatsPlugInThroughOneInterface() { CliTests::exportFormatsPlugInThroughOneInterface(); }
+    void cliStatsCountWhatAReaderReads() { CliTests::statsCountWhatAReaderReads(); }
+    void cliSkillPrintsAndInstalls() { CliTests::skillPrintsAndInstalls(); }
+    void cliSkillLeavesOtherFilesAlone() { CliTests::skillLeavesOtherFilesAlone(); }
+    void cliJsonAndTextAreSafeToPrint() { CliTests::jsonAndTextAreSafeToPrint(); }
+    void cliHtmlDestinationsCanBeRewritten() { CliTests::htmlDestinationsCanBeRewritten(); }
+    void cliCommandsNeedNoDisplay() { CliTests::commandsNeedNoDisplay(); }
     void benchmarkReportsEveryMeasure();
     void benchmarkThatCannotStartEndsTheLoop();
     void themeReadsLightAndDarkPalettes();
@@ -892,11 +916,12 @@ void ParchTests::launchLeavesQtOptionsToQt()
 
 void ParchTests::helpColumnsLineUp()
 {
-    // Every option's description starts in one column.
+    // Every option's and command's description starts in one column.
     QSet<qsizetype> columns;
-    static const QRegularExpression gap(QStringLiteral("^  \\S+(?: [A-Z]+)? +(\\S)"));
+    static const QRegularExpression gap(QStringLiteral("^  \\S+(?: \\S+)?  +(\\S)"));
     for (const QString &line : helpText().split(u'\n')) {
-        if (!line.startsWith(QLatin1String("  "))) continue;
+        // A row is indented by two spaces; the usage lines by more.
+        if (!line.startsWith(QLatin1String("  ")) || line.startsWith(QLatin1String("   "))) continue;
         const QRegularExpressionMatch match = gap.match(line);
         QVERIFY2(match.hasMatch(), qPrintable(line));
         columns.insert(match.capturedStart(1));

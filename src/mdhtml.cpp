@@ -59,8 +59,9 @@ private:
         esc(value);
         out.append(u'"');
     }
-    QString url(const QString &dest, bool image) const
+    QString url(const Node &node, const QString &written, bool image) const
     {
+        const QString dest = opt.destination ? opt.destination(node, written) : written;
         if (safe && !detail::isSafeUrl(dest, image)) return QString();
         return encodeUrl(dest);
     }
@@ -309,11 +310,18 @@ void Writer::element(const Node &node)
     const detail::HtmlTagInfo info = detail::htmlTagInfo(node.label);
     out.append(u'<');
     out.append(node.label);
+    const bool image = node.label == u"img";
+    const QLatin1StringView leads(image ? "src" : "href");
     for (const Attribute &a : node.attributes) {
         out.append(u' ');
         out.append(a.name);
         lit(QLatin1StringView("=\""));
-        esc(a.value);
+        if (opt.destination && (image || node.label == u"a") && a.name == leads) {
+            const QString dest = opt.destination(node, a.value);
+            if (!safe || detail::isSafeUrl(dest, image)) esc(dest);
+        } else {
+            esc(a.value);
+        }
         out.append(u'"');
     }
     if (info.isVoid) {
@@ -440,7 +448,7 @@ void Writer::inl(const Node &node)
     case NodeType::Link:
     case NodeType::Autolink:
         lit(QLatin1StringView("<a"));
-        attribute(QLatin1StringView("href"), url(node.dest, false));
+        attribute(QLatin1StringView("href"), url(node, node.dest, false));
         if (!node.title.isEmpty()) attribute(QLatin1StringView("title"), node.title);
         out.append(u'>');
         inlines(node.children);
@@ -448,7 +456,7 @@ void Writer::inl(const Node &node)
         break;
     case NodeType::Image:
         lit(QLatin1StringView("<img"));
-        attribute(QLatin1StringView("src"), url(node.dest, true));
+        attribute(QLatin1StringView("src"), url(node, node.dest, true));
         attribute(QLatin1StringView("alt"), plainText(node));
         if (!node.title.isEmpty()) attribute(QLatin1StringView("title"), node.title);
         lit(QLatin1StringView(" />"));

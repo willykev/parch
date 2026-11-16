@@ -61,6 +61,28 @@ int main(int argc, char *argv[])
     AppPaths paths = AppPaths::standard();
     QStringList files = absoluteFiles(launch.files, QDir::currentPath());
 
+    // A theme asked for is made to stand in for Omarchy's current one: a
+    // folder whose `theme` link points at it, which must outlive the Theme.
+    // The person's own shell settings still go over it, as over the current
+    // theme. It is settled before anything needs a display, so that a theme
+    // that is not there is said even where no window could open.
+    QTemporaryDir themeHome;
+    QString themeFolder, userShell;
+    if (!launch.themeDirectory.isEmpty()) {
+        const QString found = findTheme(launch.themeDirectory);
+        if (found.isEmpty())
+            return refused(QCoreApplication::translate("cli", "there is no theme %1").arg(launch.themeDirectory));
+        if (!themeHome.isValid())
+            return refused(QCoreApplication::translate("cli", "cannot make a temporary folder for the theme %1 (%2)")
+                               .arg(launch.themeDirectory, themeHome.errorString()));
+        QFile theme(found);
+        if (!theme.link(themeHome.filePath(QStringLiteral("theme"))))
+            return refused(QCoreApplication::translate("cli", "cannot use the theme %1 (%2)")
+                               .arg(launch.themeDirectory, theme.errorString()));
+        themeFolder = themeHome.path();
+        userShell = Theme::userShellFile();
+    }
+
     // A benchmark keeps every file parch writes beneath a temporary folder of
     // its own and opens a copy of its one file there. It never meets a
     // running parch: it neither hands its file over nor listens for others.
@@ -77,6 +99,9 @@ int main(int argc, char *argv[])
         if (!benchmarkRoot->isValid())
             return refused(QCoreApplication::translate("main", "cannot make a temporary folder to measure in"));
         paths = AppPaths::under(benchmarkRoot->path());
+        // Qt's and the graphics driver's caches go there too, so a measurement
+        // leaves nothing in the person's own cache.
+        qputenv("XDG_CACHE_HOME", QFile::encodeName(benchmarkRoot->filePath(QStringLiteral("cache"))));
         benchmarkLabel = QFileInfo(files.first()).completeBaseName();
         QString error;
         const QString copy = Benchmark::copyIn(files.first(), benchmarkRoot->filePath(QStringLiteral("document")), &error);
@@ -89,7 +114,15 @@ int main(int argc, char *argv[])
         // never opens a display, and it ends once the running instance has
         // taken them.
         QString why;
-        if (AppService::forward(paths, files, &why)) return 0;
+        if (AppService::forward(paths, files, &why)) {
+            // The running parch keeps the theme it started with.
+            if (!launch.themeDirectory.isEmpty())
+                QTextStream(stderr) << QCoreApplication::translate(
+                                           "main", "parch: parch is already running, so --theme %1 does not apply")
+                                           .arg(launch.themeDirectory)
+                                    << Qt::endl;
+            return 0;
+        }
         // An instance answered and did not take them.
         if (!why.isEmpty()) return refused(why);
     }
@@ -108,23 +141,6 @@ int main(int argc, char *argv[])
                                      : why);
     }
 
-    // A theme asked for is made to stand in for Omarchy's current one: a
-    // folder whose `theme` link points at it, which must outlive the Theme.
-    // The person's own shell settings still go over it, as over the current
-    // theme.
-    QTemporaryDir themeHome;
-    QString themeFolder, userShell;
-    if (!launch.themeDirectory.isEmpty()) {
-        const QString found = findTheme(launch.themeDirectory);
-        if (found.isEmpty() || !themeHome.isValid() || !QFile::link(found, themeHome.filePath("theme"))) {
-            QTextStream(stderr) << QCoreApplication::translate("cli", "parch: there is no theme %1")
-                                       .arg(launch.themeDirectory)
-                                << Qt::endl;
-            return 1;
-        }
-        themeFolder = themeHome.path();
-        userShell = Theme::userShellFile();
-    }
     // The theme exists only on this path because it needs the application
     // object for its watcher and processes.
     Theme theme(themeFolder, nullptr, {}, userShell);

@@ -10781,6 +10781,21 @@ void ParchTests::processRefusesAMissingTheme()
     QCOMPARE(process.exitStatus(), QProcess::NormalExit);
     QVERIFY2(process.exitCode() == 1, qPrintable(said));
     QVERIFY2(said.contains(QStringLiteral("parch: there is no theme ") + missing), qPrintable(said));
+
+    // It is said before anything needs a display: with no window system
+    // at all, the answer is the same.
+    QProcess headless;
+    const auto stopHeadless = qScopeGuard([&headless] { stopProcess(headless); });
+    QProcessEnvironment environment = processEnvironment(root.path());
+    environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("no-such-platform"));
+    headless.setProcessEnvironment(environment);
+    headless.setProcessChannelMode(QProcess::MergedChannels);
+    headless.start(parchBinary, {QStringLiteral("--theme"), missing});
+    QVERIFY(headless.waitForFinished(15000));
+    const QString saidHeadless = QString::fromLocal8Bit(headless.readAll());
+    QCOMPARE(headless.exitStatus(), QProcess::NormalExit);
+    QVERIFY2(headless.exitCode() == 1, qPrintable(saidHeadless));
+    QVERIFY2(saidHeadless.contains(QStringLiteral("parch: there is no theme ") + missing), qPrintable(saidHeadless));
 }
 
 void ParchTests::processBenchmarkEndsByItself()

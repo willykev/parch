@@ -1,0 +1,20 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Main.qml</file>
+        <file>EditorPane.qml</file>
+        <file>HeaderBar.qml</file>
+        <file>WindowMenu.qml</file>
+        <file>LibraryPanel.qml</file>
+        <file>TabStrip.qml</file>
+        <file>StatusLine.qml</file>
+        <file>NoticeBar.qml</file>
+        <file>ThemedDialog.qml</file>
+        <file>ConflictDialog.qml</file>
+        <file>HistoryDialog.qml</file>
+        <file>CloseConfirmation.qml</file>
+        <file>ThemedButton.qml</file>
+        <file>FieldCaret.qml</file>
+        <file>Icon.qml</file>
+        <file>icons.js</file>
+    </qresource>
+</RCC>

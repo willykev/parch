@@ -1,0 +1,72 @@
+#!/bin/sh
+set -eu
+
+# Measures parch in the real window on the documents of the whole-document
+# measurement: typical (10,000 words), book (100,000 words) and one
+# 10,000-word paragraph, three runs each, every run on a copy of its own.
+# Each run writes OUTDIR/<case>-<n>.json. Run it in the desktop session with
+# the screen awake and nothing else busy, and leave its window in front until
+# it ends; a run takes about a minute and a half.
+ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
+if [ "$#" -ne 1 ]; then
+    echo "usage: bin/benchmark OUTDIR" >&2
+    exit 2
+fi
+mkdir -p "$1"
+OUT="$(CDPATH= cd -P -- "$1" && pwd -P)"
+"$ROOT/bin/build" >&2
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/parch-benchmark.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 1' HUP INT TERM
+
+# The documents: a seed, then the ten words of the prose list over and
+# over, a paragraph break every 80 words (every 1,000 in the book) and none
+# in the long paragraph. The seeds are ASCII, so counting their words needs
+# no Unicode classes.
+generate() {
+    awk -v kind="$1" 'BEGIN {
+        count = kind == "book" ? 100000 : 10000
+        if (kind == "typical")
+            seed = "# A quiet morning\n\nThe writer keeps ordinary Markdown source.\n\n" \
+                   "## Notes\n\n- Keep a list\n- Follow [a link](https://example.org/notes)\n\n" \
+                   "```cpp\nint value = 1;\n```\n\n" \
+                   "```text\nA second literal example.\n```\n\n"
+        else if (kind == "book")
+            seed = "# The generated book\n\nA chapter with [references][reading] and a footnote[^note].\n\n" \
+                   "[reading]: https://example.org/book\n[^note]: A deterministic note.\n\n"
+        else
+            seed = ""
+        words = seed
+        used = gsub(/[A-Za-z0-9]+(\047[A-Za-z0-9]+)*/, "", words)
+        if (used > count) { seed = ""; used = 0 }
+        split("the quiet writer keeps each ordinary word and reads again", prose, " ")
+        every = kind == "book" ? 1000 : 80
+        printf "%s", seed
+        for (i = used; i < count; i++) {
+            if (i > used)
+                printf "%s", (kind != "long-paragraph" && (i - used) % every == 0) ? "\n\n" : " "
+            printf "%s", prose[(i - used) % 10 + 1]
+        }
+    }'
+}
+
+for kind in typical book long-paragraph; do
+    generate "$kind" > "$WORK/$kind.md"
+done
+
+# Qt keeps compiled QML and graphics pipelines, and Mesa its shaders, in the
+# cache folder. The benchmark's own keeps them out of the real one and warm
+# from one run to the next; only the first run of all starts cold, which is
+# why the typical document, whose launch has a gate, comes last.
+export XDG_CACHE_HOME="$ROOT/build/benchmark-cache"
+mkdir -p "$XDG_CACHE_HOME"
+
+for kind in long-paragraph book typical; do
+    for run in 1 2 3; do
+        mkdir "$WORK/$kind-$run"
+        cp "$WORK/$kind.md" "$WORK/$kind-$run/$kind.md"
+        "$ROOT/build/parch" open --benchmark "$OUT/$kind-$run.json" "$WORK/$kind-$run/$kind.md"
+        echo "$OUT/$kind-$run.json"
+    done
+done

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=parch
+GenericName=Markdown Editor
+Comment=Write Markdown in a native window that follows the Omarchy theme
+Exec=parch %F
+Icon=parch
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/markdown;text/x-markdown;
+Keywords=markdown;writing;writer;text;editor;notes;drafts;
+StartupNotify=true
+StartupWMClass=parch

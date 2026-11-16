@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+# Adapted from sprawl's bin/install (MIT). Builds parch, then builds and
+# installs its Arch package, asking for the missing packages it needs.
+ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
+"$ROOT/bin/build"
+cd "$ROOT/pkgbuild"
+exec makepkg -fsi "$@"

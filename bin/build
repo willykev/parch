@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+# Resolve symlinks exactly as qmake does and pin a local cache so that qmake
+# does not search ancestor directories for unrelated configuration.
+ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$ROOT/build"
+cd "$ROOT/build"
+[ -e .qmake.cache ] || : > .qmake.cache
+qmake6 -cache "$(pwd -P)/.qmake.cache" "$ROOT/parch.pro"
+make -s -j"$(nproc)"
+
+echo "Built $ROOT/build/parch"

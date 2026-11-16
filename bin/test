@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+# The canonical local cache prevents qmake loading unrelated ancestor config.
+ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
+# Some tests launch parch itself as a process, so it is built first. The
+# one that runs a whole benchmark takes about 90 s and runs only with
+# PARCH_SLOW_TESTS=1.
+"$ROOT/bin/build" > /dev/null
+mkdir -p "$ROOT/build/tests"
+cd "$ROOT/build/tests"
+[ -e .qmake.cache ] || : > .qmake.cache
+qmake6 -cache "$(pwd -P)/.qmake.cache" "$ROOT/tests/parch_tests.pro"
+make -s -j"$(nproc)"
+
+# The tests get a home, XDG folders, a runtime folder and a temporary folder
+# of their own, removed afterwards, so that nothing they or Qt do reads or
+# writes the real ones. The test binary also turns on Qt's test locations,
+# which then lie beneath this home. Tests make sockets beneath their
+# temporary folders, and a socket's path holds at most 107 bytes, so the
+# sandbox is in a short folder: a long TMPDIR gives way to /tmp.
+BASE="${TMPDIR:-/tmp}"
+[ "${#BASE}" -le 32 ] || BASE=/tmp
+SANDBOX="$(mktemp -d "$BASE/parch-tests.XXXXXX")"
+trap 'rm -rf "$SANDBOX"' EXIT
+trap 'exit 1' HUP INT TERM
+mkdir -p "$SANDBOX/home" "$SANDBOX/config" "$SANDBOX/data" "$SANDBOX/state" "$SANDBOX/cache" "$SANDBOX/tmp" \
+    "$SANDBOX/runtime"
+chmod 700 "$SANDBOX/runtime"
+
+# Offscreen software rendering keeps tests off the real desktop session, and
+# no test finds the running Hyprland.
+env -u HYPRLAND_INSTANCE_SIGNATURE \
+HOME="$SANDBOX/home" XDG_CONFIG_HOME="$SANDBOX/config" XDG_DATA_HOME="$SANDBOX/data" \
+XDG_STATE_HOME="$SANDBOX/state" XDG_CACHE_HOME="$SANDBOX/cache" \
+TMPDIR="$SANDBOX/tmp" XDG_RUNTIME_DIR="$SANDBOX/runtime" \
+QML_DISABLE_DISK_CACHE=1 QT_FORCE_STDERR_LOGGING=1 \
+QT_QPA_PLATFORMTHEME=generic QT_QUICK_BACKEND=software QT_QPA_PLATFORM=offscreen \
+./parch_tests "$@"

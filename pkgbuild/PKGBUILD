@@ -1,0 +1,33 @@
+# Adapted from sprawl's pkgbuild/PKGBUILD (MIT).
+pkgname=parch
+# The same version as the VERSION file at the top of the source tree.
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A native Markdown writing app for the Omarchy desktop'
+arch=('x86_64' 'aarch64')
+url='https://github.com/willykev/parch'
+license=('MIT')
+options=('!debug')
+# Core, GUI, OpenGL, D-Bus, networking and concurrency come from qt6-base;
+# QML, Quick, its controls and shapes from qt6-declarative; SVG from qt6-svg.
+# Nothing links to qt6-wayland, the plugin through which the window reaches
+# Omarchy's compositor, or to xdg-desktop-portal, which draws the open and
+# save dialogs, so this list is all that says they are needed.
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal')
+makedepends=('gcc' 'make')
+# This recipe builds a checkout.
+source=()
+sha256sums=()
+
+build() {
+  cd "$startdir/.."
+  ./bin/build
+}
+
+package() {
+  cd "$startdir/.."
+  install -Dm755 build/parch "$pkgdir/usr/bin/parch"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/parch.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/parch.svg"
+  install -Dm644 "$startdir/parch.desktop" "$pkgdir/usr/share/applications/parch.desktop"
+}

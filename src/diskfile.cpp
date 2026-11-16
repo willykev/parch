@@ -22,6 +22,29 @@
 #include <utility>
 
 namespace {
+// Makes a new or changed name in a folder last through a power cut: the
+// file's own data is synced before it is named, and this syncs the folder
+// that now holds the name. File systems that cannot sync a folder say so
+// with EINVAL, and the name is then as safe as they make it anyway.
+std::atomic<quint64> syncedFolders{0};
+
+void syncFolder(int directory)
+{
+    if (directory < 0) return;
+    ::fsync(directory);
+    syncedFolders.fetch_add(1);
+}
+
+void syncFolderOf(const QByteArray &path)
+{
+    const qsizetype slash = path.lastIndexOf('/');
+    const QByteArray folder = slash > 0 ? path.left(slash) : (slash == 0 ? QByteArray("/") : QByteArray("."));
+    const int directory = ::open(folder.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (directory < 0) return;
+    syncFolder(directory);
+    ::close(directory);
+}
+
 const QByteArray utf8Bom("\xEF\xBB\xBF", 3);
 
 // Paths are never tidied as text. Removing ".." or "." lexically gives a
@@ -324,6 +347,7 @@ public:
             return false;
         }
         m_name.clear();
+        syncFolderOf(m_target);
         return true;
     }
     void discard()
@@ -654,6 +678,7 @@ SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
         result.error = QCoreApplication::translate("DiskFile", "Something is already at that name");
         return result;
     }
+    syncFolder(directory);
     struct stat made {};
     FileStamp stamp;
     if (!stamped(written, made, stamp)) return failed(errno);
@@ -725,6 +750,7 @@ SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode)
     }
     if (::renameat(directory, temporary.constData(), directory, name.constData()) != 0) return failed(errno);
     temporary.clear();
+    syncFolder(directory);
     struct stat made {};
     FileStamp stamp;
     if (!stamped(descriptor, made, stamp)) return failed(errno);
@@ -764,6 +790,11 @@ void setLinking(bool supported)
 void setDirectWriteFailure(std::function<int(const QString &path)> hook)
 {
     directWriteFailure = std::move(hook);
+}
+
+quint64 folderSyncs()
+{
+    return syncedFolders.load();
 }
 
 bool readVersion(const QString &path, const DiskVersion &version, QByteArray &bytes)

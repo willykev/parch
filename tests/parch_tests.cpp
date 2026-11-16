@@ -304,6 +304,7 @@ private slots:
     void reopenedDocumentOutlivesItsSave();
     void recoveryRoundTripsAnyText();
     void recoverySweepsTemporariesACrashLeft();
+    void everyNamingSyncsItsFolder();
     void recoveryRefusesAnOddUtf16Payload();
     void recoveryFollowsIdleAndMaximumIntervals();
     void autosaveWritesAfterIdle();
@@ -2694,6 +2695,24 @@ void ParchTests::recoveryRoundTripsAnyText()
     QVERIFY(recovery.write(id, {}, SourceSnapshot{1, "ok"}, DiskVersion{}));
     writeFile(paths.recovery() + "/" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".recovery", "garbage");
     QCOMPARE(recovery.pending().size(), 1);
+}
+
+void ParchTests::everyNamingSyncsItsFolder()
+{
+    // A name put in a folder lasts through a power cut only once the folder
+    // is synced too: after an atomic save, a no-replace create and a put.
+    QTemporaryDir root;
+    const QString path = root.filePath(QStringLiteral("plan.md"));
+    writeFile(path, "old\n");
+    quint64 before = DiskFile::folderSyncs();
+    QCOMPARE(DiskFile::save(path, "new\n", DiskFile::fingerprint(path)).status, SaveStatus::Saved);
+    QVERIFY(DiskFile::folderSyncs() > before);
+    before = DiskFile::folderSyncs();
+    QCOMPARE(DiskFile::create(root.filePath(QStringLiteral("copy.md")), "copy\n").status, SaveStatus::Saved);
+    QVERIFY(DiskFile::folderSyncs() > before);
+    before = DiskFile::folderSyncs();
+    QCOMPARE(DiskFile::putAt(root.filePath(QStringLiteral("put.md")), "put\n").status, SaveStatus::Saved);
+    QVERIFY(DiskFile::folderSyncs() > before);
 }
 
 void ParchTests::recoverySweepsTemporariesACrashLeft()

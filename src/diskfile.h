@@ -209,6 +209,9 @@ void setLinking(bool supported);
 // name directly, where neither a rename that does not replace nor a link
 // works; an error number it returns fails the write as the system would.
 void setDirectWriteFailure(std::function<int(const QString &path)> hook);
+// How many times a folder has been synced after a name was put in it, for
+// tests that every way of naming a file makes the name last.
+quint64 folderSyncs();
 // The account whose files a save can replace by renaming, since only its
 // own files keep their owner: the effective user id. Tests name another,
 // so that a file another account owns can be met without being root; a

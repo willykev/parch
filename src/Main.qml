@@ -28,6 +28,7 @@ ApplicationWindow {
     // nothing moves them out of it, the editor behind it takes no input, and
     // the window's shortcuts wait.
     readonly property bool dialogOpen: conflictDialog.visible || historyDialog.visible || closeConfirmation.visible
+                                       || attachmentDialog.visible || linkCheckDialog.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -202,6 +203,12 @@ ApplicationWindow {
             historyDialog.review(document)
     }
 
+    // The document in front's local links and images that lead nowhere.
+    function checkLinks() {
+        if (document)
+            linkCheckDialog.check(document)
+    }
+
     // A folder the library is to show: the library opens on it, beside the
     // editor or over it, with the keys on its row. Shown with a document
     // opened at the same time, or while a dialog is open, the keys stay
@@ -254,6 +261,8 @@ ApplicationWindow {
         conflictDialog.close()
         historyDialog.close()
         closeConfirmation.close()
+        attachmentDialog.close()
+        linkCheckDialog.close()
     }
     onWidthChanged: context.size = Qt.size(width, height)
     onHeightChanged: context.size = Qt.size(width, height)
@@ -390,6 +399,7 @@ ApplicationWindow {
         onSave: window.save()
         onSaveAs: window.act(() => backend.saveAs())
         onShowHistory: window.showHistory()
+        onCheckLinks: window.checkLinks()
         onCloseTab: window.act(() => backend.requestCloseTab(window.tabs.activeIndex))
         // Once the menu has closed and given the keys back to the text.
         onFindDocument: Qt.callLater(window.findDocument)
@@ -539,6 +549,9 @@ ApplicationWindow {
                 lineHeight: settings.lineHeight
                 fontFamily: settings.editorFontFamily
                 inputBlocked: window.dialogOpen
+                attachments: backend.attachments
+                onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
+                onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
                 onViewMoved: window.context.noteViewMoved()
                 // Escape in the text dismisses a notice that has nothing behind it.
                 onEscapePressed: if (backend.notice) backend.dismissNotice()
@@ -697,5 +710,20 @@ ApplicationWindow {
         context: window.context
         onClosed: window.dialogClosed()
         onReview: (document) => conflictDialog.review(document)
+    }
+
+    // What a drop of files on the text asks, answered to the editor that asked.
+    AttachmentDialog {
+        id: attachmentDialog
+        objectName: "attachmentDialog"
+        onIncludeChosen: (choice) => editorPane.answerInclude(choice)
+        onCopyChosen: (copy) => editorPane.answerCopy(copy)
+        onClosed: window.dialogClosed()
+    }
+
+    LinkCheckDialog {
+        id: linkCheckDialog
+        objectName: "linkCheckDialog"
+        onClosed: window.dialogClosed()
     }
 }

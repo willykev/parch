@@ -1,5 +1,6 @@
 #include "apppaths.h"
 #include "appservice.h"
+#include "attachments.h"
 #include "autosave.h"
 #include "backend.h"
 #include "benchmark.h"
@@ -14,8 +15,10 @@
 #include "filerequests.h"
 #include "filewatch.h"
 #include "history.h"
+#include "htmlmarkdown.h"
 #include "hyprland.h"
 #include "librarymodel.h"
+#include "linktargets.h"
 #include "pathtext.h"
 #include "portalfilepicker.h"
 #include "qmltypes.h"
@@ -48,6 +51,9 @@
 #include <QInputMethodEvent>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QImage>
+#include <QBuffer>
+#include <QMimeData>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QLockFile>
@@ -616,6 +622,25 @@ private slots:
     void messagesNameParchsFoldersPlainly();
     void versionTimesReadNaturally();
     void historyActionsActOnTheirDocument();
+    // Paste, images and attachments.
+    void htmlBecomesMarkdown_data();
+    void htmlBecomesMarkdown();
+    void htmlDataImagesGoToTheSink();
+    void hostileHtmlConvertsInTime();
+    void markdownPathsAndTextAreEncoded();
+    void richPasteIsOneUndoStep();
+    void plainPasteIgnoresRichText();
+    void pastedImagesAreSavedAsAssets();
+    void pastedHtmlImagesLandOnceSaved();
+    void draftAssetsFollowTheNamedFile();
+    void droppedFilesAreCopiedOrLinked();
+    void draftDropsCopyIntoTheDraft();
+    void largeDropsAskFirst();
+    void failedCopiesSayWhy();
+    void droppedMarkdownIsLinkedOrIncluded();
+    void windowDropsCopyAndAsk();
+    void missingTargetsAreListed();
+    void checkLinksShowsWhatIsMissing();
 };
 
 void ParchTests::initMain()
@@ -17118,6 +17143,1041 @@ void ParchTests::benchmarkThatCannotStartEndsTheLoop()
     QCOMPARE(loop.exec(), 1);
     QVERIFY(reason.contains(QStringLiteral("no editor")));
     QVERIFY(!QFile::exists(folder.filePath(QStringLiteral("result.json"))));
+}
+
+// ---------------------------------------------------------------------------
+// Paste, images and attachments
+
+namespace {
+
+// A small image of one colour, as the PNG bytes a screenshot would be.
+QByteArray pngOf(const QColor &colour)
+{
+    QImage image(4, 4, QImage::Format_RGB32);
+    image.fill(colour);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
+
+// Rich text on the clipboard, as a browser or a word processor copies it.
+void copyRichText(const QString &html, const QString &text)
+{
+    auto *mime = new QMimeData;
+    mime->setHtml(html);
+    mime->setText(text);
+    QGuiApplication::clipboard()->setMimeData(mime);
+}
+
+void copyImage(const QByteArray &png, const QString &html = {})
+{
+    auto *mime = new QMimeData;
+    mime->setData(QStringLiteral("image/png"), png);
+    if (!html.isEmpty()) mime->setHtml(html);
+    QGuiApplication::clipboard()->setMimeData(mime);
+}
+
+// Attachments on a test's own folders, naming pasted images after one day.
+std::unique_ptr<Attachments> attachmentsUnder(const QString &root, const QStringList &libraries = {})
+{
+    auto attachments = std::make_unique<Attachments>(AppPaths::under(root));
+    attachments->setToday([] { return QDate(2026, 11, 16); });
+    attachments->setLibraryFolders([libraries] { return libraries; });
+    return attachments;
+}
+
+void attach(EditorView &view, Attachments *attachments)
+{
+    view.pane->setProperty("attachments", QVariant::fromValue(attachments));
+}
+
+// Where the editor draws a source position, in its own coordinates.
+QPointF pointOf(const EditorView &view, int position)
+{
+    QRectF rect;
+    QMetaObject::invokeMethod(view.editor, "positionToRectangle", Q_RETURN_ARG(QRectF, rect),
+                              Q_ARG(int, view.binding->sourceToEditor(position)));
+    return rect.center();
+}
+
+bool dropFiles(EditorView &view, int position, const QStringList &paths)
+{
+    QList<QUrl> urls;
+    for (const QString &path : paths) urls << QUrl::fromLocalFile(path);
+    const QPointF point = pointOf(view, position);
+    return view.binding->dropAt(point.x(), point.y(), urls, {}, {});
+}
+
+QStringList filesIn(const QString &folder)
+{
+    return QDir(folder).entryList(QDir::Files | QDir::Hidden, QDir::Name);
+}
+
+// The controls Tab reaches from the one with the keys, round to it again,
+// by name, sorted; one outside the dialog is named as such.
+QStringList tabRound(QQuickWindow *window, QObject *dialog)
+{
+    auto *inside = dialog->property("contentItem").value<QQuickItem *>()->parentItem();
+    QList<QQuickItem *> reached;
+    QStringList names;
+    for (int i = 0; i < 12; ++i) {
+        QQuickItem *now = window->activeFocusItem();
+        if (!now || reached.contains(now)) break;
+        reached << now;
+        names << (inside->isAncestorOf(now) ? now->objectName() : QStringLiteral("outside: ") + describe(now));
+        QTest::keyClick(window, Qt::Key_Tab);
+    }
+    names.sort();
+    return names;
+}
+
+// A library with a folder of notes and a document in it, and a folder
+// outside the library, all beneath a temporary folder.
+struct DropFolders {
+    QTemporaryDir temp;
+    QString root, library, notes, document, outside;
+
+    DropFolders()
+    {
+        root = canonical(temp.path());
+        library = root + QStringLiteral("/library");
+        notes = library + QStringLiteral("/notes");
+        document = notes + QStringLiteral("/doc.md");
+        outside = root + QStringLiteral("/outside");
+        writeFile(document, "Start end\n");
+        QDir().mkpath(outside);
+    }
+};
+
+} // namespace
+
+void ParchTests::htmlBecomesMarkdown_data()
+{
+    QTest::addColumn<QString>("html");
+    QTest::addColumn<QString>("markdown");
+    QTest::addRow("headings") << QStringLiteral("<h1>One</h1><h2>Two <em>it</em></h2><h3>Three</h3><h4>Four</h4>"
+                                                "<h5>Five</h5><h6>Six</h6>")
+                              << QStringLiteral("# One\n\n## Two *it*\n\n### Three\n\n#### Four\n\n##### Five\n\n###### Six");
+    QTest::addRow("heading ending in #") << QStringLiteral("<h3>Ends with #</h3><h2>C#</h2>")
+                                         << QStringLiteral("### Ends with \\#\n\n## C#");
+    QTest::addRow("paragraphs") << QStringLiteral("<p>First paragraph.</p><p>Second one.</p>")
+                                << QStringLiteral("First paragraph.\n\nSecond one.");
+    QTest::addRow("emphasis") << QStringLiteral("<p><b>bold</b>, <strong>strong</strong>, <i>it</i>, <em>em</em>, "
+                                                "<s>s</s>, <del>del</del>, <strike>strike</strike></p>")
+                              << QStringLiteral("**bold**, **strong**, *it*, *em*, ~~s~~, ~~del~~, ~~strike~~");
+    QTest::addRow("nested emphasis") << QStringLiteral("<p><strong>bold and <em>italic</em></strong>; <em><strong>both</strong></em></p>")
+                                     << QStringLiteral("**bold and *italic***; ***both***");
+    QTest::addRow("spaces leave emphasis") << QStringLiteral("<p>a<b> bold </b>b</p>")
+                                           << QStringLiteral("a **bold** b");
+    QTest::addRow("adjacent emphasis joins") << QStringLiteral("<p><b>one</b><b>two</b> <i>a</i><i>b</i></p>")
+                                             << QStringLiteral("**onetwo** *ab*");
+    QTest::addRow("emphasis after emphasis") << QStringLiteral("<p><b>bo<i>th</i></b><i>x</i></p>")
+                                             << QStringLiteral("**bo*th***_x_");
+    QTest::addRow("inline code") << QStringLiteral("<p>Run <code>make install</code> or <code>a `tick` b</code> or "
+                                                   "<code>`x</code> <kbd>Ctrl</kbd></p>")
+                                 << QStringLiteral("Run `make install` or ``a `tick` b`` or `` `x `` `Ctrl`");
+    QTest::addRow("code block") << QStringLiteral("<pre><code class=\"language-python\">def f():\n    return 1 &lt; 2\n"
+                                                  "</code></pre>")
+                                << QStringLiteral("```python\ndef f():\n    return 1 < 2\n```");
+    QTest::addRow("code block holding a fence") << QStringLiteral("<pre>```\ninside\n```</pre>")
+                                                << QStringLiteral("````\n```\ninside\n```\n````");
+    QTest::addRow("code editor") << QStringLiteral("<div style=\"font-family: 'Fira Code', monospace; white-space: pre;\">"
+                                                   "<div><span>let a = 1;</span></div><br><div><span>  a += 2;</span></div></div>")
+                                 << QStringLiteral("```\nlet a = 1;\n\n  a += 2;\n```");
+    QTest::addRow("links") << QStringLiteral("<p><a href=\"https://example.org/\" title=\"An &quot;example&quot;\">Example</a> "
+                                             "and <a href=\"https://example.org/a b\">spaces</a> and "
+                                             "<a href=\"https://en.wikipedia.org/wiki/Foo_(bar)\">parens</a></p>")
+                           << QStringLiteral("[Example](https://example.org/ \"An \\\"example\\\"\") and "
+                                             "[spaces](https://example.org/a%20b) and "
+                                             "[parens](https://en.wikipedia.org/wiki/Foo_(bar))");
+    QTest::addRow("autolinks") << QStringLiteral("<p><a href=\"https://example.org/x\">https://example.org/x</a> "
+                                                 "<a href=\"mailto:me@example.org\">me@example.org</a></p>")
+                               << QStringLiteral("<https://example.org/x> <me@example.org>");
+    QTest::addRow("links that keep their text") << QStringLiteral("<p><a href=\"javascript:alert(1)\">script</a> "
+                                                                  "<a href=\"#section\">anchor</a> <a>bare</a></p>")
+                                                << QStringLiteral("script anchor bare");
+    QTest::addRow("remote image") << QStringLiteral("<p><img src=\"https://example.org/cat.png\" alt=\"A cat\" title=\"Cat\"></p>")
+                                  << QStringLiteral("![A cat](https://example.org/cat.png \"Cat\")");
+    QTest::addRow("image in a link") << QStringLiteral("<a href=\"https://example.org/\"><img src=\"//example.org/logo.png\" "
+                                                       "alt=\"Logo [1]\"></a>")
+                                     << QStringLiteral("[![Logo \\[1\\]](https://example.org/logo.png)](https://example.org/)");
+    QTest::addRow("unordered list") << QStringLiteral("<ul><li>One</li><li>Two</li></ul>")
+                                    << QStringLiteral("- One\n- Two");
+    QTest::addRow("ordered list") << QStringLiteral("<ol start=\"4\"><li>Four</li><li>Five</li></ol>")
+                                  << QStringLiteral("4. Four\n5. Five");
+    QTest::addRow("nested lists") << QStringLiteral("<ul><li>A<ol><li>A1</li><li>A2<ul><li>deep</li></ul></li></ol></li>"
+                                                    "<li>B</li></ul>")
+                                  << QStringLiteral("- A\n  1. A1\n  2. A2\n     - deep\n- B");
+    QTest::addRow("list put straight in a list") << QStringLiteral("<ul><li>A</li><ul><li>inner</li></ul><li>B</li></ul>")
+                                                 << QStringLiteral("- A\n  - inner\n- B");
+    QTest::addRow("task list") << QStringLiteral("<ul><li><input type=\"checkbox\" checked disabled> Done</li>"
+                                                 "<li><p><input type=\"checkbox\"> To do</p></li>"
+                                                 "<li role=\"checkbox\" aria-checked=\"true\">Checked</li></ul>")
+                               << QStringLiteral("- [x] Done\n- [ ] To do\n- [x] Checked");
+    QTest::addRow("loose list") << QStringLiteral("<ul><li><p>One</p><p>More</p></li><li><p>Two</p></li></ul>")
+                                << QStringLiteral("- One\n\n  More\n\n- Two");
+    QTest::addRow("adjacent lists") << QStringLiteral("<ul><li>a</li></ul><ul><li>b</li></ul><ol><li>c</li></ol><ol><li>d</li></ol>")
+                                    << QStringLiteral("- a\n\n* b\n\n1. c\n\n1) d");
+    QTest::addRow("block quotes") << QStringLiteral("<blockquote><p>Quoted</p><blockquote><p>Nested</p></blockquote></blockquote>")
+                                  << QStringLiteral("> Quoted\n>\n> > Nested");
+    QTest::addRow("list in a quote") << QStringLiteral("<blockquote><ul><li>a</li><li>b</li></ul></blockquote>")
+                                     << QStringLiteral("> - a\n> - b");
+    QTest::addRow("table") << QStringLiteral("<table><thead><tr><th>Item</th><th align=\"center\">Count</th>"
+                                             "<th style=\"text-align: right\">Price</th></tr></thead><tbody>"
+                                             "<tr><td><b>Pen</b></td><td><code>a|b</code></td><td>1 | 2</td></tr>"
+                                             "<tr><td>Ink<br>blue</td><td></td><td><i>3</i></td></tr></tbody></table>")
+                           << QStringLiteral("| Item | Count | Price |\n| --- | :---: | ---: |\n"
+                                             "| **Pen** | `a\\|b` | 1 \\| 2 |\n| Ink<br>blue |  | *3* |");
+    QTest::addRow("table spans") << QStringLiteral("<table><caption>Grid</caption><tr><td>a</td><td>b</td><td>c</td></tr>"
+                                                   "<tr><td colspan=\"2\">wide</td><td>c2</td></tr>"
+                                                   "<tr><td rowspan=\"2\">tall</td><td>b3</td><td>c3</td></tr>"
+                                                   "<tr><td>b4</td><td>c4</td></tr></table>")
+                                 << QStringLiteral("Grid\n\n| a | b | c |\n| --- | --- | --- |\n| wide |  | c2 |\n"
+                                                   "| tall | b3 | c3 |\n|  | b4 | c4 |");
+    QTest::addRow("layout table") << QStringLiteral("<table><tr><td><p>Laid out</p></td></tr><tr><td>Below</td></tr></table>")
+                                  << QStringLiteral("Laid out\n\nBelow");
+    QTest::addRow("line breaks") << QStringLiteral("<p>one<br>two<br/>three<br></p><p>para<br><br>next</p>")
+                                 << QStringLiteral("one\\\ntwo\\\nthree\n\npara\n\nnext");
+    QTest::addRow("rule") << QStringLiteral("<p>above</p><hr><p>below</p>") << QStringLiteral("above\n\n---\n\nbelow");
+    QTest::addRow("escaping") << QStringLiteral("<p>*not em* _not_ snake_case #tag [not](link) `code` back\\slash "
+                                                "&lt;b&gt; 2*3 a_b_c &lt;3 R&amp;D &amp;copy;</p>")
+                              << QStringLiteral("\\*not em\\* \\_not\\_ snake_case #tag \\[not\\](link) \\`code\\` "
+                                                "back\\\\slash \\<b> 2\\*3 a_b_c <3 R&D \\&copy;");
+    QTest::addRow("line starts") << QStringLiteral("<p># not a heading</p><p>1. not a list</p><p>2) nor this</p>"
+                                                   "<p>- not an item</p><p>+ plus</p><p>&gt; not a quote</p><p>---</p>"
+                                                   "<p>=====</p><p>// not a comment</p><p>: not a definition</p>"
+                                                   "<p>a<br># after a break</p>")
+                                 << QStringLiteral("\\# not a heading\n\n1\\. not a list\n\n2\\) nor this\n\n\\- not an item\n\n"
+                                                   "\\+ plus\n\n\\> not a quote\n\n\\---\n\n\\=\\=\\=\\=\\=\n\n"
+                                                   "\\// not a comment\n\n\\: not a definition\n\na\\\n\\# after a break");
+    QTest::addRow("dialect") << QStringLiteral("<p>$x$ costs $5, US$5 and 5$ ~sub~ x^2 ==hi== {{TOC}} [^1] [@cite]</p>")
+                             << QStringLiteral("\\$x\\$ costs $5, US\\$5 and 5\\$ \\~sub\\~ x\\^2 \\=\\=hi\\=\\= \\{{TOC}} "
+                                               "\\[\\^1\\] \\[@cite\\]");
+    QTest::addRow("entities") << QStringLiteral("<p>&copy; &eacute;&ntilde; &#233; &#xE9; &#x1F600; &hellip; &mdash; "
+                                                "&lt;&gt;&quot;&apos; &unknown; &#150; &#0; &amp &Alpha;&omega;</p>")
+                              << QStringLiteral("© éñ é é 😀 … — <>\"' \\&unknown; – \ufffd & Αω");
+    QTest::addRow("whitespace") << QStringLiteral("<p>  lots    of\n\tspace   here  </p><div>\n  <span>a</span>\n"
+                                                  "  <span>b</span>\n</div><p>&nbsp;</p><p>no&nbsp;&nbsp;break</p>")
+                                << QStringLiteral("lots of space here\n\na b\n\nno break");
+    QTest::addRow("noise") << QStringLiteral("<!DOCTYPE html><html><head><title>T</title><meta charset=\"utf-8\">"
+                                             "<style>p{color:red}</style><script>alert(1)</script></head><body>"
+                                             "<!-- comment --><p class=\"x\" style=\"color:red\" onclick=\"track()\" "
+                                             "data-id=\"7\">Kept</p><noscript>no</noscript><p hidden>hidden</p>"
+                                             "<p style=\"display: none\">gone</p><img src=\"https://t.example/p.gif\" "
+                                             "width=\"1\" height=\"1\"><iframe src=\"https://ad.example\"></iframe>"
+                                             "<svg><text>svg</text></svg><button>Buy</button><select><option>A</option>"
+                                             "</select></body></html>")
+                           << QStringLiteral("Kept");
+    QTest::addRow("google docs") << QStringLiteral("<meta charset=\"utf-8\"><b style=\"font-weight:normal;\" "
+                                                   "id=\"docs-internal-guid-abc\"><p dir=\"ltr\"><span style=\"font-weight:700;\">"
+                                                   "Bold</span><span style=\"font-weight:400;\"> then </span><span "
+                                                   "style=\"font-style:italic;\">italic</span><span "
+                                                   "style=\"text-decoration:line-through;\"> gone</span></p></b>")
+                                 << QStringLiteral("**Bold** then *italic* ~~gone~~");
+    QTest::addRow("windows clipboard header") << QStringLiteral("Version:0.9\r\nStartHTML:0000000105\r\n<html><body>"
+                                                                "<!--StartFragment--><p>win</p><!--EndFragment--></body></html>")
+                                              << QStringLiteral("win");
+    QTest::addRow("malformed") << QStringLiteral("<p>open <b>bold <i>both</p><p>next</b> after<li>stray</div></span></p></td>"
+                                                 "<p>unclosed <a href=\"https://x.example\">link")
+                               << QStringLiteral("open **bold *both***\n\nnext after\n\n- stray\n\n  unclosed "
+                                                 "[link](https://x.example)");
+    QTest::addRow("unterminated markup") << QStringLiteral("<p>text <!-- never closed") << QStringLiteral("text");
+    QTest::addRow("stray brackets") << QStringLiteral("<p>a < b and 3<4 &lt;tag&gt;</p>")
+                                    << QStringLiteral("a < b and 3<4 \\<tag>");
+    QTest::addRow("super and subscript") << QStringLiteral("<p>x<sup>2</sup> H<sub>2</sub>O <mark>marked</mark> "
+                                                           "<q>quoted</q> <u>under</u></p>")
+                                         << QStringLiteral("x<sup>2</sup> H<sub>2</sub>O ==marked== \"quoted\" under");
+    QTest::addRow("nothing shown") << QStringLiteral("<p> </p><div><br></div><script>x</script>") << QString();
+}
+
+void ParchTests::htmlBecomesMarkdown()
+{
+    QFETCH(QString, html);
+    QFETCH(QString, markdown);
+    QCOMPARE(HtmlMarkdown::convert(html), markdown);
+}
+
+void ParchTests::htmlDataImagesGoToTheSink()
+{
+    const QByteArray png = pngOf(Qt::red);
+    const QString html = QStringLiteral("<p>See <img alt=\"chart (v2)\" src=\"data:image/png;base64,")
+                         + QString::fromLatin1(png.toBase64())
+                         + QStringLiteral("\"> and <img src=\"data:image/gif;base64,R0lGODlhAQABAAAAACw=\" "
+                                          "data-src=\"https://example.org/real.png\" alt=\"lazy\"></p>");
+    QList<QPair<QByteArray, QString>> saved;
+    const QString markdown = HtmlMarkdown::convert(html, [&](const QByteArray &bytes, const QString &type) {
+        saved.append({bytes, type});
+        return QStringLiteral("assets/pasted 1 (ü).png");
+    });
+    // Only the image the HTML carries is saved; a placeholder for one loaded later is not.
+    QCOMPARE(saved.size(), 1);
+    QCOMPARE(saved.first().first, png);
+    QCOMPARE(saved.first().second, QStringLiteral("image/png"));
+    QCOMPARE(markdown, QStringLiteral("See ![chart (v2)](assets/pasted%201%20%28%C3%BC%29.png) and "
+                                      "![lazy](https://example.org/real.png)"));
+    // Kept nowhere, the image leaves its alt text.
+    const QString withoutImage = QStringLiteral("See chart (v2) and ![lazy](https://example.org/real.png)");
+    QCOMPARE(HtmlMarkdown::convert(html), withoutImage);
+    QCOMPARE(HtmlMarkdown::convert(html, [](const QByteArray &, const QString &) { return QString(); }), withoutImage);
+    QVERIFY(HtmlMarkdown::mayEmbedImages(html));
+    QVERIFY(!HtmlMarkdown::mayEmbedImages(QStringLiteral("<img src=\"https://example.org/a.png\">")));
+    // A browser's Copy Image puts the HTML of that image alone beside its bytes.
+    QString alt;
+    QVERIFY(HtmlMarkdown::isLoneImage(QStringLiteral("<meta charset=\"utf-8\"><img src=\"https://example.org/a.png\" "
+                                                     "alt=\" A  cat \">"),
+                                      &alt));
+    QCOMPARE(alt, QStringLiteral("A cat"));
+    QVERIFY(!HtmlMarkdown::isLoneImage(QStringLiteral("<p>Text <img src=\"a.png\"></p>")));
+    QVERIFY(!HtmlMarkdown::isLoneImage(QStringLiteral("<img src=\"a.png\"><img src=\"b.png\">")));
+    QVERIFY(!HtmlMarkdown::isLoneImage(QStringLiteral("<p>No image</p>")));
+    // Whether the result is one paragraph, which can go inside a line.
+    bool inlineOnly = false;
+    HtmlMarkdown::convert(QStringLiteral("<span>words <b>only</b></span>"), {}, &inlineOnly);
+    QVERIFY(inlineOnly);
+    HtmlMarkdown::convert(QStringLiteral("<p>one</p><p>two</p>"), {}, &inlineOnly);
+    QVERIFY(!inlineOnly);
+    HtmlMarkdown::convert(QStringLiteral("<h1>heading</h1>"), {}, &inlineOnly);
+    QVERIFY(!inlineOnly);
+}
+
+void ParchTests::hostileHtmlConvertsInTime()
+{
+    const QList<QPair<QString, QString>> inputs = {
+        {QStringLiteral("deep nesting"),
+         QStringLiteral("<div>").repeated(100000) + QStringLiteral("deep") + QStringLiteral("</div>").repeated(100000)},
+        {QStringLiteral("deep lists"), QStringLiteral("<ul><li>x").repeated(20000)},
+        {QStringLiteral("deep emphasis"), QStringLiteral("<b><i>").repeated(50000) + QStringLiteral("x")},
+        {QStringLiteral("deep quotes"), QStringLiteral("<blockquote>").repeated(20000) + QStringLiteral("q")},
+        {QStringLiteral("deep tables"), QStringLiteral("<table><tr><td>").repeated(5000) + QStringLiteral("t")},
+        {QStringLiteral("brackets"), QString(500000, u'<')},
+        {QStringLiteral("unclosed comment"), QStringLiteral("<!--") + QString(500000, u'a')},
+        {QStringLiteral("unclosed attribute"), QStringLiteral("<p title=\"") + QString(500000, u'a')},
+        {QStringLiteral("many attributes"), QStringLiteral("<p ") + QStringLiteral("a=b ").repeated(100000) + QStringLiteral(">t")},
+        {QStringLiteral("huge spans"),
+         QStringLiteral("<table>") + QStringLiteral("<tr><td colspan=100000 rowspan=100000>c").repeated(2000)
+             + QStringLiteral("</table>")},
+        {QStringLiteral("references"), QStringLiteral("<p>") + QStringLiteral("&amp;&#x1F600;&bogus;&#99999999999;").repeated(50000)},
+        {QStringLiteral("script end tags"), QStringLiteral("<script>") + QStringLiteral("</scrip").repeated(100000)},
+        {QStringLiteral("nested links"), QStringLiteral("<a href=x>").repeated(20000) + QStringLiteral("y")},
+        {QStringLiteral("brackets in text"), QStringLiteral("<p>") + QStringLiteral("[[[[``**__").repeated(50000)},
+        {QStringLiteral("control characters"),
+         QString(1000, QChar(0)) + QStringLiteral("<p>\u0001x\u0007y\u001b\u007f\u0085z&#1;</p>")},
+    };
+    for (const auto &[name, html] : inputs) {
+        QElapsedTimer timer;
+        timer.start();
+        const QString markdown = HtmlMarkdown::convert(html);
+        const qint64 elapsed = timer.elapsed();
+        QVERIFY2(elapsed < 2000, qPrintable(QStringLiteral("%1 took %2 ms").arg(name).arg(elapsed)));
+        // Text survives whatever surrounds it.
+        if (name == u"deep nesting") QCOMPARE(markdown, QStringLiteral("deep"));
+        if (name == u"deep emphasis") QVERIFY(markdown.contains(u'x'));
+        if (name == u"deep quotes") QVERIFY(markdown.endsWith(QStringLiteral("> q")));
+        if (name == u"nested links") QVERIFY(markdown.contains(u'y'));
+        if (name == u"control characters") QCOMPARE(markdown, QStringLiteral("xyz"));
+        for (QChar c : markdown)
+            QVERIFY2(c == u'\n' || c == u'\t' || c.unicode() >= 0x20, qPrintable(name));
+    }
+}
+
+void ParchTests::markdownPathsAndTextAreEncoded()
+{
+    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("assets/my photo (1).png")),
+             QStringLiteral("assets/my%20photo%20%281%29.png"));
+    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("assets/café #2?.png")), QStringLiteral("assets/caf%C3%A9%20%232%3F.png"));
+    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("../notes/a_b-c.d~e+f.pdf")), QStringLiteral("../notes/a_b-c.d~e+f.pdf"));
+    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("100%[x]<y>&z:\\.png")),
+             QStringLiteral("100%25%5Bx%5D%3Cy%3E%26z%3A%5C.png"));
+    QCOMPARE(HtmlMarkdown::encodeUrl(QStringLiteral("https://en.wikipedia.org/wiki/Foo_(bar)")),
+             QStringLiteral("https://en.wikipedia.org/wiki/Foo_(bar)"));
+    QCOMPARE(HtmlMarkdown::encodeUrl(QStringLiteral("https://x.example/a b)c<d>é")),
+             QStringLiteral("https://x.example/a%20b\\)c%3Cd%3Eé"));
+    QCOMPARE(HtmlMarkdown::escapeText(QStringLiteral("my_file *v2* [draft] #1")),
+             QStringLiteral("my_file \\*v2\\* \\[draft\\] #1"));
+    QCOMPARE(Attachments::imageMarkdown(QStringLiteral("photo one"), QStringLiteral("assets/photo one.png")),
+             QStringLiteral("![photo one](assets/photo%20one.png)"));
+    QCOMPARE(Attachments::linkMarkdown(QStringLiteral("café [1].pdf"), QStringLiteral("assets/café [1].pdf")),
+             QStringLiteral("[café \\[1\\].pdf](assets/caf%C3%A9%20%5B1%5D.pdf)"));
+    QCOMPARE(Attachments::includeLine(QStringLiteral("./chapters/one.md")), QStringLiteral("./chapters/one.md"));
+    QCOMPARE(Attachments::includeLine(QStringLiteral("../my chapter.md")), QStringLiteral("\"../my chapter.md\""));
+    QVERIFY(Attachments::isImageFile(QStringLiteral("Photo.JPG")));
+    QVERIFY(!Attachments::isImageFile(QStringLiteral("notes.pdf")));
+    QVERIFY(Attachments::isMarkdownFile(QStringLiteral("a.markdown")));
+    QVERIFY(!Attachments::isMarkdownFile(QStringLiteral("a.txt")));
+    QCOMPARE(Attachments::LargeFileBytes, qint64(50) * 1024 * 1024);
+}
+
+void ParchTests::richPasteIsOneUndoStep()
+{
+    EditorFixture fixture;
+    Document *document = fixture.open("rich.md", QStringLiteral("Intro text.\r\nEnd\r\n"));
+    QVERIFY(document);
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    SourceBuffer *buffer = document->buffer();
+    const QString original = buffer->text();
+    // A phrase goes inside the line, and the caret after it.
+    view.cursor(11);
+    copyRichText(QStringLiteral("<span> and <b>more</b> <a href=\"https://example.org\">here</a></span>"),
+                 QStringLiteral(" and more here"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    const QString phrase = QStringLiteral("and **more** [here](https://example.org)");
+    QCOMPARE(buffer->text(), QStringLiteral("Intro text.") + phrase + QStringLiteral("\r\nEnd\r\n"));
+    QCOMPARE(view.binding->cursorSource(), 11 + int(phrase.size()));
+    QTest::keyClick(&view.window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(buffer->text(), original);
+    // Blocks get lines of their own, in the document's line endings, and
+    // the selection they replace goes.
+    view.select(6, 10);
+    copyRichText(QStringLiteral("<h2>Title</h2><ul><li>one</li><li>two</li></ul>"), QStringLiteral("Title\none\ntwo"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QCOMPARE(buffer->text(), QStringLiteral("Intro \r\n\r\n## Title\r\n\r\n- one\r\n- two\r\n\r\n.\r\nEnd\r\n"));
+    QVERIFY(buffer->canUndo());
+    buffer->undo();
+    QCOMPARE(buffer->text(), original);
+    // At the start of an empty line after text, a blank line comes first.
+    document->buffer()->replace({int(original.size()), 0}, QStringLiteral("\r\n"));
+    view.cursor(view.binding->sourceToEditor(buffer->length()));
+    copyRichText(QStringLiteral("<blockquote>quoted</blockquote>"), QStringLiteral("quoted"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QCOMPARE(buffer->text(), original + QStringLiteral("\r\n> quoted"));
+    // HTML that shows nothing pastes its plain text.
+    view.cursor(0);
+    copyRichText(QStringLiteral("<p> </p>"), QStringLiteral("plain"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QVERIFY(buffer->text().startsWith(QStringLiteral("plainIntro")));
+}
+
+void ParchTests::plainPasteIgnoresRichText()
+{
+    EditorFixture fixture;
+    Document *document = fixture.open("plain.md", QStringLiteral("a\n"));
+    QVERIFY(document);
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    SourceBuffer *buffer = document->buffer();
+    view.cursor(1);
+    copyRichText(QStringLiteral("<b>*bold*</b>"), QStringLiteral("*bold* text\r\nline"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+    QCOMPARE(buffer->text(), QStringLiteral("a*bold* text\nline\n"));
+    QTest::keyClick(&view.window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(buffer->text(), QStringLiteral("a\n"));
+    // Text alone pastes as itself with Ctrl+V too, never converted.
+    QGuiApplication::clipboard()->setText(QStringLiteral("# not <b>converted</b>"));
+    view.cursor(0);
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QCOMPARE(buffer->text(), QStringLiteral("# not <b>converted</b>a\n"));
+    // The TextEdit's own paste is the rich one.
+    buffer->undo();
+    copyRichText(QStringLiteral("<i>it</i>"), QStringLiteral("it"));
+    view.cursor(0);
+    QVERIFY(QMetaObject::invokeMethod(view.editor, "paste"));
+    QCOMPARE(buffer->text(), QStringLiteral("*it*a\n"));
+}
+
+void ParchTests::pastedImagesAreSavedAsAssets()
+{
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString notes = canonical(folder.path());
+    writeFile(notes + QStringLiteral("/notes.md"), "Look: \n");
+    EditorFixture fixture;
+    Document *document = fixture.store->open(notes + QStringLiteral("/notes.md"));
+    QVERIFY(document);
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path());
+    attach(view, attachments.get());
+    SourceBuffer *buffer = document->buffer();
+    const QString assets = notes + QStringLiteral("/assets");
+    const QByteArray red = pngOf(Qt::red), blue = pngOf(Qt::blue);
+    const QString first = QStringLiteral("![](assets/pasted-2026-11-16-1.png)");
+    view.cursor(6);
+    copyImage(red);
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Look: ") + first + u'\n');
+    QCOMPARE(readFile(assets + QStringLiteral("/pasted-2026-11-16-1.png")), red);
+    // The caret follows the image in.
+    QCOMPARE(view.binding->cursorSource(), 6 + int(first.size()));
+    // The same image again is the same file; another takes the next number.
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Look: ") + first + first + u'\n');
+    copyImage(blue);
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    const QString second = QStringLiteral("![](assets/pasted-2026-11-16-2.png)");
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Look: ") + first + first + second + u'\n');
+    QCOMPARE(filesIn(assets), (QStringList{QStringLiteral("pasted-2026-11-16-1.png"), QStringLiteral("pasted-2026-11-16-2.png")}));
+    QCOMPARE(readFile(assets + QStringLiteral("/pasted-2026-11-16-2.png")), blue);
+    // Each paste is one undo step.
+    buffer->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Look: ") + first + first + u'\n');
+    // An image the clipboard holds only as an image is saved as PNG.
+    auto *mime = new QMimeData;
+    QImage green(3, 2, QImage::Format_RGB32);
+    green.fill(Qt::green);
+    mime->setImageData(green);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    view.cursor(0);
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_VERIFY(buffer->text().startsWith(QStringLiteral("![](assets/pasted-2026-11-16-3.png)Look")));
+    const QImage saved(assets + QStringLiteral("/pasted-2026-11-16-3.png"));
+    QCOMPARE(saved.size(), QSize(3, 2));
+    QCOMPARE(saved.pixelColor(0, 0), QColor(Qt::green));
+    // Copy Image in a browser brings the HTML of the image, whose alt text is kept.
+    buffer->undo();
+    view.cursor(0);
+    copyImage(red, QStringLiteral("<img src=\"https://example.org/red.png\" alt=\"Red square\">"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_VERIFY(buffer->text().startsWith(QStringLiteral("![Red square](assets/pasted-2026-11-16-1.png)Look")));
+    QCOMPARE(filesIn(assets).size(), 3);
+}
+
+void ParchTests::pastedHtmlImagesLandOnceSaved()
+{
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString notes = canonical(folder.path());
+    writeFile(notes + QStringLiteral("/notes.md"), "Tail\n");
+    EditorFixture fixture;
+    Document *document = fixture.store->open(notes + QStringLiteral("/notes.md"));
+    QVERIFY(document);
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path());
+    attach(view, attachments.get());
+    SourceBuffer *buffer = document->buffer();
+    const QString asset = notes + QStringLiteral("/assets/pasted-2026-11-16-1.png");
+    // The text refers to the image only once the image is in its file.
+    bool savedFirst = false;
+    connect(buffer, &SourceBuffer::sourceChanged, this, [&] { savedFirst = QFile::exists(asset); });
+    view.cursor(0);
+    copyRichText(QStringLiteral("<p>Chart: <img alt=\"sales\" src=\"data:image/png;base64,")
+                     + QString::fromLatin1(pngOf(Qt::red).toBase64()) + QStringLiteral("\"></p>"),
+                 QStringLiteral("Chart:"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Chart: ![sales](assets/pasted-2026-11-16-1.png)Tail\n"));
+    QVERIFY(savedFirst);
+    QCOMPARE(readFile(asset), pngOf(Qt::red));
+    buffer->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Tail\n"));
+
+    // A place for text to come follows every edit made meanwhile.
+    buffer->replace({0, int(buffer->length())}, QStringLiteral("0123456789"));
+    auto *place = new Insertion(document, {5, 0});
+    buffer->replace({0, 0}, QStringLiteral("ab"));
+    buffer->replace({9, 2}, QString());
+    // Text put in at the very place stays after it.
+    buffer->replace({7, 0}, QStringLiteral("typed"));
+    QCOMPARE(place->range().start, 7);
+    QVERIFY(place->insert(QStringLiteral("X"), false));
+    QCOMPARE(buffer->text(), QStringLiteral("ab01234Xtyped569"));
+    buffer->undo();
+    // A range is replaced while nothing reached into it, and otherwise left alone.
+    auto *range = new Insertion(document, {2, 3});
+    buffer->replace({0, 1}, QString());
+    QVERIFY(range->insert(QStringLiteral("R"), false));
+    QCOMPARE(buffer->text(), QStringLiteral("bR34typed569"));
+    auto *touched = new Insertion(document, {1, 4});
+    buffer->replace({2, 1}, QStringLiteral("Y"));
+    QCOMPARE(touched->range().start, 1);
+    QCOMPARE(touched->range().length, 0);
+    QVERIFY(touched->insert(QStringLiteral("T"), false));
+    QCOMPARE(buffer->text(), QStringLiteral("bTRY4typed569"));
+    // One that is given up puts nothing in.
+    auto *given = new Insertion(document, {0, 0});
+    given->cancel();
+    QVERIFY(!given->insert(QStringLiteral("never"), false));
+    // Block text stands apart from the text around it.
+    QCOMPARE(Insertion::fitted(u"before after", {7, 0}, QStringLiteral("B"), true), QStringLiteral("\n\nB\n\n"));
+    QCOMPARE(Insertion::fitted(u"line\n\nnext", {5, 0}, QStringLiteral("B"), true), QStringLiteral("\nB\n"));
+    QCOMPARE(Insertion::fitted(u"line\r\n", {6, 0}, QStringLiteral("B"), true), QStringLiteral("\nB"));
+    QCOMPARE(Insertion::fitted(u"", {0, 0}, QStringLiteral("B"), true), QStringLiteral("B"));
+    QCOMPARE(Insertion::fitted(u"in line", {3, 0}, QStringLiteral("B"), false), QStringLiteral("B"));
+}
+
+void ParchTests::draftAssetsFollowTheNamedFile()
+{
+    EditorFixture fixture;
+    Document *draft = fixture.store->newDraft();
+    EditorView view(fixture.engine, draft);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path());
+    attach(view, attachments.get());
+    const QByteArray red = pngOf(Qt::red);
+    copyImage(red);
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    const QString link = QStringLiteral("![](assets/pasted-2026-11-16-1.png)");
+    QTRY_COMPARE(draft->buffer()->text(), link);
+    // A draft's assets are in its own folder, which is its owner's alone.
+    const QString draftFolder = AppPaths::under(fixture.root.path()).drafts() + u'/' + draft->id();
+    QCOMPARE(attachments->documentFolder(draft), draftFolder);
+    QCOMPARE(readFile(draftFolder + QStringLiteral("/assets/pasted-2026-11-16-1.png")), red);
+    QCOMPARE(QFile::permissions(draftFolder) & (QFileDevice::ReadGroup | QFileDevice::ReadOther), QFileDevice::Permissions());
+    QVERIFY(LinkTargets::missing(draft->buffer()->text(), draftFolder).isEmpty());
+    // Named, its assets go beside its file, and its link still leads to the image.
+    QTemporaryDir target;
+    QVERIFY(target.isValid());
+    const QString file = canonical(target.path()) + QStringLiteral("/named.md");
+    fixture.store->saveAs(draft, file);
+    fixture.store->waitForSaves();
+    QVERIFY(!draft->isDraft());
+    QCOMPARE(attachments->documentFolder(draft), canonical(target.path()));
+    QCOMPARE(readFile(canonical(target.path()) + QStringLiteral("/assets/pasted-2026-11-16-1.png")), red);
+    QVERIFY(LinkTargets::missing(draft->buffer()->text(), attachments->documentFolder(draft)).isEmpty());
+    // Pasted again, the image goes beside the named file.
+    view.cursor(0);
+    copyImage(pngOf(Qt::blue));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_COMPARE(draft->buffer()->text(), QStringLiteral("![](assets/pasted-2026-11-16-2.png)") + link);
+    QVERIFY(QFile::exists(canonical(target.path()) + QStringLiteral("/assets/pasted-2026-11-16-2.png")));
+}
+
+void ParchTests::droppedFilesAreCopiedOrLinked()
+{
+    DropFolders folders;
+    const QByteArray red = pngOf(Qt::red), blue = pngOf(Qt::blue);
+    writeFile(folders.outside + QStringLiteral("/photo one.png"), red);
+    writeFile(folders.outside + QStringLiteral("/other/photo one.png"), blue);
+    writeFile(folders.outside + QStringLiteral("/café.pdf"), "pdf");
+    writeFile(folders.notes + QStringLiteral("/img/pic (1).png"), red);
+    writeFile(folders.library + QStringLiteral("/shared/plan.pdf"), "plan");
+    QVERIFY(QDir().mkpath(folders.outside + QStringLiteral("/folder")));
+    EditorFixture fixture;
+    Document *document = fixture.store->open(folders.document);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document, 600, 300);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path(), {folders.library});
+    attach(view, attachments.get());
+    SourceBuffer *buffer = document->buffer();
+    const QString original = buffer->text();
+    const QString assets = folders.notes + QStringLiteral("/assets");
+    // Drops a file at a place and returns the text it made, undoing it after.
+    const auto dropped = [&](int position, const QStringList &paths) {
+        if (!dropFiles(view, position, paths)) return QStringLiteral("(refused)");
+        if (!QTest::qWaitFor([&] { return buffer->text() != original; }, 5000)) return QStringLiteral("(nothing)");
+        const QString text = buffer->text();
+        buffer->undo();
+        return buffer->text() == original ? text : QStringLiteral("(not one step)");
+    };
+    // An image from outside is copied into the assets, at the place it is dropped.
+    QCOMPARE(dropped(6, {folders.outside + QStringLiteral("/photo one.png")}),
+             QStringLiteral("Start ![photo one](assets/photo%20one.png)end\n"));
+    QCOMPARE(readFile(assets + QStringLiteral("/photo one.png")), red);
+    // Another file of that name takes a number; the same file again is the copy there.
+    QCOMPARE(dropped(0, {folders.outside + QStringLiteral("/other/photo one.png")}),
+             QStringLiteral("![photo one](assets/photo%20one-2.png)Start end\n"));
+    QCOMPARE(dropped(0, {folders.outside + QStringLiteral("/photo one.png")}),
+             QStringLiteral("![photo one](assets/photo%20one.png)Start end\n"));
+    QCOMPARE(filesIn(assets), (QStringList{QStringLiteral("photo one-2.png"), QStringLiteral("photo one.png")}));
+    // A file in the document's folder, or anywhere in the library, is linked
+    // where it is; the original files stay.
+    QCOMPARE(dropped(9, {folders.notes + QStringLiteral("/img/pic (1).png")}),
+             QStringLiteral("Start end![pic (1)](img/pic%20%281%29.png)\n"));
+    QCOMPARE(dropped(9, {folders.library + QStringLiteral("/shared/plan.pdf")}),
+             QStringLiteral("Start end[plan.pdf](../shared/plan.pdf)\n"));
+    QCOMPARE(filesIn(assets).size(), 2);
+    QVERIFY(QFile::exists(folders.outside + QStringLiteral("/photo one.png")));
+    // Any other file is copied and linked, its name encoded.
+    QCOMPARE(dropped(0, {folders.outside + QStringLiteral("/café.pdf")}),
+             QStringLiteral("[café.pdf](assets/caf%C3%A9.pdf)Start end\n"));
+    QCOMPARE(readFile(assets + QStringLiteral("/café.pdf")), QByteArray("pdf"));
+    // Several files are a paragraph each.
+    QCOMPARE(dropped(6, {folders.outside + QStringLiteral("/photo one.png"), folders.outside + QStringLiteral("/café.pdf")}),
+             QStringLiteral("Start \n\n![photo one](assets/photo%20one.png)\n\n[café.pdf](assets/caf%C3%A9.pdf)\n\nend\n"));
+    // A folder is not attached, and says so.
+    QSignalSpy problems(attachments.get(), &Attachments::problem);
+    QVERIFY(dropFiles(view, 0, {folders.outside + QStringLiteral("/folder")}));
+    QTRY_COMPARE(problems.count(), 1);
+    QVERIFY(problems.first().at(1).toString().contains(QStringLiteral("folder")));
+    QTest::qWait(50);
+    QCOMPARE(buffer->text(), original);
+    // Links, rich text and text dropped from elsewhere go in at the drop.
+    const QPointF at = pointOf(view, 6);
+    QVERIFY(view.binding->dropAt(at.x(), at.y(), {QUrl(QStringLiteral("https://example.org/a b"))}, {}, {}));
+    QCOMPARE(buffer->text(), QStringLiteral("Start <https://example.org/a%20b>end\n"));
+    buffer->undo();
+    QVERIFY(view.binding->dropAt(at.x(), at.y(), {QUrl(QStringLiteral("https://example.org"))},
+                                 QStringLiteral("<a href=\"https://example.org\">site</a>"), QStringLiteral("site")));
+    QCOMPARE(buffer->text(), QStringLiteral("Start [site](https://example.org)end\n"));
+    buffer->undo();
+    QVERIFY(view.binding->dropAt(at.x(), at.y(), {}, {}, QStringLiteral("plain *text*")));
+    QCOMPARE(buffer->text(), QStringLiteral("Start plain *text*end\n"));
+    buffer->undo();
+    QVERIFY(!view.binding->dropAt(at.x(), at.y(), {}, {}, {}));
+}
+
+void ParchTests::draftDropsCopyIntoTheDraft()
+{
+    DropFolders folders;
+    writeFile(folders.library + QStringLiteral("/shared/plan.pdf"), "plan");
+    writeFile(folders.library + QStringLiteral("/chapter.md"), "# Chapter\n");
+    EditorFixture fixture;
+    Document *draft = fixture.store->newDraft();
+    EditorView view(fixture.engine, draft);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path(), {folders.library});
+    attach(view, attachments.get());
+    const QString assets = attachments->documentFolder(draft) + QStringLiteral("/assets");
+    // A draft has no place of its own to link from, so even a library file is copied.
+    QVERIFY(dropFiles(view, 0, {folders.library + QStringLiteral("/shared/plan.pdf")}));
+    QTRY_COMPARE(draft->buffer()->text(), QStringLiteral("[plan.pdf](assets/plan.pdf)"));
+    QCOMPARE(readFile(assets + QStringLiteral("/plan.pdf")), QByteArray("plan"));
+    // A Markdown file can only be linked from a draft, which includes nothing until it is named.
+    QSignalSpy asked(view.binding, &EditorBinding::includeAsked);
+    QVERIFY(dropFiles(view, 0, {folders.library + QStringLiteral("/chapter.md")}));
+    QTRY_COMPARE(asked.count(), 1);
+    QCOMPARE(asked.first().at(0).toString(), QStringLiteral("chapter.md"));
+    QCOMPARE(asked.first().at(1).toBool(), false);
+    view.binding->answerInclude(EditorBinding::Include);
+    QTRY_COMPARE(draft->buffer()->text(), QStringLiteral("[chapter.md](assets/chapter.md)[plan.pdf](assets/plan.pdf)"));
+    QVERIFY(QFile::exists(assets + QStringLiteral("/chapter.md")));
+}
+
+void ParchTests::largeDropsAskFirst()
+{
+    DropFolders folders;
+    writeFile(folders.outside + QStringLiteral("/big.bin"), QByteArray(4096, 'x'));
+    writeFile(folders.outside + QStringLiteral("/small.txt"), "small");
+    writeFile(folders.notes + QStringLiteral("/big here.bin"), QByteArray(4096, 'y'));
+    EditorFixture fixture;
+    Document *document = fixture.store->open(folders.document);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path(), {folders.library});
+    QCOMPARE(attachments->largeFileBytes(), Attachments::LargeFileBytes);
+    attachments->setLargeFileBytes(1024);
+    attach(view, attachments.get());
+    SourceBuffer *buffer = document->buffer();
+    const QString assets = folders.notes + QStringLiteral("/assets");
+    QSignalSpy asked(view.binding, &EditorBinding::copyAsked);
+    const QStringList both = {folders.outside + QStringLiteral("/big.bin"), folders.outside + QStringLiteral("/small.txt")};
+    // Nothing is copied before the answer, and nothing at all when it is no.
+    QVERIFY(dropFiles(view, 0, both));
+    QTRY_COMPARE(asked.count(), 1);
+    QCOMPARE(asked.first().at(0).toStringList(), QStringList{QStringLiteral("big.bin")});
+    QCOMPARE(asked.first().at(1).toLongLong(), qint64(4096));
+    QVERIFY(!QFile::exists(assets));
+    view.binding->answerCopy(false);
+    QTest::qWait(100);
+    QCOMPARE(buffer->text(), QStringLiteral("Start end\n"));
+    QVERIFY(!QFile::exists(assets));
+    // Yes copies them all.
+    QVERIFY(dropFiles(view, 0, both));
+    QTRY_COMPARE(asked.count(), 2);
+    view.binding->answerCopy(true);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("[big.bin](assets/big.bin)\n\n[small.txt](assets/small.txt)\n\nStart end\n"));
+    QCOMPARE(readFile(assets + QStringLiteral("/big.bin")), QByteArray(4096, 'x'));
+    // A large file linked where it is copies nothing and asks nothing.
+    buffer->undo();
+    QVERIFY(dropFiles(view, 0, {folders.notes + QStringLiteral("/big here.bin")}));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("[big here.bin](big%20here.bin)Start end\n"));
+    QCOMPARE(asked.count(), 2);
+}
+
+void ParchTests::failedCopiesSayWhy()
+{
+    DropFolders folders;
+    writeFile(folders.outside + QStringLiteral("/pic.png"), pngOf(Qt::red));
+    // Something that is no folder stands where the assets would go.
+    writeFile(folders.notes + QStringLiteral("/assets"), "not a folder");
+    EditorFixture fixture;
+    Document *document = fixture.store->open(folders.document);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path(), {folders.library});
+    attach(view, attachments.get());
+    SourceBuffer *buffer = document->buffer();
+    QSignalSpy problems(attachments.get(), &Attachments::problem);
+    QVERIFY(dropFiles(view, 0, {folders.outside + QStringLiteral("/pic.png")}));
+    QTRY_COMPARE(problems.count(), 1);
+    QCOMPARE(problems.at(0).at(0).toString(), QStringLiteral("Not attached"));
+    QVERIFY2(problems.at(0).at(1).toString().contains(folders.notes + QStringLiteral("/assets")),
+             qPrintable(problems.at(0).at(1).toString()));
+    // A pasted image fails the same way, and the text is left as it was.
+    view.cursor(0);
+    copyImage(pngOf(Qt::blue));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_COMPARE(problems.count(), 2);
+    QCOMPARE(problems.at(1).at(0).toString(), QStringLiteral("Image not pasted"));
+    QCOMPARE(buffer->text(), QStringLiteral("Start end\n"));
+    // Pasted rich text keeps its words, and its images their alt text.
+    copyRichText(QStringLiteral("<p>See <img alt=\"chart\" src=\"data:image/png;base64,")
+                     + QString::fromLatin1(pngOf(Qt::red).toBase64()) + QStringLiteral("\"></p>"),
+                 QStringLiteral("See"));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("See chartStart end\n"));
+    QTRY_COMPARE(problems.count(), 3);
+    QCOMPARE(problems.at(2).at(0).toString(), QStringLiteral("Pasted images not saved"));
+}
+
+void ParchTests::droppedMarkdownIsLinkedOrIncluded()
+{
+    DropFolders folders;
+    writeFile(folders.notes + QStringLiteral("/chapters/one.md"), "# One\n");
+    writeFile(folders.notes + QStringLiteral("/chapters/two words.md"), "# Two\n");
+    writeFile(folders.library + QStringLiteral("/shared/intro.md"), "# Intro\n");
+    writeFile(folders.outside + QStringLiteral("/far.md"), "# Far\n");
+    EditorFixture fixture;
+    Document *document = fixture.store->open(folders.document);
+    QVERIFY(document);
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto attachments = attachmentsUnder(fixture.root.path(), {folders.library});
+    attach(view, attachments.get());
+    SourceBuffer *buffer = document->buffer();
+    const QString original = buffer->text();
+    QSignalSpy asked(view.binding, &EditorBinding::includeAsked);
+    const auto chosen = [&](const QString &path, int choice) {
+        const int before = int(asked.count());
+        if (!dropFiles(view, 6, {path})) return QStringLiteral("(refused)");
+        if (!QTest::qWaitFor([&] { return asked.count() > before; }, 5000)) return QStringLiteral("(not asked)");
+        if (!asked.last().at(1).toBool()) return QStringLiteral("(cannot include)");
+        view.binding->answerInclude(choice);
+        if (!QTest::qWaitFor([&] { return buffer->text() != original; }, 2000)) return QStringLiteral("(nothing)");
+        const QString text = buffer->text();
+        buffer->undo();
+        return text;
+    };
+    // An include goes on a paragraph of its own, relative to the document.
+    QCOMPARE(chosen(folders.notes + QStringLiteral("/chapters/one.md"), EditorBinding::Include),
+             QStringLiteral("Start \n\n./chapters/one.md\n\nend\n"));
+    QCOMPARE(asked.last().at(0).toString(), QStringLiteral("one.md"));
+    QCOMPARE(chosen(folders.notes + QStringLiteral("/chapters/two words.md"), EditorBinding::Include),
+             QStringLiteral("Start \n\n\"./chapters/two words.md\"\n\nend\n"));
+    QCOMPARE(chosen(folders.library + QStringLiteral("/shared/intro.md"), EditorBinding::Include),
+             QStringLiteral("Start \n\n../shared/intro.md\n\nend\n"));
+    QCOMPARE(chosen(folders.outside + QStringLiteral("/far.md"), EditorBinding::Include),
+             QStringLiteral("Start \n\n../../outside/far.md\n\nend\n"));
+    QVERIFY(!QFile::exists(folders.notes + QStringLiteral("/assets")));
+    // A link is made as for any other file.
+    QCOMPARE(chosen(folders.library + QStringLiteral("/shared/intro.md"), EditorBinding::InsertLink),
+             QStringLiteral("Start [intro.md](../shared/intro.md)end\n"));
+    QCOMPARE(chosen(folders.outside + QStringLiteral("/far.md"), EditorBinding::InsertLink),
+             QStringLiteral("Start [far.md](assets/far.md)end\n"));
+    // A newer drop gives up one still asked about.
+    QVERIFY(dropFiles(view, 6, {folders.notes + QStringLiteral("/chapters/one.md")}));
+    QTRY_COMPARE(asked.count(), 7);
+    QVERIFY(dropFiles(view, 0, {folders.outside + QStringLiteral("/far.md")}));
+    QTRY_COMPARE(asked.count(), 8);
+    view.binding->answerInclude(EditorBinding::Include);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("../../outside/far.md\n\nStart end\n"));
+    QTest::qWait(100);
+    QCOMPARE(buffer->text(), QStringLiteral("../../outside/far.md\n\nStart end\n"));
+    buffer->undo();
+    // Cancel adds nothing.
+    QVERIFY(dropFiles(view, 6, {folders.notes + QStringLiteral("/chapters/one.md")}));
+    QTRY_COMPARE(asked.count(), 9);
+    view.binding->answerInclude(EditorBinding::Cancel);
+    QTest::qWait(100);
+    QCOMPARE(buffer->text(), original);
+    // The included document resolves where it is.
+    QVERIFY(LinkTargets::missing(QStringLiteral("./chapters/one.md\n"), folders.notes).isEmpty());
+}
+
+void ParchTests::windowDropsCopyAndAsk()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    DropFolders folders;
+    writeFile(folders.outside + QStringLiteral("/pic.png"), pngOf(Qt::red));
+    writeFile(folders.notes + QStringLiteral("/chapter.md"), "# Chapter\n");
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.backend->openFiles({folders.document});
+    Document *document = shell.document();
+    QVERIFY(document);
+    SourceBuffer *buffer = document->buffer();
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    QVERIFY(editor);
+    // A file manager proposes to move what it drags; parch copies.
+    auto mime = std::make_unique<QMimeData>();
+    mime->setUrls({QUrl::fromLocalFile(folders.outside + QStringLiteral("/pic.png"))});
+    const QPointF at = editor->mapToScene(QPointF(2, 2));
+    const Qt::DropActions proposed = Qt::MoveAction | Qt::CopyAction;
+    QDragEnterEvent enter(at, proposed, mime.get(), Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(window, &enter);
+    QVERIFY(enter.isAccepted());
+    QCOMPARE(enter.dropAction(), Qt::CopyAction);
+    QDragMoveEvent move(at, proposed, mime.get(), Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(window, &move);
+    QQuickItem *mark = shell.item(QStringLiteral("dropMark"));
+    QVERIFY(mark && mark->isVisible());
+    QDropEvent drop(at, proposed, mime.get(), Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(window, &drop);
+    QVERIFY(drop.isAccepted());
+    QCOMPARE(drop.dropAction(), Qt::CopyAction);
+    QVERIFY(!mark->isVisible());
+    QTRY_COMPARE(buffer->text(), QStringLiteral("![pic](assets/pic.png)Start end\n"));
+    QVERIFY(QFile::exists(folders.outside + QStringLiteral("/pic.png")));
+    buffer->undo();
+    // A Markdown file asks over the window, which waits for the answer.
+    EditorBinding *binding = shell.binding();
+    QObject *dialog = shell.object(QStringLiteral("attachmentDialog"));
+    QVERIFY(dialog);
+    const QPointF start = editor->mapFromScene(at);
+    QVERIFY(binding->dropAt(start.x(), start.y(), {QUrl::fromLocalFile(folders.notes + QStringLiteral("/chapter.md"))}, {}, {}));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QVERIFY(binding->blocked());
+    QStringList problems;
+    QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join("; ")));
+    QVERIFY2(unnamedAccessibleItems(window).isEmpty(), qPrintable(unnamedAccessibleItems(window).join(", ")));
+    // The keys start on Cancel, and Tab goes round the choices inside the dialog.
+    QCOMPARE(window->activeFocusItem()->objectName(), QStringLiteral("cancelChoice"));
+    QVERIFY(window->activeFocusItem()->property("visualFocus").toBool());
+    QCOMPARE(tabRound(window, dialog),
+             (QStringList{QStringLiteral("cancelChoice"), QStringLiteral("includeChoice"), QStringLiteral("insertLinkChoice")}));
+    QObject *include = dialog->findChild<QObject *>(QStringLiteral("includeChoice"));
+    QVERIFY(include);
+    QVERIFY(QMetaObject::invokeMethod(include, "clicked"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("./chapter.md\n\nStart end\n"));
+    QVERIFY(!dialog->property("opened").toBool());
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    buffer->undo();
+    // Escape cancels.
+    QVERIFY(binding->dropAt(start.x(), start.y(), {QUrl::fromLocalFile(folders.notes + QStringLiteral("/chapter.md"))}, {}, {}));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QTest::qWait(50);
+    QCOMPARE(buffer->text(), QStringLiteral("Start end\n"));
+    // Large files ask too, and Copy copies.
+    shell.backend->attachments()->setLargeFileBytes(1);
+    QVERIFY(binding->dropAt(start.x(), start.y(), {QUrl::fromLocalFile(folders.outside + QStringLiteral("/pic.png"))}, {}, {}));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QCOMPARE(dialog->property("question").toString(), QStringLiteral("copy"));
+    QVERIFY2(unnamedAccessibleItems(window).isEmpty(), qPrintable(unnamedAccessibleItems(window).join(", ")));
+    QVERIFY(QMetaObject::invokeMethod(dialog->findChild<QObject *>(QStringLiteral("copyChoice")), "clicked"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("![pic](assets/pic.png)Start end\n"));
+    // What cannot be attached is a notice.
+    shell.backend->attachments()->report(QStringLiteral("Not attached"), QStringLiteral("pic.png is gone"));
+    QCOMPARE(shell.backend->problem(), QStringLiteral("Not attached"));
+    QVERIFY(shell.backend->notice());
+}
+
+void ParchTests::missingTargetsAreListed()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString root = canonical(temp.path());
+    const QString library = root + QStringLiteral("/lib"), folder = library + QStringLiteral("/notes");
+    writeFile(folder + QStringLiteral("/here.png"), "png");
+    writeFile(folder + QStringLiteral("/my file.pdf"), "pdf");
+    writeFile(library + QStringLiteral("/chapters/one.md"), "# One\n");
+    writeFile(folder + QStringLiteral("/sub/two.md"), "# Two\n");
+    const QString text =
+        QStringLiteral("---\ncover: gone.png\n---\n"
+                       "# Title ![ok](here.png) ![gone](missing.png)\n"
+                       "[doc](my%20file.pdf) [gone doc](<no such.pdf> \"title\") [web](https://example.org/x.png) "
+                       "[mail](mailto:a@b.example) [anchor](#top)\n"
+                       "`![code](code.png)` and <img src=\"html.png\"> <a href='html-link.pdf'>x</a>\n"
+                       "\n"
+                       "```\n![fenced](fenced.png)\n```\n"
+                       "\n"
+                       "    ![indented](indented.png)\n"
+                       "\n"
+                       "<!-- ![commented](commented.png)\n![still](commented-too.png) -->\n"
+                       "[ref]: refs/missing.png \"Title\"\n"
+                       "[ok-ref]: <my file.pdf>\n"
+                       "\n"
+                       "/chapters/one.md\n"
+                       "\n"
+                       "sub/two.md \"Two\"\n"
+                       "\n"
+                       "./sub/three.md\n"
+                       "\n"
+                       "// ![comment](writer-comment.png)\n"
+                       "![abs](")
+        + folder + QStringLiteral("/here.png) ![url](file://") + root
+        + QStringLiteral("/nothing.png) ![fragment](here.png#x) ![\\[escaped\\]](missing%20%28x%29.png)\n");
+    const auto describe = [](const QList<LinkTargets::Target> &targets) {
+        QStringList found;
+        for (const LinkTargets::Target &target : targets) {
+            const QString kind = target.kind == LinkTargets::Target::Image   ? QStringLiteral("image")
+                                 : target.kind == LinkTargets::Target::Include ? QStringLiteral("include")
+                                                                               : QStringLiteral("link");
+            found << QStringLiteral("%1 %2 %3").arg(target.line).arg(kind, target.destination);
+        }
+        return found;
+    };
+    const QList<LinkTargets::Target> missing = LinkTargets::missing(text, folder, library);
+    QCOMPARE(describe(missing),
+             (QStringList{QStringLiteral("4 image missing.png"), QStringLiteral("5 link no such.pdf"),
+                          QStringLiteral("6 image html.png"), QStringLiteral("6 link html-link.pdf"),
+                          QStringLiteral("16 link refs/missing.png"), QStringLiteral("23 include ./sub/three.md"),
+                          QStringLiteral("26 image file://") + root + QStringLiteral("/nothing.png"),
+                          QStringLiteral("26 image missing%20%28x%29.png")}));
+    // Every target says where it is written.
+    const QList<LinkTargets::Target> all = LinkTargets::local(text, folder, library);
+    QCOMPARE(all.size(), 15);
+    for (const LinkTargets::Target &target : all)
+        QCOMPARE(text.mid(target.position, target.destination.size()), target.destination);
+    QCOMPARE(all.first().path, folder + QStringLiteral("/here.png"));
+    QCOMPARE(missing.last().path, folder + QStringLiteral("/missing (x).png"));
+    // Without a library, an include from its root resolves nowhere.
+    const QList<LinkTargets::Target> unrooted = LinkTargets::missing(QStringLiteral("/chapters/one.md\n"), folder);
+    QCOMPARE(unrooted.size(), 1);
+    QVERIFY(unrooted.first().path.isEmpty());
+    // A path in two lines, or one inside prose, is no include.
+    QVERIFY(LinkTargets::local(QStringLiteral("Read\nother.md\n\nSee other.md too.\n"), folder).isEmpty());
+    // The library that holds a path is the nearest.
+    QCOMPARE(LinkTargets::libraryOf(QStringLiteral("/a/b/c.md"), {QStringLiteral("/a"), QStringLiteral("/a/b"), QStringLiteral("/x")}),
+             QStringLiteral("/a/b"));
+    QCOMPARE(LinkTargets::libraryOf(QStringLiteral("/ab/c.md"), {QStringLiteral("/a")}), QString());
+    // CRLF lines count the same.
+    QString crlf = QStringLiteral("a\r\n\r\n![x](gone.png)\r\n");
+    QCOMPARE(LinkTargets::missing(crlf, folder).first().line, 3);
+}
+
+void ParchTests::checkLinksShowsWhatIsMissing()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    const QString folder = canonical(files.path());
+    const QString file = folder + QStringLiteral("/doc.md");
+    writeFile(file, "![ok](ok.png) ![gone](gone.png)\n");
+    writeFile(folder + QStringLiteral("/ok.png"), "png");
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.backend->openFiles({file});
+    QVERIFY(shell.document());
+    QObject *entry = shell.object(QStringLiteral("checkLinksEntry"));
+    QVERIFY(entry && entry->property("enabled").toBool());
+    QObject *dialog = shell.object(QStringLiteral("linkCheckDialog"));
+    QVERIFY(dialog);
+    QVERIFY(QMetaObject::invokeMethod(window, "checkLinks"));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QTRY_VERIFY(!dialog->property("checking").toBool());
+    QCOMPARE(dialog->property("summary").toString(),
+             QStringLiteral("1 of 2 local links and images lead to files that are not there."));
+    QCOMPARE(dialog->property("listing").toString(), QStringLiteral("Line 1, image: gone.png"));
+    QTest::qWait(50);
+    QStringList problems;
+    QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join("; ")));
+    QVERIFY2(unnamedAccessibleItems(window).isEmpty(), qPrintable(unnamedAccessibleItems(window).join(", ")));
+    // The keys start on Close; Tab reaches the list, to select and copy from it, and stays in the dialog.
+    QCOMPARE(window->activeFocusItem()->objectName(), QStringLiteral("closeChoice"));
+    QVERIFY(window->activeFocusItem()->property("visualFocus").toBool());
+    QCOMPARE(tabRound(window, dialog), (QStringList{QStringLiteral("closeChoice"), QStringLiteral("paneText")}));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QTRY_COMPARE(window->activeFocusItem(), shell.item(QStringLiteral("editor")));
+    // Once the file is there, everything is found.
+    writeFile(folder + QStringLiteral("/gone.png"), "png");
+    QVERIFY(QMetaObject::invokeMethod(window, "checkLinks"));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QTRY_COMPARE(dialog->property("summary").toString(),
+                 QStringLiteral("All 2 local links and images lead to files that are there."));
 }
 
 QTEST_MAIN(ParchTests)

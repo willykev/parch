@@ -1,8 +1,9 @@
 #pragma once
 
 #include "apppaths.h"
-// Documents, the settings and the review are properties QML reads, so their
-// types must be complete here.
+// The attachments, documents, the settings and the review are properties
+// QML reads, so their types must be complete here.
+#include "attachments.h"
 #include "document.h"
 #include "documentreview.h"
 #include "history.h"
@@ -64,6 +65,8 @@ class Backend : public QObject {
     // Why recovery could not take a document's text, by document id: from a
     // failed write until a write succeeds or the text no longer needs it.
     Q_PROPERTY(QVariantMap recoveryFailures READ recoveryFailures NOTIFY recoveryFailuresChanged)
+    // Where pasted images and dropped files are placed; what fails there is a notice.
+    Q_PROPERTY(Attachments *attachments READ attachments CONSTANT)
 
 public:
     enum NoticeTone { Failure, Warning, News };
@@ -97,6 +100,7 @@ public:
     FileRequests *fileRequests() const;
     DocumentReview *review() const;
     QVariantMap recoveryFailures() const;
+    Attachments *attachments() const;
     QList<WindowContext *> windows() const;
     // The window that came to the front last, or the oldest window when none has yet.
     WindowContext *activeWindow() const;
@@ -337,4 +341,7 @@ private:
     QVariantMap m_recoveryFailures;
     // The documents whose tab closes once their save lands, by id.
     QSet<QString> m_closing;
+    // Declared last, so that it goes first and its copies end before the
+    // documents they insert into do.
+    std::unique_ptr<Attachments> m_attachments;
 };

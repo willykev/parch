@@ -23,6 +23,7 @@ Menu {
     signal save()
     signal saveAs()
     signal showHistory()
+    signal checkLinks()
     signal closeTab()
     signal findDocument()
     signal toggleLibrary()
@@ -120,6 +121,12 @@ Menu {
         text: qsTr("Version history…")
         enabled: menu.hasDocument
         onTriggered: menu.showHistory()
+    }
+    MenuEntry {
+        objectName: "checkLinksEntry"
+        text: qsTr("Check links…")
+        enabled: menu.hasDocument
+        onTriggered: menu.checkLinks()
     }
     MenuEntry {
         text: qsTr("Close tab")

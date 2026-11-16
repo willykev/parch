@@ -1,5 +1,6 @@
 #pragma once
 
+#include "attachments.h"
 #include "document.h"
 #include "sourcebuffer.h"
 #include "sourcetypes.h"
@@ -11,10 +12,13 @@
 #include <QQuickItem>
 #include <QString>
 #include <QStringView>
+#include <QUrl>
+#include <memory>
 #include <vector>
 
 class QInputMethodEvent;
 class QKeyEvent;
+class QMimeData;
 class QTextBlockFormat;
 class QTextDocument;
 
@@ -84,8 +88,15 @@ class EditorBinding : public QObject {
     // input method text or edits of its own; the source can still change
     // from elsewhere, and the view follows it.
     Q_PROPERTY(bool blocked READ blocked WRITE setBlocked NOTIFY blockedChanged)
+    // Where pasted images and dropped files are placed; without it, files
+    // are not attached, and images in pasted HTML keep only their alt text.
+    Q_PROPERTY(Attachments *attachments READ attachments WRITE setAttachments NOTIFY attachmentsChanged)
 
 public:
+    // What the writer chose for a dropped Markdown file.
+    enum DropChoice { Cancel, InsertLink, Include };
+    Q_ENUM(DropChoice)
+
     explicit EditorBinding(QObject *parent = nullptr);
     ~EditorBinding() override;
 
@@ -109,7 +120,24 @@ public:
     Q_INVOKABLE void redo();
     Q_INVOKABLE void copy();
     Q_INVOKABLE void cut();
+    // Pastes what the clipboard holds as Markdown: files copied in a file
+    // manager are attached as when dropped, HTML is converted, an image is
+    // saved in the assets, and anything else is its plain text.
     Q_INVOKABLE void paste();
+
+    // Paste and drop, in editorpaste.cpp.
+    Attachments *attachments() const;
+    void setAttachments(Attachments *attachments);
+    // The clipboard's plain text, never converted, as Ctrl+Shift+V pastes it.
+    Q_INVOKABLE void pastePlainText();
+    // Takes what a drop brings, at a point in the editor's coordinates:
+    // files are attached, HTML converted, links and text put in. False,
+    // and nothing happens, when the document takes no edits or the drop
+    // brings nothing to take.
+    Q_INVOKABLE bool dropAt(qreal x, qreal y, const QList<QUrl> &urls, const QString &html, const QString &text);
+    // The answers to includeAsked() and copyAsked(); a DropChoice for the first.
+    Q_INVOKABLE void answerInclude(int choice);
+    Q_INVOKABLE void answerCopy(bool copy);
     // The TextEdit's own insert, remove and clear, in its positions.
     Q_INVOKABLE void replaceEditorRange(int start, int end, const QString &text);
     // The TextEdit's own append: a new paragraph at the end.
@@ -137,6 +165,13 @@ signals:
     void editableChanged();
     void lineHeightChanged();
     void blockedChanged();
+    void attachmentsChanged();
+    // A dropped Markdown document can be linked to or included; a draft
+    // includes nothing until it is named. Answered with answerInclude().
+    void includeAsked(const QString &name, bool canInclude);
+    // Dropped files larger than the large-file size are to be copied.
+    // Answered with answerCopy().
+    void copyAsked(const QStringList &names, qint64 bytes);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -173,6 +208,15 @@ private:
     // every line break in it, CRLF, a lone CR or LF, made the document's own.
     // Text with no break, as typing gives, comes back as it is.
     QString withDocumentBreaks(const QString &text) const;
+    // Paste and drop, in editorpaste.cpp.
+    void pasteFrom(const QMimeData *mime);
+    // Converts HTML and puts it at the range; false when it shows nothing.
+    bool insertHtml(const QString &html, SourceRange range);
+    void pasteImage(const QMimeData *mime, const QString &alt, SourceRange range);
+    void attachFiles(const QStringList &paths, SourceRange range);
+    struct DropRequest;
+    void continueDrop(const std::shared_ptr<DropRequest> &request);
+    void placeDrop(const std::shared_ptr<DropRequest> &request);
     // How far a deletion key reaches when nothing is selected.
     enum class Extent { PreviousGrapheme, NextGrapheme, StartOfWord, EndOfWord, EndOfLine };
     void deleteTo(Extent extent);
@@ -227,4 +271,7 @@ private:
         qreal contentY = 0;
     };
     TopAnchor m_topAnchor;
+    QPointer<Attachments> m_attachments;
+    // The drop waiting for its files to be looked at or for an answer.
+    std::shared_ptr<DropRequest> m_drop;
 };

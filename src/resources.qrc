@@ -12,6 +12,8 @@
         <file>ConflictDialog.qml</file>
         <file>HistoryDialog.qml</file>
         <file>CloseConfirmation.qml</file>
+        <file>AttachmentDialog.qml</file>
+        <file>LinkCheckDialog.qml</file>
         <file>ThemedButton.qml</file>
         <file>FieldCaret.qml</file>
         <file>Icon.qml</file>

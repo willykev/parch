@@ -11,6 +11,10 @@ The first version: a native Markdown writing app for Omarchy.
 - Tabs, separate windows, and several views of one document.
 - Drafts that are kept from the first keystroke and named when saved.
 - Each file's line endings and byte-order mark are kept.
+- Rich text pastes as clean Markdown; `Ctrl+Shift+V` pastes plain text.
+- Pasted images and dropped files go into an `assets` folder beside the
+  document; a dropped Markdown document can be linked or included.
+- Check links lists the links and images whose files are missing.
 
 ### Keeping text safe
 

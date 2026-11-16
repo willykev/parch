@@ -17,6 +17,7 @@ HEADERS += \
     windowtesting.h \
     ../src/apppaths.h \
     ../src/appservice.h \
+    ../src/attachments.h \
     ../src/autosave.h \
     ../src/backend.h \
     ../src/benchmark.h \
@@ -31,8 +32,10 @@ HEADERS += \
     ../src/filerequests.h \
     ../src/filewatch.h \
     ../src/history.h \
+    ../src/htmlmarkdown.h \
     ../src/hyprland.h \
     ../src/librarymodel.h \
+    ../src/linktargets.h \
     ../src/pathtext.h \
     ../src/portalfilepicker.h \
     ../src/qmltypes.h \
@@ -56,6 +59,7 @@ SOURCES += \
     windowtesting.cpp \
     ../src/apppaths.cpp \
     ../src/appservice.cpp \
+    ../src/attachments.cpp \
     ../src/autosave.cpp \
     ../src/backend.cpp \
     ../src/benchmark.cpp \
@@ -66,11 +70,14 @@ SOURCES += \
     ../src/documentreview.cpp \
     ../src/documentstore.cpp \
     ../src/editorbinding.cpp \
+    ../src/editorpaste.cpp \
     ../src/filerequests.cpp \
     ../src/filewatch.cpp \
     ../src/history.cpp \
+    ../src/htmlmarkdown.cpp \
     ../src/hyprland.cpp \
     ../src/librarymodel.cpp \
+    ../src/linktargets.cpp \
     ../src/pathtext.cpp \
     ../src/portalfilepicker.cpp \
     ../src/qmltypes.cpp \

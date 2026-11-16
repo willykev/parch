@@ -679,8 +679,7 @@ void EditorBinding::cut()
 void EditorBinding::paste()
 {
     if (!editable()) return;
-    const QString text = QGuiApplication::clipboard()->text();
-    if (!text.isEmpty()) insertText(withDocumentBreaks(text), EditKind::Other);
+    if (const QMimeData *mime = QGuiApplication::clipboard()->mimeData()) pasteFrom(mime);
 }
 
 QString EditorBinding::withDocumentBreaks(const QString &text) const
@@ -876,6 +875,8 @@ bool EditorBinding::handleKey(QKeyEvent *key)
         cut();
     } else if (key->matches(QKeySequence::Paste)) {
         paste();
+    } else if (key->key() == Qt::Key_V && key->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
+        pastePlainText();
     } else if (key->matches(QKeySequence::InsertParagraphSeparator) || key->matches(QKeySequence::InsertLineSeparator)) {
         // A line break in the document's own convention; Markdown gives U+2028 no meaning.
         if (m_document) insertText(m_document->newline(), EditKind::Typing);

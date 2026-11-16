@@ -1,5 +1,6 @@
 #include "qmltypes.h"
 
+#include "attachments.h"
 #include "backend.h"
 #include "caretrest.h"
 #include "document.h"
@@ -28,4 +29,5 @@ void registerQmlTypes()
     // QML reaches the one backend as a context property, and its choices by name.
     qmlRegisterUncreatableType<Backend>("Parch", 1, 0, "Backend", QStringLiteral("There is one backend"));
     qmlRegisterUncreatableType<DocumentReview>("Parch", 1, 0, "DocumentReview", QStringLiteral("The backend has one"));
+    qmlRegisterUncreatableType<Attachments>("Parch", 1, 0, "Attachments", QStringLiteral("The backend has one"));
 }

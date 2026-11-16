@@ -22,6 +22,30 @@ while you work.
 parch keeps each file's line endings and byte-order mark. Text you paste gets
 the document's line endings.
 
+## Pasting, images and attachments
+
+- **Paste** (`Ctrl+V`) turns rich text copied from a web page or a word
+  processor into Markdown: headings, emphasis, links, lists and task lists,
+  quotes, code and tables. Scripts, styles and hidden text are left out, and
+  characters that would otherwise turn into Markdown are escaped. One undo
+  takes the whole paste back. `Ctrl+Shift+V` always pastes plain text.
+- A pasted image, such as a screenshot, is saved in the `assets` folder beside
+  the document, named after the day as in `pasted-2026-11-16-1.png`, and
+  linked where you pasted it. Pasting the same image again reuses its file.
+  Images in the web page itself stay links to where they are online; nothing
+  is downloaded.
+- Dropping files on the text, or pasting files copied in a file manager,
+  links them where they land. A file already in the document's folder or in
+  the library is linked where it is; anything else is copied into `assets`,
+  keeping its name, with `-2`, `-3` added when another file has it. Files
+  over 50 MiB are copied only once you agree, and nothing you drop is moved.
+- Dropping a Markdown document offers **Insert link** or **Include**, which
+  puts its path on a line of its own so that its text is shown there.
+- A draft keeps its assets in its own folder until you save it; they then go
+  into `assets` beside the file.
+- **Check links…** in the menu lists the links, images and includes whose
+  files are not there.
+
 ## Saving
 
 A named document saves itself a moment after you pause typing, and at least
@@ -120,6 +144,8 @@ change the text size, and `Ctrl+0` returns to the theme's size.
 | `Ctrl+Shift+S` | Save as |
 | `Ctrl+W` | Close the tab |
 | `Ctrl+Q` | Quit |
+| `Ctrl+V` | Paste, rich text as Markdown |
+| `Ctrl+Shift+V` | Paste plain text |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo |
 | `Ctrl+Tab` / `Ctrl+PageDown` | Next tab |

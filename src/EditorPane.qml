@@ -24,6 +24,16 @@ Rectangle {
     // While the window shows a dialog the text takes no keys or input, even
     // should it be given the focus.
     property bool inputBlocked: false
+    // Where pasted images and dropped files are placed; without it, a drop
+    // of files is refused.
+    property Attachments attachments: null
+
+    // A dropped Markdown file can be linked or included, and large files
+    // copied: the window asks, and answers through answerInclude() and answerCopy().
+    signal includeAsked(string name, bool canInclude)
+    signal copyAsked(var names, real bytes)
+    function answerInclude(choice) { binding.answerInclude(choice) }
+    function answerCopy(copy) { binding.answerCopy(copy) }
 
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
@@ -205,6 +215,52 @@ Rectangle {
             function remove(start: int, end: int) { binding.replaceEditorRange(start, end, "") }
             function append(text: string) { binding.appendParagraph(text) }
             function clear() { binding.replaceEditorRange(0, length, "") }
+
+            // Where a drop would land, while something is dragged over the text.
+            Rectangle {
+                id: dropMark
+                objectName: "dropMark"
+                visible: false
+                width: Math.max(1, Math.round(pane.fontPixelSize / 8))
+                color: theme.accent
+
+                function place(x, y) {
+                    const line = editor.positionToRectangle(editor.positionAt(x, y))
+                    dropMark.x = line.x
+                    dropMark.y = line.y
+                    dropMark.height = line.height
+                    dropMark.visible = true
+                }
+            }
+        }
+    }
+
+    // Files, rich text, links and text dragged in from other applications.
+    // Files are always copied or linked, never moved, whatever the source proposes.
+    DropArea {
+        id: dropArea
+        objectName: "dropArea"
+        anchors.fill: flickable
+        enabled: binding.editable && !pane.inputBlocked
+        onEntered: (drag) => {
+            if (drag.hasUrls || drag.hasHtml || drag.hasText)
+                drag.accept(Qt.CopyAction)
+            else
+                drag.accepted = false
+        }
+        onPositionChanged: (drag) => {
+            const point = editor.mapFromItem(dropArea, drag.x, drag.y)
+            dropMark.place(point.x, point.y)
+        }
+        onExited: dropMark.visible = false
+        onDropped: (drop) => {
+            dropMark.visible = false
+            const point = editor.mapFromItem(dropArea, drop.x, drop.y)
+            if (binding.dropAt(point.x, point.y, drop.hasUrls ? drop.urls : [], drop.hasHtml ? drop.html : "",
+                               drop.hasText ? drop.text : ""))
+                drop.accept(Qt.CopyAction)
+            else
+                drop.accepted = false
         }
     }
 
@@ -214,10 +270,13 @@ Rectangle {
         document: pane.document
         editor: editor
         blocked: pane.inputBlocked
+        attachments: pane.attachments
         onCursorChanged: {
             pane.viewMoved()
             pane.wakeCaret()
         }
         onActivity: pane.wakeCaret()
+        onIncludeAsked: (name, canInclude) => pane.includeAsked(name, canInclude)
+        onCopyAsked: (names, bytes) => pane.copyAsked(names, bytes)
     }
 }

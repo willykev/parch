@@ -1,5 +1,6 @@
 #include "backend.h"
 
+#include "attachments.h"
 #include "autosave.h"
 #include "document.h"
 #include "documentreview.h"
@@ -189,6 +190,11 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     });
     connect(m_review.get(), &DocumentReview::acting, this, &Backend::clearNotice);
     connect(m_review.get(), &DocumentReview::problem, this, &Backend::notify);
+    // Files dropped from the library are linked where they are; what cannot
+    // be attached is a notice.
+    m_attachments = std::make_unique<Attachments>(paths);
+    m_attachments->setLibraryFolders([this] { return m_settings->libraryFolders(); });
+    connect(m_attachments.get(), &Attachments::problem, this, &Backend::notify);
     m_sessionTimer.setSingleShot(true);
     m_sessionTimer.setInterval(SessionDelayMs);
     connect(&m_sessionTimer, &QTimer::timeout, this, [this] { m_sessionWriter.write(collectSession()); });
@@ -223,6 +229,7 @@ Backend::NoticeTone Backend::noticeTone() const { return notice() ? m_tone : Fai
 bool Backend::noticeInforms() const { return noticeTone() == News; }
 FileRequests *Backend::fileRequests() const { return m_files.get(); }
 DocumentReview *Backend::review() const { return m_review.get(); }
+Attachments *Backend::attachments() const { return m_attachments.get(); }
 bool Backend::historyPaused() const { return m_historyPause != History::Pause::None; }
 bool Backend::historyFull() const { return m_historyPause == History::Pause::NamedVersionsFill; }
 QVariantMap Backend::recoveryFailures() const { return m_recoveryFailures; }

@@ -1,0 +1,81 @@
+{
+  "rule": "Lower case; letters, digits, combining marks, hyphens and underscores are kept; every other character is removed; each run of white space becomes one hyphen; a heading with nothing left is 'section'; a slug already used in the document gets -2, -3 and so on.",
+  "headings": [
+    {
+      "text": "Hello, World!",
+      "slug": "hello-world"
+    },
+    {
+      "text": "Über uns",
+      "slug": "über-uns"
+    },
+    {
+      "text": "C++ & Rust",
+      "slug": "c-rust"
+    },
+    {
+      "text": "  Spaced   out  ",
+      "slug": "spaced-out"
+    },
+    {
+      "text": "日本語 見出し",
+      "slug": "日本語-見出し"
+    },
+    {
+      "text": "well-known_thing",
+      "slug": "well-known_thing"
+    },
+    {
+      "text": "2001: A Space Odyssey",
+      "slug": "2001-a-space-odyssey"
+    },
+    {
+      "text": "Tabs\tand\u00a0spaces",
+      "slug": "tabs-and-spaces"
+    },
+    {
+      "text": "Ça va? Très bien!",
+      "slug": "ça-va-très-bien"
+    },
+    {
+      "text": "ΑΒΓ Δοκιμή",
+      "slug": "αβγ-δοκιμή"
+    },
+    {
+      "text": "snake_case and kebab-case",
+      "slug": "snake_case-and-kebab-case"
+    },
+    {
+      "text": "100% \"quoted\" (parenthesised) [bracketed]",
+      "slug": "100-quoted-parenthesised-bracketed"
+    },
+    {
+      "text": "Emoji 😀 gone",
+      "slug": "emoji-gone"
+    },
+    {
+      "text": "e\u0301 with a combining accent",
+      "slug": "e\u0301-with-a-combining-accent"
+    },
+    {
+      "text": "!!!",
+      "slug": ""
+    }
+  ],
+  "document": {
+    "markdown": "# Intro\n\n## Intro\n\n# Intro\n\n# **Bold** and `code`\n\n# Intro-2\n\n# !!!\n\n# ???\n\n# Labelled [Tag]\n\n# Café — menu\n\nA [link](https://example.org) in a title\n=========================================\n\n## Intro ##\n",
+    "slugs": [
+      "intro",
+      "intro-2",
+      "intro-3",
+      "bold-and-code",
+      "intro-2-2",
+      "section",
+      "section-2",
+      "labelled",
+      "café-menu",
+      "a-link-in-a-title",
+      "intro-4"
+    ]
+  }
+}

@@ -17,6 +17,7 @@ INCLUDEPATH += ../src
 HEADERS += \
     editingtests.h \
     rendertesting.h \
+    markdown_tests.h \
     testfiles.h \
     windowtesting.h \
     ../src/apppaths.h \
@@ -43,6 +44,7 @@ HEADERS += \
     ../src/filewatch.h \
     ../src/focusmode.h \
     ../src/foldersearch.h \
+    ../src/frontmatter.h \
     ../src/history.h \
     ../src/htmlmarkdown.h \
     ../src/hyprland.h \
@@ -53,6 +55,10 @@ HEADERS += \
     ../src/markdownlines.h \
     ../src/outline.h \
     ../src/mathrender.h \
+    ../src/mdhtml.h \
+    ../src/mdinclude.h \
+    ../src/mdparser_p.h \
+    ../src/mdtree.h \
     ../src/pathtext.h \
     ../src/portalfilepicker.h \
     ../src/qmltypes.h \
@@ -82,6 +88,7 @@ HEADERS += \
 
 # Every source except main.cpp is compiled in, since the test provides its own main.
 SOURCES += \
+    markdown_tests.cpp \
     parch_tests.cpp \
     editingtests.cpp \
     rendertesting.cpp \
@@ -111,6 +118,7 @@ SOURCES += \
     ../src/filewatch.cpp \
     ../src/focusmode.cpp \
     ../src/foldersearch.cpp \
+    ../src/frontmatter.cpp \
     ../src/history.cpp \
     ../src/htmlmarkdown.cpp \
     ../src/hyprland.cpp \
@@ -121,6 +129,15 @@ SOURCES += \
     ../src/markdownlines.cpp \
     ../src/outline.cpp \
     ../src/mathrender.cpp \
+    ../src/mdblocks.cpp \
+    ../src/mdentities.cpp \
+    ../src/mdhtml.cpp \
+    ../src/mdinclude.cpp \
+    ../src/mdinlines.cpp \
+    ../src/mdrawhtml.cpp \
+    ../src/mdresolve.cpp \
+    ../src/mdscan.cpp \
+    ../src/mdtree.cpp \
     ../src/pathtext.cpp \
     ../src/portalfilepicker.cpp \
     ../src/qmltypes.cpp \

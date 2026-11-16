@@ -26,6 +26,7 @@
 #include "librarymodel.h"
 #include "linktargets.h"
 #include "outline.h"
+#include "markdown_tests.h"
 #include "pathtext.h"
 #include "portalfilepicker.h"
 #include "qmltypes.h"
@@ -265,6 +266,42 @@ private slots:
     void helpColumnsLineUp();
     void testsKeepToTestLocations();
     void desktopEntryOpensMarkdown();
+    // The Markdown engine. The tests themselves are in markdown_tests.cpp.
+    void markdownCommonMarkSpec() { MarkdownTests::commonMarkSpec(); }
+    void markdownGfmExtensions() { MarkdownTests::gfmExtensions(); }
+    void markdownProfilesAndOptions() { MarkdownTests::profilesAndOptions(); }
+    void markdownInlineFormatting() { MarkdownTests::inlineFormatting(); }
+    void markdownSuperscriptAndSubscript() { MarkdownTests::superscriptAndSubscript(); }
+    void markdownHeadingsAndBreaks() { MarkdownTests::headingsAndBreaks(); }
+    void markdownLists() { MarkdownTests::lists(); }
+    void markdownCodeBlocks() { MarkdownTests::codeBlocks(); }
+    void markdownLinksAndImages() { MarkdownTests::linksAndImages(); }
+    void markdownHeadingLabelsAndSlugs() { MarkdownTests::headingLabelsAndSlugs(); }
+    void markdownTableOfContents() { MarkdownTests::tableOfContents(); }
+    void markdownTables() { MarkdownTests::tables(); }
+    void markdownDefinitionLists() { MarkdownTests::definitionLists(); }
+    void markdownFootnotes() { MarkdownTests::footnotes(); }
+    void markdownCitations() { MarkdownTests::citations(); }
+    void markdownComments() { MarkdownTests::comments(); }
+    void markdownRawHtmlPolicy() { MarkdownTests::rawHtmlPolicy(); }
+    void markdownMath() { MarkdownTests::math(); }
+    void markdownMermaid() { MarkdownTests::mermaid(); }
+    void markdownFrontMatter() { MarkdownTests::frontMatter(); }
+    void markdownVariables() { MarkdownTests::variables(); }
+    void markdownIncludes() { MarkdownTests::includes(); }
+    void markdownIncludeGuards() { MarkdownTests::includeGuards(); }
+    void markdownIncludeScopes() { MarkdownTests::includeScopes(); }
+    void markdownIncludesFromDisk() { MarkdownTests::includesFromDisk(); }
+    void markdownSourceRanges() { MarkdownTests::sourceRanges(); }
+    void markdownMarkerRanges() { MarkdownTests::markerRanges(); }
+    void markdownRandomDocuments() { MarkdownTests::randomDocuments(); }
+    void markdownOutlineAndPlainText() { MarkdownTests::outlineAndPlainText(); }
+    void markdownPositionsAndProse() { MarkdownTests::positionsAndProse(); }
+    void markdownHtmlRenderer() { MarkdownTests::htmlRenderer(); }
+    void markdownDiagnostics() { MarkdownTests::diagnostics(); }
+    void markdownParsesOnAnyThread() { MarkdownTests::parsesOnAnyThread(); }
+    void markdownPerformance() { MarkdownTests::performance(); }
+    void markdownPathologicalInput() { MarkdownTests::pathologicalInput(); }
     void benchmarkReportsEveryMeasure();
     void benchmarkThatCannotStartEndsTheLoop();
     void themeReadsLightAndDarkPalettes();

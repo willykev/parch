@@ -94,7 +94,9 @@ public:
     void forgetSaves(const QString &documentId) const;
     // Forgets the saves of every document that has neither an entry nor an
     // id among the open ones, as those of a document whose file held its
-    // text when parch ended.
+    // text when parch ended. Also removes the half-written temporaries a
+    // crash left behind, those older than this Recovery, so that none
+    // of this process's own writes in flight is touched.
     void sweepSaves(const QStringList &openIds) const;
 
 private:
@@ -117,4 +119,6 @@ private:
     static std::optional<qsizetype> heldBy(const QList<Link> &links, const QByteArray &content);
 
     AppPaths m_paths;
+    // When this Recovery was made: every temporary written since is this process's.
+    QDateTime m_made;
 };

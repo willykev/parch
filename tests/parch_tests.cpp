@@ -303,6 +303,8 @@ private slots:
     void twoDocumentsCannotTakeOneName();
     void reopenedDocumentOutlivesItsSave();
     void recoveryRoundTripsAnyText();
+    void recoverySweepsTemporariesACrashLeft();
+    void recoveryRefusesAnOddUtf16Payload();
     void recoveryFollowsIdleAndMaximumIntervals();
     void autosaveWritesAfterIdle();
     void draftWhoseFolderWentIsMadeAgain();
@@ -2692,6 +2694,71 @@ void ParchTests::recoveryRoundTripsAnyText()
     QVERIFY(recovery.write(id, {}, SourceSnapshot{1, "ok"}, DiskVersion{}));
     writeFile(paths.recovery() + "/" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".recovery", "garbage");
     QCOMPARE(recovery.pending().size(), 1);
+}
+
+void ParchTests::recoverySweepsTemporariesACrashLeft()
+{
+    QTemporaryDir root;
+    const AppPaths paths = AppPaths::under(root.path());
+    QVERIFY(DiskFile::makeFolders(paths.recovery()));
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString entry = paths.recovery() + u'/' + id + QStringLiteral(".recovery");
+    // A QSaveFile in flight writes an unnamed file where the file system
+    // allows, which a crash cannot leave behind, and otherwise one beside
+    // its file, under its name and six more characters.
+    {
+        QSaveFile inFlight(entry);
+        QVERIFY(inFlight.open(QIODevice::WriteOnly));
+        inFlight.write("text");
+        const QStringList beside = QDir(paths.recovery()).entryList(QDir::Files | QDir::Hidden);
+        QVERIFY(beside.size() <= 1);
+        if (!beside.isEmpty())
+            QVERIFY2(QRegularExpression(QStringLiteral("^%1\\.recovery\\.[A-Za-z0-9]{6}$").arg(id))
+                         .match(beside.first()).hasMatch(),
+                     qPrintable(beside.first()));
+        inFlight.cancelWriting();
+    }
+    // Two left by a crash an hour ago, and one written just now by this process.
+    const QString oldEntry = entry + QStringLiteral(".Ab12Cd");
+    const QString oldSaves = paths.recovery() + u'/' + id + QStringLiteral(".saves.Zz9Yy8");
+    const QString fresh = entry + QStringLiteral(".Qq1Ww2");
+    const QString unrelated = paths.recovery() + QStringLiteral("/notes.txt.Ab12Cd");
+    Recovery recovery(paths);
+    for (const QString &file : {oldEntry, oldSaves, unrelated}) {
+        writeFile(file, "half");
+        QFile handle(file);
+        QVERIFY(handle.open(QIODevice::ReadWrite));
+        QVERIFY(handle.setFileTime(QDateTime::currentDateTimeUtc().addSecs(-3600), QFileDevice::FileModificationTime));
+    }
+    writeFile(fresh, "in flight");
+    recovery.sweepSaves({});
+    QVERIFY(!QFileInfo::exists(oldEntry));
+    QVERIFY(!QFileInfo::exists(oldSaves));
+    // Neither this process's own write nor a file that is not parch's is touched.
+    QVERIFY(QFileInfo::exists(fresh));
+    QVERIFY(QFileInfo::exists(unrelated));
+}
+
+void ParchTests::recoveryRefusesAnOddUtf16Payload()
+{
+    QTemporaryDir root;
+    const AppPaths paths = AppPaths::under(root.path());
+    QVERIFY(DiskFile::makeFolders(paths.recovery()));
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // A lone surrogate keeps the text out of UTF-8, so it is kept as UTF-16.
+    Recovery recovery(paths);
+    SourceBuffer buffer(QStringLiteral("a") + QChar(0xd800));
+    QVERIFY(recovery.write(id, QString(), *buffer.snapshot(), DiskVersion{}));
+    QCOMPARE(recovery.pending().size(), 1);
+    // One byte more, with the length in the header to match, is damage.
+    const QString file = paths.recovery() + u'/' + id + QStringLiteral(".recovery");
+    QByteArray bytes = readFile(file);
+    const qsizetype end = bytes.indexOf('\n');
+    QJsonObject header = QJsonDocument::fromJson(bytes.left(end)).object();
+    QByteArray payload = bytes.mid(end + 1) + QByteArray(1, 'x');
+    header.insert(QStringLiteral("bytes"), payload.size());
+    writeFile(file, QJsonDocument(header).toJson(QJsonDocument::Compact) + '\n' + payload);
+    QVERIFY(recovery.pending().isEmpty());
 }
 
 void ParchTests::recoveryFollowsIdleAndMaximumIntervals()

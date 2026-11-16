@@ -7,6 +7,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QTimeZone>
+#include <QRegularExpression>
 #include <algorithm>
 
 namespace {
@@ -54,7 +56,7 @@ QString fromUtf16Bytes(const QByteArray &bytes)
 }
 } // namespace
 
-Recovery::Recovery(const AppPaths &paths) : m_paths(paths) {}
+Recovery::Recovery(const AppPaths &paths) : m_paths(paths), m_made(QDateTime::currentDateTimeUtc()) {}
 
 QString Recovery::fileFor(const QString &documentId) const
 {
@@ -264,6 +266,17 @@ void Recovery::sweepSaves(const QStringList &openIds) const
         if (!AppPaths::isDocumentId(id) || openIds.contains(id) || QFileInfo::exists(fileFor(id))) continue;
         QFile::remove(folder.filePath(name));
     }
+    // QSaveFile writes beside its file under the file's name and six more
+    // characters, and a crash leaves that temporary. One older than this
+    // Recovery, with a margin for coarse file times, is no write of ours.
+    static const QRegularExpression temporary(
+        QStringLiteral("^([0-9a-f-]{36})\\.(recovery|saves)\\.[A-Za-z0-9]{6}$"));
+    const QDateTime before = m_made.addSecs(-2);
+    for (const QFileInfo &info : folder.entryInfoList(QDir::Files | QDir::Hidden)) {
+        const QRegularExpressionMatch match = temporary.match(info.fileName());
+        if (!match.hasMatch() || !AppPaths::isDocumentId(match.captured(1))) continue;
+        if (info.lastModified(QTimeZone::UTC) < before) QFile::remove(info.filePath());
+    }
 }
 
 QList<Recovery::Entry> Recovery::pending() const
@@ -285,7 +298,9 @@ QList<Recovery::Entry> Recovery::pending() const
         // The name must agree with the id inside, and the length with the payload.
         if (!AppPaths::isDocumentId(id) || id + suffix != name || !revisionOk
             || header.value(QStringLiteral("bytes")).toInteger(-1) != payload.size()
-            || (encoding != QLatin1String("utf8") && encoding != QLatin1String("utf16")))
+            || (encoding != QLatin1String("utf8") && encoding != QLatin1String("utf16"))
+            // UTF-16 comes in pairs of bytes; an odd one out is a damaged entry.
+            || (encoding == QLatin1String("utf16") && payload.size() % 2 != 0))
             continue;
         Entry entry;
         entry.documentId = id;

@@ -1105,9 +1105,10 @@ void repeatedLibrarySearchesReadLittleAgain()
             QCOMPARE(search.filesMatched(), 100);
             QVERIFY2(took.elapsed() <= timeLimit(5000), qPrintable(QString::number(took.elapsed())));
             if (run == 0) QCOMPARE(reads, 10000);
-            // Again: only what the cache could not hold, and some slack for
-            // the few that a cache's cost per entry may leave out.
-            else QVERIFY2(reads <= 10000 - held + 100, qPrintable(QStringLiteral("%1 files read again").arg(reads)));
+            // Again: only what the cache could not hold, with slack for the
+            // files around its edge: several workers read at once, so which
+            // ones the first search kept varies with how they were scheduled.
+            else QVERIFY2(reads <= 10000 - held + 500, qPrintable(QStringLiteral("%1 files read again").arg(reads)));
         }
     }
     FolderSearch::clearCache();

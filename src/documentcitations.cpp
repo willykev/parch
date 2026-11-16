@@ -138,13 +138,6 @@ quint64 placeKey(int file, int start)
     return (quint64(quint32(file)) << 32) | quint32(start);
 }
 
-bool safeLink(const QString &dest)
-{
-    const QString lower = dest.trimmed().toLower();
-    return lower.startsWith(QLatin1StringView("https://")) || lower.startsWith(QLatin1StringView("http://"))
-           || lower.startsWith(QLatin1StringView("mailto:"));
-}
-
 void inlineText(const md::Document *document, const md::Node &node, CslFormat format, CslText &out)
 {
     using T = md::NodeType;
@@ -178,7 +171,8 @@ void inlineText(const md::Document *document, const md::Node &node, CslFormat fo
         break;
     case T::Link:
     case T::Autolink:
-        if (safeLink(node.dest)) format.link = node.dest.trimmed();
+        // A link in a definition is held to what a bibliography may link.
+        format.link = bibliographyLink(node.dest);
         break;
     case T::Citation:
     case T::FootnoteReference:

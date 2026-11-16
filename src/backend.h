@@ -155,8 +155,24 @@ public:
     // What opens a link a preview does not show itself: the desktop's
     // handler for it. Without an opener, as in the tests, nothing is opened.
     void setLinkOpener(std::function<bool(const QUrl &url)> opener);
-    // True when an opener took the link.
+    // What shows a file on this computer in its folder, selected: the
+    // desktop's file manager. Without one, nothing is shown.
+    void setFolderShower(std::function<bool(const QString &path)> shower);
+    // How a link that leads out of parch is followed: refused outright (a
+    // script, data, or parch's own addresses), opened at once (a web or
+    // mail address), opened only once the writer agrees (any other
+    // scheme, which goes to whichever program registered for it), or, for
+    // a file on this computer, shown in its folder once the writer agrees.
+    enum class LinkWay { Refused, Open, Ask, Local };
+    static LinkWay linkWay(const QUrl &url);
+    // Opens a web or mail address, and nothing else. True when an opener took it.
     bool openLink(const QUrl &url);
+    // Opens an address of another kind that the writer agreed to open;
+    // never a file on this computer or an address refused outright.
+    Q_INVOKABLE bool openAsked(const QString &url);
+    // Shows a file or folder on this computer in its folder, rather than
+    // opening it; the path must be absolute and there.
+    Q_INVOKABLE bool showInFolder(const QString &path);
     // What fetches the pictures a preview shows from the network. Without
     // one, such pictures are not shown.
     void setRemoteFetcher(RemoteFetcher *fetcher);
@@ -516,6 +532,7 @@ private:
     bool m_dictionaryMissingSaid = false;
     std::unique_ptr<RenderService> m_render;
     std::function<bool(const QUrl &url)> m_linkOpener;
+    std::function<bool(const QString &path)> m_folderShower;
     RemoteFetcher *m_remoteFetcher = nullptr;
     // The Markdown guide, while a tab shows it.
     QPointer<Document> m_markdownGuide;

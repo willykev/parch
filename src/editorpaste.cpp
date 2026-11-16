@@ -52,6 +52,20 @@ struct Converted {
     QStringList errors;
 };
 
+// HTML up to this many characters is converted at once; more goes to a
+// worker, so that the window never waits on it, and comes in when ready.
+constexpr qsizetype ConvertAtOnceChars = 64 * 1024;
+// Markdown that grows past this many times its HTML, and past
+// MaxGrowthFloor characters, as deeply nested lists do, is not pasted:
+// the plain text the clipboard holds is pasted in its place.
+constexpr qsizetype MaxGrowth = 4;
+constexpr qsizetype MaxGrowthFloor = 1024 * 1024;
+
+bool overgrown(const QString &markdown, const QString &html)
+{
+    return markdown.size() > MaxGrowthFloor && markdown.size() > MaxGrowth * html.size();
+}
+
 } // namespace
 
 // A drop of files on its way in: looked at first, then asked about, then copied.
@@ -107,7 +121,7 @@ void EditorBinding::pasteFrom(const QMimeData *mime)
             pasteImage(mime, alt, selection());
             return;
         }
-        if (insertHtml(html, selection())) return;
+        if (insertHtml(html, selection(), mime->text())) return;
     }
     if (image) {
         pasteImage(mime, {}, selection());
@@ -117,20 +131,27 @@ void EditorBinding::pasteFrom(const QMimeData *mime)
     if (!text.isEmpty()) insertText(withDocumentBreaks(text), EditKind::Other);
 }
 
-bool EditorBinding::insertHtml(const QString &html, SourceRange range)
+bool EditorBinding::insertHtml(const QString &html, SourceRange range, const QString &plain)
 {
     if (!editable() || m_blocked || !m_document) return false;
     // Images the HTML carries are saved first, off the UI thread, and the
-    // text goes in once they are in place.
-    if (m_attachments && HtmlMarkdown::mayEmbedImages(html)) {
+    // text goes in once they are in place; so does the text of a large page,
+    // whose conversion would hold up the window.
+    const bool images = HtmlMarkdown::mayEmbedImages(html);
+    if (m_attachments && (images || html.size() > ConvertAtOnceChars)) {
         auto *insertion = new Insertion(m_document, range);
         const QString folder = m_attachments->documentFolder(m_document);
         const QDate date = m_attachments->today();
         Attachments *attachments = m_attachments;
         attachments->run<Converted>(
             insertion,
-            [html, folder, date] {
+            [html, folder, date, images] {
                 Converted converted;
+                if (!images) {
+                    converted.markdown = HtmlMarkdown::convert(html, {}, &converted.inlineOnly);
+                    if (overgrown(converted.markdown, html)) converted.markdown.clear();
+                    return converted;
+                }
                 const auto save = [&](const QByteArray &bytes, const QString &type) -> QString {
                     QString extension = Attachments::extensionFor(type);
                     QByteArray data = bytes;
@@ -149,18 +170,20 @@ bool EditorBinding::insertHtml(const QString &html, SourceRange range)
                 converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly);
                 return converted;
             },
-            [insertion, attachments](Converted converted) {
+            [insertion, attachments, plain](Converted converted) {
                 if (!converted.errors.isEmpty())
                     attachments->report(tr("Pasted images not saved"),
                                         tr("Their alt text was pasted instead. %1").arg(converted.errors.join(u' ')));
-                if (converted.markdown.isEmpty()) insertion->cancel();
-                else insertion->insert(converted.markdown, !converted.inlineOnly);
+                // What shows nothing, or would not fit, is the plain text.
+                if (!converted.markdown.isEmpty()) insertion->insert(converted.markdown, !converted.inlineOnly);
+                else if (!plain.isEmpty()) insertion->insert(plain, false);
+                else insertion->cancel();
             });
         return true;
     }
     bool inlineOnly = true;
     const QString markdown = HtmlMarkdown::convert(html, {}, &inlineOnly);
-    if (markdown.isEmpty()) return false;
+    if (markdown.isEmpty() || overgrown(markdown, html)) return false;
     cancelComposition();
     // One edit, so that one undo takes the whole paste back.
     replace(range, withDocumentBreaks(Insertion::fitted(m_buffer->text(), range, markdown, !inlineOnly)),
@@ -254,7 +277,7 @@ bool EditorBinding::dropAt(qreal x, qreal y, const QList<QUrl> &urls, const QStr
         attachFiles(files, at);
         return true;
     }
-    if (!html.isEmpty() && insertHtml(html, at)) return true;
+    if (!html.isEmpty() && insertHtml(html, at, text)) return true;
     if (!links.isEmpty()) return replace(at, links.join(u' '), EditKind::Other);
     if (!text.isEmpty()) return replace(at, withDocumentBreaks(text), EditKind::Other);
     return false;

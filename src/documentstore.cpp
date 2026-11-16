@@ -4,6 +4,7 @@
 #include "document.h"
 #include "documentparse.h"
 #include "pathtext.h"
+#include "privatefiles.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
 #include "testhook.h"
@@ -1466,7 +1467,8 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
         outcome.nameTaken = outcome.result.status == SaveStatus::Conflict;
         outcome.put = true;
     } else if (creates) {
-        outcome.result = DiskFile::create(job.target, written, job.mode);
+        // A draft's text is its owner's alone, as its folder is.
+        outcome.result = DiskFile::create(job.target, written, job.savesDraft ? 0600 : job.mode);
         // What took the name is said once the outcome is back, where folders are named.
         if (outcome.result.status == SaveStatus::Conflict && job.savesDraft)
             outcome.result.error = tr("A file is already where the draft goes");
@@ -2168,9 +2170,9 @@ void DocumentStore::writeRegistryFile(const QJsonObject &entries)
     }
     // A registry that cannot be written loses only identity across a restart,
     // never text, so the document opens anyway.
-    QDir().mkpath(PathText::folderOf(m_paths.registryFile()));
+    PrivateFiles::makeFolder(PathText::folderOf(m_paths.registryFile()));
     QSaveFile file(m_paths.registryFile());
-    if (!file.open(QIODevice::WriteOnly)) return;
+    if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file)) return;
     file.write(QJsonDocument(entries).toJson());
     file.commit();
 }
@@ -2461,7 +2463,8 @@ void DocumentStore::restoreDraft(const QString &documentId, std::function<void(c
         const QByteArray text = versions.isEmpty() ? QByteArray() : history->read(documentId, versions.first().id, &found);
         if (!found) return tr("Nothing of it is left to put back.");
         QSaveFile file(draftFile(paths, documentId));
-        if (!QDir().mkpath(folder) || !file.open(QIODevice::WriteOnly) || file.write(text) != text.size() || !file.commit())
+        if (!PrivateFiles::makeFolder(folder) || !file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file)
+            || file.write(text) != text.size() || !file.commit())
             return tr("Its text could not be written back: %1.").arg(file.errorString());
         return {};
     }, std::move(done));

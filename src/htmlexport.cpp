@@ -6,7 +6,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QSaveFile>
 #include <QUrl>
 
 namespace {
@@ -266,11 +265,10 @@ ExportResult HtmlExporter::write(const md::Document &document, const ExportRecip
     }
     if (run.stopped()) return Exporters::cancelled();
 
-    // The page is held back until its pictures are in place.
-    QSaveFile file(recipe.output);
-    const QByteArray bytes = page.toUtf8();
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
-        result.error = QStringLiteral("cannot write %1: %2").arg(recipe.output, file.errorString());
+    // The page is held back until its pictures are in place, and nothing
+    // is written through a link, the folder of pictures included.
+    Exporters::PendingFile file(recipe.output, recipe.replaceLink);
+    if (!file.write(page.toUtf8(), &result.error)) {
         result.ioFailure = true;
         return result;
     }
@@ -278,12 +276,10 @@ ExportResult HtmlExporter::write(const md::Document &document, const ExportRecip
         if (Exporters::isSource(document, folder) || !ExportWeb::replaceFolder(folder, assets.assets(), &result.error)) {
             if (result.error.isEmpty()) result.error = QStringLiteral("%1 is one of the document's own files").arg(folder);
             result.ioFailure = true;
-            file.cancelWriting();
             return result;
         }
     }
-    if (!file.commit()) {
-        result.error = QStringLiteral("cannot write %1: %2").arg(recipe.output, file.errorString());
+    if (!file.commit(&result.error)) {
         result.ioFailure = true;
         return result;
     }

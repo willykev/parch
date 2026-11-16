@@ -1,5 +1,6 @@
 #include "exportweb.h"
 
+#include "exporter.h"
 #include "mdhtml.h"
 #include "saferead.h"
 
@@ -151,6 +152,11 @@ bool replaceFolder(const QString &target, const QList<Assets::Asset> &files, QSt
 {
     const QFileInfo info(target);
     const QString mark = QString::fromLatin1(kFolderMark);
+    // A link is never followed: neither replaced nor emptied.
+    if (const QString why = Exporters::linkRefusal(target); !why.isEmpty()) {
+        *error = why;
+        return false;
+    }
     if (info.exists() && (!info.isDir() || !QFileInfo::exists(target + u'/' + mark))) {
         *error = QStringLiteral("%1 is already there and an export did not make it; parch leaves it alone").arg(target);
         return false;

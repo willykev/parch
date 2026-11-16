@@ -16,6 +16,9 @@
 #include "themefolder.h"
 #include "windowcontext.h"
 
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
@@ -37,6 +40,28 @@
 #include <memory>
 #include <optional>
 #include <unistd.h>
+
+namespace {
+
+// Shows a file selected in its folder, through the file manager's
+// org.freedesktop.FileManager1 service, without waiting for its answer.
+// Where no file manager answers, the folder that holds the file opens in
+// the desktop's handler for folders; the file itself never does.
+bool showInFileManager(const QString &path)
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(
+        QStringLiteral("org.freedesktop.FileManager1"), QStringLiteral("/org/freedesktop/FileManager1"),
+        QStringLiteral("org.freedesktop.FileManager1"), QStringLiteral("ShowItems"));
+    call << QStringList{QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded)} << QString();
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(call));
+    QObject::connect(watcher, &QDBusPendingCallWatcher::finished, [path](QDBusPendingCallWatcher *answered) {
+        if (answered->isError()) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
+        answered->deleteLater();
+    });
+    return true;
+}
+
+} // namespace
 
 int main(int argc, char *argv[])
 {
@@ -283,6 +308,7 @@ int main(int argc, char *argv[])
         printer.emplace();
         backend.setPrinter(&*printer);
         backend.setLinkOpener([](const QUrl &url) { return QDesktopServices::openUrl(url); });
+        backend.setFolderShower(showInFileManager);
         fetcher.emplace();
         backend.setRemoteFetcher(&*fetcher);
     }

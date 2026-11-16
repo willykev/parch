@@ -60,6 +60,10 @@ struct ExportRecipe {
     // The document's citations as its style formats them, read with the
     // document; none leaves the engine's own numbering.
     std::shared_ptr<const DocumentCitations::Formatted> citations;
+    // The output is a symbolic link the writer chose to replace: the link
+    // itself is replaced by the export, and what it leads to is left as it
+    // is. Otherwise a link at the output is refused (Exporters::writeFile).
+    bool replaceLink = false;
 
     QJsonObject toJson() const;
 };
@@ -154,8 +158,37 @@ const Exporter *forFile(const QString &path);
 // export may write.
 bool isSource(const md::Document &document, const QString &path);
 
-// Writes a whole file in one step (a temporary file renamed over it).
-bool writeFile(const QString &path, const QByteArray &bytes, QString *error);
+// Writes a whole file in one step: a temporary file beside it, made anew,
+// renamed over it. Never through a symbolic link: a link at `path` is
+// refused, saying where it leads (linkRefusal()), unless `replaceLink`,
+// when the link itself is replaced and what it leads to is left as it is.
+// A file replaced keeps its permissions.
+bool writeFile(const QString &path, const QByteArray &bytes, QString *error, bool replaceLink = false);
+// Why an export does not write `path`: it is a symbolic link, "X is a link
+// to Y; parch never writes through a link". Empty when it is not one.
+QString linkRefusal(const QString &path);
+
+// writeFile() in two steps, for an export that writes other files between
+// them: write() puts the bytes in the temporary file beside `path`, and
+// commit() puts it in place. A file never committed is removed.
+class PendingFile {
+public:
+    PendingFile(const QString &path, bool replaceLink = false);
+    ~PendingFile();
+    PendingFile(const PendingFile &) = delete;
+    PendingFile &operator=(const PendingFile &) = delete;
+    bool write(const QByteArray &bytes, QString *error);
+    bool commit(QString *error);
+
+private:
+    bool fail(const QString &why, QString *error);
+
+    QString m_path;
+    bool m_replaceLink = false;
+    int m_folder = -1;
+    QByteArray m_name;
+    QByteArray m_temporary;
+};
 
 // A local file as a link or image in a file written to `outputFolder`
 // gives it: relative to that folder.

@@ -484,13 +484,14 @@ void previewBuildsTextAndInlineFormatting()
     QCOMPARE(built->formatOf(QStringLiteral("2 and")).verticalAlignment(), QTextCharFormat::AlignSuperScript);
     QCOMPARE(built->formatOf(QStringLiteral("i, an")).verticalAlignment(), QTextCharFormat::AlignSubScript);
 
-    // Links are anchors, in the link colour and underlined, with their title.
+    // Links are anchors, in the link colour and underlined, with where they
+    // lead and then their title.
     const QTextCharFormat link = built->formatOf(QStringLiteral("a link"));
     QVERIFY(link.isAnchor());
     QCOMPARE(link.anchorHref(), QStringLiteral("https://example.com"));
     QCOMPARE(inkOf(link), int(PreviewStyle::Link));
     QVERIFY(link.fontUnderline());
-    QCOMPARE(link.toolTip(), QStringLiteral("Its title"));
+    QCOMPARE(link.toolTip(), QStringLiteral("https://example.com\nIts title"));
     QCOMPARE(built->formatOf(QStringLiteral("https://auto")).anchorHref(), QStringLiteral("https://auto.example"));
     QVERIFY(!built->formatOf(QStringLiteral("After")).isAnchor());
 
@@ -957,7 +958,7 @@ void previewShowsRawHtmlUnderThePolicy()
     QCOMPARE(paperOf(built->formatOf(QStringLiteral("Ctrl"))), int(PreviewStyle::CodePaper));
     QCOMPARE(built->formatOf(QStringLiteral("2O")).verticalAlignment(), QTextCharFormat::AlignSubScript);
     QCOMPARE(built->formatOf(QStringLiteral("link")).anchorHref(), QStringLiteral("https://example.com"));
-    QCOMPARE(built->formatOf(QStringLiteral("link")).toolTip(), QStringLiteral("T"));
+    QCOMPARE(built->formatOf(QStringLiteral("link")).toolTip(), QStringLiteral("https://example.com\nT"));
     QVERIFY(lines.at(1).contains(QStringLiteral("a break") + QChar::LineSeparator + QStringLiteral("here")));
     // What the policy does not support is shown as the text it is, and
     // nothing of it is acted on.
@@ -1925,9 +1926,21 @@ void linksGoWhereTheyLead()
         QCOMPARE(contentY(w.flickable), 0.0);
         QVERIFY(QFile::setPermissions(locked, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
     }
-    // Any other file goes to the desktop's handler for it.
+    // Any other file is never handed to the desktop's handler: the window
+    // asks first whether to show it in its folder.
+    QSignalSpy asked(w.preview, &Preview::linkAsked);
+    const int beforeFile = int(opened.size());
     QVERIFY(w.preview->activate(QUrl::fromLocalFile(folder.filePath(QStringLiteral("paper.pdf"))).toString(), 1));
-    QCOMPARE(opened.last(), QUrl::fromLocalFile(folder.filePath(QStringLiteral("paper.pdf"))));
+    QCOMPARE(asked.count(), 1);
+    QCOMPARE(asked.last().at(0).toString(), folder.filePath(QStringLiteral("paper.pdf")));
+    QVERIFY(asked.last().at(3).toBool());
+    QCOMPARE(opened.size(), beforeFile);
+    QObject *linkDialog = w.shell.object(QStringLiteral("linkDialog"));
+    QVERIFY(linkDialog);
+    QTRY_VERIFY(linkDialog->property("opened").toBool());
+    QTest::keyClick(w.window, Qt::Key_Escape);
+    QTRY_VERIFY(!linkDialog->property("opened").toBool());
+    QCOMPARE(opened.size(), beforeFile);
     QCOMPARE(w.preview->textDocument()->find(QStringLiteral("paper")).charFormat().anchorHref(),
              QUrl::fromLocalFile(folder.filePath(QStringLiteral("paper.pdf"))).toString());
     // Nothing that would run is a link at all, and nothing made up is followed.
@@ -1957,6 +1970,141 @@ void linksGoWhereTheyLead()
     // A heading nobody has leads nowhere.
     QVERIFY(!w.preview->goTo(QStringLiteral("no-such-heading")));
     QVERIFY(w.preview->goTo(QStringLiteral("the-end")));
+}
+
+void linksOfOtherKindsAskFirst()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    writeFile(folder.filePath(QStringLiteral("paper.pdf")), "%PDF");
+    writeFile(folder.filePath(QStringLiteral("run.sh")), "#!/bin/sh\necho hi\n");
+    writeFile(folder.filePath(QStringLiteral("app.desktop")), "[Desktop Entry]\nExec=true\n");
+    QVERIFY(QDir(folder.path()).mkdir(QStringLiteral("sub")));
+    const QString path = folder.filePath(QStringLiteral("links.md"));
+    writeFile(path, "# Links\n\n"
+                    "[zoom](zoommtg://zoom.us/join?confno=1 \"https://example.com/docs\") and\n"
+                    "[web](https://example.com/page \"The page\") and [script](run.sh) and\n"
+                    "[entry](app.desktop) and [inside](sub/) and <a href=\"steam://run/1\" title=\"A game\">game</a>.\n");
+    ShellOptions options;
+    options.files = {path};
+    PreviewWindow w(QString(), 1280, options);
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    QList<QUrl> opened;
+    QStringList shown;
+    w.shell.backend->setLinkOpener([&](const QUrl &url) {
+        opened << url;
+        return true;
+    });
+    w.shell.backend->setFolderShower([&](const QString &file) {
+        shown << file;
+        return true;
+    });
+    QSignalSpy asked(w.preview, &Preview::linkAsked);
+    w.run("viewReading");
+    QVERIFY(w.settled());
+
+    // The hint always says where a link leads, with its title after it, so
+    // that a title cannot pass for the destination.
+    const QPointF onZoom = w.surface->mapFromScene(QPointF(placeOf(w, QStringLiteral("zoom"))));
+    QCOMPARE(w.preview->hintAt(onZoom.x(), onZoom.y()),
+             QStringLiteral("zoommtg://zoom.us/join?confno=1\nhttps://example.com/docs"));
+    const QPointF onWeb = w.surface->mapFromScene(QPointF(placeOf(w, QStringLiteral("web"))));
+    QCOMPARE(w.preview->hintAt(onWeb.x(), onWeb.y()), QStringLiteral("https://example.com/page\nThe page"));
+    const QPointF onGame = w.surface->mapFromScene(QPointF(placeOf(w, QStringLiteral("game"))));
+    QCOMPARE(w.preview->hintAt(onGame.x(), onGame.y()), QStringLiteral("steam://run/1\nA game"));
+
+    // A web address opens at once.
+    QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, placeOf(w, QStringLiteral("web")));
+    QTRY_COMPARE(opened.size(), 1);
+    QCOMPARE(opened.last(), QUrl(QStringLiteral("https://example.com/page")));
+
+    // Any other kind of address asks first, naming it and its scheme, with
+    // the keys on Cancel; Escape opens nothing.
+    QObject *dialog = w.shell.object(QStringLiteral("linkDialog"));
+    QVERIFY(dialog);
+    QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, placeOf(w, QStringLiteral("zoom")));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QCOMPARE(asked.count(), 1);
+    QCOMPARE(asked.last().at(2).toString(), QStringLiteral("zoommtg"));
+    QVERIFY(!asked.last().at(3).toBool());
+    QCOMPARE(opened.size(), 1);
+    QObject *question = dialog->findChild<QObject *>(QStringLiteral("linkQuestion"));
+    QVERIFY(question);
+    QCOMPARE(question->property("text").toString(),
+             QStringLiteral("Open zoommtg://zoom.us/join?confno=1 with the program registered for it?"));
+    QVERIFY(dialog->property("title").toString().contains(QStringLiteral("zoommtg")));
+    QStringList problems;
+    QVERIFY2(everyVisibleItemFitsWithin(w.window, &problems), qPrintable(problems.join("; ")));
+    QVERIFY2(unnamedAccessibleItems(w.window).isEmpty(), qPrintable(unnamedAccessibleItems(w.window).join(", ")));
+    QCOMPARE(w.window->activeFocusItem()->objectName(), QStringLiteral("linkCancelChoice"));
+    QTest::keyClick(w.window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QCOMPARE(opened.size(), 1);
+    // Agreed to, it opens.
+    QVERIFY(w.preview->activate(QStringLiteral("zoommtg://zoom.us/join?confno=1"), 1));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QObject *openChoice = dialog->findChild<QObject *>(QStringLiteral("linkOpenChoice"));
+    QVERIFY(openChoice && openChoice->property("visible").toBool());
+    QVERIFY(!dialog->findChild<QObject *>(QStringLiteral("linkShowChoice"))->property("visible").toBool());
+    QVERIFY(QMetaObject::invokeMethod(openChoice, "clicked"));
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QCOMPARE(opened.size(), 2);
+    QCOMPARE(opened.last(), QUrl(QStringLiteral("zoommtg://zoom.us/join?confno=1")));
+    // A raw HTML link asks the same.
+    QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, placeOf(w, QStringLiteral("game")));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QCOMPARE(asked.last().at(2).toString(), QStringLiteral("steam"));
+    QTest::keyClick(w.window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+
+    // A script, a desktop entry and a folder are never opened: each is
+    // offered in its folder, and only that.
+    for (const QString &name : {QStringLiteral("script"), QStringLiteral("entry"), QStringLiteral("inside")}) {
+        const int before = int(asked.count());
+        QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, placeOf(w, name));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(asked.count(), before + 1);
+        QVERIFY(asked.last().at(3).toBool());
+        QVERIFY(dialog->findChild<QObject *>(QStringLiteral("linkShowChoice"))->property("visible").toBool());
+        QVERIFY(!dialog->findChild<QObject *>(QStringLiteral("linkOpenChoice"))->property("visible").toBool());
+        QVERIFY2(unnamedAccessibleItems(w.window).isEmpty(), qPrintable(unnamedAccessibleItems(w.window).join(", ")));
+        QVERIFY(QMetaObject::invokeMethod(dialog->findChild<QObject *>(QStringLiteral("linkShowChoice")), "clicked"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+    }
+    QCOMPARE(shown, (QStringList{folder.filePath(QStringLiteral("run.sh")), folder.filePath(QStringLiteral("app.desktop")),
+                                 folder.filePath(QStringLiteral("sub"))}));
+    QCOMPARE(opened.size(), 2);
+
+    // Whatever asks, the backend itself hands the desktop only web and mail
+    // addresses, an address agreed to, and never a file or a script.
+    QVERIFY(!w.shell.backend->openLink(QUrl::fromLocalFile(folder.filePath(QStringLiteral("run.sh")))));
+    QVERIFY(!w.shell.backend->openLink(QUrl(QStringLiteral("zoommtg://x"))));
+    QVERIFY(!w.shell.backend->openAsked(QUrl::fromLocalFile(folder.filePath(QStringLiteral("run.sh"))).toString()));
+    QVERIFY(!w.shell.backend->openAsked(QStringLiteral("javascript:alert(1)")));
+    QVERIFY(!w.shell.backend->openAsked(QStringLiteral("JavaScript:alert(1)")));
+    QVERIFY(!w.shell.backend->openAsked(QStringLiteral("not a url")));
+    QCOMPARE(opened.size(), 2);
+    // What shows a file in its folder takes only a file that is there.
+    QVERIFY(!w.shell.backend->showInFolder(folder.filePath(QStringLiteral("gone.txt"))));
+    QVERIFY(!w.shell.backend->showInFolder(QStringLiteral("relative.txt")));
+    QCOMPARE(shown.size(), 3);
+    // The denylist still refuses outright, without asking.
+    const int before = int(asked.count());
+    for (const char *refused : {"javascript:alert(1)", "vbscript:x", "data:text/html,x", "about:blank", "qrc:/Main.qml",
+                                "parch:x", "blob:x"})
+        QVERIFY(!w.preview->activate(QString::fromLatin1(refused), 1));
+    QCOMPARE(asked.count(), before);
+    // An address too long to read is shortened in the middle, and what
+    // cannot be seen in it is shown by its code, so that the question
+    // shows what would open.
+    const QString shownLong = Preview::shownLink(QUrl(QStringLiteral("zoommtg://x/") + QString(2000, u'a') + QStringLiteral("end")));
+    QVERIFY(shownLong.size() < 600);
+    QVERIFY(shownLong.startsWith(QStringLiteral("zoommtg://x/aaa")));
+    QVERIFY(shownLong.endsWith(QStringLiteral("aend")));
+    QVERIFY(shownLong.contains(u'…'));
+    QVERIFY(!Preview::shownLink(QUrl(QStringLiteral("zoommtg://x/%E2%80%AEfdp.exe"))).contains(QChar(0x202E)));
 }
 
 void tasksAreTickedInTheSource()
@@ -2599,6 +2747,144 @@ QByteArray pngOf(int width, int height, const QColor &color)
 }
 } // namespace
 
+void pathologicalBlocksStayCheapToLayOut()
+{
+    // One word of 300,000 characters: Qt breaks such a word into lines in
+    // time that grows with its square, so the preview gives it a place to
+    // break every few hundred characters, which nothing else sees.
+    const QString word(300000, u'w');
+    const auto built = build(QStringLiteral("Before.\n\n") + word + QStringLiteral("\n\nAfter.\n"));
+    const QTextBlock block = built->blockOf(QStringLiteral("wwwwwwwwww"));
+    QVERIFY(block.isValid());
+    QVERIFY(block.text().count(QChar(0x200B)) >= 300000 / 1024);
+    QCOMPARE(QString(block.text()).remove(QChar(0x200B)), word);
+    built->document.setTextWidth(700);
+    QElapsedTimer clock;
+    clock.start();
+    const qreal height = built->document.documentLayout()->documentSize().height();
+    QVERIFY2(clock.elapsed() < timeLimit(1000), qPrintable(QString::number(clock.elapsed())));
+    QVERIFY(height > 1000);
+    // Ordinary words are left as they are.
+    const auto prose = build(QStringLiteral("Some ordinary words in a line.\n"));
+    QVERIFY(!prose->lines().join(u' ').contains(QChar(0x200B)));
+
+    // A table too wide or too large to lay out is shown as it is written,
+    // in a code island that scrolls sideways, and says why.
+    QString wide = QStringLiteral("|");
+    QString rule = QStringLiteral("|");
+    QString row = QStringLiteral("|");
+    for (int column = 0; column < 300; ++column) {
+        wide += QStringLiteral(" h%1 |").arg(column);
+        rule += QStringLiteral("---|");
+        row += QStringLiteral(" c%1 |").arg(column);
+    }
+    const auto table = build(wide + u'\n' + rule + u'\n' + row + u'\n' + row + QStringLiteral("\n\nAfter.\n"));
+    QVERIFY(!table->island(Island::Table));
+    const Island *shown = table->island(Island::Code);
+    QVERIFY(shown && shown->document);
+    QVERIFY(shown->document->toPlainText().startsWith(QStringLiteral("| h0 | h1 |")));
+    QCOMPARE(shown->document->defaultTextOption().wrapMode(), QTextOption::NoWrap);
+    QVERIFY(shown->document->toPlainText().contains(QStringLiteral("too large to lay out as a table (300 columns, 3 rows)")));
+    // An ordinary table is still a table.
+    const auto ordinary = build(QStringLiteral("| a | b |\n|---|---|\n| 1 | 2 |\n"));
+    QVERIFY(ordinary->island(Island::Table));
+
+    // What is copied from the preview is the text as written, without the
+    // places to break.
+    PreviewWindow w(QStringLiteral("Start ") + QString(3000, u'z') + QStringLiteral(" end.\n"));
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    w.run("viewReading");
+    QVERIFY(w.settled());
+    QVERIFY(w.preview->textDocument()->toPlainText().contains(QChar(0x200B)));
+    QMetaObject::invokeMethod(w.surface, "selectAll");
+    const QStringList copied = w.preview->copied(w.surface);
+    QCOMPARE(copied.value(0).trimmed(), QStringLiteral("Start ") + QString(3000, u'z') + QStringLiteral(" end."));
+}
+
+void webPicturesWaitUntilAsked()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString path = folder.filePath(QStringLiteral("web.md"));
+    writeFile(path, "# Web\n\n![Far](https://example.com/far.png)\n\n![Odd](https://example.com/odd.png)\n\nText.\n");
+    const QString plain = folder.filePath(QStringLiteral("plain.md"));
+    writeFile(plain, "# Plain\n\nNo pictures from anywhere.\n");
+    ShellOptions options;
+    options.files = {plain, path};
+    PreviewWindow w(QString(), 1000, options);
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    TestFetcher fetcher;
+    w.shell.backend->setRemoteFetcher(&fetcher);
+    const auto unplugged = qScopeGuard([&] { w.shell.backend->setRemoteFetcher(nullptr); });
+    // Pictures from the web are not fetched until the writer asks.
+    QVERIFY(!w.shell.settings()->remoteImages());
+    w.run("viewReading");
+    QVERIFY(w.settled());
+    QTRY_VERIFY(w.preview->webPictures());
+    QTest::qWait(50);
+    QVERIFY(fetcher.requests.empty());
+    QVERIFY(!w.preview->textDocument()->find(QStringLiteral("Image not shown: Far")).isNull());
+    // A quiet row says so, with a way to show them for this document.
+    QQuickItem *row = w.shell.item(QStringLiteral("webPicturesNotice"));
+    QVERIFY(row);
+    QTRY_VERIFY(row->isVisible());
+    QQuickItem *said = w.shell.item(QStringLiteral("webPicturesText"));
+    QVERIFY(said);
+    QCOMPARE(said->property("text").toString(), QStringLiteral("This document shows pictures from the web."));
+    QStringList problems;
+    QVERIFY2(everyVisibleItemFitsWithin(w.window, &problems), qPrintable(problems.join("; ")));
+    QVERIFY2(unnamedAccessibleItems(w.window).isEmpty(), qPrintable(unnamedAccessibleItems(w.window).join(", ")));
+    // The row does not hide the start of the text.
+    QVERIFY(row->mapToScene(QPointF(0, row->height())).y() <= w.surface->mapToScene(QPointF(0, 0)).y() + 1);
+    QObject *show = w.shell.object(QStringLiteral("showWebPictures"));
+    QVERIFY(show);
+    QVERIFY(QMetaObject::invokeMethod(show, "clicked"));
+    QTRY_COMPARE(fetcher.requests.size(), size_t(2));
+    QTRY_VERIFY(!row->isVisible());
+    fetcher.answer(QUrl(QStringLiteral("https://example.com/far.png")), pngOf(40, 20, Qt::darkBlue));
+    QTRY_VERIFY(imagesIn(*w.preview->textDocument()).size() == 1);
+    // A picture from the web is read only as PNG, JPEG, GIF, WebP or SVG,
+    // whatever other readers are installed.
+    QImage bitmap(8, 8, QImage::Format_RGB32);
+    bitmap.fill(Qt::red);
+    QByteArray bmp;
+    QBuffer bmpBuffer(&bmp);
+    bmpBuffer.open(QIODevice::WriteOnly);
+    QVERIFY(bitmap.save(&bmpBuffer, "BMP"));
+    fetcher.answer(QUrl(QStringLiteral("https://example.com/odd.png")), bmp);
+    QTRY_VERIFY2(!w.preview->textDocument()->find(QStringLiteral("Image not shown: Odd (it is not a PNG, JPEG, GIF, WebP or SVG picture)")).isNull(),
+                 qPrintable(w.lines().join(u'|')));
+    // The choice is the document's, kept in its settings, and not the
+    // application's.
+    QVERIFY(!w.shell.settings()->remoteImages());
+    QVERIFY(w.shell.backend->documentSettings()->remotePictures(w.document));
+    DocumentSettings::Store kept(w.shell.paths().documentSettingsFile());
+    QVERIFY(kept.load());
+    QVERIFY(kept.remotePictures(w.document->id()));
+    // It stays when the document's other settings change.
+    QVERIFY(w.shell.backend->documentSettings()->setProfile(w.document, QStringLiteral("document"), QStringLiteral("standard")));
+    QVERIFY(w.shell.backend->documentSettings()->remotePictures(w.document));
+    // A document without pictures from the web shows no row.
+    w.tabs()->setActiveIndex(0);
+    w.run("viewReading");
+    QVERIFY(w.settled());
+    QTRY_VERIFY(!w.preview->webPictures());
+    QVERIFY(!row->isVisible());
+    // Taken back, the pictures go again.
+    w.tabs()->setActiveIndex(1);
+    QVERIFY(w.settled());
+    QVERIFY(w.shell.backend->documentSettings()->setRemotePictures(w.document, false));
+    QTRY_VERIFY(row->isVisible());
+    DocumentSettings::Store again(w.shell.paths().documentSettingsFile());
+    QVERIFY(again.load());
+    QVERIFY(!again.remotePictures(w.document->id()));
+    // The Preferences switch shows them in every document.
+    w.shell.settings()->setRemoteImages(true);
+    QTRY_VERIFY(!row->isVisible());
+}
+
 void picturesArriveAndFailInTheirPlace()
 {
     QTemporaryDir folder;
@@ -2634,6 +2920,7 @@ void picturesArriveAndFailInTheirPlace()
     TestFetcher fetcher;
     w.shell.backend->setRemoteFetcher(&fetcher);
     const auto unplugged = qScopeGuard([&] { w.shell.backend->setRemoteFetcher(nullptr); });
+    w.shell.settings()->setRemoteImages(true);
     w.run("viewReading");
     QVERIFY(w.settled());
     QTextDocument *document = w.preview->textDocument();
@@ -2884,7 +3171,9 @@ void outlineAndPreferencesReachThePreview()
     // All of it is kept, and a value out of range is not.
     settings->setPreviewFontPixelSize(22);
     settings->setScrollSync(false);
-    settings->setRemoteImages(false);
+    // Pictures from the web are off until the writer turns them on.
+    QVERIFY(!settings->remoteImages());
+    settings->setRemoteImages(true);
     settings->setPreviewFontFamily(QStringLiteral("Liberation Serif"));
     settings->setPreviewLineHeight(9);
     settings->setPreviewLineLength(5);
@@ -2894,7 +3183,7 @@ void outlineAndPreferencesReachThePreview()
     QCOMPARE(again.previewLineLength(), 40);
     QCOMPARE(again.previewFontFamily(), QStringLiteral("Liberation Serif"));
     QVERIFY(!again.scrollSync());
-    QVERIFY(!again.remoteImages());
+    QVERIFY(again.remoteImages());
     // Damaged values are each their default.
     QTemporaryDir other;
     const QString file = other.filePath(QStringLiteral("settings.json"));
@@ -2907,7 +3196,7 @@ void outlineAndPreferencesReachThePreview()
     QCOMPARE(damaged.previewLineLength(), 68);
     QVERIFY(damaged.previewFontFamily().isEmpty());
     QVERIFY(damaged.scrollSync());
-    QVERIFY(damaged.remoteImages());
+    QVERIFY(!damaged.remoteImages());
 }
 
 void themeChangeRecoloursWithoutRebuilding()

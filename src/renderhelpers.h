@@ -46,10 +46,14 @@ struct HelperSet {
 };
 
 // How hard a helper may be pushed. A helper that runs past its time or
-// writes past its output limit is stopped and its result thrown away.
+// writes past its output limit is stopped and its result thrown away. The
+// kernel holds it to the rest: its address space, its processor time, and
+// the size of any file it writes (maxOutputBytes); it dumps no core.
 struct RenderLimits {
     int maxProcesses = 2;
     int timeoutMs = 15000;
+    qint64 maxMemoryBytes = qint64(2) << 30;
+    int maxCpuSeconds = 30;
     qint64 maxOutputBytes = 32 * 1024 * 1024;
     qint64 maxErrorBytes = 64 * 1024;
     qint64 diskCacheBytes = 128 * 1024 * 1024;
@@ -109,6 +113,13 @@ public:
     // with the Cancelled status.
     void cancel();
     qint64 processId() const;
+
+    // Whether the kernel lets a helper have a network namespace of its own
+    // without privileges (unprivileged user namespaces). Asked of the kernel
+    // once, by a child that tries; where it cannot, helpers run with the
+    // network, and `parch check --json` says so. A test may answer instead.
+    static bool canIsolate();
+    static void setIsolationProbe(std::function<bool()> probe);
 
 signals:
     void finished(const HelperOutcome &outcome);

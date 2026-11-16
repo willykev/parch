@@ -256,7 +256,8 @@ Rectangle {
             // Clicking below the text still reaches the editor.
             height: Math.max(implicitHeight, flickable.height - 2 * pane.margin)
             textFormat: TextEdit.PlainText
-            wrapMode: TextEdit.Wrap
+            // A word too long for Qt to break quickly wraps anywhere instead.
+            wrapMode: binding.wrapAnywhere ? TextEdit.WrapAnywhere : TextEdit.Wrap
             readOnly: !binding.editable
             selectByMouse: true
             // A document that cannot be edited can still be selected and copied from the keyboard.

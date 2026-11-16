@@ -394,7 +394,7 @@ Out richText(const QString &value, bool quotes = true)
                 if (style.contains(u"vertical-align:sup")) node.verticalAlign = 1;
                 if (style.contains(u"vertical-align:sub")) node.verticalAlign = 2;
             } else if (name == u"a") {
-                node.link = token.href;
+                node.link = bibliographyLink(token.href);
             }
             // Small capitals, superscripts and subscripts keep their case.
             if (node.smallCaps == 1 || node.verticalAlign > 0) node.nocase = true;
@@ -1109,7 +1109,9 @@ Out Processor::text(const CslNode &node, Context &ctx)
             o = Out::of(value);
             QString link = value;
             if (variable == u"DOI" && !value.startsWith(u"http")) {
-                link = QStringLiteral("https://doi.org/") + value;
+                // A DOI written as doi:… is linked by bibliographyLink().
+                if (!value.startsWith(QLatin1StringView("doi:"), Qt::CaseInsensitive))
+                    link = QStringLiteral("https://doi.org/") + value;
                 // A style that writes the resolver as a prefix links it with the DOI.
                 const QString prefix = node.formatting.prefix;
                 const qsizetype at = prefix.indexOf(QStringLiteral("doi.org/"));
@@ -1120,14 +1122,16 @@ Out Processor::text(const CslNode &node, Context &ctx)
                     CslFormatting f = node.formatting;
                     f.prefix = prefix.left(start);
                     Out linked = Out::seq({Out::of(resolver), Out::of(value)});
-                    linked.link = resolver + value;
+                    linked.link = bibliographyLink(resolver + value);
                     finish(linked, CslFormatting{}, ctx.english);
                     Out outer = wrap(std::move(linked));
                     finish(outer, f, ctx.english);
                     return outer;
                 }
             }
-            o.link = link;
+            // Only a web, mail or DOI address is a link; anything else,
+            // such as a script, stays text.
+            o.link = bibliographyLink(link);
             o = wrap(std::move(o));
         } else {
             o = richText(value);

@@ -58,6 +58,10 @@ public:
     void clear();
     // How many pictures are still being drawn, read or fetched.
     int pending() const;
+    // What bytes fetched from the web are read as, by what they are: "png",
+    // "jpeg", "gif", "webp" or "svg", and nothing for anything else, which
+    // is then not read at all, whatever image readers are installed.
+    static QByteArray webPictureFormat(const QByteArray &bytes);
 
 signals:
     void changed(const QString &key);
@@ -82,7 +86,7 @@ private:
 
     RenderService *m_service = nullptr;
     RemoteFetcher *m_fetcher = nullptr;
-    bool m_remoteAllowed = true;
+    bool m_remoteAllowed = false;
     RenderColors m_colors;
     qreal m_scale = 1;
     QString m_labelFamily;

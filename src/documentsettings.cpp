@@ -2,6 +2,7 @@
 
 #include "diskfile.h"
 #include "documentlinks.h"
+#include "privatefiles.h"
 
 #include <QDir>
 #include <QFile>
@@ -18,6 +19,7 @@ namespace {
 
 const QString applicationKey = QStringLiteral("application");
 const QString documentsKey = QStringLiteral("documents");
+const QString remotePicturesKey = QStringLiteral("remotePictures");
 const QString librariesKey = QStringLiteral("libraries");
 
 // The JSON object in a file: an empty one when there is no file, nothing
@@ -184,6 +186,28 @@ Dialect::Layer Store::document(const QString &documentId) const
     return layerOf(m_stored.value(documentsKey).toObject().value(documentId).toObject());
 }
 
+bool Store::remotePictures(const QString &documentId) const
+{
+    return m_stored.value(documentsKey).toObject().value(documentId).toObject().value(remotePicturesKey).toBool();
+}
+
+bool Store::setRemotePictures(const QString &documentId, bool shown, QString *error)
+{
+    if (!AppPaths::isDocumentId(documentId)) {
+        if (error) *error = QStringLiteral("%1 is not a document id").arg(documentId);
+        return false;
+    }
+    QJsonObject entries = m_stored.value(documentsKey).toObject();
+    QJsonObject entry = entries.value(documentId).toObject();
+    if (shown) entry.insert(remotePicturesKey, true);
+    else entry.remove(remotePicturesKey);
+    if (entry.isEmpty()) entries.remove(documentId);
+    else entries.insert(documentId, entry);
+    if (entries.isEmpty()) m_stored.remove(documentsKey);
+    else m_stored.insert(documentsKey, entries);
+    return write(error);
+}
+
 Dialect::Layer Store::library(const QString &folder) const
 {
     return layerOf(libraryEntry(m_stored.value(librariesKey).toObject(), folder));
@@ -243,11 +267,12 @@ bool Store::write(QString *error)
         if (DiskFile::moveAside(m_file)) m_damaged = false;
         else why = QStringLiteral("the unreadable file cannot be moved aside");
     }
-    if (why.isEmpty() && !QDir().mkpath(QFileInfo(m_file).absolutePath())) {
+    if (why.isEmpty() && !PrivateFiles::makeFolder(QFileInfo(m_file).absolutePath())) {
         why = QStringLiteral("cannot make its folder");
     } else if (why.isEmpty()) {
         QSaveFile file(m_file);
-        if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(m_stored).toJson()) < 0 || !file.commit())
+        if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file)
+            || file.write(QJsonDocument(m_stored).toJson()) < 0 || !file.commit())
             why = file.errorString();
     }
     if (why.isEmpty()) return true;

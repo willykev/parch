@@ -16,6 +16,7 @@
         <file>HistoryDialog.qml</file>
         <file>CloseConfirmation.qml</file>
         <file>AttachmentDialog.qml</file>
+        <file>OpenLinkDialog.qml</file>
         <file>CheckDocumentDialog.qml</file>
         <file>ThemedButton.qml</file>
         <file>FieldCaret.qml</file>
@@ -56,5 +57,6 @@
         <file>DialectSettingsForm.qml</file>
         <file>DocumentSettingsDialog.qml</file>
         <file>ExportDialog.qml</file>
+        <file>ExportLinkDialog.qml</file>
     </qresource>
 </RCC>

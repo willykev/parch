@@ -2,6 +2,7 @@
 
 #include "diskfile.h"
 #include "pathtext.h"
+#include "privatefiles.h"
 #include "settings.h"
 
 #include <QDir>
@@ -124,9 +125,10 @@ QByteArray Session::encode(const SessionState &state)
 bool Session::write(const AppPaths &paths, const QByteArray &bytes)
 {
     const QString file = paths.sessionFile();
-    if (!QDir().mkpath(QFileInfo(file).absolutePath())) return false;
+    if (!PrivateFiles::makeFolder(QFileInfo(file).absolutePath())) return false;
     QSaveFile output(file);
-    return output.open(QIODevice::WriteOnly) && output.write(bytes) == bytes.size() && output.commit();
+    return output.open(QIODevice::WriteOnly) && PrivateFiles::restrict(output) && output.write(bytes) == bytes.size()
+           && output.commit();
 }
 
 bool Session::save(const AppPaths &paths, const SessionState &state)

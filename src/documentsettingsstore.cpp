@@ -243,6 +243,32 @@ QVariantMap DocumentSettingsStore::describeApplication() const
     return describe(nullptr);
 }
 
+bool DocumentSettingsStore::remotePictures(Document *document) const
+{
+    if (!document) return false;
+    if (document->isScratch()) return m_scratchPictures.contains(document->id());
+    return m_store.remotePictures(document->id());
+}
+
+bool DocumentSettingsStore::setRemotePictures(Document *document, bool shown)
+{
+    if (!document) return false;
+    if (remotePictures(document) == shown) return true;
+    QString error;
+    bool kept = true;
+    if (document->isScratch()) {
+        if (shown) m_scratchPictures.insert(document->id());
+        else m_scratchPictures.remove(document->id());
+    } else {
+        // A change that could not be written still applies while parch runs.
+        kept = m_store.setRemotePictures(document->id(), shown, &error);
+        if (!kept) emit problem(tr("Document settings not saved"), error);
+    }
+    ++m_revision;
+    emit changed();
+    return kept;
+}
+
 bool DocumentSettingsStore::edit(Document *document, const QString &scope,
                                  const std::function<bool(Dialect::Layer &)> &change)
 {

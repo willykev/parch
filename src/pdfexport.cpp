@@ -129,7 +129,7 @@ std::unique_ptr<PdfExporter::Pages> PdfExporter::setPages(const md::Document &do
         *result = Exporters::cancelled();
         return nullptr;
     }
-    run.report(0.6, QStringLiteral("Setting the pages"));
+    run.report(0.6, QStringLiteral("Laying out the pages"));
     pages->buffer.open(QIODevice::WriteOnly);
     pages->writer = std::make_unique<QPdfWriter>(&pages->buffer);
     QPdfWriter &writer = *pages->writer;
@@ -139,8 +139,13 @@ std::unique_ptr<PdfExporter::Pages> PdfExporter::setPages(const md::Document &do
     writer.setAuthor(Exporters::frontMatterText(document, QStringLiteral("author")));
     writer.setCreator(QStringLiteral("parch " PARCH_VERSION));
     pages->paper = std::make_unique<PaperDocument>(document, recipe.citations.get(), pages->pictures.get(), paper);
-    pages->paper->layOut(&writer);
-    if (run.stopped()) {
+    // Laid out block by block, with its progress, and stopped when asked.
+    const bool laidOut = pages->paper->layOut(&writer, [&run](qreal done) {
+        if (run.stopped()) return false;
+        run.report(0.6 + 0.15 * done, QStringLiteral("Laying out the pages"));
+        return true;
+    });
+    if (!laidOut || run.stopped()) {
         *result = Exporters::cancelled();
         return nullptr;
     }
@@ -171,7 +176,7 @@ QByteArray PdfExporter::render(const md::Document &document, const ExportRecipe 
             }
             if (page > 0) writer.newPage();
             sheets.paint(painter, page);
-            run.report(0.6 + 0.35 * (page + 1) / pages, QStringLiteral("Setting the pages"));
+            run.report(0.75 + 0.2 * (page + 1) / pages, QStringLiteral("Setting the pages"));
         }
         painter.end();
     }
@@ -235,7 +240,7 @@ ExportResult PdfExporter::write(const md::Document &document, const ExportRecipe
         return result;
     }
     if (run.stopped()) return Exporters::cancelled();
-    if (!Exporters::writeFile(recipe.output, pdf, &result.error)) {
+    if (!Exporters::writeFile(recipe.output, pdf, &result.error, recipe.replaceLink)) {
         result.ioFailure = true;
         return result;
     }

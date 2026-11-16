@@ -14,6 +14,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -73,7 +74,10 @@ public:
 
     // Builds the document and lays it out on pages for the device, whose
     // resolution must be 96 dots per inch: a logical pixel is a device's.
-    void layOut(QPagedPaintDevice *device);
+    // `going`, when given, is told how far it has come, from 0 to 1, as it
+    // builds and lays out block by block, and stops it by answering false:
+    // then nothing is laid out as it should be, and layOut() is false.
+    bool layOut(QPagedPaintDevice *device, const std::function<bool(qreal done)> &going = {});
 
     int pageCount() const;
     // The page, from 0, of the line a position of the laid-out text is in.
@@ -128,6 +132,11 @@ private:
     // each page, so that each page draws only its own lines.
     void splitAcrossPages();
     void relayOut();
+    // Lays the text out block by block, telling `m_going` how far it has
+    // come within [from, to] as it goes; false once it says to stop.
+    bool layOutBlocks(qreal from, qreal to);
+    // Whether `m_going` says to stop, at this much of the whole.
+    bool stopping(qreal done);
     void findHeadings();
     int pageOf(qreal y) const;
     qreal blockBottom(const QTextBlock &block) const;
@@ -137,6 +146,8 @@ private:
     PaperOptions m_options;
     PreviewStyle m_style;
     QTextDocument m_text;
+    std::function<bool(qreal done)> m_going;
+    bool m_stopped = false;
     std::unique_ptr<Resources> m_resources;
     // Draws the pictures: formulas and diagrams as vectors where it can.
     std::unique_ptr<QObject> m_objects;

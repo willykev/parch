@@ -80,6 +80,10 @@ public:
     // Asks the window whether saving the document, read in another
     // encoding, may write UTF-8 over its file.
     void askToConfirmEncoding(Document *document);
+    // Asks whether an export goes elsewhere, or replaces the link at the
+    // file it would write (Exports::linkInTheWay()), both shown as the
+    // writer reads them.
+    void askAboutExportLink(const QString &output, const QString &target);
     // The window's editor moved its cursor or scrolled.
     Q_INVOKABLE void noteViewMoved();
     FolderSearch *folderSearch() const;
@@ -99,6 +103,7 @@ signals:
     void textFocusRequested();
     void closeConfirmationRequested(Document *document, bool discarding);
     void encodingConfirmationRequested(Document *document);
+    void exportLinkQuestionRequested(const QString &output, const QString &target);
     void viewShowRequested();
     // Something the session keeps changed.
     void changed();

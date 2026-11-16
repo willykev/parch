@@ -1,5 +1,7 @@
 #include "spellchecker.h"
 
+#include "privatefiles.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -338,11 +340,11 @@ bool SpellChecker::addToDictionary(const QString &given)
     QString error;
     if (m_personalUnreadable) {
         error = tr("it could not be read, so it is left as it is");
-    } else if (!QDir().mkpath(QFileInfo(m_personalFile).absolutePath())) {
+    } else if (!PrivateFiles::makeFolder(QFileInfo(m_personalFile).absolutePath())) {
         error = tr("its folder cannot be made");
     } else {
         QSaveFile file(m_personalFile);
-        if (!file.open(QIODevice::WriteOnly) || file.write((m_personalWords.join(u'\n') + u'\n').toUtf8()) < 0
+        if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file) || file.write((m_personalWords.join(u'\n') + u'\n').toUtf8()) < 0
             || !file.commit())
             error = file.errorString();
     }

@@ -13,6 +13,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QHash>
+#include <functional>
 #include <vector>
 
 class CslText;
@@ -54,7 +55,20 @@ enum Property {
     // An empty block that holds the place of an island: its number in the
     // section, from 1.
     IslandProperty = QTextFormat::UserProperty + 0x510,
+    // A character format property: a zero-width space the builder put in a
+    // word too long to break, so that it can break there. Text copied from
+    // the preview leaves it out.
+    BreakProperty = QTextFormat::UserProperty + 0x511,
 };
+
+// A word longer than this many characters is given a place to break after
+// every so many of them: Qt finds where to break a word that has none in
+// time that grows with the square of its length.
+inline constexpr qsizetype LongWord = 512;
+// A table with more columns or cells than these is not laid out as a table,
+// which would take minutes, but shown as it is written, in a code island.
+inline constexpr int MaxTableColumns = 128;
+inline constexpr qsizetype MaxTableCells = 20000;
 
 // Where a piece of built text came from. `position` counts from the start
 // of the section or island the anchor belongs to, and `source` from the
@@ -257,7 +271,9 @@ public:
     // Every part into an empty document, which is given the style's body
     // font; the sections in order. The document then starts with one empty
     // block, as a preview's does.
-    std::vector<Section> buildAll(QTextDocument *document);
+    // `going`, when given, is told how far building has come, from 0 to 1,
+    // part by part, and stops it, with what is built so far, by answering false.
+    std::vector<Section> buildAll(QTextDocument *document, const std::function<bool(qreal done)> &going = {});
     // Empties a document down to the one empty block every built document
     // starts with, a pixel high, after which parts are built.
     static void prepare(QTextDocument *document);

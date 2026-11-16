@@ -1,5 +1,7 @@
 #include "rendercache.h"
 
+#include "privatefiles.h"
+
 #include <QDataStream>
 #include <QDateTime>
 #include <QDir>
@@ -132,9 +134,11 @@ void RenderCache::insert(const QString &key, const RenderResult &result)
     load();
     const QByteArray bytes = serialize(kept);
     if (bytes.size() > m_diskLimit) return;
-    QDir().mkpath(m_folder);
+    PrivateFiles::makeFolder(m_folder);
     QSaveFile file(path(key));
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) return;
+    if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file) || file.write(bytes) != bytes.size()
+        || !file.commit())
+        return;
     if (const auto it = m_disk.constFind(key); it != m_disk.constEnd()) m_diskTotal -= it->bytes;
     m_disk.insert(key, {bytes.size(), ++m_clock});
     m_diskTotal += bytes.size();

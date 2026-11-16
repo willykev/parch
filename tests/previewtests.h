@@ -25,6 +25,7 @@ void previewAndSourceFindEachOther();
 void includedTextLeadsToItsFile();
 void textAndPreviewScrollTogether();
 void linksGoWhereTheyLead();
+void linksOfOtherKindsAskFirst();
 void tasksAreTickedInTheSource();
 void notesGoThereAndBack();
 void themeChangeRecoloursWithoutRebuilding();
@@ -43,6 +44,8 @@ void distractionFreeWritingKeepsEachView();
 void citationsReadAsTheirStyleWordsThem();
 void documentSettingsReachThePreview();
 void previewFollowsFilesOnDisk();
+void webPicturesWaitUntilAsked();
+void pathologicalBlocksStayCheapToLayOut();
 void drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize();
 void headingLinksAreFoundInTheSharedParse();
 

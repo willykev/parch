@@ -10,7 +10,9 @@
 #include "markdownexport.h"
 #include "mdhtml.h"
 #include "mdinclude.h"
+#include "renderhelpers.h"
 #include "testfiles.h"
+#include "zippackage.h"
 
 #include <QBuffer>
 #include <QDir>
@@ -28,6 +30,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
+#include <sys/stat.h>
 
 namespace CliTests {
 namespace {
@@ -1469,6 +1472,163 @@ void commandsNeedNoDisplay()
     }
     QVERIFY(box.read(QStringLiteral("clean.html")).startsWith("<!DOCTYPE html>"));
     QCOMPARE(readFile(box.home() + QStringLiteral("/.claude/skills/parch/SKILL.md")).left(16), QByteArray("---\nname: parch\n"));
+}
+
+void bibliographyLinksAreOnlyWebMailOrDoi()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    // A link a bibliography gives, as its URL, its DOI or in the markup of
+    // a title or a note, that would run as a script.
+    box.write(QStringLiteral("refs.bib"),
+              QStringLiteral("@misc{k, title={T <a href=\"javascript:alert(2)\">click</a>}, author={Doe, Jane}, year={2020},"
+                             " url={javascript:alert(document.domain)}, doi={javascript:alert(3)}}\n"
+                             "@misc{j, title={U}, author={Roe, R}, year={2021}, url={  JavaScript:alert(1)},"
+                             " note={<a href=\"jav&#x61;script:alert(4)\">n</a>}}\n"
+                             "@misc{w, title={Web}, author={Poe, P}, year={2019}, url={https://example.com/w}}\n"
+                             "@misc{z, title={Zoom}, author={Zoe, Z}, year={2018}, url={zoommtg://zoom.us/join}}\n"
+                             "@misc{d, title={Doi}, author={Dee, D}, year={2017}, url={doi:10.1000/182}}\n"));
+    box.write(QStringLiteral("refs.json"),
+              QStringLiteral("[{\"id\":\"m\",\"type\":\"webpage\",\"title\":\"<a href=\\\"javascript:alert(5)\\\">x</a> "
+                             "<a href=\\\"mailto:a@example.com\\\">mail</a>\",\"URL\":\"javascript:alert(7)\","
+                             "\"author\":[{\"family\":\"A\"}],\"issued\":{\"date-parts\":[[2020]]}}]"));
+    box.write(QStringLiteral("doc.md"), QStringLiteral("---\nbibliography: [refs.bib, refs.json]\ncsl: apa\n---\n\n"
+                                                       "A [@k] and [@j] and [@m] and [@w] and [@z] and [@d].\n"));
+    // Only web, mail and DOI addresses are links; everything else is text.
+    const auto linksOf = [](const QString &html) {
+        QStringList links;
+        static const QRegularExpression href(QStringLiteral("<a [^>]*href=\"([^\"]*)\""));
+        for (const QRegularExpressionMatch &match : href.globalMatch(html)) links << match.captured(1);
+        return links;
+    };
+    const auto check = [&](const QString &html, const QString &where) {
+        for (const QString &link : linksOf(html))
+            QVERIFY2(link.startsWith(u'#') || link.startsWith(QStringLiteral("https://")) || link.startsWith(QStringLiteral("http://"))
+                         || link.startsWith(QStringLiteral("mailto:")),
+                     qPrintable(where + QStringLiteral(": ") + link));
+        QVERIFY2(linksOf(html).contains(QStringLiteral("https://example.com/w")), qPrintable(where));
+        QVERIFY2(linksOf(html).contains(QStringLiteral("https://doi.org/10.1000/182")), qPrintable(where + u'\n' + html));
+        QVERIFY2(linksOf(html).contains(QStringLiteral("mailto:a@example.com")), qPrintable(where));
+        // A refused link keeps its text.
+        QVERIFY2(html.contains(QStringLiteral("zoommtg://zoom.us/join")), qPrintable(where));
+        QVERIFY2(!linksOf(html).contains(QStringLiteral("zoommtg://zoom.us/join")), qPrintable(where));
+    };
+    const Ran rendered = box.run({"render", "doc.md", "--to", "html"});
+    QVERIFY2(rendered.code == 0, qPrintable(rendered.said()));
+    check(rendered.out, QStringLiteral("render"));
+    const Ran html = box.run({"export", "doc.md", "-o", "out.html"});
+    QVERIFY2(html.code == 0, qPrintable(html.said()));
+    check(QString::fromUtf8(box.read(QStringLiteral("out.html"))), QStringLiteral("HTML export"));
+    const Ran epub = box.run({"export", "doc.md", "-o", "out.epub"});
+    QVERIFY2(epub.code == 0, qPrintable(epub.said()));
+    QList<ZipPackage::Entry> entries;
+    QVERIFY(ZipPackage::read(box.read(QStringLiteral("out.epub")), &entries));
+    QString text;
+    for (const ZipPackage::Entry &entry : entries)
+        if (entry.name.endsWith(QStringLiteral(".xhtml")) && !entry.name.endsWith(QStringLiteral("nav.xhtml")))
+            text += QString::fromUtf8(entry.data);
+    QVERIFY(!text.isEmpty());
+    check(text, QStringLiteral("EPUB export"));
+}
+
+void exportNeverWritesThroughALink()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("repo/notes.md"), QStringLiteral("# Notes\n\n```sh\ncurl -s https://example.invalid/x | sh\n```\n"));
+    box.write(QStringLiteral("victim_rc"), QStringLiteral("kept\n"));
+    // A link planted where an export would go, to a file that is there, and
+    // one to a file that is not.
+    const QStringList outputs{QStringLiteral("notes.html"), QStringLiteral("notes.pdf"), QStringLiteral("notes.docx"),
+                              QStringLiteral("notes.epub"), QStringLiteral("export.md")};
+    for (const QString &name : outputs)
+        QVERIFY(QFile::link(QStringLiteral("../victim_rc"), box.path(QStringLiteral("repo/") + name)));
+    QVERIFY(QFile::link(QStringLiteral("../absent_rc"), box.path(QStringLiteral("repo/dangling.html"))));
+    QVERIFY(QFile::link(QStringLiteral("../victim_rc"), box.path(QStringLiteral("repo/rendered.html"))));
+    const auto stillLinks = [&] {
+        for (const QString &name : outputs + QStringList{QStringLiteral("dangling.html"), QStringLiteral("rendered.html")})
+            if (!QFileInfo(box.path(QStringLiteral("repo/") + name)).isSymLink()) return false;
+        return true;
+    };
+    // Refused, even with --force, saying where the link leads; neither the
+    // link nor what it leads to is touched.
+    for (const QString &name : outputs + QStringList{QStringLiteral("dangling.html")}) {
+        for (const bool force : {false, true}) {
+            QStringList arguments{QStringLiteral("export"), QStringLiteral("repo/notes.md"), QStringLiteral("-o"),
+                                  QStringLiteral("repo/") + name};
+            if (force) arguments << QStringLiteral("--force");
+            const Ran ran = box.run(arguments);
+            QVERIFY2(ran.code == 3, qPrintable(ran.said()));
+            QVERIFY2(ran.err.contains(QStringLiteral("is a link to")), qPrintable(ran.said()));
+            QVERIFY2(ran.err.contains(QStringLiteral("never writes through a link")), qPrintable(ran.said()));
+        }
+    }
+    const Ran rendered = box.run({"render", "repo/notes.md", "--to", "html", "-o", "repo/rendered.html", "--force"});
+    QVERIFY2(rendered.code == 3 && rendered.err.contains(QStringLiteral("is a link to")), qPrintable(rendered.said()));
+    QCOMPARE(box.read(QStringLiteral("victim_rc")), QByteArray("kept\n"));
+    QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("absent_rc"))));
+    QVERIFY(stillLinks());
+
+    // A folder of pictures beside the page that is a link is not replaced
+    // either, and what it leads to keeps what it holds, export folder or not.
+    box.write(QStringLiteral("repo/pic.md"), QStringLiteral("![p](p.png)\n"));
+    QImage picture(4, 4, QImage::Format_RGB32);
+    picture.fill(Qt::blue);
+    QVERIFY(picture.save(box.path(QStringLiteral("repo/p.png"))));
+    box.write(QStringLiteral("elsewhere/.parch-export"), QStringLiteral("parch\n"));
+    box.write(QStringLiteral("elsewhere/keep.txt"), QStringLiteral("keep\n"));
+    QVERIFY(QFile::link(QStringLiteral("../elsewhere"), box.path(QStringLiteral("repo/pic_files"))));
+    const Ran folder = box.run({"export", "repo/pic.md", "-o", "repo/pic.html", "--force"});
+    QVERIFY2(folder.code == 3 && folder.err.contains(QStringLiteral("is a link to")), qPrintable(folder.said()));
+    QCOMPARE(box.read(QStringLiteral("elsewhere/keep.txt")), QByteArray("keep\n"));
+    QVERIFY(QFileInfo(box.path(QStringLiteral("repo/pic_files"))).isSymLink());
+    QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("repo/pic.html"))));
+    const Ran markdown = box.run({"export", "repo/pic.md", "--to", "md", "-o", "repo/pic.markdown", "--images", "copy"});
+    QVERIFY2(markdown.code == 3 && markdown.err.contains(QStringLiteral("is a link to")), qPrintable(markdown.said()));
+    QCOMPARE(box.read(QStringLiteral("elsewhere/keep.txt")), QByteArray("keep\n"));
+    QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("repo/pic.markdown"))));
+
+    // What writes an export replaces a link only when asked to, and then
+    // the link itself, never what it leads to.
+    const QString link = box.path(QStringLiteral("repo/notes.html"));
+    QString error;
+    QVERIFY(!Exporters::writeFile(link, "page", &error));
+    QVERIFY2(error.contains(QStringLiteral("is a link to")) && error.contains(box.path(QStringLiteral("victim_rc"))),
+             qPrintable(error));
+    QVERIFY(Exporters::writeFile(link, "page", &error, true));
+    QVERIFY(!QFileInfo(link).isSymLink());
+    QCOMPARE(box.read(QStringLiteral("repo/notes.html")), QByteArray("page"));
+    QCOMPARE(box.read(QStringLiteral("victim_rc")), QByteArray("kept\n"));
+    // A file replaced keeps its permissions, and a new one has the usual.
+    const QString plain = box.path(QStringLiteral("repo/plain.html"));
+    QVERIFY(Exporters::writeFile(plain, "one", &error));
+    QVERIFY(QFile::setPermissions(plain, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadGroup));
+    QVERIFY(Exporters::writeFile(plain, "two", &error));
+    QCOMPARE(box.read(QStringLiteral("repo/plain.html")), QByteArray("two"));
+    struct stat status;
+    QVERIFY(::stat(QFile::encodeName(plain).constData(), &status) == 0);
+    QCOMPARE(status.st_mode & 07777, mode_t(0640));
+    // Nothing is left behind beside it.
+    QStringList left = QDir(box.path(QStringLiteral("repo"))).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
+    left.removeIf([](const QString &name) { return !name.contains(QStringLiteral("parch-")); });
+    QVERIFY2(left.isEmpty(), qPrintable(left.join(u' ')));
+}
+
+void checkSaysWhetherHelpersAreIsolated()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), QStringLiteral("# Doc\n\nWords.\n"));
+    const Ran ran = box.run({"check", "doc.md", "--json"});
+    QVERIFY2(ran.code == 0, qPrintable(ran.said()));
+    const QJsonValue isolated = ran.json().value(QStringLiteral("helpers")).toObject().value(QStringLiteral("isolated"));
+    QVERIFY(isolated.isBool());
+    QCOMPARE(isolated.toBool(), HelperProcess::canIsolate());
+    // Where the kernel allows no user namespaces, it says so.
+    HelperProcess::setIsolationProbe([] { return false; });
+    const auto restore = qScopeGuard([] { HelperProcess::setIsolationProbe({}); });
+    const Ran refused = box.run({"check", "doc.md", "--json"});
+    QCOMPARE(refused.json().value(QStringLiteral("helpers")).toObject().value(QStringLiteral("isolated")), QJsonValue(false));
 }
 
 } // namespace CliTests

@@ -10,6 +10,7 @@
 #include <QImageReader>
 #include <QPagedPaintDevice>
 #include <QPainter>
+#include <QScopeGuard>
 #include <QSvgRenderer>
 #include <QTextBlock>
 #include <QTextCursor>
@@ -18,6 +19,7 @@
 #include <QTextObjectInterface>
 #include <QUrl>
 
+#include <algorithm>
 #include <cmath>
 
 namespace paper_detail {
@@ -401,8 +403,30 @@ PaperDocument::PaperDocument(const md::Document &document, const DocumentCitatio
 
 PaperDocument::~PaperDocument() = default;
 
-void PaperDocument::layOut(QPagedPaintDevice *device)
+bool PaperDocument::stopping(qreal done)
 {
+    if (!m_stopped && m_going && !m_going(std::clamp<qreal>(done, 0, 1))) m_stopped = true;
+    return m_stopped;
+}
+
+bool PaperDocument::layOutBlocks(qreal from, qreal to)
+{
+    QAbstractTextDocumentLayout *layout = m_text.documentLayout();
+    const qreal characters = std::max(1, m_text.characterCount());
+    int counted = 0;
+    for (QTextBlock block = m_text.begin(); block.isValid(); block = block.next()) {
+        // Laid out as far as this block, which Qt does block by block.
+        (void)layout->blockBoundingRect(block);
+        if (++counted % 32 == 0 && stopping(from + (to - from) * block.position() / characters)) return false;
+    }
+    return !stopping(to);
+}
+
+bool PaperDocument::layOut(QPagedPaintDevice *device, const std::function<bool(qreal done)> &going)
+{
+    m_going = going;
+    m_stopped = false;
+    const auto forget = qScopeGuard([this] { m_going = {}; });
     const QPageLayout layout(m_options.pageSize, m_options.orientation,
                              QMarginsF(m_options.margin, m_options.margin, m_options.margin, m_options.margin),
                              QPageLayout::Millimeter);
@@ -423,8 +447,9 @@ void PaperDocument::layOut(QPagedPaintDevice *device)
     // Code and long addresses break where they must rather than run off the page.
     wrapping.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
     m_text.setDefaultTextOption(wrapping);
-    const std::vector<preview::Section> sections =
-        preview::Builder(m_source, m_style, m_resources.get(), options).buildAll(&m_text);
+    const std::vector<preview::Section> sections = preview::Builder(m_source, m_style, m_resources.get(), options)
+                                                       .buildAll(&m_text, [this](qreal done) { return !stopping(0.4 * done); });
+    if (m_stopped) return false;
     m_text.setPageSize(m_body.size());
     // Letters as they are, not joined into ligatures, so that what is printed
     // is found and copied as it was written: "first", never "ﬁrst".
@@ -433,6 +458,10 @@ void PaperDocument::layOut(QPagedPaintDevice *device)
     font.setFeature(QFont::Tag("clig"), 0);
     m_text.setDefaultFont(font);
 
+    // The changes below are one edit, laid out once at its end rather than
+    // after each of them, which for many notes or links would take minutes.
+    QTextCursor edits(&m_text);
+    edits.beginEditBlock();
     // Task boxes lead into the editor, which paper has not.
     for (QTextBlock block = m_text.begin(); block.isValid(); block = block.next()) {
         for (auto it = block.begin(); !it.atEnd(); ++it) {
@@ -449,6 +478,9 @@ void PaperDocument::layOut(QPagedPaintDevice *device)
         }
     }
     markNames(sections);
+    // Stopped, the document is thrown away as it is, its edit never ended
+    // and so never laid out.
+    if (m_stopped) return false;
     ruleTables();
     // The way back from a note is an arrow every face has, not the emoji
     // the screen's fallback fonts may find.
@@ -457,6 +489,7 @@ void PaperDocument::layOut(QPagedPaintDevice *device)
         const QTextCharFormat format = arrow.charFormat();
         arrow.insertText(QString(QChar(0x2191)), format);
     }
+    edits.endEditBlock();
 
     // What the screen draws over the text, paper draws itself.
     const auto at = [this](int position) {
@@ -483,11 +516,19 @@ void PaperDocument::layOut(QPagedPaintDevice *device)
         }
         start += section.length;
     }
+    // Laid out block by block first, so that a document that takes long to
+    // lay out says how far it has come and can be stopped on the way.
+    if (!layOutBlocks(0.4, 0.6)) return false;
     breakPages(sections);
     keepHeadingsWithText();
     splitAcrossPages();
-    relayOut();
+    if (m_stopped) return false;
+    // Laid out once more from the start, as relayOut() does, block by block.
+    m_text.markContentsDirty(0, m_text.characterCount());
+    if (!layOutBlocks(0.8, 1)) return false;
+    m_text.pageCount();
     findHeadings();
+    return true;
 }
 
 void PaperDocument::ruleTables()
@@ -533,7 +574,9 @@ void PaperDocument::splitAcrossPages()
     QAbstractTextDocumentLayout *layout = m_text.documentLayout();
     QTextBlock block = m_text.begin();
     bool relaid = false;
+    const qreal characters = std::max(1, m_text.characterCount());
     for (int guard = 0; block.isValid() && guard < 1000000; ++guard) {
+        if (guard % 32 == 31 && stopping(0.6 + 0.2 * block.position() / characters)) return;
         // Laid out as far as this block; where it stands on the page, in a
         // table's cell too, whose lines go on from page to page as well.
         const qreal top = layout->blockBoundingRect(block).top();
@@ -549,14 +592,18 @@ void PaperDocument::splitAcrossPages()
             block = block.next();
             continue;
         }
-        const int page = pageOf(top + lines->lineAt(0).y());
-        int split = -1;
+        // Every place the block goes onto another page, found in one pass,
+        // so that a paragraph many pages long is split in time that grows
+        // with its length rather than with its square.
+        QList<int> splits;
+        int page = pageOf(top + lines->lineAt(0).y());
         for (int i = 1; i < lines->lineCount(); ++i) {
-            if (pageOf(top + lines->lineAt(i).y()) == page) continue;
-            split = lines->lineAt(i).textStart();
-            break;
+            const int at = pageOf(top + lines->lineAt(i).y());
+            if (at == page) continue;
+            page = at;
+            if (lines->lineAt(i).textStart() > 0) splits.append(lines->lineAt(i).textStart());
         }
-        if (split <= 0) {
+        if (splits.isEmpty()) {
             block = block.next();
             continue;
         }
@@ -566,15 +613,26 @@ void PaperDocument::splitAcrossPages()
         after.setTopMargin(0);
         after.setTextIndent(0);
         after.setPageBreakPolicy(QTextFormat::PageBreak_Auto);
+        QTextBlockFormat between = after;
+        between.setBottomMargin(0);
+        const int start = block.position();
+        const QString text = block.text();
         QTextCursor cursor(block);
+        // One edit, laid out once at its end rather than after every split.
+        cursor.beginEditBlock();
         cursor.setBlockFormat(before);
-        cursor.setPosition(block.position() + split);
-        // A line of code ends in a line separator, which the new block takes the place of.
-        if (split > 0 && block.text().at(split - 1) == QChar::LineSeparator)
-            cursor.setPosition(block.position() + split - 1, QTextCursor::KeepAnchor);
-        const QTextCharFormat chars = cursor.charFormat();
-        cursor.insertBlock(after, chars);
-        block = cursor.block();
+        // From the last place back, so that the places before it stay where they are.
+        for (qsizetype k = splits.size() - 1; k >= 0; --k) {
+            const int split = splits.at(k);
+            cursor.setPosition(start + split);
+            // A line of code ends in a line separator, which the new block takes the place of.
+            if (text.at(split - 1) == QChar::LineSeparator) cursor.setPosition(start + split - 1, QTextCursor::KeepAnchor);
+            const QTextCharFormat chars = cursor.charFormat();
+            cursor.insertBlock(k == splits.size() - 1 ? after : between, chars);
+        }
+        cursor.endEditBlock();
+        // Each part is looked at once more, on the page it now starts.
+        block = m_text.findBlock(start).next();
     }
 }
 
@@ -589,7 +647,10 @@ void PaperDocument::markNames(const std::vector<preview::Section> &sections)
         start += section.length;
     }
     const int end = m_text.characterCount() - 1;
+    int marked = 0;
     for (auto it = places.cbegin(); it != places.cend(); ++it) {
+        // Many names take a while; it can be stopped meanwhile.
+        if (++marked % 256 == 0 && stopping(0.4 * it.key() / std::max(1, end))) return;
         int position = it.key();
         // A place where a block ends names the next character there is.
         while (position < end && m_text.characterAt(position) == QChar::ParagraphSeparator) ++position;

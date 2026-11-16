@@ -582,7 +582,32 @@ void Builder::name(const QString &name)
 void Builder::text(const QString &text, const Char &state)
 {
     if (text.isEmpty()) return;
-    m_out->cursor.insertText(oneBlock(text, state.html), charFormat(state));
+    const QString shown = oneBlock(text, state.html);
+    const QTextCharFormat format = charFormat(state);
+    if (shown.size() <= LongWord) {
+        m_out->cursor.insertText(shown, format);
+        return;
+    }
+    // A word too long to break gets a zero-width space after every LongWord
+    // characters, never inside a surrogate pair or before a combining mark.
+    QTextCharFormat mark = format;
+    mark.setProperty(BreakProperty, true);
+    qsizetype from = 0, run = 0;
+    for (qsizetype i = 0; i < shown.size(); ++i) {
+        const QChar c = shown.at(i);
+        if (c.isSpace() || c == QChar(0x200B) || c == u'-') {
+            run = 0;
+            continue;
+        }
+        if (++run < LongWord || i + 1 >= shown.size()) continue;
+        const QChar next = shown.at(i + 1);
+        if (c.isHighSurrogate() || next.isLowSurrogate() || next.isMark()) continue;
+        m_out->cursor.insertText(shown.mid(from, i + 1 - from), format);
+        m_out->cursor.insertText(QString(QChar(0x200B)), mark);
+        from = i + 1;
+        run = 0;
+    }
+    if (from < shown.size()) m_out->cursor.insertText(shown.mid(from), format);
 }
 
 void Builder::uses(const Picture &picture)
@@ -1132,6 +1157,20 @@ void Builder::table(const Node &node, const Flow &flow)
         rows.push_back(std::move(cells));
     }
     if (rows.empty()) return;
+    // A table too large to lay out is shown as it is written, and says why.
+    qsizetype cells = 0;
+    for (const std::vector<Cell> &cellsOfRow : rows) cells += qsizetype(cellsOfRow.size());
+    if (node.columns > MaxTableColumns || cells > MaxTableCells) {
+        const QString source = node.file >= 0 && size_t(node.file) < m_document.files.size()
+                                   ? m_document.source(node).toString()
+                                   : QString();
+        codeBlock(node, flow, source.endsWith(u'\n') ? source.chopped(1) : source, QString(),
+                  tr("This table is too large to lay out as a table (%1 columns, %2 rows): it is shown as it is written.")
+                      .arg(node.columns)
+                      .arg(rows.size()),
+                  PreviewStyle::Dim, PreviewStyle::Code);
+        return;
+    }
     const qreal gap = m_style.gap();
     if (!m_options.islands || m_out->island >= 0) {
         QTextCursor &cursor = m_out->cursor;
@@ -1740,7 +1779,9 @@ void Builder::inl(const Node &node, const Char &given)
         if (!inner.href.isEmpty()) {
             inner.ink = PreviewStyle::Link;
             inner.underline = true;
-            inner.tip = node.title.isEmpty() ? node.dest : node.title;
+            // Where it leads always, and its title after that, so that a
+            // title can never pass for where the link goes.
+            inner.tip = node.title.isEmpty() ? node.dest : node.dest + u'\n' + node.title;
         }
         // A heading that is not there.
         if (state.ink == PreviewStyle::Danger && !node.resolved) {
@@ -1830,8 +1871,8 @@ void Builder::htmlInline(const Node &node, const Char &state)
         if (!inner.href.isEmpty()) {
             inner.ink = PreviewStyle::Link;
             inner.underline = true;
-            inner.tip = attribute(QLatin1StringView("title"));
-            if (inner.tip.isEmpty()) inner.tip = href;
+            const QString title = attribute(QLatin1StringView("title"));
+            inner.tip = title.isEmpty() ? href : href + u'\n' + title;
         }
     }
     anchor(node, 0);
@@ -2169,7 +2210,7 @@ void Builder::prepare(QTextDocument *document)
     cursor.endEditBlock();
 }
 
-std::vector<Section> Builder::buildAll(QTextDocument *document)
+std::vector<Section> Builder::buildAll(QTextDocument *document, const std::function<bool(qreal done)> &going)
 {
     prepare(document);
     document->setDefaultFont(m_style.bodyFont());
@@ -2177,7 +2218,11 @@ std::vector<Section> Builder::buildAll(QTextDocument *document)
     cursor.beginEditBlock();
     m_reuseBlock = false;
     std::vector<Section> sections;
-    for (const Part &part : parts(m_document, m_options.citations)) sections.push_back(build(part, cursor));
+    const std::vector<Part> all = parts(m_document, m_options.citations);
+    for (size_t i = 0; i < all.size(); ++i) {
+        if (going && !going(qreal(i) / qreal(all.size()))) break;
+        sections.push_back(build(all[i], cursor));
+    }
     cursor.endEditBlock();
     return sections;
 }

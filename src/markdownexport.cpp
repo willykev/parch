@@ -4,7 +4,6 @@
 #include "htmlexport.h"
 
 #include <QDir>
-#include <QSaveFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
@@ -382,7 +381,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     if (recipe.options.contains(QStringLiteral("as-is"))) {
         result.limitations = limitations(document, recipe, {});
         const QString text = document.files.empty() ? QString() : document.files.front().text;
-        if (!Exporters::writeFile(recipe.output, text.toUtf8(), &result.error)) {
+        if (!Exporters::writeFile(recipe.output, text.toUtf8(), &result.error, recipe.replaceLink)) {
             result.ioFailure = true;
             return result;
         }
@@ -410,10 +409,9 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
         result.limitations.append(QStringLiteral("Images that could not be read are linked where they were: %1")
                                       .arg(unread.join(QStringLiteral(", "))));
     if (run.stopped()) return Exporters::cancelled();
-    QSaveFile file(recipe.output);
-    const QByteArray bytes = assembled.text.toUtf8();
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
-        result.error = QStringLiteral("cannot write %1: %2").arg(recipe.output, file.errorString());
+    // Nothing is written through a link, the folder of pictures included.
+    Exporters::PendingFile file(recipe.output, recipe.replaceLink);
+    if (!file.write(assembled.text.toUtf8(), &result.error)) {
         result.ioFailure = true;
         return result;
     }
@@ -421,12 +419,10 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
         if (Exporters::isSource(document, folder) || !ExportWeb::replaceFolder(folder, assets.assets(), &result.error)) {
             if (result.error.isEmpty()) result.error = QStringLiteral("%1 is one of the document's own files").arg(folder);
             result.ioFailure = true;
-            file.cancelWriting();
             return result;
         }
     }
-    if (!file.commit()) {
-        result.error = QStringLiteral("cannot write %1: %2").arg(recipe.output, file.errorString());
+    if (!file.commit(&result.error)) {
         result.ioFailure = true;
         return result;
     }

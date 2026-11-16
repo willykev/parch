@@ -146,6 +146,8 @@ struct Preview::Parsed {
     QStringList pictures, files;
     // What the preview marks as leading nowhere.
     QStringList unresolved;
+    // It names pictures on the web.
+    bool webPictures = false;
 };
 
 // Sections that go and the parts that are built in their place.
@@ -193,6 +195,23 @@ QTextTable *tableOf(QTextDocument *document)
     return nullptr;
 }
 
+// Text with every character that cannot be seen, or that would reorder
+// what is around it, written as its code point.
+QString visibleText(const QString &text)
+{
+    QString shown;
+    shown.reserve(text.size());
+    for (const QChar c : text) {
+        const QChar::Category category = c.category();
+        if (category == QChar::Other_Control || category == QChar::Other_Format || category == QChar::Separator_Line
+            || category == QChar::Separator_Paragraph)
+            shown += QStringLiteral("<U+%1>").arg(uint(c.unicode()), 4, 16, QLatin1Char(u'0')).toUpper();
+        else
+            shown += c;
+    }
+    return shown;
+}
+
 bool readsAsMarkdown(const QString &path)
 {
     static const QStringList suffixes{QStringLiteral("md"), QStringLiteral("markdown"), QStringLiteral("mdown"),
@@ -201,8 +220,9 @@ bool readsAsMarkdown(const QString &path)
 }
 
 // The local pictures a tree shows, by the paths the builder reads them
-// from: Markdown images and HTML `img` elements, in every file it includes.
-void picturesOf(const md::Document &document, const md::Node &node, QStringList &out)
+// from: Markdown images and HTML `img` elements, in every file it includes;
+// and whether it names any on the web.
+void picturesOf(const md::Document &document, const md::Node &node, QStringList &out, bool &web)
 {
     QString written;
     if (node.type == md::NodeType::Image) {
@@ -215,8 +235,9 @@ void picturesOf(const md::Document &document, const md::Node &node, QStringList 
         const int file = std::clamp(node.file, 0, int(document.files.size()) - 1);
         const md::Destination target = md::classifyDestination(written, document.files[size_t(file)].directory);
         if (target.kind == md::Destination::Kind::LocalFile && target.absolute) out.append(target.path);
+        else if (target.kind == md::Destination::Kind::Remote) web = true;
     }
-    for (const md::Node &child : node.children) picturesOf(document, child, out);
+    for (const md::Node &child : node.children) picturesOf(document, child, out, web);
 }
 
 // The files a reading read besides the text: what it includes, its
@@ -543,6 +564,7 @@ void Preview::clear()
     m_readFiles.clear();
     m_watch->setFiles({});
     setUnresolved({});
+    setWebPictures(false);
     m_startsValid = 0;
     m_shownRevision = 0;
     m_trimmed = 0;
@@ -568,6 +590,13 @@ void Preview::setUnresolved(const QStringList &messages)
     if (said == m_unresolved) return;
     m_unresolved = said;
     emit unresolvedChanged();
+}
+
+void Preview::setWebPictures(bool web)
+{
+    if (web == m_webPictures) return;
+    m_webPictures = web;
+    emit webPicturesChanged();
 }
 
 void Preview::setCurrent(bool current)
@@ -636,7 +665,7 @@ Preview::Parsed Preview::parseJob(ParsedTextPtr parse, quint64 generation)
     result.citations = std::shared_ptr<const DocumentCitations::Formatted>(read, &read->formatted);
     result.parts = std::make_shared<std::vector<Part>>(preview::parts(*result.tree, result.citations.get()));
     preview::warm(*result.tree);
-    picturesOf(reading.document, reading.document.root, result.pictures);
+    picturesOf(reading.document, reading.document.root, result.pictures, result.webPictures);
     result.files = filesRead(reading);
     result.unresolved = preview::Unresolved(reading.document).messages();
     return result;
@@ -769,6 +798,7 @@ void Preview::plan(const Parsed &result)
     m_readFiles = QSet<QString>(result.files.cbegin(), result.files.cend());
     m_watch->setFiles(result.files + result.pictures);
     setUnresolved(result.unresolved);
+    setWebPictures(result.webPictures);
     m_planRevision = result.revision;
     ++m_updates;
     // Text that reads as it did, as after an undo and its redo, is shown already.
@@ -1633,21 +1663,38 @@ bool Preview::activate(const QString &link, int position, quint64 island)
     }
     if (link.startsWith(u'#')) return goTo(link.mid(1));
     const QUrl url(link);
-    if (!url.isValid() || url.scheme().isEmpty()) return false;
-    if (url.isLocalFile()) {
-        const QString path = url.toLocalFile();
+    switch (Backend::linkWay(url)) {
+    case Backend::LinkWay::Refused:
+        return false;
+    case Backend::LinkWay::Open:
+        return m_backend && m_backend->openLink(url);
+    case Backend::LinkWay::Local: {
+        const QString path = QDir::cleanPath(url.toLocalFile());
         if (readsAsMarkdown(path) && !QFileInfo(path).isDir()) {
             emit openRequested(path, url.fragment(QUrl::FullyDecoded));
             return true;
         }
-        return m_backend && m_backend->openLink(url);
+        // Any other file, a script or a desktop entry as much as a picture,
+        // is never handed to a program from a link: it is offered in its
+        // folder, once asked.
+        emit linkAsked(path, visibleText(m_backend ? m_backend->shownText(path) : path), QStringLiteral("file"), true);
+        return true;
     }
-    // Nothing that would run as a script, and nothing parch made up.
-    static const QStringList refused{QStringLiteral("javascript"), QStringLiteral("vbscript"), QStringLiteral("livescript"),
-                                     QStringLiteral("data"),       QStringLiteral("blob"),     QStringLiteral("about"),
-                                     QStringLiteral("parch"),      QStringLiteral("qrc")};
-    if (refused.contains(url.scheme().toLower())) return false;
-    return m_backend && m_backend->openLink(url);
+    case Backend::LinkWay::Ask:
+        emit linkAsked(url.toString(QUrl::FullyEncoded), shownLink(url), url.scheme().toLower(), false);
+        return true;
+    }
+    return false;
+}
+
+QString Preview::shownLink(const QUrl &url)
+{
+    // Fully encoded, a character that would hide or reorder what is shown
+    // stays a code, and a host is shown as the name it really asks for.
+    QString text = visibleText(url.toString(QUrl::FullyEncoded));
+    constexpr qsizetype Most = 400, Head = 300, Tail = 80;
+    if (text.size() > Most) text = text.left(Head) + u'…' + text.right(Tail);
+    return text;
 }
 
 int Preview::findHeading(const QString &slug)
@@ -1731,6 +1778,8 @@ QString blockText(const QTextBlock &block, int from, int to)
         const int start = std::max(from, fragment.position()), end = std::min(to, fragment.position() + fragment.length());
         if (start >= end) continue;
         const QTextCharFormat format = fragment.charFormat();
+        // A place to break that the preview put in a long word is not text.
+        if (format.boolProperty(preview::BreakProperty)) continue;
         if (format.isImageFormat()) {
             const QString name = format.toImageFormat().name();
             for (int i = start; i < end; ++i) {
@@ -1824,6 +1873,7 @@ QStringList Preview::copied(QQuickItem *textEdit) const
             const int a = std::max(from, fragment.position()), b = std::min(to, fragment.position() + fragment.length());
             if (a >= b) continue;
             const QTextCharFormat charFormat = fragment.charFormat();
+            if (charFormat.boolProperty(preview::BreakProperty)) continue;
             QString piece;
             if (charFormat.isImageFormat()) {
                 const QString name = charFormat.toImageFormat().name();

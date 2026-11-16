@@ -2,6 +2,7 @@
 
 #include "diskfile.h"
 #include "pathtext.h"
+#include "privatefiles.h"
 
 #include <QDir>
 #include <QFile>
@@ -131,7 +132,8 @@ void ReadingPositions::finished()
 
 bool ReadingPositions::writeFile(const QString &file, const QByteArray &bytes)
 {
-    if (!QDir().mkpath(QFileInfo(file).absolutePath())) return false;
+    if (!PrivateFiles::makeFolder(QFileInfo(file).absolutePath())) return false;
     QSaveFile output(file);
-    return output.open(QIODevice::WriteOnly) && output.write(bytes) == bytes.size() && output.commit();
+    return output.open(QIODevice::WriteOnly) && PrivateFiles::restrict(output) && output.write(bytes) == bytes.size()
+           && output.commit();
 }

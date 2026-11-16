@@ -28,5 +28,8 @@ void skillLeavesOtherFilesAlone();
 void jsonAndTextAreSafeToPrint();
 void htmlDestinationsCanBeRewritten();
 void commandsNeedNoDisplay();
+void bibliographyLinksAreOnlyWebMailOrDoi();
+void exportNeverWritesThroughALink();
+void checkSaysWhetherHelpersAreIsolated();
 
 } // namespace CliTests

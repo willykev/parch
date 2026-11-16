@@ -114,6 +114,13 @@ public:
     Q_INVOKABLE bool exportAgain(Document *document);
     // The recipe of the document's last export, as the notice reports it.
     QJsonObject lastRecipe(Document *document) const;
+    // An export, or Export again, to a file that is a symbolic link is held
+    // back, and linkInTheWay() asks what to do: write elsewhere, which asks
+    // for another file, or replace the link itself with the export, leaving
+    // what it leads to as it is. Anything else, or a later export, forgets it.
+    Q_INVOKABLE void exportElsewhere();
+    Q_INVOKABLE void replaceLink();
+    Q_INVOKABLE void keepLink();
 
     // An export's options as a recipe holds them: a switch that is off is
     // left out, a value given as it is.
@@ -125,6 +132,9 @@ signals:
     void readChanged();
     // An export or a print ended.
     void finished(bool ok);
+    // The file an export would write is a link to `target`; it waits for
+    // exportElsewhere(), replaceLink() or keepLink().
+    void linkInTheWay(const QString &output, const QString &target);
     // The file dialog was given a name without the format's suffix, and the
     // name with it, `path`, is a file that is there already, which the
     // dialog never asked about. The window that asked asks whether to write
@@ -138,7 +148,10 @@ private:
     struct Job;
     struct Outcome;
     void start(Document *document, const QString &format, const QHash<QString, QString> &options, const QString &output,
-               bool printing, quint32 token = 0);
+               bool printing, quint32 token = 0, bool replaceLink = false);
+    // Asks the file dialog where to write the document in the format.
+    void askWhere(Document *document, const QString &format, const QHash<QString, QString> &options,
+                  WindowContext *window = nullptr);
     void done(const Outcome &outcome);
     void poll();
     void remember(const QString &documentId, const QJsonObject &recipe);
@@ -182,6 +195,9 @@ private:
     };
     Asked m_asked;
     Asked m_printing;
+    // The export held back because its file is a link, and that file.
+    Asked m_linked;
+    QString m_linkedOutput;
     Asked m_replacing;
 
     // Each document's last recipe, by document id.

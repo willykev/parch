@@ -30,10 +30,10 @@ struct Loaded {
     QString error;
 };
 
-Loaded readPicture(QImageReader &reader)
+Loaded readPicture(QImageReader &reader, bool byContent = true)
 {
     reader.setAutoTransform(true);
-    reader.setDecideFormatFromContent(true);
+    reader.setDecideFormatFromContent(byContent);
     if (!reader.canRead()) return {{}, tr("it is not a picture parch can read")};
     const QSize size = reader.size();
     if (size.isValid() && std::max(size.width(), size.height()) > PreviewResources::MaxSide)
@@ -94,6 +94,20 @@ QImage pictureOf(const RenderResult &result, qreal scale)
     return image;
 }
 
+// A picture from the web, read by the one reader of the format its bytes
+// show, and never by any other installed reader.
+Loaded readWebPicture(const QByteArray &bytes)
+{
+    const QByteArray format = PreviewResources::webPictureFormat(bytes);
+    if (format.isEmpty()) return {{}, tr("it is not a PNG, JPEG, GIF, WebP or SVG picture")};
+    QBuffer buffer;
+    buffer.setData(bytes);
+    buffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&buffer, format);
+    reader.setAutoDetectImageFormat(false);
+    return readPicture(reader, false);
+}
+
 // The bytes a data: URL carries.
 QByteArray inlineBytes(const QString &url)
 {
@@ -106,6 +120,23 @@ QByteArray inlineBytes(const QString &url)
 }
 
 } // namespace
+
+QByteArray PreviewResources::webPictureFormat(const QByteArray &bytes)
+{
+    if (bytes.startsWith("\x89PNG\r\n\x1a\n")) return "png";
+    if (bytes.startsWith("\xff\xd8\xff")) return "jpeg";
+    if (bytes.startsWith("GIF87a") || bytes.startsWith("GIF89a")) return "gif";
+    if (bytes.size() >= 12 && bytes.startsWith("RIFF") && bytes.sliced(8, 4) == "WEBP") return "webp";
+    // SVG is text, whose root element may follow a byte order mark, an XML
+    // declaration, comments and a document type.
+    const QByteArray head = bytes.left(4096);
+    QByteArray start = head.trimmed();
+    if (start.startsWith("\xef\xbb\xbf")) start = start.sliced(3).trimmed();
+    if ((start.startsWith("<?xml") || start.startsWith("<svg") || start.startsWith("<!--") || start.startsWith("<!DOCTYPE"))
+        && head.contains("<svg"))
+        return "svg";
+    return {};
+}
 
 PreviewResources::PreviewResources(QObject *parent) : QObject(parent)
 {
@@ -290,7 +321,7 @@ preview::Picture PreviewResources::image(const md::Destination &destination, con
                 loaded(key, generation, QImage(), error.isEmpty() ? tr("nothing came back") : error);
                 return;
             }
-            QtConcurrent::run(&m_pool, readBytes, data).then(this, take);
+            QtConcurrent::run(&m_pool, readWebPicture, data).then(this, take);
         });
     } else {
         return fail(tr("its address is not one parch shows pictures from"));

@@ -37,6 +37,7 @@ HEADERS += \
     cslfixture.h \
     testfiles.h \
     vimtests.h \
+    securitytests.h \
     windowtesting.h \
     ../src/apppaths.h \
     ../src/appservice.h \
@@ -115,6 +116,7 @@ HEADERS += \
     ../src/previewbuilder.h \
     ../src/previewresources.h \
     ../src/previewwatch.h \
+    ../src/privatefiles.h \
     ../src/previewstyle.h \
     ../src/qmltypes.h \
     ../src/quitsignals.h \
@@ -169,6 +171,7 @@ SOURCES += \
     cslfixture.cpp \
     testfiles.cpp \
     vimtests.cpp \
+    securitytests.cpp \
     windowtesting.cpp \
     ../src/apppaths.cpp \
     ../src/appservice.cpp \
@@ -252,6 +255,7 @@ SOURCES += \
     ../src/previewbuilder.cpp \
     ../src/previewresources.cpp \
     ../src/previewwatch.cpp \
+    ../src/privatefiles.cpp \
     ../src/previewstyle.cpp \
     ../src/qmltypes.cpp \
     ../src/quitsignals.cpp \

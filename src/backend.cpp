@@ -12,9 +12,11 @@
 #include "history.h"
 #include "librarymodel.h"
 #include "pathtext.h"
+#include "privatefiles.h"
 #include "readingpositions.h"
 #include "recentfiles.h"
 #include "recovery.h"
+#include "rendercache.h"
 #include "renderservice.h"
 #include "settings.h"
 #include "sourcebuffer.h"
@@ -107,6 +109,11 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
             [places](Document *document) { document->parse()->setPlaces(places); });
     connect(m_exports, &Exports::news, this, &Backend::inform);
     connect(m_exports, &Exports::problem, this, &Backend::notify);
+    // The window in front asks what to do about a link where an export would go.
+    connect(m_exports, &Exports::linkInTheWay, this, [this](const QString &output, const QString &target) {
+        if (WindowContext *window = activeWindow()) window->askAboutExportLink(shownText(output), shownText(target));
+        else m_exports->keepLink();
+    });
     // Every document is read in the dialect its settings choose, kept
     // current as they, its place and the library's folders change.
     m_documentSettings->setLibraryFolders([this] { return m_settings->libraryFolders(); });
@@ -451,6 +458,11 @@ QString Backend::folderLabel(const QString &path, const QStringList &libraryFold
 
 void Backend::start(const QStringList &files)
 {
+    // parch's own folders, and what earlier versions left in them, are made
+    // their owner's alone, quietly and off the UI thread.
+    m_libraryPool->start([folders = PrivateFiles::folders(m_paths, {QFileInfo(RenderCache::standardFolder()).path()})] {
+        PrivateFiles::tighten(folders);
+    });
     // The dictionary is read off the UI thread while the windows open.
     m_spelling->load();
     // Drafts deleted before parch last ended can no longer be undone.
@@ -958,7 +970,44 @@ RenderService *Backend::renderService()
 
 void Backend::setRenderService(std::unique_ptr<RenderService> service) { m_render = std::move(service); }
 void Backend::setLinkOpener(std::function<bool(const QUrl &url)> opener) { m_linkOpener = std::move(opener); }
-bool Backend::openLink(const QUrl &url) { return m_linkOpener && url.isValid() && m_linkOpener(url); }
+void Backend::setFolderShower(std::function<bool(const QString &path)> shower) { m_folderShower = std::move(shower); }
+
+Backend::LinkWay Backend::linkWay(const QUrl &url)
+{
+    if (!url.isValid()) return LinkWay::Refused;
+    const QString scheme = url.scheme().toLower();
+    if (scheme.isEmpty()) return LinkWay::Refused;
+    // Nothing that would run as a script, and nothing parch made up.
+    static const QStringList refused{QStringLiteral("javascript"), QStringLiteral("vbscript"), QStringLiteral("livescript"),
+                                     QStringLiteral("data"),       QStringLiteral("blob"),     QStringLiteral("about"),
+                                     QStringLiteral("parch"),      QStringLiteral("qrc")};
+    if (refused.contains(scheme)) return LinkWay::Refused;
+    if (scheme == u"file") {
+        // A file on another machine is no file of this one.
+        const QString host = url.host().toLower();
+        return host.isEmpty() || host == u"localhost" ? LinkWay::Local : LinkWay::Refused;
+    }
+    if (scheme == u"http" || scheme == u"https" || scheme == u"mailto") return LinkWay::Open;
+    return LinkWay::Ask;
+}
+
+bool Backend::openLink(const QUrl &url) { return m_linkOpener && linkWay(url) == LinkWay::Open && m_linkOpener(url); }
+
+bool Backend::openAsked(const QString &text)
+{
+    const QUrl url(text, QUrl::StrictMode);
+    const LinkWay way = linkWay(url);
+    if (way != LinkWay::Open && way != LinkWay::Ask) return false;
+    return m_linkOpener && m_linkOpener(url);
+}
+
+bool Backend::showInFolder(const QString &path)
+{
+    if (!m_folderShower || !QDir::isAbsolutePath(path)) return false;
+    const QFileInfo info(path);
+    if (!info.exists() && !info.isSymLink()) return false;
+    return m_folderShower(QDir::cleanPath(path));
+}
 void Backend::setRemoteFetcher(RemoteFetcher *fetcher) { m_remoteFetcher = fetcher; }
 RemoteFetcher *Backend::remoteFetcher() const { return m_remoteFetcher; }
 

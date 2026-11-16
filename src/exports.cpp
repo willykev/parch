@@ -8,6 +8,7 @@
 #include "mdinclude.h"
 #include "pdfexport.h"
 #include "printportal.h"
+#include "privatefiles.h"
 #include "sourcebuffer.h"
 #include "workerfailure.h"
 
@@ -34,6 +35,8 @@ struct Exports::Job {
     bool printing = false;
     // The document's text is parsed, and the export runs on it.
     bool started = false;
+    // The writer chose to replace the link at the output.
+    bool replaceLink = false;
 };
 
 struct Exports::Outcome {
@@ -266,8 +269,16 @@ void Exports::exportDocument(Document *document, const QString &format, const QV
         emit problem(tr("An export is running"), tr("Wait for it to end, or cancel it, and then export again."));
         return;
     }
+    askWhere(document, format, recipeOptions(format, options), window);
+}
+
+void Exports::askWhere(Document *document, const QString &format, const QHash<QString, QString> &options,
+                       WindowContext *window)
+{
+    const Exporter *exporter = Exporters::find(format);
+    if (!document || !exporter) return;
     m_replacing = {};
-    m_asked = {document, format, recipeOptions(format, options)};
+    m_asked = {document, format, options};
     QString folder = document->path().isEmpty() ? QString() : QFileInfo(document->path()).absolutePath();
     if (folder.isEmpty() && m_files) folder = m_files->startFolder();
     QString base = document->path().isEmpty() ? document->title() : QFileInfo(document->path()).completeBaseName();
@@ -312,6 +323,26 @@ void Exports::print(Document *document, const QVariantMap &options)
     m_printer->prepare(document->title());
 }
 
+void Exports::exportElsewhere()
+{
+    const Asked linked = std::exchange(m_linked, {});
+    m_linkedOutput.clear();
+    if (linked.document) askWhere(linked.document, linked.format, linked.options);
+}
+
+void Exports::replaceLink()
+{
+    const Asked linked = std::exchange(m_linked, {});
+    const QString output = std::exchange(m_linkedOutput, {});
+    if (linked.document) start(linked.document, linked.format, linked.options, output, false, 0, true);
+}
+
+void Exports::keepLink()
+{
+    m_linked = {};
+    m_linkedOutput.clear();
+}
+
 void Exports::cancel()
 {
     if (m_job) m_job->cancelled = true;
@@ -324,7 +355,7 @@ bool Exports::stop(int waitMs)
 }
 
 void Exports::start(Document *document, const QString &format, const QHash<QString, QString> &options,
-                    const QString &output, bool printing, quint32 token)
+                    const QString &output, bool printing, quint32 token, bool replaceLink)
 {
     if (!document) return;
     if (m_job) {
@@ -333,8 +364,18 @@ void Exports::start(Document *document, const QString &format, const QHash<QStri
     }
     const Exporter *exporter = Exporters::find(format);
     if (!exporter) return;
+    keepLink();
+    // A link where the file would be is never written through: the writer
+    // is asked first.
+    if (!printing && !replaceLink && !Exporters::linkRefusal(output).isEmpty()) {
+        m_linked = {document, format, options};
+        m_linkedOutput = output;
+        emit linkInTheWay(output, QFile::symLinkTarget(output));
+        return;
+    }
     auto job = std::make_shared<Job>();
     job->printing = printing;
+    job->replaceLink = replaceLink;
     job->name = printing ? document->title() : QFileInfo(output).fileName();
     m_job = job;
     m_progress = 0;
@@ -428,6 +469,7 @@ void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr 
         recipe.dialect = reading->dialect;
         recipe.options = options;
         recipe.citations = std::shared_ptr<const DocumentCitations::Formatted>(read, &read->formatted);
+        recipe.replaceLink = job->replaceLink;
         ExportRun run;
         run.cancelled = [job] { return job->cancelled.load(); };
         run.progress = [job](qreal done, const QString &step) {
@@ -573,9 +615,9 @@ void Exports::remember(const QString &documentId, const QJsonObject &recipe)
     m_recipes.insert(documentId, recipe);
     QJsonObject recipes;
     for (auto it = m_recipes.cbegin(); it != m_recipes.cend(); ++it) recipes.insert(it.key(), it.value());
-    QDir().mkpath(m_paths.data);
+    PrivateFiles::makeFolder(m_paths.data);
     QSaveFile file(recipesFile());
-    if (file.open(QIODevice::WriteOnly)) {
+    if (file.open(QIODevice::WriteOnly) && PrivateFiles::restrict(file)) {
         file.write(QJsonDocument(QJsonObject{{QStringLiteral("recipes"), recipes}}).toJson());
         file.commit();
     }

@@ -130,10 +130,14 @@ Add `--json` for scripts. `parch --help` lists everything, and
 Your documents are ordinary Markdown files, saved where you put them. parch
 keeps drafts and history in `~/.local/share/parch/`, unsaved text and open
 tabs in `~/.local/state/parch/`, and settings in `~/.config/parch/`; back
-those up with your documents. There is no account and no cloud. The only
-network use is the preview fetching a picture a document names by web
-address, which **Preferences** turns off; links you click open in your
-browser. Spelling is checked in English only.
+those up with your documents. There is no account and no cloud. parch
+uses the network only to show a picture a document names by web address,
+and only once you ask: a document with such pictures says so above its
+preview, with **Show them** for that document, and **Preferences** shows
+them in every document. Even then, nothing is fetched from your own computer
+or your local network. Web and mail links you click open in your browser or
+mail program; any other link asks first. Spelling is checked in English
+only.
 
 ## More
 

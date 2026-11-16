@@ -57,6 +57,15 @@ private:
     QList<CslSpan> m_spans;
 };
 
+// The address a bibliography may link to: a web or mail address (http,
+// https or mailto) as it is written, without the spaces and control
+// characters around and inside it that browsers ignore, or a DOI written
+// as doi:… as its https://doi.org/ address. Anything else, such as a
+// script or a program's own scheme, gives nothing, and its text stays text.
+// The engine applies it to every link before anything renders, so that the
+// preview and every export link the same addresses.
+QString bibliographyLink(const QString &address);
+
 namespace CslMarkup {
 // One piece of a run of HTML-like markup: text, an opening tag or a closing tag.
 struct Token {

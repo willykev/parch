@@ -2,6 +2,7 @@
 
 #include "diskfile.h"
 #include "pathtext.h"
+#include "privatefiles.h"
 #include "theme.h"
 
 #include <QDir>
@@ -621,11 +622,12 @@ void Settings::write()
         else
             error = QStringLiteral("the unreadable file cannot be moved aside");
     }
-    if (error.isEmpty() && !QDir().mkpath(QFileInfo(m_file).absolutePath())) {
+    if (error.isEmpty() && !PrivateFiles::makeFolder(QFileInfo(m_file).absolutePath())) {
         error = QStringLiteral("cannot make its folder");
     } else if (error.isEmpty()) {
         QSaveFile file(m_file);
-        if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(m_stored).toJson()) < 0 || !file.commit())
+        if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file)
+            || file.write(QJsonDocument(m_stored).toJson()) < 0 || !file.commit())
             error = file.errorString();
     }
     if (!error.isEmpty())

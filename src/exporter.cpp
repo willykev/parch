@@ -10,7 +10,12 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
-#include <QSaveFile>
+#include <QRandomGenerator>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 QJsonObject ExportRecipe::toJson() const
 {
@@ -80,14 +85,90 @@ bool isSource(const md::Document &document, const QString &path)
     return false;
 }
 
-bool writeFile(const QString &path, const QByteArray &bytes, QString *error)
+QString linkRefusal(const QString &path)
 {
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
-        *error = QStringLiteral("cannot write %1: %2").arg(path, file.errorString());
-        return false;
+    struct stat status;
+    if (::lstat(QFile::encodeName(path).constData(), &status) != 0 || !S_ISLNK(status.st_mode)) return {};
+    const QString target = QFile::symLinkTarget(path);
+    return QStringLiteral("%1 is a link to %2; parch never writes through a link")
+        .arg(path, target.isEmpty() ? QStringLiteral("another file") : target);
+}
+
+PendingFile::PendingFile(const QString &path, bool replaceLink) : m_path(path), m_replaceLink(replaceLink) {}
+
+PendingFile::~PendingFile()
+{
+    if (!m_temporary.isEmpty()) ::unlinkat(m_folder, m_temporary.constData(), 0);
+    if (m_folder >= 0) ::close(m_folder);
+}
+
+bool PendingFile::fail(const QString &why, QString *error)
+{
+    *error = QStringLiteral("cannot write %1: %2").arg(m_path, why);
+    return false;
+}
+
+bool PendingFile::write(const QByteArray &bytes, QString *error)
+{
+    if (!m_replaceLink) {
+        if (const QString why = linkRefusal(m_path); !why.isEmpty()) {
+            *error = why;
+            return false;
+        }
     }
+    const QFileInfo info(m_path);
+    m_name = QFile::encodeName(info.fileName());
+    if (m_name.isEmpty()) return fail(QStringLiteral("it names no file"), error);
+    m_folder = ::open(QFile::encodeName(info.absolutePath()).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (m_folder < 0) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    struct stat there;
+    const bool exists = ::fstatat(m_folder, m_name.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0;
+    if (exists && S_ISDIR(there.st_mode)) return fail(QStringLiteral("it is a folder"), error);
+    // The temporary file is made anew, never through anything already there.
+    int fd = -1;
+    for (int attempt = 0; attempt < 16 && fd < 0; ++attempt) {
+        const QByteArray name = ".parch-" + QByteArray::number(QRandomGenerator::global()->generate64(), 16) + ".part";
+        fd = ::openat(m_folder, name.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+        if (fd >= 0) m_temporary = name;
+        else if (errno != EEXIST) break;
+    }
+    if (fd < 0) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    // A file replaced keeps its permissions; a new one has the usual.
+    int why = 0;
+    if (exists && S_ISREG(there.st_mode) && ::fchmod(fd, there.st_mode & 07777) != 0) why = errno;
+    for (qsizetype done = 0; why == 0 && done < bytes.size();) {
+        const ssize_t wrote = ::write(fd, bytes.constData() + done, size_t(bytes.size() - done));
+        if (wrote < 0 && errno == EINTR) continue;
+        if (wrote <= 0) why = wrote < 0 ? errno : EIO;
+        else done += wrote;
+    }
+    if (why == 0 && ::fsync(fd) != 0) why = errno;
+    ::close(fd);
+    if (why != 0) return fail(QString::fromLocal8Bit(std::strerror(why)), error);
     return true;
+}
+
+bool PendingFile::commit(QString *error)
+{
+    if (m_temporary.isEmpty()) return fail(QStringLiteral("nothing was written"), error);
+    // A link that took the file's place meanwhile is refused as before.
+    if (!m_replaceLink) {
+        if (const QString why = linkRefusal(m_path); !why.isEmpty()) {
+            *error = why;
+            return false;
+        }
+    }
+    // The name itself is replaced, whatever is there: never what a link leads to.
+    if (::renameat(m_folder, m_temporary.constData(), m_folder, m_name.constData()) != 0)
+        return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    m_temporary.clear();
+    return true;
+}
+
+bool writeFile(const QString &path, const QByteArray &bytes, QString *error, bool replaceLink)
+{
+    PendingFile file(path, replaceLink);
+    return file.write(bytes, error) && file.commit(error);
 }
 
 QString relativeTo(const QString &outputFolder, const QString &absolutePath)

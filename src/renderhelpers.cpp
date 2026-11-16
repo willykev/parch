@@ -12,12 +12,14 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
+#include <cerrno>
 #include <csignal>
 #include <sched.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -181,13 +183,23 @@ void HelperProcess::start()
              QProcess::UnixProcessFlag::ResetIds | QProcess::UnixProcessFlag::DisableCoreDumps,
          3});
     const rlim_t fileLimit = rlim_t(m_limits.maxOutputBytes);
+    const rlim_t memoryLimit = rlim_t(m_limits.maxMemoryBytes);
+    const rlim_t cpuLimit = rlim_t(m_limits.maxCpuSeconds);
     // Runs in the child between fork and exec: system calls only.
-    m_process->setChildProcessModifier([fileLimit] {
+    m_process->setChildProcessModifier([fileLimit, memoryLimit, cpuLimit] {
         // Dies with the thread that started it, so that a helper never
         // outlives parch.
         ::prctl(PR_SET_PDEATHSIG, SIGKILL);
         const rlimit files{fileLimit, fileLimit};
         ::setrlimit(RLIMIT_FSIZE, &files);
+        // A helper that runs away with memory or the processor is stopped
+        // by the kernel, whatever the timeout.
+        const rlimit memory{memoryLimit, memoryLimit};
+        ::setrlimit(RLIMIT_AS, &memory);
+        const rlimit cpu{cpuLimit, cpuLimit};
+        ::setrlimit(RLIMIT_CPU, &cpu);
+        const rlimit core{0, 0};
+        ::setrlimit(RLIMIT_CORE, &core);
         // A user namespace makes a network namespace possible without
         // privileges; the new network namespace has no way out.
         if (::unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0) {
@@ -221,6 +233,32 @@ void HelperProcess::start()
 }
 
 void HelperProcess::cancel() { stop(HelperOutcome::Cancelled); }
+
+namespace {
+std::function<bool()> &isolationProbe()
+{
+    static std::function<bool()> probe;
+    return probe;
+}
+} // namespace
+
+void HelperProcess::setIsolationProbe(std::function<bool()> probe) { isolationProbe() = std::move(probe); }
+
+bool HelperProcess::canIsolate()
+{
+    if (isolationProbe()) return isolationProbe()();
+    static const bool can = [] {
+        // A child tries what a helper's child does, and says how it went.
+        const pid_t child = ::fork();
+        if (child == 0) ::_exit(::unshare(CLONE_NEWUSER | CLONE_NEWNET) == 0 ? 0 : 1);
+        if (child < 0) return false;
+        int status = 0;
+        while (::waitpid(child, &status, 0) < 0)
+            if (errno != EINTR) return false;
+        return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    }();
+    return can;
+}
 
 void HelperProcess::stop(HelperOutcome::Status status)
 {

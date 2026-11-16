@@ -37,6 +37,7 @@
 #include "outline.h"
 #include "markdown_tests.h"
 #include "previewtests.h"
+#include "securitytests.h"
 #include "pathtext.h"
 #include "portalfilepicker.h"
 #include "qmltypes.h"
@@ -368,6 +369,9 @@ private slots:
     void cliJsonAndTextAreSafeToPrint() { CliTests::jsonAndTextAreSafeToPrint(); }
     void cliHtmlDestinationsCanBeRewritten() { CliTests::htmlDestinationsCanBeRewritten(); }
     void cliCommandsNeedNoDisplay() { CliTests::commandsNeedNoDisplay(); }
+    void cliBibliographyLinksAreOnlyWebMailOrDoi() { CliTests::bibliographyLinksAreOnlyWebMailOrDoi(); }
+    void cliExportNeverWritesThroughALink() { CliTests::exportNeverWritesThroughALink(); }
+    void cliCheckSaysWhetherHelpersAreIsolated() { CliTests::checkSaysWhetherHelpersAreIsolated(); }
     // Pictures of the window. The tests themselves are in screenshottests.cpp.
     void screenshotOptionsAreParsed() { ScreenshotTests::optionsAreParsed(); }
     void screenshotMalformedOptionsAreRefused() { ScreenshotTests::malformedOptionsAreRefused(); }
@@ -774,6 +778,7 @@ private slots:
     void includedTextLeadsToItsFile() { PreviewTests::includedTextLeadsToItsFile(); }
     void textAndPreviewScrollTogether() { PreviewTests::textAndPreviewScrollTogether(); }
     void linksGoWhereTheyLead() { PreviewTests::linksGoWhereTheyLead(); }
+    void linksOfOtherKindsAskFirst() { PreviewTests::linksOfOtherKindsAskFirst(); }
     void tasksAreTickedInTheSource() { PreviewTests::tasksAreTickedInTheSource(); }
     void notesGoThereAndBack() { PreviewTests::notesGoThereAndBack(); }
     void themeChangeRecoloursWithoutRebuilding() { PreviewTests::themeChangeRecoloursWithoutRebuilding(); }
@@ -797,6 +802,17 @@ private slots:
         PreviewTests::drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize();
     }
     void headingLinksAreFoundInTheSharedParse() { PreviewTests::headingLinksAreFoundInTheSharedParse(); }
+    void webPicturesWaitUntilAsked() { PreviewTests::webPicturesWaitUntilAsked(); }
+    void pathologicalBlocksStayCheapToLayOut() { PreviewTests::pathologicalBlocksStayCheapToLayOut(); }
+    // What parch refuses to reach or write, written in securitytests.cpp.
+    void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }
+    void exportsAskBeforeReplacingALink() { SecurityTests::exportsAskBeforeReplacingALink(); }
+    void parchKeepsItsFilesToItself() { SecurityTests::parchKeepsItsFilesToItself(); }
+    void helpersRunWithinLimits() { SecurityTests::helpersRunWithinLimits(); }
+    void aLinkedAssetsFolderIsNotFollowed() { SecurityTests::aLinkedAssetsFolderIsNotFollowed(); }
+    void bigPastesConvertOffTheWindowThread() { SecurityTests::bigPastesConvertOffTheWindowThread(); }
+    void aWordTooLongToBreakKeepsTypingQuick() { SecurityTests::aWordTooLongToBreakKeepsTypingQuick(); }
+    void aLongPdfStaysCancellableWhileItIsSet() { SecurityTests::aLongPdfStaysCancellableWhileItIsSet(); }
     // The Markdown guide, written in guidetests.cpp.
     void markdownGuideOpensBesideItsPreview() { GuideTests::markdownGuideOpensBesideItsPreview(); }
     void markdownGuideRendersEveryPart() { GuideTests::markdownGuideRendersEveryPart(); }

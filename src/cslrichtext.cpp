@@ -28,6 +28,26 @@ QString CslText::toPlainText() const
     return text;
 }
 
+QString bibliographyLink(const QString &address)
+{
+    // As a browser reads an address: without the spaces and control
+    // characters around it, and without tabs and line breaks inside it.
+    QString link;
+    link.reserve(address.size());
+    for (const QChar c : address)
+        if (c.unicode() > 0x20 && c.unicode() != 0x7f) link += c;
+    const QString lower = link.toLower();
+    if (lower.startsWith(QLatin1StringView("https://")) || lower.startsWith(QLatin1StringView("http://"))
+        || lower.startsWith(QLatin1StringView("mailto:")))
+        return link;
+    if (lower.startsWith(QLatin1StringView("doi:"))) {
+        QString doi = link.mid(4);
+        while (doi.startsWith(u'/')) doi.remove(0, 1);
+        return doi.isEmpty() ? QString() : QStringLiteral("https://doi.org/") + doi;
+    }
+    return {};
+}
+
 namespace {
 
 // The inline tags of a run, outermost first, so that runs sharing a format
@@ -37,7 +57,8 @@ enum class Tag { Link, Bold, Italic, SmallCaps, Underline, Superscript, Subscrip
 QList<Tag> tagsOf(const CslFormat &format)
 {
     QList<Tag> tags;
-    if (!format.link.isEmpty()) tags.append(Tag::Link);
+    // A link that came by any other way than the engine is checked again here.
+    if (!bibliographyLink(format.link).isEmpty()) tags.append(Tag::Link);
     if (format.bold) tags.append(Tag::Bold);
     if (format.italic) tags.append(Tag::Italic);
     if (format.smallCaps) tags.append(Tag::SmallCaps);
@@ -51,7 +72,7 @@ QString openTag(Tag tag, const CslFormat &format)
 {
     switch (tag) {
     case Tag::Link:
-        return QStringLiteral("<a href=\"%1\">").arg(CslMarkup::escapeHtml(format.link));
+        return QStringLiteral("<a href=\"%1\">").arg(CslMarkup::escapeHtml(bibliographyLink(format.link)));
     case Tag::Bold:
         return QStringLiteral("<b>");
     case Tag::Italic:
@@ -212,7 +233,7 @@ CslText CslText::fromHtml(const QString &html)
             else if (name == u"sc")
                 format.smallCaps = true;
             else if (name == u"a")
-                format.link = token.href;
+                format.link = bibliographyLink(token.href);
             else if (name == u"div") {
                 if (token.cssClass.contains(u"csl-left-margin"))
                     format.display = CslFormat::Display::LeftMargin;

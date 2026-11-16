@@ -1,5 +1,7 @@
 #include "recovery.h"
 
+#include "privatefiles.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -87,7 +89,7 @@ bool Recovery::writeEntry(const QString &documentId, const QString &path, const 
         return fail(QCoreApplication::translate("Recovery", "Not a document id: %1").arg(documentId));
     // The folder is parch's own, so it is named by what it is for, not where it is.
     QString reason;
-    if (!DiskFile::makeFolders(m_paths.recovery(), &reason))
+    if (!PrivateFiles::makeFolder(m_paths.recovery(), &reason))
         return fail(QCoreApplication::translate("Recovery", "The recovery folder can't be written (%1)").arg(reason));
 
     const bool utf8 = survivesUtf8(snapshot.text);
@@ -118,7 +120,7 @@ bool Recovery::writeEntry(const QString &documentId, const QString &path, const 
     header.insert(QStringLiteral("bytes"), payload.size());
 
     QSaveFile file(fileFor(documentId));
-    if (!file.open(QIODevice::WriteOnly)) return fail(file.errorString());
+    if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file)) return fail(file.errorString());
     // The compact header is one line, so the first line break ends it.
     if (file.write(QJsonDocument(header).toJson(QJsonDocument::Compact) + '\n') < 0
         || file.write(payload) != payload.size() || !file.commit())
@@ -165,13 +167,14 @@ bool Recovery::writeSaves(const QString &documentId, const QList<Link> &links) c
         text += link.from + ' ' + link.to + ' ' + QByteArray::number(link.revision) + (link.landed ? QByteArray() : " " + pendingMark)
                 + '\n';
     QSaveFile file(savesFor(documentId));
-    return file.open(QIODevice::WriteOnly) && file.write(text) == text.size() && file.commit();
+    return file.open(QIODevice::WriteOnly) && PrivateFiles::restrict(file) && file.write(text) == text.size()
+           && file.commit();
 }
 
 bool Recovery::noteSave(const QString &documentId, const QByteArray &from, const QByteArray &to,
                         Revision revision) const
 {
-    if (!AppPaths::isDocumentId(documentId) || !DiskFile::makeFolders(m_paths.recovery())) return false;
+    if (!AppPaths::isDocumentId(documentId) || !PrivateFiles::makeFolder(m_paths.recovery())) return false;
     QList<Link> links = saves(documentId);
     links.append({hexOf(from), hexOf(to), revision, false});
     if (links.size() > keptSaves) links.remove(0, links.size() - keptSaves);

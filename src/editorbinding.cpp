@@ -394,6 +394,11 @@ void EditorBinding::load()
     if (m_editor->width() <= 0) return;
     const QString source = m_buffer->text();
     m_editor->setFlag(QQuickItem::ItemObservesViewport, source.size() > largeTextUnits);
+    // Decided before the text goes in, so that it is laid out once.
+    if (const bool anywhere = hasLongWord(source, 0, source.size()); anywhere != m_wrapAnywhere) {
+        m_wrapAnywhere = anywhere;
+        emit wrapAnywhereChanged();
+    }
     m_projecting = true;
     m_textDocument->clear();
     QTextCursor cursor(m_textDocument);
@@ -414,9 +419,36 @@ void EditorBinding::load()
     emit projectionLoaded();
 }
 
+bool EditorBinding::hasLongWord(QStringView text, qsizetype from, qsizetype to)
+{
+    const auto breaks = [](QChar c) { return c.isSpace() || c == QChar(0x200B) || c == u'-'; };
+    from = std::clamp<qsizetype>(from, 0, text.size());
+    to = std::clamp<qsizetype>(to, from, text.size());
+    // Back to where the run around `from` starts, but no further than needed.
+    qsizetype start = from;
+    while (start > 0 && from - start <= LongWord && !breaks(text.at(start - 1))) --start;
+    qsizetype run = 0;
+    for (qsizetype i = start; i < text.size(); ++i) {
+        if (breaks(text.at(i))) {
+            if (i >= to) return false;
+            run = 0;
+            continue;
+        }
+        if (++run > LongWord) return true;
+    }
+    return false;
+}
+
 void EditorBinding::applySourceChange(Revision revision, SourceRange range, const QString &replacement)
 {
     if (!m_loaded || !m_editor || !m_textDocument) return;
+    // An edit that makes a word too long to break wraps the editor anywhere
+    // before the projection takes the edit, looking only around it.
+    if (!m_wrapAnywhere && !replacement.isEmpty()
+        && hasLongWord(m_buffer->text(), range.start, range.start + replacement.size())) {
+        m_wrapAnywhere = true;
+        emit wrapAnywhereChanged();
+    }
     if (m_foreign.pending) {
         // The source changed while a write into the projection waited, so
         // the projection no longer shows the text the write was made in: it

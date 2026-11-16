@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QTimer>
 #include <QVariantMap>
 #include <algorithm>
@@ -38,21 +39,43 @@ QString errorText(int number)
     return QString::fromLocal8Bit(std::strerror(number));
 }
 
-// The folder's assets folder, made when it is not there; a draft's own
-// folder, made first, is for its owner alone, as the store makes it.
-QString assetsOf(const QString &folder, QString *error)
+// The folder's assets folder, made when it is not there, opened as a
+// descriptor that every file is then made through; a draft's own folder,
+// made first, is for its owner alone, as the store makes it. An assets
+// folder that is a link is never followed, wherever it leads: -1, with why.
+int openAssets(const QString &folder, QString *error)
 {
     QString reason;
     if (!QFileInfo(folder).isDir() && !DiskFile::makeFolders(folder, &reason, 0700)) {
         *error = Attachments::tr("Cannot create the folder %1: %2").arg(folder, reason);
-        return {};
+        return -1;
     }
     const QString assets = folder + QStringLiteral("/assets");
-    if (!DiskFile::makeFolders(assets, &reason)) {
-        *error = Attachments::tr("Cannot create the folder %1: %2").arg(assets, reason);
-        return {};
+    const int parent = ::open(QFile::encodeName(folder).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parent < 0) {
+        *error = Attachments::tr("Cannot open the folder %1: %2").arg(folder, errorText(errno));
+        return -1;
     }
-    return assets;
+    if (::mkdirat(parent, "assets", 0777) != 0 && errno != EEXIST) {
+        *error = Attachments::tr("Cannot create the folder %1: %2").arg(assets, errorText(errno));
+        ::close(parent);
+        return -1;
+    }
+    const int opened = ::openat(parent, "assets", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    const int failure = errno;
+    struct stat there {};
+    const bool link = opened < 0 && ::fstatat(parent, "assets", &there, AT_SYMLINK_NOFOLLOW) == 0 && S_ISLNK(there.st_mode);
+    ::close(parent);
+    if (opened >= 0) return opened;
+    if (link) {
+        const QString target = QFile::symLinkTarget(assets);
+        *error = Attachments::tr("The assets folder %1 is a link to %2, which parch does not put files through. "
+                                 "Make assets a folder of its own.")
+                     .arg(assets, target.isEmpty() ? Attachments::tr("another place") : target);
+    } else {
+        *error = Attachments::tr("Cannot open the folder %1: %2").arg(assets, errorText(failure));
+    }
+    return -1;
 }
 
 // Whether the file holds exactly these bytes.
@@ -83,18 +106,21 @@ Attachments::Placed place(const QString &folder, const std::function<QString(int
                           const std::function<bool(QFile &out, QString *error)> &write)
 {
     QString error;
-    const QString assets = assetsOf(folder, &error);
-    if (assets.isEmpty()) return {{}, error};
+    const int assets = openAssets(folder, &error);
+    if (assets < 0) return {{}, error};
+    const auto closeAssets = qScopeGuard([assets] { ::close(assets); });
+    const QString shown = folder + QStringLiteral("/assets");
     for (int n = 1; n <= 10000; ++n) {
         const QString name = candidate(n);
-        const QString path = assets + u'/' + name;
-        const QByteArray encoded = QFile::encodeName(path);
+        const QString path = shown + u'/' + name;
+        const QByteArray encoded = QFile::encodeName(name);
         struct stat there {};
-        if (::lstat(encoded.constData(), &there) == 0) {
+        if (::fstatat(assets, encoded.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0) {
             if (S_ISREG(there.st_mode) && same(path)) return {QStringLiteral("assets/") + name, {}};
             continue;
         }
-        const int descriptor = ::open(encoded.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+        const int descriptor =
+            ::openat(assets, encoded.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
         if (descriptor < 0) {
             if (errno == EEXIST) continue;
             return {{}, Attachments::tr("Cannot write %1: %2").arg(path, errorText(errno))};
@@ -102,7 +128,7 @@ Attachments::Placed place(const QString &folder, const std::function<QString(int
         QFile out;
         if (!out.open(descriptor, QIODevice::WriteOnly, QFileDevice::AutoCloseHandle)) {
             ::close(descriptor);
-            ::unlink(encoded.constData());
+            ::unlinkat(assets, encoded.constData(), 0);
             return {{}, Attachments::tr("Cannot write %1").arg(path)};
         }
         QString why;
@@ -111,12 +137,12 @@ Attachments::Placed place(const QString &folder, const std::function<QString(int
         if (!written) {
             const QString reason = why.isEmpty() ? out.errorString() : why;
             out.close();
-            ::unlink(encoded.constData());
+            ::unlinkat(assets, encoded.constData(), 0);
             return {{}, Attachments::tr("Cannot write %1: %2").arg(path, reason)};
         }
         return {QStringLiteral("assets/") + name, {}};
     }
-    return {{}, Attachments::tr("No free name is left in %1").arg(assets)};
+    return {{}, Attachments::tr("No free name is left in %1").arg(shown)};
 }
 
 } // namespace

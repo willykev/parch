@@ -86,6 +86,11 @@ void WindowContext::askToConfirmEncoding(Document *document)
     emit encodingConfirmationRequested(document);
 }
 
+void WindowContext::askAboutExportLink(const QString &output, const QString &target)
+{
+    emit exportLinkQuestionRequested(output, target);
+}
+
 void WindowContext::showFolder(const QString &path, bool takesKeys)
 {
     setLibraryOpen(true);

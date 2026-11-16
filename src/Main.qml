@@ -32,8 +32,8 @@ ApplicationWindow {
                                        || commandPalette.visible || preferencesDialog.visible || shortcutsDialog.visible
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
                                        || encodingDialog.visible
-                                       || documentSettingsDialog.visible || exportDialog.visible
-                                       || exportReplacePrompt.visible
+                                       || documentSettingsDialog.visible || exportDialog.visible || openLinkDialog.visible
+                                       || exportLinkDialog.visible || exportReplacePrompt.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -647,6 +647,7 @@ ApplicationWindow {
         }
         function onCloseConfirmationRequested(document, discarding) { closeConfirmation.ask(document, discarding) }
         function onEncodingConfirmationRequested(document) { encodingDialog.confirm(document) }
+        function onExportLinkQuestionRequested(output, target) { exportLinkDialog.ask(output, target) }
         function onViewShowRequested() { window.showView() }
     }
 
@@ -1102,7 +1103,9 @@ ApplicationWindow {
                     fontFamily: settings.previewFontFamily
                     fontPixelSize: settings.previewFontPixelSize
                     lineHeight: settings.previewLineHeight
+                    // Pictures from the web, for every document or as this one chose.
                     remoteImages: settings.remoteImages
+                                  || (backend.documentSettings.revision >= 0 && backend.documentSettings.remotePictures(window.document))
                     // The caret goes to what was double-clicked, and the keys
                     // with it where the text is shown.
                     onSourceRequested: (position) => {
@@ -1121,6 +1124,7 @@ ApplicationWindow {
                         if (heading.length > 0 && (window.document !== from || window.tabs.activePath === path))
                             Qt.callLater(window.showAnchor, heading)
                     }
+                    onLinkAsked: (target, shown, scheme, local) => openLinkDialog.ask(target, shown, scheme, local)
                     onEscapePressed: window.escapeInText()
                 }
 
@@ -1381,6 +1385,13 @@ ApplicationWindow {
         onClosed: window.dialogClosed()
     }
 
+    // What a link that leads out of parch asks before it is followed.
+    OpenLinkDialog {
+        id: openLinkDialog
+        objectName: "linkDialog"
+        onClosed: window.dialogClosed()
+    }
+
     CheckDocumentDialog {
         id: checkDocumentDialog
         objectName: "checkDocumentDialog"
@@ -1412,6 +1423,13 @@ ApplicationWindow {
         id: exportDialog
         objectName: "exportDialog"
         context: window.context
+        onClosed: window.dialogClosed()
+    }
+
+    // What an export to a file that is a link asks.
+    ExportLinkDialog {
+        id: exportLinkDialog
+        objectName: "exportLinkDialog"
         onClosed: window.dialogClosed()
     }
 

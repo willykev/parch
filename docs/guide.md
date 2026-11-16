@@ -269,6 +269,8 @@ plain text; turning it on again styles it at once.
   the library is linked where it is; anything else is copied into `assets`,
   keeping its name, with `-2`, `-3` added when another file has it. Files
   over 50 MiB are copied only once you agree, and nothing you drop is moved.
+  An `assets` that is a link to another folder is never followed: nothing is
+  pasted or dropped into it, and a notice says so.
 - Dropping a Markdown document offers **Insert link** or **Include**, which
   puts its path on a line of its own so that its text is shown there.
 - A draft keeps its assets in its own folder until you save it; they then go
@@ -362,10 +364,17 @@ In the preview:
 
 - It scrolls with the text beside it, each showing the same place. **Scroll
   sync** in the status line turns that off and on.
-- A click on a link opens a web address in your browser and a Markdown file
-  in a tab, at the heading the link names if it names one, and scrolls to a
-  heading in the same document. A footnote's number goes to the note and
-  the arrow after the note comes back.
+- A click on a link opens a web or mail address in your browser or mail
+  program and a Markdown file in a tab, at the heading the link names if it
+  names one, and scrolls to a heading in the same document. A footnote's
+  number goes to the note and the arrow after the note comes back.
+- A link of any other kind asks first. An address such as `zoommtg:` or
+  `steam:` names the program it would go to by its scheme, and shows the
+  whole address; **Open** hands it to that program. A link to any other file
+  on your computer, such as a PDF, a script or a folder, never opens from
+  the preview: **Show in folder** shows it in your file manager, where you
+  can open it yourself. Resting the pointer on a link always shows where it
+  leads, with its title, if it has one, after that.
   **Back in the preview** (`Alt+Left`) returns to where you were.
 - A click on a task's box ticks it in the text; `Ctrl+Z` takes that back.
 - A double click puts the caret at the same place in the text. In text an
@@ -581,6 +590,11 @@ page to page.
   writes its file in one step: when it fails or is cancelled, a file that was
   there is as it was. A folder of pictures beside an HTML page or a Markdown
   file is replaced only when an earlier export made it.
+- An export never writes through a link. When the file it would write is a
+  symbolic link, parch says where the link leads and asks: **Export as…**
+  chooses another file, and **Replace the link** puts the export in place
+  of the link itself, leaving the file it led to as it was. A folder of
+  pictures that is a link is never replaced.
 - **Export again** repeats the document's last export: the same format and
   options, to the same file, with the text as it is now.
 - **Print…** (`Ctrl+P`) prints the document as the PDF export sets it,
@@ -1146,9 +1160,10 @@ parch stats book.md                  # Words, characters, reading time, headings
 - **stats** counts the words, characters (with and without spaces) and
   headings a reader reads, and the reading time at 200 words a minute.
 
-An export never writes over the document or a file it includes, replaces a
-file that is there only with `--force`, and is not made at all when a file
-the document includes cannot be read. `--quiet` prints nothing but errors.
+An export never writes over the document or a file it includes, never
+writes through a symbolic link, even with `--force`, replaces a file that
+is there only with `--force`, and is not made at all when a file the
+document includes cannot be read. `--quiet` prints nothing but errors.
 `render -o` follows the same rules.
 
 ### The dialect
@@ -1227,8 +1242,8 @@ profile, extensions, citation style and bibliography for every document, as
 Under **Preview** it sets the reading font, which is a serif made for reading
 unless you choose another; the preview's text size, two pixels larger than
 the text's until you choose one; its line height and longest line; whether
-the text and the preview scroll together; and whether pictures are fetched
-from the web.
+the text and the preview scroll together; and whether pictures from the
+web are shown in every document.
 
 ## Appearance
 
@@ -1281,10 +1296,38 @@ starts a history of its own.
 
 There is no account, and nothing you write leaves your computer. The one
 thing parch fetches from the network is a picture a document names by web
-address, for the preview; **Fetch pictures from the web** under **Preview** in
-**Preferences…** turns that off, and exports never fetch pictures. A link you click in
-the preview opens in your browser. Formulas and diagrams are drawn by helper
-programs that run on your computer, cut off from the network.
+address, for the preview, and only once you ask: fetching a picture tells
+its server that the document was opened, when, and from where. A document
+that names such pictures says **This document shows pictures from the web**
+above its preview, and **Show them** fetches them for that document, now
+and whenever it opens again; the choice is kept with its
+[document settings](#choose-how-a-document-is-read). **Fetch pictures from
+the web** under **Preview** in **Preferences…** shows them in every
+document. Exports never fetch pictures.
+
+Even when pictures are shown, parch fetches only from public addresses:
+never from your computer itself, your local network, or link-local and
+shared addresses, whatever name a document gives them, and it checks every
+address a name leads to, again after each redirect. It follows at most
+three redirects, never from `https` to `http`, takes only PNG, JPEG, GIF,
+WebP and SVG pictures, at most 32 MiB of one, and gives up on a picture
+that takes more than 30 seconds.
+
+parch's own folders, which hold copies of what you write (drafts, history
+and recovery) and what you were doing (open tabs, recent files, settings),
+are readable by your account alone, whatever your umask, and parch makes
+ones an earlier version left open private again as it starts.
+
+A web or mail link you click in the preview opens in your browser or mail
+program; a link of any other kind asks first.
+
+Formulas and diagrams are drawn by helper programs that run on your
+computer, cut off from the network, each in a private temporary folder,
+with at most 2 GiB of memory and 30 seconds of processor time, and stopped
+after 15 seconds. Cutting a helper off from the network needs unprivileged
+user namespaces, which some hardened kernels turn off; there the helpers
+run with the network, and `parch check --json` says so with
+`"isolated": false` under `helpers`.
 
 ## Troubleshooting
 
@@ -1325,8 +1368,10 @@ give history more
 room under **History** in **Preferences…**. Saving carries on meanwhile.
 
 **A picture does not show in the preview.** A picture from the web needs a
-network connection and **Fetch pictures from the web** turned on in
-**Preferences…**. A local
+network connection and **Show them** above the preview, or **Fetch pictures
+from the web** turned on in **Preferences…**; one on your own computer or
+local network is never fetched, nor one that is not a PNG, JPEG, GIF, WebP
+or SVG picture. A local
 picture is read from the document's folder; **Check document** lists any
 whose file is missing.
 
@@ -1344,7 +1389,9 @@ running parch takes the files it is given. `Ctrl+Shift+N` opens a new window,
 and **New view** shows one document in two tabs.
 
 **`parch export` refuses to write a file.** The file is already there:
-add `--force` to replace it. It never writes over the document itself.
+add `--force` to replace it. It never writes over the document itself, and
+never through a link: when the file is a link, export to another name, or
+remove the link first.
 
 ## Conformance
 
@@ -1432,6 +1479,16 @@ report each of these as a note.
   description instead; an HTML page links to it.
 - **Come packaged for other systems.** The packages are for Arch Linux and
   Omarchy.
+- **Lay out text no one could read.** A word longer than 10,000 characters,
+  with no space or hyphen in it, makes the editor wrap that document at any
+  character rather than between words, since breaking such a word between
+  words takes Qt time that grows with the square of its length; the
+  document wraps between words again once it is opened afresh without it.
+  The preview and PDF give such a word a place to break every 512
+  characters, which copying leaves out. A table of more than 128 columns or
+  20,000 cells is shown in the preview and printed as it is written, in a
+  code block, rather than laid out as a table. A PDF that takes long to set
+  shows how far it has come and stops when cancelled.
 
 ## Getting help
 

@@ -1,5 +1,7 @@
 #include "history.h"
 
+#include "privatefiles.h"
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
@@ -258,7 +260,8 @@ QList<History::Version> History::load(const QString &documentId) const
 bool History::writeName(const QString &documentId, const QString &versionId, const QString &name) const
 {
     QSaveFile file(folderOf(documentId) + u'/' + versionId + QStringLiteral(".name"));
-    return file.open(QIODevice::WriteOnly) && file.write(name.toUtf8()) == name.toUtf8().size() && file.commit();
+    return file.open(QIODevice::WriteOnly) && PrivateFiles::restrict(file)
+           && file.write(name.toUtf8()) == name.toUtf8().size() && file.commit();
 }
 
 bool History::store(const QString &documentId, const QList<Version> &versions) const
@@ -275,7 +278,7 @@ bool History::store(const QString &documentId, const QList<Version> &versions) c
         entries.append(entry);
     }
     QSaveFile file(folderOf(documentId) + u'/' + indexName);
-    if (!file.open(QIODevice::WriteOnly)) return false;
+    if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file)) return false;
     file.write(QJsonDocument(entries).toJson(QJsonDocument::Compact));
     return file.commit();
 }
@@ -543,7 +546,7 @@ QString History::captureLocked(const QString &documentId, QList<Version> version
         return {};
     }
     const QString folder = folderOf(documentId);
-    if (!QDir().mkpath(folder)) return {};
+    if (!PrivateFiles::makeFolder(folder)) return {};
     const QDateTime taken = utc(m_now());
     const QString baseId = taken.toString(timeFormat) + u'-'
         + QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex().left(12));
@@ -580,7 +583,8 @@ QString History::captureLocked(const QString &documentId, QList<Version> version
         return {};
     }
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+    if (!file.open(QIODevice::WriteOnly) || !PrivateFiles::restrict(file) || file.write(bytes) != bytes.size()
+        || !file.commit()) {
         QFile::remove(folder + u'/' + id + QStringLiteral(".name"));
         return {};
     }

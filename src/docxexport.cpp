@@ -1531,7 +1531,7 @@ ExportResult DocxExporter::write(const md::Document &document, const ExportRecip
         result.renderers.insert(QStringLiteral("svg"), SvgPaper::version());
     }
     result.renderers.insert(QStringLiteral("docx"), QStringLiteral("parch " PARCH_VERSION));
-    if (!Exporters::writeFile(recipe.output, bytes, &result.error)) {
+    if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.replaceLink)) {
         result.ioFailure = true;
         return result;
     }

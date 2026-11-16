@@ -88,6 +88,12 @@ class EditorBinding : public QObject {
     // takes no edits, though it can be selected and copied. A document in
     // conflict is still written in; only its saving waits.
     Q_PROPERTY(bool editable READ editable NOTIFY editableChanged)
+    // The text holds a word longer than LongWord characters, which Qt
+    // could only break into lines in time that grows with its square: the
+    // editor then wraps at any character, in time that grows with the line.
+    // Found as the text is shown and as edits make such a word; it stays
+    // until the text is shown again.
+    Q_PROPERTY(bool wrapAnywhere READ wrapAnywhere NOTIFY wrapAnywhereChanged)
     // Line height as a multiple of the editor font's pixel size, as CSS sets
     // one: every paragraph's lines sit round(lineHeight × pixel size) pixels
     // apart, whatever the font's own line spacing, and again so whenever the
@@ -123,6 +129,12 @@ public:
     int cursorSource() const { return m_cursorSource; }
     int anchorSource() const { return m_anchorSource; }
     bool editable() const;
+    bool wrapAnywhere() const { return m_wrapAnywhere; }
+    static constexpr qsizetype LongWord = 10000;
+    // Whether the text has a run of more than LongWord characters with no
+    // place to break, looking only from `from` to `to`, and past them until
+    // the run around them ends.
+    static bool hasLongWord(QStringView text, qsizetype from, qsizetype to);
     qreal lineHeight() const { return m_lineHeight; }
     void setLineHeight(qreal lineHeight);
     bool blocked() const { return m_blocked; }
@@ -210,6 +222,7 @@ signals:
     // writer is here, whatever it changes.
     void activity();
     void editableChanged();
+    void wrapAnywhereChanged();
     void lineHeightChanged();
     void blockedChanged();
     void attachmentsChanged();
@@ -277,7 +290,10 @@ private:
     // Paste and drop, in editorpaste.cpp.
     void pasteFrom(const QMimeData *mime);
     // Converts HTML and puts it at the range; false when it shows nothing.
-    bool insertHtml(const QString &html, SourceRange range);
+    // A large page, or one with images, is converted on a worker and goes
+    // in when ready, as `plain` when its Markdown shows nothing or would
+    // grow far past it.
+    bool insertHtml(const QString &html, SourceRange range, const QString &plain = {});
     void pasteImage(const QMimeData *mime, const QString &alt, SourceRange range);
     // An image with no alt text, `length` long, came into the document at
     // `at`: a caret that followed it in, in this view, goes between its
@@ -326,6 +342,7 @@ private:
     int m_cursorSource = 0;
     int m_anchorSource = 0;
     bool m_loaded = false;
+    bool m_wrapAnywhere = false;
     bool m_editable = false;
     bool m_blocked = false;
     bool m_setextHeadings = false;

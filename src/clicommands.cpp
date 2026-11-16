@@ -351,12 +351,17 @@ bool loadDocument(const QString &path, const DialectFlags &flags, const Context 
 }
 
 // Whether a command may write `output`: never one of the document's own
-// files, and a file that is there only with --force.
+// files, never through a symbolic link, even with --force, and a file that
+// is there only with --force.
 bool mayWrite(const QString &output, bool force, const md::Document &document, QString *error)
 {
     const QFileInfo info(output);
     if (Exporters::isSource(document, output)) {
         *error = QStringLiteral("%1 is the document or a file it includes; parch never writes over it").arg(output);
+        return false;
+    }
+    if (const QString why = Exporters::linkRefusal(output); !why.isEmpty()) {
+        *error = why + QStringLiteral(", even with --force: export to another name, or remove the link");
         return false;
     }
     if (info.isDir()) {
@@ -552,6 +557,8 @@ int check(const QStringList &arguments, const Context &context)
             used.insert(QStringLiteral("diagram"), helpers.mermanVersion());
             helperPaths.insert(QStringLiteral("merman-cli"), helpers.merman);
         }
+        // Whether the helpers run cut off from the network, as the kernel allows.
+        helperPaths.insert(QStringLiteral("isolated"), HelperProcess::canIsolate());
         result.insert(QStringLiteral("renderers"), used);
         result.insert(QStringLiteral("helpers"), helperPaths);
         // What the documents hold that could not be checked, for want of its helper.

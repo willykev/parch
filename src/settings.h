@@ -65,7 +65,8 @@ class Settings : public QObject {
     Q_PROPERTY(int previewLineLength READ previewLineLength NOTIFY changed)
     // The editor and the preview beside it scroll together.
     Q_PROPERTY(bool scrollSync READ scrollSync WRITE setScrollSync NOTIFY changed)
-    // The preview fetches the pictures a document names by web address.
+    // The preview fetches the pictures any document names by web address;
+    // off until turned on, when only documents that chose to show them do.
     Q_PROPERTY(bool remoteImages READ remoteImages NOTIFY changed)
     // What focus mode keeps bright: "sentence" or "paragraph".
     Q_PROPERTY(QString focusUnit READ focusUnit NOTIFY changed)
@@ -230,7 +231,7 @@ private:
     qreal m_previewLineHeight = 1.6;
     int m_previewLineLength = 68;
     bool m_scrollSync = true;
-    bool m_remoteImages = true;
+    bool m_remoteImages = false;
     std::optional<bool> m_spellcheck;
     QString m_focusUnit = QStringLiteral("sentence");
     QString m_focusDimming = QStringLiteral("strong");

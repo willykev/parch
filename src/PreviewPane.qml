@@ -24,7 +24,7 @@ Rectangle {
     property string fontFamily: ""
     property int fontPixelSize: theme.fontSize + 6
     property real lineHeight: 1.6
-    property bool remoteImages: true
+    property bool remoteImages: false
 
     readonly property alias preview: preview
     readonly property alias viewport: flickable
@@ -59,6 +59,8 @@ Rectangle {
     }
     // A link names a document to open, and perhaps a heading of it by its slug.
     signal openRequested(string path, string heading)
+    // A link leads out of parch in a way that is asked about first, as Preview's linkAsked().
+    signal linkAsked(string target, string shown, string scheme, bool local)
     signal escapePressed()
 
     // Gives the keys to the preview; `byKeys` when a key asked for it, as
@@ -103,6 +105,7 @@ Rectangle {
         scale: Screen.devicePixelRatio
         remoteImages: pane.remoteImages
         onOpenRequested: (path, heading) => pane.openRequested(path, heading)
+        onLinkAsked: (target, shown, scheme, local) => pane.linkAsked(target, shown, scheme, local)
     }
 
     // The advance of "0" in the reading face, the width CSS calls one character.
@@ -113,10 +116,61 @@ Rectangle {
         font.pixelSize: preview.bodySize
     }
 
+    // A quiet row over the text when the document names pictures on the
+    // web that are not shown: they are fetched only once the writer asks,
+    // for this document here, or for every document in Preferences.
+    Rectangle {
+        id: webNotice
+        objectName: "webPicturesNotice"
+        readonly property real pad: Math.round(theme.fontSize / 2)
+        visible: pane.document !== null && preview.webPictures && !pane.remoteImages
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: visible ? Math.max(webText.implicitHeight, showWeb.implicitHeight) + 2 * pad : 0
+        color: theme.panel
+        Accessible.role: Accessible.StaticText
+        Accessible.name: webText.text
+
+        Text {
+            id: webText
+            objectName: "webPicturesText"
+            anchors.left: parent.left
+            anchors.leftMargin: pane.margin
+            anchors.right: showWeb.left
+            anchors.rightMargin: webNotice.pad
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("This document shows pictures from the web.")
+            textFormat: Text.PlainText
+            font.family: theme.fontFamily
+            font.pixelSize: theme.sizes.small
+            color: theme.dim
+            elide: Text.ElideRight
+            Accessible.ignored: true
+        }
+
+        ThemedButton {
+            id: showWeb
+            objectName: "showWebPictures"
+            anchors.right: parent.right
+            anchors.rightMargin: pane.margin
+            anchors.verticalCenter: parent.verticalCenter
+            framed: true
+            text: qsTr("Show them")
+            font.pixelSize: theme.sizes.small
+            Accessible.name: text
+            Accessible.description: qsTr("Fetches this document's pictures from the web, now and whenever it is opened. Preferences shows them in every document.")
+            onClicked: pane.application.documentSettings.setRemotePictures(pane.document, true)
+        }
+    }
+
     Flickable {
         id: flickable
         objectName: "previewFlickable"
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.top: webNotice.visible ? webNotice.bottom : parent.top
         clip: true
         contentWidth: width
         contentHeight: surface.y + surface.height + pane.margin

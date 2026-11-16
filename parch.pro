@@ -94,6 +94,7 @@ HEADERS += \
     src/previewbuilder.h \
     src/previewresources.h \
     src/previewwatch.h \
+    src/privatefiles.h \
     src/previewstyle.h \
     src/qmltypes.h \
     src/quitsignals.h \
@@ -211,6 +212,7 @@ SOURCES += \
     src/previewbuilder.cpp \
     src/previewresources.cpp \
     src/previewwatch.cpp \
+    src/privatefiles.cpp \
     src/previewstyle.cpp \
     src/qmltypes.cpp \
     src/quitsignals.cpp \

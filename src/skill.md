@@ -29,8 +29,9 @@ errors to stderr.
   diagrams their renderers refuse (`math`, `diagram`, with the renderer's
   own message), malformed table rows, unclosed math, front matter, and HTML
   shown as text. Exit 0 means nothing wrong (info notes alone do not count),
-  2 means problems were found. When the renderers are not installed,
-  `skipped` in the JSON lists what was not checked.
+  2 means problems were found. When the renderers are not installed, or
+  with `--no-render` (faster, for a quick check), `skipped` in the JSON
+  lists what was not checked.
 - Render: `parch render notes.md --to html|text|outline|json-tree [-o out]`.
   `html` is a safe fragment (no page around it), `text` the reading text,
   `outline` the headings indented by level, `json-tree` the whole semantic

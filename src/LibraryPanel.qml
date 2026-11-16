@@ -16,8 +16,12 @@ import "icons.js" as Icons
 // From the field, Down moves into the tree and Enter opens the first match.
 // In the tree, Up and Down move, Right and Left open and close a folder or
 // go into and out of it, Enter or Space opens a row, and Shift+F10 or the
-// menu key offers to take a folder out of the library. Escape anywhere in
-// the library empties the field and goes back to the text.
+// menu key offers what can be done with the row: a folder of the library can
+// be taken out of it, and what lies inside one can be made, renamed (F2),
+// moved, also by dragging it onto a folder, or moved to the trash (Delete).
+// Escape anywhere in the library empties the field and goes back to the text.
+//
+// Beneath the folders, the outline of the document in front can be shown.
 Item {
     id: panel
 
@@ -31,6 +35,18 @@ Item {
     signal opened()
     // The person is done with the library and goes back to the text.
     signal leave()
+    // A heading of the outline was chosen, at this source offset.
+    signal headingChosen(int position)
+
+    // Where the caret is in the document in front, for its outline.
+    property int caret: 0
+    // One of the library's dialogs is open, and has the keys.
+    readonly property bool dialogOpen: nameDialog.visible || moveDialog.visible || trashDialog.visible
+                                       || linkDialog.visible
+    // This window asked the organizer for what it is now looking into, so
+    // that the question it then has is asked here and in no other window.
+    property bool awaitingReview: false
+    property bool awaitingTrash: false
 
     readonly property real gap: Math.round(theme.fontSize * 2 / 3)
     readonly property real rowHeight: Math.round(theme.fontSize * 2.4)
@@ -135,16 +151,90 @@ Item {
         }
     }
 
-    // A folder at the top of the tree can be taken out of the library.
+    // What can be done with a row: a folder at the top of the tree can be
+    // taken out of the library, and documents made in it; what lies inside
+    // a library folder can be made in, renamed, moved and trashed.
     function offerMenu(row, item) {
-        if (rowData(row, LibraryModel.KindRole) !== "folder" || tree.depth(row) !== 0)
+        const kind = rowData(row, LibraryModel.KindRole)
+        const path = rowData(row, LibraryModel.PathRole)
+        let menu = null
+        if (kind === "folder" && tree.depth(row) === 0) {
+            menu = folderMenu
+        } else if ((kind === "folder" || kind === "document") && backend.organizer.organizes(path)) {
+            menu = entryMenu
+            entryMenu.isFolder = kind === "folder"
+        }
+        if (!menu)
             return
-        folderMenu.folder = rowData(row, LibraryModel.PathRole)
+        menu.folder = path
         // Placed in the panel, since the tree may reuse the row's item.
         const below = item.mapToItem(panel, item.leftInset || 0, item.height)
-        folderMenu.x = below.x
-        folderMenu.y = below.y
-        folderMenu.open()
+        menu.x = below.x
+        menu.y = below.y
+        menu.open()
+    }
+
+    function nameOf(path) {
+        return path.substring(path.lastIndexOf("/") + 1)
+    }
+
+    function askNewFile(folder) {
+        nameDialog.task = { kind: "file", path: folder }
+        nameDialog.ask(qsTr("New document in “%1”").arg(nameOf(folder)), qsTr("Make"), "",
+                       qsTr("A name without .md, .markdown or .txt gets .md."))
+    }
+
+    function askNewFolder(folder) {
+        nameDialog.task = { kind: "folder", path: folder }
+        nameDialog.ask(qsTr("New folder in “%1”").arg(nameOf(folder)), qsTr("Make"), "", "")
+    }
+
+    function askRename(path) {
+        if (!backend.organizer.organizes(path))
+            return
+        nameDialog.task = { kind: "rename", path: path }
+        nameDialog.ask(qsTr("Rename “%1”").arg(nameOf(path)), qsTr("Rename"), nameOf(path), "")
+    }
+
+    function askMove(path) {
+        if (backend.organizer.organizes(path))
+            moveDialog.ask(path)
+    }
+
+    // Moves what is at the path into the folder. The review it may need is
+    // asked here while the organizer looks for references.
+    function moveInto(path, folder) {
+        backend.activate(panel.context)
+        panel.awaitingReview = true
+        backend.organizer.move(path, folder)
+        panel.awaitingReview = backend.organizer.busy
+    }
+
+    function askTrash(path) {
+        if (!backend.organizer.organizes(path))
+            return
+        backend.activate(panel.context)
+        panel.awaitingTrash = true
+        backend.organizer.askToTrash(path)
+        panel.awaitingTrash = backend.organizer.busy
+    }
+
+    // The row the keyboard is on, as {kind, path}.
+    function cursorEntry() {
+        const row = cursorRow()
+        return row < 0 ? { kind: "", path: "" } : { kind: rowData(row, LibraryModel.KindRole), path: rowData(row, LibraryModel.PathRole) }
+    }
+
+    // What is dragged onto a folder, and where it is.
+    property string dragPath
+    property string dropFolder
+
+    // Whether what is dragged can go into this folder: not into itself,
+    // what it holds, or the folder it is in already.
+    function canDrop(folder) {
+        const path = panel.dragPath
+        return path.length > 0 && folder !== path && !folder.startsWith(path + "/")
+               && folder !== path.substring(0, path.lastIndexOf("/"))
     }
 
     // How many matches one search opens the library to show, nearest first;
@@ -354,7 +444,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: heading.bottom
-        anchors.bottom: footLine.top
+        anchors.bottom: outlineList.top
         anchors.leftMargin: Math.round(theme.fontSize / 4)
         anchors.rightMargin: Math.round(theme.fontSize / 4)
         clip: true
@@ -489,6 +579,12 @@ Item {
             case Qt.Key_Escape:
                 panel.leaveLibrary()
                 break
+            case Qt.Key_F2:
+                panel.askRename(panel.cursorEntry().path)
+                break
+            case Qt.Key_Delete:
+                panel.askTrash(panel.cursorEntry().path)
+                break
             case Qt.Key_Menu:
             case Qt.Key_F10:
                 if (event.key === Qt.Key_F10 && !(event.modifiers & Qt.ShiftModifier)) {
@@ -563,6 +659,55 @@ Item {
                 onTapped: {
                     panel.moveTo(entry.row)
                     panel.offerMenu(entry.row, entry)
+                }
+            }
+
+            // A document or folder inside a library folder can be dragged
+            // onto another folder, and moves there.
+            DragHandler {
+                id: dragger
+                target: null
+                enabled: (entry.kind === "document" || entry.kind === "folder") && entry.section.length === 0
+                         && backend.organizer.organizes(entry.path)
+                onActiveChanged: {
+                    if (active) {
+                        panel.dragPath = entry.path
+                        dragProxy.label = entry.name
+                        dragProxy.Drag.active = true
+                    } else {
+                        if (panel.dropFolder.length > 0)
+                            dragProxy.Drag.drop()
+                        dragProxy.Drag.active = false
+                        panel.dragPath = ""
+                        panel.dropFolder = ""
+                    }
+                }
+                onCentroidChanged: {
+                    if (!active)
+                        return
+                    const at = entry.mapToItem(panel, centroid.position.x, centroid.position.y)
+                    dragProxy.x = at.x + Math.round(theme.fontSize / 2)
+                    dragProxy.y = at.y + Math.round(theme.fontSize / 2)
+                }
+            }
+
+            DropArea {
+                anchors.fill: parent
+                keys: ["parch-library-entry"]
+                enabled: entry.kind === "folder"
+                onEntered: (drag) => {
+                    drag.accepted = panel.canDrop(entry.path)
+                    if (drag.accepted)
+                        panel.dropFolder = entry.path
+                }
+                onExited: if (panel.dropFolder === entry.path) panel.dropFolder = ""
+                onDropped: (drop) => {
+                    const path = panel.dragPath
+                    panel.dropFolder = ""
+                    if (panel.canDrop(entry.path)) {
+                        drop.accept()
+                        panel.moveInto(path, entry.path)
+                    }
                 }
             }
 
@@ -641,9 +786,11 @@ Item {
             }
 
             background: Rectangle {
+                readonly property bool dropping: panel.dropFolder.length > 0 && panel.dropFolder === entry.path
+
                 radius: theme.radius
-                color: entry.down ? theme.pressedFill : entry.hovered || entry.keyboard ? theme.hoverFill : "transparent"
-                border.width: entry.keyboard ? Math.max(1, theme.controlBorderWidth) : 0
+                color: entry.down || dropping ? theme.pressedFill : entry.hovered || entry.keyboard ? theme.hoverFill : "transparent"
+                border.width: entry.keyboard || dropping ? Math.max(1, theme.controlBorderWidth) : 0
                 border.color: theme.accent
 
                 // The front document's row: an accent tint and a bar at its edge.
@@ -687,6 +834,55 @@ Item {
         Accessible.name: text
     }
 
+    // What is dragged, beside the pointer.
+    Rectangle {
+        id: dragProxy
+        objectName: "libraryDragProxy"
+
+        property string label
+
+        visible: Drag.active
+        z: 10
+        width: Math.min(dragLabel.implicitWidth + theme.fontSize, panel.width / 2)
+        height: panel.rowHeight
+        radius: theme.radius
+        color: theme.menuBackground
+        border.width: Math.max(1, theme.controlBorderWidth)
+        border.color: theme.menuBorder
+        Drag.keys: ["parch-library-entry"]
+        Drag.hotSpot.x: 0
+        Drag.hotSpot.y: 0
+
+        Text {
+            id: dragLabel
+            anchors.fill: parent
+            anchors.leftMargin: Math.round(theme.fontSize / 2)
+            anchors.rightMargin: Math.round(theme.fontSize / 2)
+            text: dragProxy.label
+            textFormat: Text.PlainText
+            font.family: theme.fontFamily
+            font.pixelSize: theme.fontSize
+            color: theme.foreground
+            elide: Text.ElideMiddle
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    OutlineList {
+        id: outlineList
+        objectName: "outlineList"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: footLine.top
+        anchors.leftMargin: Math.round(theme.fontSize / 4)
+        anchors.rightMargin: Math.round(theme.fontSize / 4)
+        height: implicitHeight
+        maxListHeight: Math.round(panel.height * 0.4)
+        document: panel.context.tabs.activeDocument
+        caret: panel.caret
+        onChosen: (position) => panel.headingChosen(position)
+    }
+
     Rectangle {
         id: footLine
         anchors.left: parent.left
@@ -728,7 +924,7 @@ Item {
 
         // As the window's menu: no scroll indicator fading at a fixed pace.
         contentItem: ListView {
-            implicitWidth: removeEntry.implicitWidth
+            implicitWidth: Math.max(removeEntry.implicitWidth, topNewDocument.implicitWidth, topNewFolder.implicitWidth)
             implicitHeight: contentHeight
             model: folderMenu.contentModel
             interactive: false
@@ -743,27 +939,200 @@ Item {
             border.color: theme.menuBorder
         }
 
-        MenuItem {
+        MenuEntry {
             id: removeEntry
             text: qsTr("Remove from library")
-            implicitHeight: panel.rowHeight
-            leftPadding: panel.gap
-            rightPadding: panel.gap
             onTriggered: panel.library.removeFolder(folderMenu.folder)
+        }
+        MenuEntry {
+            id: topNewDocument
+            text: qsTr("New document…")
+            onTriggered: panel.askNewFile(folderMenu.folder)
+        }
+        MenuEntry {
+            id: topNewFolder
+            text: qsTr("New folder…")
+            onTriggered: panel.askNewFolder(folderMenu.folder)
+        }
+    }
 
-            contentItem: Text {
-                text: removeEntry.text
+    // What can be done with a document or folder inside a library folder.
+    Menu {
+        id: entryMenu
+        objectName: "libraryEntryMenu"
+
+        property string folder
+        property bool isFolder: false
+
+        padding: Math.max(1, theme.controlBorderWidth)
+        font.family: theme.fontFamily
+        font.pixelSize: theme.fontSize
+
+        contentItem: ListView {
+            implicitWidth: Math.max(newDocumentEntry.implicitWidth, newFolderEntry.implicitWidth, renameEntry.implicitWidth,
+                                    moveEntry.implicitWidth, trashEntry.implicitWidth)
+            implicitHeight: contentHeight
+            model: entryMenu.contentModel
+            interactive: false
+            clip: true
+            currentIndex: entryMenu.currentIndex
+        }
+
+        background: Rectangle {
+            color: theme.menuBackground
+            radius: theme.radius
+            border.width: Math.max(1, theme.controlBorderWidth)
+            border.color: theme.menuBorder
+        }
+
+        MenuEntry {
+            id: newDocumentEntry
+            objectName: "menuNewDocument"
+            shown: entryMenu.isFolder
+            text: qsTr("New document…")
+            onTriggered: panel.askNewFile(entryMenu.folder)
+        }
+        MenuEntry {
+            id: newFolderEntry
+            objectName: "menuNewFolder"
+            shown: entryMenu.isFolder
+            text: qsTr("New folder…")
+            onTriggered: panel.askNewFolder(entryMenu.folder)
+        }
+        MenuEntry {
+            id: renameEntry
+            objectName: "menuRename"
+            text: qsTr("Rename…")
+            treeKey: "F2"
+            onTriggered: panel.askRename(entryMenu.folder)
+        }
+        MenuEntry {
+            id: moveEntry
+            objectName: "menuMove"
+            text: qsTr("Move to…")
+            onTriggered: panel.askMove(entryMenu.folder)
+        }
+        MenuEntry {
+            id: trashEntry
+            objectName: "menuTrash"
+            text: qsTr("Move to trash…")
+            treeKey: "Del"
+            danger: true
+            onTriggered: panel.askTrash(entryMenu.folder)
+        }
+    }
+
+    // An entry of the library's menus, in the window menu's look.
+    component MenuEntry: MenuItem {
+        id: menuEntry
+
+        // Hidden entries take no room.
+        property bool shown: true
+        // The key that does the same in the tree, shown at its end; the
+        // tree's own, not a shortcut of the window's.
+        property string treeKey
+        property bool danger: false
+
+        visible: shown
+        height: shown ? implicitHeight : 0
+        implicitHeight: panel.rowHeight
+        implicitWidth: label.implicitWidth + keyLabel.implicitWidth + 3 * panel.gap
+        leftPadding: panel.gap
+        rightPadding: panel.gap
+
+        contentItem: Item {
+            Text {
+                id: label
+                anchors.left: parent.left
+                anchors.right: keyLabel.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: menuEntry.text
                 textFormat: Text.PlainText
-                font: removeEntry.font
-                color: removeEntry.highlighted ? theme.bright : theme.foreground
+                font: menuEntry.font
+                color: menuEntry.danger ? theme.danger : menuEntry.highlighted ? theme.bright : theme.foreground
                 elide: Text.ElideRight
-                verticalAlignment: Text.AlignVCenter
             }
+            Text {
+                id: keyLabel
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: menuEntry.treeKey
+                textFormat: Text.PlainText
+                font.family: theme.fontFamily
+                font.pixelSize: theme.sizes.small
+                color: theme.dim
+            }
+        }
 
-            background: Rectangle {
-                radius: theme.radius
-                color: removeEntry.down ? theme.pressedFill : removeEntry.highlighted ? theme.hoverFill : "transparent"
+        background: Rectangle {
+            radius: theme.radius
+            color: menuEntry.down ? theme.pressedFill : menuEntry.highlighted ? theme.hoverFill : "transparent"
+        }
+    }
+
+    // The library's questions, each giving the keys back to the tree.
+    NameDialog {
+        id: nameDialog
+        objectName: "libraryNameDialog"
+
+        property var task: ({})
+
+        onChosen: (name) => {
+            backend.activate(panel.context)
+            const task = nameDialog.task
+            if (task.kind === "file") {
+                backend.organizer.newFile(task.path, name)
+            } else if (task.kind === "folder") {
+                backend.organizer.newFolder(task.path, name)
+            } else if (task.kind === "rename") {
+                panel.awaitingReview = true
+                backend.organizer.rename(task.path, name)
+                panel.awaitingReview = backend.organizer.busy
             }
+        }
+        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+    }
+
+    MoveDialog {
+        id: moveDialog
+        objectName: "libraryMoveDialog"
+        onChosen: (folder) => panel.moveInto(moveDialog.path, folder)
+        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+    }
+
+    TrashDialog {
+        id: trashDialog
+        objectName: "libraryTrashDialog"
+        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+    }
+
+    LinkUpdateDialog {
+        id: linkDialog
+        objectName: "libraryLinkDialog"
+        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+    }
+
+    // The organizer's questions come to the window that asked.
+    Connections {
+        target: backend.organizer
+        function onReviewChanged() {
+            if (backend.organizer.review.title && panel.awaitingReview) {
+                panel.awaitingReview = false
+                linkDialog.open()
+            } else if (!backend.organizer.review.title && linkDialog.visible) {
+                linkDialog.close()
+            }
+        }
+        function onTrashingChanged() {
+            if (backend.organizer.trashing.path && panel.awaitingTrash) {
+                panel.awaitingTrash = false
+                trashDialog.open()
+            }
+        }
+        // A move that needed no review is done; this window waits for no question.
+        function onBusyChanged() {
+            if (!backend.organizer.busy && !backend.organizer.review.title)
+                panel.awaitingReview = false
         }
     }
 }

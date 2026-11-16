@@ -28,6 +28,10 @@ ThemedMenu {
     CommandEntry { command: "open" }
     CommandEntry { command: "openFolder" }
     CommandEntry { command: "findDocument" }
+    CommandEntry { command: "findText" }
+    CommandEntry { command: "replace" }
+    CommandEntry { command: "searchLibrary" }
+    CommandEntry { command: "goToHeading" }
     CommandEntry { command: "save" }
     CommandEntry { command: "saveAs" }
     CommandEntry { objectName: "historyEntry"; command: "history" }

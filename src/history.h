@@ -47,8 +47,9 @@ public:
     ~History() override;
 
     // Why history kept a version by itself: a save, or one of the moments
-    // before text is replaced or set aside.
-    enum class Reason { Save, Opened, Reload, Overwrite, Restore, Recovery, Draft, Closed };
+    // before text is replaced or set aside, as when a move in the library
+    // updates the links in a file.
+    enum class Reason { Save, Opened, Reload, Overwrite, Restore, Recovery, Draft, Closed, Links };
     Q_ENUM(Reason)
 
     struct Version {

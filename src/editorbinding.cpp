@@ -1083,3 +1083,14 @@ void EditorBinding::restore(int cursor, int anchor, int top)
     view->setProperty("contentY", line.y() <= 0 ? 0 : qBound<qreal>(0, m_editor->y() + line.y(), maximum));
     m_topAnchor = {true, position, view->property("contentY").toReal()};
 }
+
+void EditorBinding::select(int anchor, int cursor)
+{
+    if (!m_loaded || m_composing) return;
+    const QString source = m_buffer->text();
+    const auto fit = [&](int position) { return graphemeAtOrBefore(source, qBound(0, position, int(source.size()))); };
+    selectEditor(m_pairs.toEditor(fit(anchor)), m_pairs.toEditor(fit(cursor)));
+    // The binding placed the caret, so its move left the scroll alone; the
+    // caret is shown here, by the least scroll that does.
+    revealCursor();
+}

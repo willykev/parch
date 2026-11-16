@@ -8,30 +8,37 @@
 #include "cli.h"
 #include "diskfile.h"
 #include "document.h"
+#include "documentfind.h"
 #include "documentreview.h"
 #include "documentstore.h"
 #include "editingtests.h"
 #include "editorbinding.h"
+#include "fileorganizer.h"
 #include "filepicker.h"
 #include "filerequests.h"
 #include "filewatch.h"
+#include "foldersearch.h"
 #include "history.h"
 #include "htmlmarkdown.h"
 #include "hyprland.h"
 #include "librarymodel.h"
 #include "linktargets.h"
+#include "outline.h"
 #include "pathtext.h"
 #include "portalfilepicker.h"
 #include "qmltypes.h"
 #include "quitsignals.h"
+#include "readingpositions.h"
 #include "recentfiles.h"
 #include "recovery.h"
+#include "references.h"
 #include "session.h"
 #include "settings.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
 #include "tabmodel.h"
 #include "testfiles.h"
+#include "textsearch.h"
 #include "theme.h"
 #include "themefolder.h"
 #include "windowcontext.h"
@@ -588,6 +595,35 @@ private slots:
     void libraryKeyGoesToTheFieldAndBack();
     void librarySearchEnterSpaceAndCursor();
     void listedEmptyFolderShowsNoChevronWhileWatched();
+    // Find and replace, search across folders, headings and organizing files.
+    void findMatchesPlainTextCaseAndWholeWords();
+    void findMatchesRegularExpressionsByLine();
+    void replacementsExpandCapturedGroups();
+    void anInvalidPatternSaysWhy();
+    void findStepsRoundTheMatchesAndFollowsEdits();
+    void replaceAndReplaceAllAreEachOneUndoStep();
+    void findInALargeDocumentRunsOffTheUiThread();
+    void headingsFollowTheLineRules();
+    void outlineFollowsEditsOffTheUiThread();
+    void folderSearchStreamsResultsGroupedByDocument();
+    void folderSearchReusesWhatItRead();
+    void folderSearchStopsWhenCancelled();
+    void referencesAreFoundOutsideCode();
+    void movesRewriteRelativeReferences();
+    void renamingAnOpenDocumentKeepsItsIdentity();
+    void movingADocumentUpdatesTheLinksToIt();
+    void aMoveCanLeaveItsLinksOrNotHappen();
+    void movingAFolderTakesItsDocumentsAlong();
+    void organizingRefusesWhatItCannotDo();
+    void trashGoesToTheDesktopTrashOnceConfirmed();
+    void readingPositionsFollowFilesAndRestarts();
+    void findBarFindsAndReplacesFromTheKeys();
+    void goToHeadingAndTheOutlineMoveTheCaret();
+    void searchAcrossTheLibraryOpensTheMatch();
+    void searchOfTenThousandDocumentsKeepsTheWindowResponsive();
+    void libraryMenusAndKeysOrganizeFiles();
+    void draggingARowOntoAFolderMovesIt();
+    void newControlsAreNamedAndReachedByKeys();
     void saveOnDraftAsksForNameThenPromotes();
     void cancelledPickerChangesNothing();
     void fileDialogClosedByItsWindowIsACancel();
@@ -13894,6 +13930,1370 @@ QQuickItem *footButton(QObject *dialog, const QString &text)
     return nullptr;
 }
 } // namespace
+
+namespace {
+// The matches of a query in a text, each as the text it covers.
+QStringList matchedTexts(const QString &text, const TextQuery &query)
+{
+    QStringList texts;
+    const std::optional<QRegularExpression> expression = TextSearch::compile(query);
+    if (!expression) return {QStringLiteral("<no expression>")};
+    for (const SourceRange &range : TextSearch::findAll(text, *expression)) texts << text.mid(range.start, range.length);
+    return texts;
+}
+
+// Ranges as start and length, which QCOMPARE can compare and print.
+using Spans = QList<std::pair<int, int>>;
+
+Spans spans(const QList<SourceRange> &ranges)
+{
+    Spans found;
+    for (const SourceRange &range : ranges) found.append({range.start, range.length});
+    return found;
+}
+
+Spans matchRanges(const QString &text, const TextQuery &query)
+{
+    const std::optional<QRegularExpression> expression = TextSearch::compile(query);
+    return expression ? spans(TextSearch::findAll(text, *expression)) : Spans{};
+}
+
+// A draft of the store with this text, as one undo step.
+Document *draftWith(DocumentStore &store, const QString &text)
+{
+    Document *document = store.newDraft();
+    document->buffer()->replace({0, 0}, text);
+    return document;
+}
+} // namespace
+
+void ParchTests::findMatchesPlainTextCaseAndWholeWords()
+{
+    const QString text = QStringLiteral("Cat, cat and CATALOGUE; concat (cat) a+b a+b");
+    QCOMPARE(matchedTexts(text, {QStringLiteral("cat")}),
+             (QStringList{"Cat", "cat", "CAT", "cat", "cat"}));
+    QCOMPARE(matchedTexts(text, {QStringLiteral("cat"), true}), (QStringList{"cat", "cat", "cat"}));
+    QCOMPARE(matchRanges(text, {QStringLiteral("cat"), false, true}),
+             (Spans{{0, 3}, {5, 3}, {32, 3}}));
+    QCOMPARE(matchRanges(text, {QStringLiteral("Cat"), true, true}), (Spans{{0, 3}}));
+    // Plain text is found as written, whatever a regular expression would make of it.
+    QCOMPARE(matchedTexts(text, {QStringLiteral("a+b")}), (QStringList{"a+b", "a+b"}));
+    QCOMPARE(matchedTexts(text, {QStringLiteral("(cat)")}), QStringList{"(cat)"});
+    // Unicode letters are word characters and fold their case.
+    const QString unicode = QStringLiteral("Ärger ärgerlich ÄRGER");
+    QCOMPARE(matchedTexts(unicode, {QStringLiteral("ärger"), false, true}), (QStringList{"Ärger", "ÄRGER"}));
+    // A match never splits a grapheme: an e with its accent apart is no e.
+    const QString accented = QStringLiteral("café cafe");
+    QCOMPARE(matchRanges(accented, {QStringLiteral("cafe")}), (Spans{{6, 4}}));
+    // Nothing is looked for an empty pattern.
+    QString error = QStringLiteral("unchanged");
+    QVERIFY(!TextSearch::compile({QString()}, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void ParchTests::findMatchesRegularExpressionsByLine()
+{
+    // ^ and $ are the ends of every line, in LF, CRLF and CR documents alike,
+    // and a match never ends between a CR and its LF.
+    for (const QString &newline : {QStringLiteral("\n"), QStringLiteral("\r\n"), QStringLiteral("\r")}) {
+        const QString text = QStringList{"# One", "plain", "# Two"}.join(newline);
+        QCOMPARE(matchedTexts(text, {QStringLiteral("^# (\\w+)$"), true, false, true}), (QStringList{"# One", "# Two"}));
+        QCOMPARE(matchRanges(text, {QStringLiteral("$"), true, false, true}).size(), 3);
+        // . is any character but a line break.
+        QCOMPARE(matchedTexts(text, {QStringLiteral(".+"), true, false, true}), (QStringList{"# One", "plain", "# Two"}));
+        QCOMPARE(matchedTexts(text, {QStringLiteral("One.plain"), true, false, true}), QStringList());
+    }
+    // A regular expression can be case-blind and kept to whole words too.
+    QCOMPARE(matchedTexts(QStringLiteral("Note notes NOTE"), {QStringLiteral("not(e)"), false, true, true}),
+             (QStringList{"Note", "NOTE"}));
+    // Empty matches are matches, where a caret can go.
+    QCOMPARE(matchRanges(QStringLiteral("a\nb"), {QStringLiteral("^"), true, false, true}),
+             (Spans{{0, 0}, {2, 0}}));
+}
+
+void ParchTests::replacementsExpandCapturedGroups()
+{
+    const QString text = QStringLiteral("2026-11-16 and 1999-01-02");
+    const auto expression = TextSearch::compile({QStringLiteral("(\\d{4})-(\\d\\d)-(?<day>\\d\\d)"), true, false, true});
+    QVERIFY(expression);
+    const QList<SourceRange> found = TextSearch::findAll(text, *expression);
+    QCOMPARE(found.size(), 2);
+    const QRegularExpressionMatch match = TextSearch::matchAt(text, *expression, found.first());
+    QVERIFY(match.hasMatch());
+    QCOMPARE(TextSearch::expand(QStringLiteral("${day}/$2/$1"), match, true), QStringLiteral("16/11/2026"));
+    QCOMPARE(TextSearch::expand(QStringLiteral("[$0] [$&] $$1"), match, true),
+             QStringLiteral("[2026-11-16] [2026-11-16] $1"));
+    // $12 is group 1 then "2" when there is no twelfth group; a group not there is empty.
+    QCOMPARE(TextSearch::expand(QStringLiteral("$12|$9|${4}|$"), match, true), QStringLiteral("20262|||$"));
+    // Plain replacements are taken as written.
+    QCOMPARE(TextSearch::expand(QStringLiteral("$1 costs $5"), match, false), QStringLiteral("$1 costs $5"));
+    // The text at a range that no longer matches has no match.
+    QVERIFY(!TextSearch::matchAt(QStringLiteral("2026-11-1x and"), *expression, found.first()).hasMatch());
+}
+
+void ParchTests::anInvalidPatternSaysWhy()
+{
+    QString error;
+    QVERIFY(!TextSearch::compile({QStringLiteral("(unclosed"), false, false, true}, &error));
+    QVERIFY2(error.contains(QStringLiteral("Not a valid pattern")), qPrintable(error));
+    // The same characters, as plain text, are simply found.
+    QVERIFY(TextSearch::compile({QStringLiteral("(unclosed")}, &error));
+    QVERIFY(error.isEmpty());
+
+    QTemporaryDir root;
+    DocumentStore store(AppPaths::under(root.path()));
+    Document *document = draftWith(store, QStringLiteral("(unclosed (unclosed"));
+    DocumentFind find;
+    find.setDocument(document);
+    find.setActive(true);
+    find.setRegex(true);
+    find.setPattern(QStringLiteral("(unclosed"));
+    QVERIFY(!find.error().isEmpty());
+    QCOMPARE(find.count(), 0);
+    QVERIFY(!find.searching());
+    find.setRegex(false);
+    QVERIFY(find.error().isEmpty());
+    QTRY_COMPARE(find.count(), 2);
+}
+
+void ParchTests::findStepsRoundTheMatchesAndFollowsEdits()
+{
+    QTemporaryDir root;
+    DocumentStore store(AppPaths::under(root.path()));
+    Document *document = draftWith(store, QStringLiteral("one two one three one"));
+    DocumentFind find;
+    QSignalSpy selected(&find, &DocumentFind::selectRequested);
+    find.setDocument(document);
+    find.setActive(true);
+    find.setSelection(5, 5);
+    // A move asked for before the matches are found waits for them.
+    find.setPattern(QStringLiteral("one"));
+    find.next();
+    QTRY_COMPARE(selected.count(), 1);
+    QCOMPARE(selected.last(), (QVariantList{8, 11}));
+    QCOMPARE(find.count(), 3);
+    QCOMPARE(find.current(), 1);
+    find.next();
+    QCOMPARE(selected.last(), (QVariantList{18, 21}));
+    // Round the end, and back.
+    find.next();
+    QCOMPARE(selected.last(), (QVariantList{0, 3}));
+    QCOMPARE(find.current(), 0);
+    find.previous();
+    QCOMPARE(selected.last(), (QVariantList{18, 21}));
+    // A selection that is no match counts as none, and moves from where it is.
+    find.setSelection(4, 7);
+    QCOMPARE(find.current(), -1);
+    find.previous();
+    QCOMPARE(selected.last(), (QVariantList{0, 3}));
+    find.setSelection(12, 12);
+    find.seek();
+    QCOMPARE(selected.last(), (QVariantList{18, 21}));
+    // An edit moves the matches after it at once, drops one it touches, and
+    // the text is looked in again once it rests.
+    document->buffer()->replace({0, 0}, QStringLiteral(">> "));
+    QCOMPARE(spans(find.matches()), (Spans{{3, 3}, {11, 3}, {21, 3}}));
+    document->buffer()->replace({12, 1}, QStringLiteral("x"));
+    QCOMPARE(find.count(), 2);
+    document->buffer()->replace({0, 0}, QStringLiteral("one "));
+    QTRY_COMPARE(find.count(), 3);
+    QCOMPARE(spans(find.matches()).first(), std::make_pair(0, 3));
+    // Closed, the bar holds no matches and looks for none.
+    find.setActive(false);
+    QCOMPARE(find.count(), 0);
+    document->buffer()->replace({0, 0}, QStringLiteral("one "));
+    QTest::qWait(DocumentFind::EditSettleMs + 50);
+    QCOMPARE(find.count(), 0);
+}
+
+void ParchTests::replaceAndReplaceAllAreEachOneUndoStep()
+{
+    QTemporaryDir root;
+    DocumentStore store(AppPaths::under(root.path()));
+    const QString original = QStringLiteral("- [x] Cat\n- [ ] dog\n- [x] Bird\n");
+    Document *document = draftWith(store, original);
+    SourceBuffer *buffer = document->buffer();
+    DocumentFind find;
+    find.setDocument(document);
+    find.setActive(true);
+    find.setRegex(true);
+    find.setPattern(QStringLiteral("^- \\[(x| )\\] (\\w+)$"));
+    QTRY_COMPARE(find.count(), 3);
+    QSignalSpy selected(&find, &DocumentFind::selectRequested);
+    // The first Replace selects the match; the next replaces it and selects the one after.
+    find.setSelection(0, 0);
+    find.replace(QStringLiteral("$2 ($1)"));
+    QCOMPARE(buffer->text(), original);
+    QCOMPARE(selected.last(), (QVariantList{0, 9}));
+    find.replace(QStringLiteral("$2 ($1)"));
+    QCOMPARE(buffer->text(), QStringLiteral("Cat (x)\n- [ ] dog\n- [x] Bird\n"));
+    QCOMPARE(selected.last(), (QVariantList{8, 17}));
+    buffer->undo();
+    QCOMPARE(buffer->text(), original);
+
+    QSignalSpy replaced(&find, &DocumentFind::replacedAll);
+    find.replaceAll(QStringLiteral("${2}: $1"));
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(replaced.first().first().toInt(), 3);
+    QCOMPARE(buffer->text(), QStringLiteral("Cat: x\ndog:  \nBird: x\n"));
+    buffer->undo();
+    QCOMPARE(buffer->text(), original);
+    buffer->redo();
+    QCOMPARE(buffer->text(), QStringLiteral("Cat: x\ndog:  \nBird: x\n"));
+    // A read-only document takes no replacement.
+    const QString file = canonical(root.path()) + QStringLiteral("/bytes.md");
+    writeFile(file, QByteArray("not \xff utf-8\n"));
+    Document *readOnly = store.open(file);
+    QVERIFY(readOnly);
+    find.setDocument(readOnly);
+    QVERIFY(!find.canReplace());
+    find.setRegex(false);
+    find.setPattern(QStringLiteral("utf"));
+    QTRY_COMPARE(find.count(), 1);
+    find.replaceAll(QStringLiteral("x"));
+    QTest::qWait(50);
+    QVERIFY(readOnly->buffer()->text().contains(QStringLiteral("utf")));
+}
+
+void ParchTests::findInALargeDocumentRunsOffTheUiThread()
+{
+    // Over eight million characters, in which a regular expression takes
+    // far longer than a frame to find every match: the event loop never
+    // waits on it, as the pattern is typed, while the text is edited, or
+    // while every match is replaced.
+    QTemporaryDir root;
+    DocumentStore store(AppPaths::under(root.path()));
+    QString text;
+    const QString line = QStringLiteral("Writing, editing and reading are the things one keeps doing.\n");
+    while (text.size() < 8 * 1024 * 1024) text += line;
+    const int lines = int(text.size() / line.size());
+    Document *document = draftWith(store, text);
+    DocumentFind find;
+    find.setDocument(document);
+    find.setActive(true);
+    find.setRegex(true);
+    LoopGaps gaps;
+    QElapsedTimer took;
+    took.start();
+    find.setPattern(QStringLiteral("\\b\\w+ing\\b"));
+    QVERIFY(find.searching());
+    QTRY_VERIFY_WITH_TIMEOUT(!find.searching(), 30000);
+    const qint64 searched = took.elapsed(), searchGap = gaps.longest();
+    QCOMPARE(find.count(), 4 * lines);
+    gaps.restart();
+    document->buffer()->replace({0, 0}, QStringLiteral("Thinking "));
+    QTRY_VERIFY_WITH_TIMEOUT(find.count() == 4 * lines + 1, 30000);
+    const qint64 editGap = gaps.longest();
+    QSignalSpy replaced(&find, &DocumentFind::replacedAll);
+    gaps.restart();
+    find.replaceAll(QStringLiteral("[$0]"));
+    QTRY_COMPARE_WITH_TIMEOUT(replaced.count(), 1, 30000);
+    const qint64 replaceGap = gaps.longest();
+    QCOMPARE(replaced.first().first().toInt(), 4 * lines + 1);
+    QVERIFY(document->buffer()->text().startsWith(QStringLiteral("[Thinking] [Writing], [editing] and [reading]")));
+    qInfo("matched in %lld ms; longest gaps: search %lld ms, edit %lld ms, replace all %lld ms", searched, searchGap,
+          editGap, replaceGap);
+    QVERIFY2(searched > 33, "the search was too quick to tell where it ran");
+    QVERIFY2(searchGap <= 33, qPrintable(QStringLiteral("a gap of %1 ms while searching").arg(searchGap)));
+    QVERIFY2(editGap <= 33, qPrintable(QStringLiteral("a gap of %1 ms after an edit").arg(editGap)));
+    QVERIFY2(replaceGap <= 33, qPrintable(QStringLiteral("a gap of %1 ms replacing every match").arg(replaceGap)));
+}
+
+namespace {
+QString headingList(const QList<Heading> &headings)
+{
+    QStringList shown;
+    for (const Heading &heading : headings)
+        shown << QStringLiteral("%1:%2@%3").arg(heading.level).arg(heading.text).arg(heading.position);
+    return shown.join(u'|');
+}
+
+// What a search's rows show, by section, as "title:line:match".
+QStringList searchRows(const FolderSearch &search)
+{
+    QStringList rows;
+    for (int row = 0; row < search.rowCount(); ++row) {
+        const QModelIndex at = search.index(row);
+        rows << QStringLiteral("%1:%2:%3")
+                    .arg(at.data(FolderSearch::TitleRole).toString())
+                    .arg(at.data(FolderSearch::LineRole).toInt())
+                    .arg(at.data(FolderSearch::MatchRole).toString());
+    }
+    return rows;
+}
+
+// A library of one folder, with a backend started on it, for organizing.
+struct OrganizerFixture {
+    QTemporaryDir root;
+    QString base = canonical(root.path());
+    QString library = base + QStringLiteral("/Library");
+    AppPaths paths = AppPaths::under(base + QStringLiteral("/app"));
+    std::unique_ptr<Backend> backend;
+
+    OrganizerFixture()
+    {
+        QDir().mkpath(library);
+        backend = std::make_unique<Backend>(paths);
+        backend->start({});
+        backend->settings()->setLibraryFolders({library});
+    }
+    FileOrganizer *organizer() const { return backend->organizer(); }
+    QString file(const QString &name) const { return library + u'/' + name; }
+    Document *open(const QString &name) const
+    {
+        backend->openFiles({file(name)});
+        return backend->document();
+    }
+};
+} // namespace
+
+void ParchTests::headingsFollowTheLineRules()
+{
+    const QString text = QStringLiteral(
+        "---\ntitle: # not a heading\n---\n"
+        "# One #\n"
+        "Some text\n"
+        "## Two [Second label]\n"
+        "#Not a heading\n"
+        "```\n# In a fence\n```\n"
+        "~~~~\n# In a tilde fence\n~~~\n# Still in it\n~~~~\n"
+        "    # Indented code\n"
+        "\n"
+        "A paragraph that\ngoes on\n===\n"
+        "\n"
+        "Setext two\n---\n"
+        "- list item\n---\n"
+        "> # In a quote\n"
+        "<!-- # In a comment\n# Still -->\n"
+        "###### Six\n"
+        "####### Seven\n");
+    QCOMPARE(headingList(Outline::headings(text)).split(u'|'),
+             (QStringList{"1:One@31", "2:Two@49", "1:A paragraph that goes on@175", "2:Setext two@205",
+                          "6:Six@283"}));
+    // Positions count CRLF and CR line breaks as the text holds them.
+    QCOMPARE(headingList(Outline::headings(QStringLiteral("x\r\n# A\r\n\r\nB\r\n=\r\n"))), QStringLiteral("1:A@3|1:B@10"));
+    QCOMPARE(headingList(Outline::headings(QStringLiteral("x\r# A\r"))), QStringLiteral("1:A@2"));
+    QVERIFY(Outline::headings(QString()).isEmpty());
+}
+
+void ParchTests::outlineFollowsEditsOffTheUiThread()
+{
+    QTemporaryDir root;
+    DocumentStore store(AppPaths::under(root.path()));
+    Document *document = draftWith(store, QStringLiteral("# Alpha\ntext\n## Beta\nmore\n### Gamma\n"));
+    OutlineModel outline;
+    QAbstractItemModelTester tester(&outline);
+    outline.setDocument(document);
+    // Nothing is looked for until something shows it.
+    QTest::qWait(50);
+    QCOMPARE(outline.rowCount(), 0);
+    outline.setActive(true);
+    QTRY_VERIFY(outline.ready());
+    QCOMPARE(headingList(outline.headings()), QStringLiteral("1:Alpha@0|2:Beta@13|3:Gamma@26"));
+    QCOMPARE(outline.data(outline.index(1), OutlineModel::LevelRole).toInt(), 2);
+    QCOMPARE(outline.rowAt(0), 0);
+    QCOMPARE(outline.rowAt(20), 1);
+    QCOMPARE(outline.positionAt(2), 26);
+    // An edit is looked at once the text rests.
+    document->buffer()->replace({0, 0}, QStringLiteral("# Zero\n"));
+    QVERIFY(!outline.ready());
+    QTRY_VERIFY(outline.ready());
+    QCOMPARE(outline.rowCount(), 4);
+    QCOMPARE(outline.positionAt(1), 7);
+    outline.setFilter(QStringLiteral("ET"));
+    QCOMPARE(headingList(outline.headings()), QStringLiteral("2:Beta@20"));
+    outline.setFilter({});
+    QCOMPARE(outline.rowCount(), 4);
+    // Hidden, it looks at nothing however the text changes.
+    outline.setActive(false);
+    document->buffer()->replace({0, 0}, QStringLiteral("# Minus\n"));
+    QTest::qWait(OutlineModel::EditSettleMs + 100);
+    QCOMPARE(outline.rowCount(), 4);
+    QVERIFY(!outline.ready());
+}
+
+void ParchTests::folderSearchStreamsResultsGroupedByDocument()
+{
+    QTemporaryDir root;
+    const QString base = canonical(root.path()), notes = base + QStringLiteral("/Notes");
+    writeFile(notes + QStringLiteral("/b.md"), "alpha\nthe needle here\n");
+    writeFile(notes + QStringLiteral("/a.md"), "Needle first\nno\n    needle again, needle\n");
+    writeFile(notes + QStringLiteral("/Sub/c.markdown"), "deep needle\n");
+    writeFile(notes + QStringLiteral("/picture.png"), "needle");
+    writeFile(notes + QStringLiteral("/.hidden.md"), "needle");
+    writeFile(notes + QStringLiteral("/latin.md"), QByteArray("needle \xe9t\xe9\n"));
+    writeFile(notes + QStringLiteral("/locked.md"), "needle\n");
+    QVERIFY(QFile::setPermissions(notes + QStringLiteral("/locked.md"), QFileDevice::WriteOwner));
+    const auto unlock = qScopeGuard([&] {
+        QFile::setPermissions(notes + QStringLiteral("/locked.md"), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    });
+    // A link back up to the library folder makes a loop the walk leaves.
+    QVERIFY(QFile::link(notes, notes + QStringLiteral("/Sub/loop")));
+    const AppPaths paths = AppPaths::under(base + QStringLiteral("/app"));
+    DocumentStore store(paths);
+    Settings settings(paths.settingsFile());
+    settings.setLibraryFolders({notes});
+    // An open document is searched as its text is now, and an open draft too.
+    Document *open = store.open(notes + QStringLiteral("/b.md"));
+    QVERIFY(open);
+    open->buffer()->replace({0, 0}, QStringLiteral("needle unsaved\n"));
+    draftWith(store, QStringLiteral("# Draft\nneedle in a draft\n"));
+    FolderSearch search(paths, &store, &settings);
+    QAbstractItemModelTester tester(&search);
+    search.setPattern(QStringLiteral("needle"));
+    search.start();
+    QVERIFY(search.searching());
+    QTRY_VERIFY_WITH_TIMEOUT(search.finished(), 10000);
+    QVERIFY(!search.searching());
+    QCOMPARE(searchRows(search), (QStringList{"Draft:2:needle", "a.md:1:Needle", "a.md:3:needle", "a.md:3:needle",
+                                              "b.md:1:needle", "b.md:3:needle", "c.markdown:1:needle"}));
+    QCOMPARE(search.matchCount(), 7);
+    QCOMPARE(search.filesMatched(), 4);
+    QCOMPARE(search.filesSearched(), 4);
+    // The file that is not UTF-8 and the one that cannot be read.
+    QCOMPARE(search.unreadable(), 2);
+    // A row shows its line around the match, its indent gone.
+    const QVariantMap again = search.row(2);
+    QCOMPARE(again.value(QStringLiteral("before")).toString(), QString());
+    QCOMPARE(again.value(QStringLiteral("after")).toString(), QStringLiteral(" again, needle"));
+    QCOMPARE(again.value(QStringLiteral("column")).toInt(), 5);
+    const QVariantMap last = search.row(3);
+    QCOMPARE(last.value(QStringLiteral("before")).toString(), QStringLiteral("needle again, "));
+    QCOMPARE(last.value(QStringLiteral("path")).toString(), notes + QStringLiteral("/a.md"));
+    QCOMPARE(search.section(notes + QStringLiteral("/Sub/c.markdown")).value(QStringLiteral("folder")).toString(),
+             QStringLiteral("Notes / Sub"));
+    QVERIFY(!search.row(0).value(QStringLiteral("documentId")).toString().isEmpty());
+    // Case, whole words and regular expressions are the find bar's.
+    search.setCaseSensitive(true);
+    search.start();
+    QTRY_VERIFY(search.finished());
+    QCOMPARE(search.matchCount(), 6);
+    search.setRegex(true);
+    search.setPattern(QStringLiteral("need(le"));
+    QVERIFY(!search.error().isEmpty());
+    search.start();
+    QCOMPARE(search.rowCount(), 0);
+    QVERIFY(!search.searching());
+}
+
+void ParchTests::folderSearchReusesWhatItRead()
+{
+    QTemporaryDir root;
+    const QString base = canonical(root.path()), notes = base + QStringLiteral("/Notes");
+    for (int i = 0; i < 40; ++i) writeFile(notes + QStringLiteral("/note %1.md").arg(i), "a word or two\n");
+    const AppPaths paths = AppPaths::under(base + QStringLiteral("/app"));
+    DocumentStore store(paths);
+    Settings settings(paths.settingsFile());
+    settings.setLibraryFolders({notes});
+    FolderSearch search(paths, &store, &settings);
+    search.setPattern(QStringLiteral("word"));
+    const quint64 before = FolderSearch::fileReads();
+    search.start();
+    QTRY_VERIFY(search.finished());
+    QCOMPARE(FolderSearch::fileReads() - before, quint64(40));
+    // Again, every file is as it was: nothing is read.
+    search.setPattern(QStringLiteral("two"));
+    search.start();
+    QTRY_VERIFY(search.finished());
+    QCOMPARE(search.matchCount(), 40);
+    QCOMPARE(FolderSearch::fileReads() - before, quint64(40));
+    // A file that changed is read again, and only it.
+    writeFile(notes + QStringLiteral("/note 7.md"), "a word or two, and three\n");
+    search.start();
+    QTRY_VERIFY(search.finished());
+    QCOMPARE(FolderSearch::fileReads() - before, quint64(41));
+    FolderSearch::clearCache();
+    search.start();
+    QTRY_VERIFY(search.finished());
+    QCOMPARE(FolderSearch::fileReads() - before, quint64(81));
+}
+
+void ParchTests::folderSearchStopsWhenCancelled()
+{
+    QTemporaryDir root;
+    const QString base = canonical(root.path()), notes = base + QStringLiteral("/Notes");
+    for (int folder = 0; folder < 40; ++folder)
+        for (int note = 0; note < 50; ++note)
+            writeFile(notes + QStringLiteral("/%1/%2.md").arg(folder).arg(note), "find me\n");
+    const AppPaths paths = AppPaths::under(base + QStringLiteral("/app"));
+    DocumentStore store(paths);
+    Settings settings(paths.settingsFile());
+    settings.setLibraryFolders({notes});
+    FolderSearch search(paths, &store, &settings);
+    search.setPattern(QStringLiteral("find"));
+    search.start();
+    search.cancel();
+    QVERIFY(!search.searching());
+    const int rows = search.rowCount();
+    QTest::qWait(300);
+    QCOMPARE(search.rowCount(), rows);
+    QVERIFY(!search.finished());
+    // A new search runs to its end.
+    search.start();
+    QTRY_VERIFY_WITH_TIMEOUT(search.finished(), 10000);
+    QCOMPARE(search.matchCount(), 2000);
+}
+
+void ParchTests::referencesAreFoundOutsideCode()
+{
+    const QString text = QStringLiteral(
+        "# Notes\n"
+        "[Plan](plan%20one.md#goals \"The plan\") and ![chart](<images/my chart.png>)\n"
+        "`[code](plan%20one.md)` stays\n"
+        "```\n[fenced](plan%20one.md)\n```\n"
+        "[web](https://example.org/a.md) [here](#notes)\n"
+        "[ref]: ./plan%20one.md\n"
+        "[^note]: a footnote\n"
+        "\n"
+        "\"chapters/opening one.md\" \"Opening\"\n"
+        "\n"
+        "/chapters/closing.md\n");
+    QStringList found;
+    for (const References::Reference &reference : References::find(text)) {
+        QCOMPARE(text.mid(reference.range.start, reference.range.length), reference.destination);
+        found << QStringLiteral("%1:%2:%3%4")
+                     .arg(int(reference.kind))
+                     .arg(reference.line)
+                     .arg(reference.destination)
+                     .arg(reference.enclosed ? QStringLiteral("!") : QString());
+    }
+    QCOMPARE(found, (QStringList{"0:1:plan%20one.md#goals", "1:1:images/my chart.png!", "0:6:https://example.org/a.md",
+                                 "0:6:#notes", "2:7:./plan%20one.md", "3:10:chapters/opening one.md!",
+                                 "3:12:/chapters/closing.md"}));
+}
+
+void ParchTests::movesRewriteRelativeReferences()
+{
+    const QString text = QStringLiteral(
+        "[Plan](plan%20one.md#goals \"The plan\") and ![chart](<images/my chart.png>)\n"
+        "`[code](plan%20one.md)` [web](https://example.org/plan%20one.md)\n"
+        "[ref]: ./plan%20one.md\n"
+        "\n"
+        "\"chapters/opening one.md\" \"Opening\"\n"
+        "\n"
+        "/chapters/closing.md\n");
+    const QString library = QStringLiteral("/lib");
+    const auto apply = [&](const QString &path, const QList<References::Move> &moves) {
+        QStringList shown;
+        for (const References::Change &change : References::changes(text, path, library, moves))
+            shown << change.before + QStringLiteral(" -> ") + change.after;
+        return shown;
+    };
+    // What the document leads to moves.
+    QCOMPARE(apply(QStringLiteral("/lib/notes.md"), {{QStringLiteral("/lib/plan one.md"), QStringLiteral("/lib/archive/plan one.md")}}),
+             (QStringList{"plan%20one.md#goals -> archive/plan%20one.md#goals",
+                          "./plan%20one.md -> ./archive/plan%20one.md"}));
+    // The document moves, and its own references keep leading where they led.
+    QCOMPARE(apply(QStringLiteral("/lib/notes.md"), {{QStringLiteral("/lib/notes.md"), QStringLiteral("/lib/sub/notes.md")}}),
+             (QStringList{"plan%20one.md#goals -> ../plan%20one.md#goals", "images/my chart.png -> ../images/my chart.png",
+                          "./plan%20one.md -> ../plan%20one.md",
+                          "chapters/opening one.md -> ../chapters/opening one.md"}));
+    // A folder moves with all in it, includes rooted at the library among them.
+    QCOMPARE(apply(QStringLiteral("/lib/notes.md"), {{QStringLiteral("/lib/chapters"), QStringLiteral("/lib/book/chapters")}}),
+             (QStringList{"chapters/opening one.md -> book/chapters/opening one.md",
+                          "/chapters/closing.md -> /book/chapters/closing.md"}));
+    // A bare path that takes a space is encoded; an include that takes one is quoted.
+    const QString plain = QStringLiteral("[x](plan.md) ![y](img/a.png)\n\nchapters/one.md\n");
+    QStringList shown;
+    for (const References::Change &change : References::changes(
+             plain, QStringLiteral("/lib/n.md"), library,
+             {{QStringLiteral("/lib/plan.md"), QStringLiteral("/lib/my plans/plan.md")},
+              {QStringLiteral("/lib/chapters"), QStringLiteral("/lib/my chapters")}})) {
+        shown << change.after;
+        QCOMPARE(change.lineBefore.contains(change.before), true);
+        QCOMPARE(change.lineAfter.contains(change.after), true);
+    }
+    QCOMPARE(shown, (QStringList{"my%20plans/plan.md", "\"my chapters/one.md\""}));
+    // Nothing moved that it leads to, nothing changes.
+    QVERIFY(References::changes(text, QStringLiteral("/lib/notes.md"), library,
+                                {{QStringLiteral("/lib/other.md"), QStringLiteral("/lib/x/other.md")}})
+                .isEmpty());
+}
+
+void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
+{
+    OrganizerFixture f;
+    writeFile(f.file(QStringLiteral("draft notes.md")), "# Notes\n");
+    Document *document = f.open(QStringLiteral("draft notes.md"));
+    QVERIFY(document);
+    const QString id = document->id();
+    document->buffer()->replace({0, 0}, QStringLiteral("Edited. "));
+    f.organizer()->rename(f.file(QStringLiteral("draft notes.md")), QStringLiteral("final notes"));
+    // A document keeps its ending, its identity, its text and its undo.
+    QTRY_COMPARE(document->path(), f.file(QStringLiteral("final notes.md")));
+    QCOMPARE(document->id(), id);
+    QCOMPARE(document->buffer()->text(), QStringLiteral("Edited. # Notes\n"));
+    QVERIFY(document->buffer()->canUndo());
+    QVERIFY(!QFile::exists(f.file(QStringLiteral("draft notes.md"))));
+    QVERIFY(QFile::exists(f.file(QStringLiteral("final notes.md"))));
+    QCOMPARE(f.backend->windows().first()->tabs()->activeTitle(), QStringLiteral("final notes.md"));
+    // It saves at its new name, and its old name stays gone.
+    f.backend->save();
+    f.backend->store()->waitForSaves();
+    QTRY_COMPARE(document->state(), Document::State::Clean);
+    QCOMPARE(readFile(f.file(QStringLiteral("final notes.md"))), QByteArray("Edited. # Notes\n"));
+    QVERIFY(!QFile::exists(f.file(QStringLiteral("draft notes.md"))));
+    QVERIFY(!f.backend->history()->versions(id).isEmpty());
+    QCOMPARE(f.backend->store()->documentIdFor(f.file(QStringLiteral("final notes.md"))), id);
+    // The recent files follow it.
+    QVERIFY(f.backend->recentFiles()->paths().contains(f.file(QStringLiteral("final notes.md"))));
+    QVERIFY(!f.backend->recentFiles()->paths().contains(f.file(QStringLiteral("draft notes.md"))));
+    // A plain rename says nothing; the library shows it.
+    QVERIFY(!f.backend->notice());
+    // A save that runs as the rename is asked for lands first, at the old
+    // name, and the rename goes on.
+    document->buffer()->replace({0, 0}, QStringLiteral("Again. "));
+    f.backend->save();
+    QVERIFY(document->isSaving());
+    f.organizer()->rename(f.file(QStringLiteral("final notes.md")), QStringLiteral("last notes"));
+    QTRY_COMPARE(document->path(), f.file(QStringLiteral("last notes.md")));
+    QCOMPARE(readFile(f.file(QStringLiteral("last notes.md"))), QByteArray("Again. Edited. # Notes\n"));
+    QVERIFY(!QFile::exists(f.file(QStringLiteral("final notes.md"))));
+    // A tab not read yet, as a session brings back, waits for its file where it went.
+    TabModel waiting(f.backend->store());
+    waiting.restore({ViewState{newUuid(), f.file(QStringLiteral("Folder/x.md"))},
+                     ViewState{newUuid(), f.file(QStringLiteral("other.md"))}},
+                    0);
+    waiting.relocate(f.file(QStringLiteral("Folder")), f.file(QStringLiteral("Moved")));
+    QCOMPARE(waiting.viewState(0).path, f.file(QStringLiteral("Moved/x.md")));
+    QCOMPARE(waiting.viewState(1).path, f.file(QStringLiteral("other.md")));
+}
+
+void ParchTests::movingADocumentUpdatesTheLinksToIt()
+{
+    OrganizerFixture f;
+    writeFile(f.file(QStringLiteral("index.md")), "[Plan](plan.md)\n![](plan.md#top)\n");
+    writeFile(f.file(QStringLiteral("notes/other.md")), "See [the plan](../plan.md).\n");
+    writeFile(f.file(QStringLiteral("plan.md")), "[Index](index.md)\n");
+    QVERIFY(QDir().mkpath(f.file(QStringLiteral("archive"))));
+    Document *index = f.open(QStringLiteral("index.md"));
+    QVERIFY(index);
+    f.organizer()->move(f.file(QStringLiteral("plan.md")), f.file(QStringLiteral("archive")));
+    QVERIFY(f.organizer()->busy());
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    const QVariantMap review = f.organizer()->review();
+    QCOMPARE(review.value(QStringLiteral("changes")).toInt(), 4);
+    QCOMPARE(review.value(QStringLiteral("files")).toInt(), 3);
+    // Nothing moves while the writer reviews.
+    QVERIFY(QFile::exists(f.file(QStringLiteral("plan.md"))));
+    f.organizer()->confirmMove(true);
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(QFile::exists(f.file(QStringLiteral("archive/plan.md"))));
+    // Closed documents are written; the moved one's own link follows it.
+    QCOMPARE(readFile(f.file(QStringLiteral("notes/other.md"))), QByteArray("See [the plan](../archive/plan.md).\n"));
+    QCOMPARE(readFile(f.file(QStringLiteral("archive/plan.md"))), QByteArray("[Index](../index.md)\n"));
+    // An open one is edited as one undo step, and saved as any edit is.
+    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](archive/plan.md)\n![](archive/plan.md#top)\n"));
+    index->buffer()->undo();
+    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](plan.md)\n![](plan.md#top)\n"));
+    // What a closed document held is in its history.
+    const QString otherId = f.backend->store()->documentIdFor(f.file(QStringLiteral("notes/other.md")));
+    const QList<History::Version> versions = f.backend->history()->versions(otherId);
+    QVERIFY(!versions.isEmpty());
+    QCOMPARE(versions.first().reason, History::Reason::Links);
+    QCOMPARE(f.backend->history()->read(otherId, versions.first().id), QByteArray("See [the plan](../plan.md).\n"));
+    QVERIFY(f.backend->noticeInforms());
+    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("4 links were updated in 3 documents")),
+             qPrintable(f.backend->problemDetail()));
+}
+
+void ParchTests::aMoveCanLeaveItsLinksOrNotHappen()
+{
+    OrganizerFixture f;
+    writeFile(f.file(QStringLiteral("index.md")), "[Plan](plan.md)\n");
+    writeFile(f.file(QStringLiteral("plan.md")), "plan\n");
+    QVERIFY(QDir().mkpath(f.file(QStringLiteral("archive"))));
+    f.organizer()->rename(f.file(QStringLiteral("plan.md")), QStringLiteral("old plan.md"));
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    QVERIFY2(f.organizer()->review().value(QStringLiteral("title")).toString().contains(QStringLiteral("Rename")),
+             qPrintable(f.organizer()->review().value(QStringLiteral("title")).toString()));
+    // Cancelled, nothing moves and nothing is written.
+    f.organizer()->cancelMove();
+    QVERIFY(f.organizer()->review().isEmpty());
+    QVERIFY(QFile::exists(f.file(QStringLiteral("plan.md"))));
+    QVERIFY(!QFile::exists(f.file(QStringLiteral("old plan.md"))));
+    // Moved only, the link is left, and that is said.
+    f.organizer()->rename(f.file(QStringLiteral("plan.md")), QStringLiteral("old plan.md"));
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    f.organizer()->confirmMove(false);
+    QVERIFY(QFile::exists(f.file(QStringLiteral("old plan.md"))));
+    QCOMPARE(readFile(f.file(QStringLiteral("index.md"))), QByteArray("[Plan](plan.md)\n"));
+    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("left as it was")), qPrintable(f.backend->problemDetail()));
+    // Something put at the new name while the writer reviewed is not replaced.
+    writeFile(f.file(QStringLiteral("other.md")), "[Old](old%20plan.md)\n");
+    f.organizer()->move(f.file(QStringLiteral("old plan.md")), f.file(QStringLiteral("archive")));
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    writeFile(f.file(QStringLiteral("archive/old plan.md")), "someone else's\n");
+    f.organizer()->confirmMove(true);
+    QTRY_VERIFY(!f.organizer()->busy());
+    QCOMPARE(readFile(f.file(QStringLiteral("other.md"))), QByteArray("[Old](old%20plan.md)\n"));
+    QCOMPARE(readFile(f.file(QStringLiteral("archive/old plan.md"))), QByteArray("someone else's\n"));
+    QVERIFY(QFile::exists(f.file(QStringLiteral("old plan.md"))));
+    QVERIFY2(f.backend->problem().contains(QStringLiteral("Not moved")), qPrintable(f.backend->problem()));
+}
+
+void ParchTests::movingAFolderTakesItsDocumentsAlong()
+{
+    OrganizerFixture f;
+    writeFile(f.file(QStringLiteral("Essays/one.md")), "[two](two.md) [up](../top.md)\n");
+    writeFile(f.file(QStringLiteral("Essays/two.md")), "two\n");
+    writeFile(f.file(QStringLiteral("top.md")), "[one](Essays/one.md)\n");
+    QVERIFY(QDir().mkpath(f.file(QStringLiteral("Archive"))));
+    QVERIFY(QDir().mkpath(f.file(QStringLiteral("Empty"))));
+    Document *one = f.open(QStringLiteral("Essays/one.md"));
+    QVERIFY(one);
+    const QString id = one->id();
+    f.organizer()->move(f.file(QStringLiteral("Essays")), f.file(QStringLiteral("Archive")));
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    // Links within the folder stay as they are; those across its edge change.
+    QCOMPARE(f.organizer()->review().value(QStringLiteral("changes")).toInt(), 2);
+    f.organizer()->confirmMove(true);
+    QTRY_VERIFY(!f.organizer()->busy());
+    QCOMPARE(one->path(), f.file(QStringLiteral("Archive/Essays/one.md")));
+    QCOMPARE(one->id(), id);
+    QCOMPARE(one->buffer()->text(), QStringLiteral("[two](two.md) [up](../../top.md)\n"));
+    QCOMPARE(readFile(f.file(QStringLiteral("top.md"))), QByteArray("[one](Archive/Essays/one.md)\n"));
+    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("The 2 documents in it went with it")),
+             qPrintable(f.backend->problemDetail()));
+    // An empty folder moves too, and says so.
+    f.organizer()->move(f.file(QStringLiteral("Empty")), f.file(QStringLiteral("Archive")));
+    QTRY_VERIFY(QFile::exists(f.file(QStringLiteral("Archive/Empty"))));
+    QTRY_VERIFY2(f.backend->problemDetail().contains(QStringLiteral("holds no documents")),
+                 qPrintable(f.backend->problemDetail()));
+}
+
+void ParchTests::organizingRefusesWhatItCannotDo()
+{
+    OrganizerFixture f;
+    FileOrganizer *organizer = f.organizer();
+    writeFile(f.file(QStringLiteral("a.md")), "a\n");
+    writeFile(f.file(QStringLiteral("b.md")), "b\n");
+    // Names a file cannot have, or that would hide it.
+    for (const char *name : {"", "  ", "x/y", "..", ".hidden"})
+        QVERIFY2(!organizer->nameProblem(QString::fromLatin1(name)).isEmpty(), name);
+    QVERIFY(organizer->nameProblem(QStringLiteral("Chapter 1: notes")).isEmpty());
+    // A name taken is never replaced.
+    organizer->rename(f.file(QStringLiteral("a.md")), QStringLiteral("b.md"));
+    QTRY_VERIFY(!organizer->busy());
+    QCOMPARE(readFile(f.file(QStringLiteral("b.md"))), QByteArray("b\n"));
+    QVERIFY(QFile::exists(f.file(QStringLiteral("a.md"))));
+    QVERIFY2(f.backend->problem().contains(QStringLiteral("Not renamed: a.md")), qPrintable(f.backend->problem()));
+    organizer->newFile(f.library, QStringLiteral("b"));
+    QVERIFY2(f.backend->problem().contains(QStringLiteral("already exists")), qPrintable(f.backend->problem()));
+    QCOMPARE(readFile(f.file(QStringLiteral("b.md"))), QByteArray("b\n"));
+    QVERIFY(QDir().mkpath(f.file(QStringLiteral("Folder"))));
+    organizer->newFolder(f.library, QStringLiteral("Folder"));
+    QVERIFY2(f.backend->problem().contains(QStringLiteral("already exists")), qPrintable(f.backend->problem()));
+    // A new document is made and opened.
+    organizer->newFile(f.file(QStringLiteral("Folder")), QStringLiteral("Fresh"));
+    QVERIFY(QFile::exists(f.file(QStringLiteral("Folder/Fresh.md"))));
+    QCOMPARE(f.backend->document()->path(), f.file(QStringLiteral("Folder/Fresh.md")));
+    // The library's folder itself, and a folder into itself, are refused.
+    organizer->rename(f.library, QStringLiteral("Elsewhere"));
+    QVERIFY(QFileInfo(f.library).isDir());
+    organizer->move(f.file(QStringLiteral("Folder")), f.file(QStringLiteral("Folder")));
+    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("inside itself")), qPrintable(f.backend->problemDetail()));
+    QVERIFY(!organizer->organizes(f.library));
+    QVERIFY(!organizer->organizes(f.base + QStringLiteral("/outside.md")));
+    // Gone since it was listed.
+    organizer->rename(f.file(QStringLiteral("gone.md")), QStringLiteral("still gone"));
+    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("can no longer be found")),
+             qPrintable(f.backend->problemDetail()));
+    // A folder that cannot be written keeps what is in it.
+    writeFile(f.file(QStringLiteral("Locked/c.txt")), "c\n");
+    QVERIFY(QFile::setPermissions(f.file(QStringLiteral("Locked")), QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+    const auto unlock = qScopeGuard([&] {
+        QFile::setPermissions(f.file(QStringLiteral("Locked")), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    });
+    organizer->rename(f.file(QStringLiteral("Locked/c.txt")), QStringLiteral("d.txt"));
+    QTRY_VERIFY(!organizer->busy());
+    QVERIFY(QFile::exists(f.file(QStringLiteral("Locked/c.txt"))));
+    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("cannot be written")), qPrintable(f.backend->problemDetail()));
+}
+
+void ParchTests::trashGoesToTheDesktopTrashOnceConfirmed()
+{
+    OrganizerFixture f;
+    FileOrganizer *organizer = f.organizer();
+    writeFile(f.file(QStringLiteral("old.md")), "old\n");
+    writeFile(f.file(QStringLiteral("Folder/one.md")), "one\n");
+    writeFile(f.file(QStringLiteral("Folder/Sub/two.md")), "two\n");
+    QVERIFY(QDir().mkpath(f.file(QStringLiteral("Empty"))));
+    QSignalSpy asked(organizer, &FileOrganizer::trashingChanged);
+    organizer->askToTrash(f.file(QStringLiteral("old.md")));
+    QCOMPARE(organizer->trashing().value(QStringLiteral("name")).toString(), QStringLiteral("old.md"));
+    // Cancelled, it stays.
+    organizer->cancelTrash();
+    QVERIFY(organizer->trashing().isEmpty());
+    QVERIFY(QFile::exists(f.file(QStringLiteral("old.md"))));
+    organizer->askToTrash(f.file(QStringLiteral("old.md")));
+    organizer->confirmTrash();
+    QVERIFY2(!QFile::exists(f.file(QStringLiteral("old.md"))), qPrintable(f.backend->problemDetail()));
+    const QString trash = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/Trash/files");
+    QVERIFY2(!QDir(trash).entryList({QStringLiteral("old*.md")}, QDir::Files).isEmpty(), qPrintable(trash));
+    QVERIFY(f.backend->noticeInforms());
+    // A folder says what goes with it, an empty one that nothing does.
+    organizer->askToTrash(f.file(QStringLiteral("Folder")));
+    QTRY_VERIFY(!organizer->trashing().isEmpty());
+    QCOMPARE(organizer->trashing().value(QStringLiteral("documents")).toInt(), 2);
+    QVERIFY(organizer->trashing().value(QStringLiteral("folder")).toBool());
+    organizer->confirmTrash();
+    QVERIFY(!QFileInfo::exists(f.file(QStringLiteral("Folder"))));
+    organizer->askToTrash(f.file(QStringLiteral("Empty")));
+    QTRY_VERIFY(!organizer->trashing().isEmpty());
+    QCOMPARE(organizer->trashing().value(QStringLiteral("documents")).toInt(), 0);
+    organizer->cancelTrash();
+    // The library's folder itself is never trashed from here.
+    organizer->askToTrash(f.library);
+    QVERIFY(organizer->trashing().isEmpty());
+    QVERIFY(QFileInfo(f.library).isDir());
+}
+
+void ParchTests::readingPositionsFollowFilesAndRestarts()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString base = canonical(root.path()), file = base + QStringLiteral("/long.md");
+    const QString other = base + QStringLiteral("/other.md");
+    QByteArray text;
+    for (int i = 0; i < 400; ++i) text += "Line " + QByteArray::number(i) + " of a long document.\n";
+    writeFile(file, text);
+    writeFile(other, "other\n");
+    const QString app = base + QStringLiteral("/app");
+    int cursor = 0, top = 0;
+    {
+        ShellFixture shell({.root = app});
+        QVERIFY2(shell.ok(), qPrintable(shell.error));
+        activate(shell.window.get());
+        shell.backend->openFiles({other});
+        shell.backend->openFiles({file});
+        EditorBinding *binding = shell.binding();
+        QTRY_VERIFY(binding && binding->document() && binding->document()->path() == file);
+        binding->restore(6000, 6000, 5000);
+        cursor = binding->cursorSource();
+        top = binding->topSourcePosition();
+        QVERIFY(top > 0 && cursor == 6000);
+        // Closed and opened again, it starts where it was.
+        shell.backend->requestCloseTab(shell.context()->tabs()->activeIndex());
+        QTRY_VERIFY(shell.document() && shell.document()->path() == other);
+        shell.backend->openFiles({file});
+        QTRY_COMPARE(shell.binding()->cursorSource(), cursor);
+        QCOMPARE(shell.binding()->topSourcePosition(), top);
+        // Closed again, and the application ends.
+        shell.backend->requestCloseTab(shell.context()->tabs()->activeIndex());
+        QTRY_VERIFY(shell.document() && shell.document()->path() == other);
+        QSignalSpy quitting(shell.backend.get(), &Backend::quitRequested);
+        shell.backend->quit();
+        QCOMPARE(quitting.count(), 1);
+    }
+    {
+        ShellFixture shell({.root = app});
+        QVERIFY2(shell.ok(), qPrintable(shell.error));
+        activate(shell.window.get());
+        shell.backend->openFiles({file});
+        QTRY_VERIFY(shell.binding()->document() && shell.binding()->document()->path() == file);
+        QTRY_COMPARE(shell.binding()->cursorSource(), cursor);
+        QCOMPARE(shell.binding()->topSourcePosition(), top);
+        QVERIFY(shell.backend->readingPositions()->at(file).has_value());
+        // A move takes its position along.
+        shell.backend->readingPositions()->relocate(base, base + QStringLiteral("/moved"));
+        QVERIFY(shell.backend->readingPositions()->at(base + QStringLiteral("/moved/long.md")).has_value());
+        QVERIFY(!shell.backend->readingPositions()->at(file).has_value());
+    }
+    // A file that cannot be read as positions is moved aside, never written over.
+    const AppPaths paths = AppPaths::under(app);
+    writeFile(paths.positionsFile(), "not json");
+    ReadingPositions damaged(paths);
+    QVERIFY(damaged.paths().isEmpty());
+    QVERIFY(QFile::exists(paths.positionsFile() + QStringLiteral(".bad")));
+}
+
+namespace {
+// Tab, from the first control inside the item, reaches every visible
+// control inside it, as a dialog's keys stay inside it; what is not
+// reached is named in `missed`.
+bool tabReachesEveryControlIn(QQuickWindow *window, QQuickItem *root, QStringList *missed)
+{
+    QList<QQuickItem *> controls;
+    std::function<void(QQuickItem *)> visit = [&](QQuickItem *item) {
+        if (!item->isVisible() || !item->isEnabled()) return;
+        QAccessibleInterface *access = QAccessible::queryAccessibleInterface(item);
+        if (item->width() > 0 && item->height() > 0
+            && (item->activeFocusOnTab() || (access && isInteractiveRole(access->role()))))
+            controls << item;
+        for (QQuickItem *child : item->childItems()) visit(child);
+    };
+    visit(root);
+    if (controls.isEmpty()) {
+        *missed << QStringLiteral("no control in ") + describe(root);
+        return false;
+    }
+    // A list's focus can rest on its current row, which counts as the list.
+    const auto control = [&](QQuickItem *item) {
+        for (QQuickItem *at = item; at; at = at->parentItem())
+            if (controls.contains(at)) return at;
+        return item;
+    };
+    controls.first()->forceActiveFocus(Qt::TabFocusReason);
+    QList<QQuickItem *> reached{control(window->activeFocusItem())};
+    for (int i = 0; i <= controls.size() + 2; ++i) {
+        QTest::keyClick(window, Qt::Key_Tab);
+        QQuickItem *now = control(window->activeFocusItem());
+        if (!now || reached.contains(now)) break;
+        reached << now;
+    }
+    for (QQuickItem *control : std::as_const(controls))
+        if (!reached.contains(control)) *missed << describe(control);
+    return missed->isEmpty();
+}
+
+// The item of a popup, such as a dialog, that holds what it shows.
+QQuickItem *popupItem(QObject *popup)
+{
+    return popup ? popup->property("contentItem").value<QQuickItem *>()->parentItem() : nullptr;
+}
+} // namespace
+
+void ParchTests::findBarFindsAndReplacesFromTheKeys()
+{
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    SourceBuffer *buffer = shell.document()->buffer();
+    buffer->replace({0, 0}, QStringLiteral("one two one three one\nfour one\n"));
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    EditorBinding *binding = shell.binding();
+    editor->forceActiveFocus();
+    binding->select(4, 4);
+    QQuickItem *bar = shell.item(QStringLiteral("findBar"));
+    QVERIFY(bar && !bar->isVisible());
+    QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier);
+    QTRY_VERIFY(bar->isVisible());
+    QQuickItem *field = shell.item(QStringLiteral("findField"));
+    QTRY_COMPARE(window->activeFocusItem(), field);
+    // As it is typed, the nearest match after the caret is selected.
+    typeText(window, QStringLiteral("one"));
+    QTRY_COMPARE(binding->anchorSource(), 8);
+    QCOMPARE(binding->cursorSource(), 11);
+    QObject *count = shell.object(QStringLiteral("findCount"));
+    QTRY_COMPARE(count->property("text").toString(), QStringLiteral("2 of 4"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(binding->anchorSource(), 18);
+    QCOMPARE(count->property("text").toString(), QStringLiteral("3 of 4"));
+    QTest::keyClick(window, Qt::Key_Return, Qt::ShiftModifier);
+    QTRY_COMPARE(binding->anchorSource(), 8);
+    // F3 and Shift+F3 step from the text as well, which keeps the keys.
+    editor->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_F3);
+    QTRY_COMPARE(binding->anchorSource(), 18);
+    QTest::keyClick(window, Qt::Key_F3, Qt::ShiftModifier);
+    QTRY_COMPARE(binding->anchorSource(), 8);
+    QCOMPARE(window->activeFocusItem(), editor);
+    // Ctrl+H shows the replace row with the keys in it.
+    QTest::keyClick(window, Qt::Key_H, Qt::ControlModifier);
+    QQuickItem *replaceField = shell.item(QStringLiteral("replaceField"));
+    QTRY_VERIFY(replaceField->isVisible());
+    QTRY_COMPARE(window->activeFocusItem(), replaceField);
+    typeText(window, QStringLiteral("1"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("one two 1 three one\nfour one\n"));
+    QTRY_COMPARE(binding->anchorSource(), 16);
+    QQuickItem *all = shell.item(QStringLiteral("replaceAll"));
+    QVERIFY2(all->isEnabled() && all->isVisible(), qPrintable(describe(all)));
+    // The bar's rows are placed as the window draws next.
+    settle(bar);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(all));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("1 two 1 three 1\nfour 1\n"));
+    buffer->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("one two 1 three one\nfour one\n"));
+    // A pattern that is no regular expression says why.
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(shell.item(QStringLiteral("findRegex"))));
+    field->setProperty("text", QStringLiteral("(one"));
+    QQuickItem *error = shell.item(QStringLiteral("findError"));
+    QTRY_VERIFY(error->isVisible());
+    QVERIFY(error->property("text").toString().contains(QStringLiteral("Not a valid pattern")));
+    QCOMPARE(count->property("text").toString(), QString());
+    // Escape closes the bar and gives the keys back to the text.
+    field->forceActiveFocus(Qt::TabFocusReason);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!bar->isVisible());
+    QCOMPARE(window->activeFocusItem(), editor);
+    // Opened on a selection of one line, the bar looks for it.
+    binding->select(10, 15);
+    QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier);
+    QTRY_COMPARE(field->property("text").toString(), QStringLiteral("three"));
+}
+
+void ParchTests::goToHeadingAndTheOutlineMoveTheCaret()
+{
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    resizeWindow(window, 1200);
+    QString text = QStringLiteral("# One\n");
+    for (int i = 0; i < 150; ++i) text += QStringLiteral("Filler line %1\n").arg(i);
+    const int two = int(text.size());
+    text += QStringLiteral("## Two\n");
+    for (int i = 0; i < 150; ++i) text += QStringLiteral("More filler %1\n").arg(i);
+    const int three = int(text.size());
+    text += QStringLiteral("### Three\n");
+    for (int i = 0; i < 150; ++i) text += QStringLiteral("Last filler %1\n").arg(i);
+    shell.document()->buffer()->replace({0, 0}, text);
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    EditorBinding *binding = shell.binding();
+    editor->forceActiveFocus();
+    binding->restore(0, 0, 0);
+    QObject *dialog = shell.object(QStringLiteral("headingsDialog"));
+    QTest::keyClick(window, Qt::Key_R, Qt::ControlModifier);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QQuickItem *filter = shell.item(QStringLiteral("headingsFilter"));
+    QTRY_COMPARE(window->activeFocusItem(), filter);
+    typeText(window, QStringLiteral("thr"));
+    QObject *list = shell.object(QStringLiteral("headingsList"));
+    QTRY_COMPARE(list->property("count").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    // The caret is on the heading, and its line at the top of the view.
+    QTRY_COMPARE(binding->cursorSource(), three);
+    QCOMPARE(binding->topSourcePosition(), three);
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    // Opened again, the list starts at the heading the caret is under.
+    QTest::keyClick(window, Qt::Key_R, Qt::ControlModifier);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QTRY_COMPARE(list->property("count").toInt(), 3);
+    QTRY_COMPARE(list->property("currentIndex").toInt(), 2);
+    QTest::keyClick(window, Qt::Key_Up);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(binding->cursorSource(), two);
+    QCOMPARE(binding->topSourcePosition(), two);
+    // Escape leaves the caret where it was.
+    QTest::keyClick(window, Qt::Key_R, Qt::ControlModifier);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QCOMPARE(binding->cursorSource(), two);
+    // The library shows the outline once asked, and keeps that asked.
+    QVERIFY(!shell.settings()->outlineShown());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(shell.item(QStringLiteral("outlineToggle"))));
+    QVERIFY(shell.settings()->outlineShown());
+    QObject *outline = shell.object(QStringLiteral("libraryOutlineList"));
+    QTRY_COMPARE(outline->property("count").toInt(), 3);
+    QQuickItem *first = nullptr;
+    QTRY_VERIFY((first = [&]() -> QQuickItem * {
+        for (QQuickItem *item : visibleItems(window))
+            if (item->objectName() == QStringLiteral("outlineRow") && item->property("text").toString() == QStringLiteral("One"))
+                return item;
+        return nullptr;
+    }()));
+    // The row the caret is under is marked.
+    for (QQuickItem *item : visibleItems(window))
+        if (item->objectName() == QStringLiteral("outlineRow"))
+            QCOMPARE(item->property("marked").toBool(), item->property("text").toString() == QStringLiteral("Two"));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(first));
+    QTRY_COMPARE(binding->cursorSource(), 0);
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+}
+
+void ParchTests::searchAcrossTheLibraryOpensTheMatch()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString notes = canonical(root.path()) + QStringLiteral("/Notes");
+    writeFile(notes + QStringLiteral("/a.md"), "nothing here\n");
+    writeFile(notes + QStringLiteral("/b.md"), "first line\nwhere the needle is\n");
+    ShellFixture shell({.settings = librarySettings(notes), .root = root.path() + QStringLiteral("/app")});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.item(QStringLiteral("editor"))->forceActiveFocus();
+    QObject *dialog = shell.object(QStringLiteral("folderSearchDialog"));
+    QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QQuickItem *field = shell.item(QStringLiteral("librarySearchField"));
+    QTRY_COMPARE(window->activeFocusItem(), field);
+    typeText(window, QStringLiteral("needle"));
+    FolderSearch *search = shell.context()->folderSearch();
+    QTRY_VERIFY(search->finished());
+    QCOMPARE(search->rowCount(), 1);
+    QObject *status = shell.object(QStringLiteral("librarySearchStatus"));
+    QTRY_VERIFY2(status->property("text").toString().contains(QStringLiteral("1 match in 1 document of 2 documents")),
+                 qPrintable(status->property("text").toString()));
+    // Down goes to the results, and Enter opens the match, selected.
+    QTest::keyClick(window, Qt::Key_Down);
+    QTRY_VERIFY(shell.object(QStringLiteral("librarySearchResults"))->property("activeFocus").toBool());
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QTRY_VERIFY(shell.document() && shell.document()->path() == notes + QStringLiteral("/b.md"));
+    QTRY_COMPARE(shell.binding()->anchorSource(), 21);
+    QCOMPARE(shell.binding()->cursorSource(), 27);
+    QTRY_COMPARE(window->activeFocusItem(), shell.item(QStringLiteral("editor")));
+    // Edited since, the match is found where the same text is now.
+    shell.document()->buffer()->replace({0, 0}, QStringLiteral("a new first line\n"));
+    const QVariantMap found = search->row(0);
+    shell.backend->openSearchResult(found.value(QStringLiteral("path")).toString(), {}, found.value(QStringLiteral("start")).toInt(),
+                                    found.value(QStringLiteral("length")).toInt(), found.value(QStringLiteral("line")).toInt(),
+                                    found.value(QStringLiteral("match")).toString());
+    QTRY_COMPARE(shell.binding()->anchorSource(), 38);
+    QCOMPARE(shell.binding()->cursorSource(), 44);
+    // Opened again, the dialog keeps its query and results.
+    QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QCOMPARE(field->property("text").toString(), QStringLiteral("needle"));
+    QCOMPARE(search->rowCount(), 1);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+}
+
+void ParchTests::searchOfTenThousandDocumentsKeepsTheWindowResponsive()
+{
+    // The library workload: 10,000 documents in 100 folders, each holding
+    // the word looked for. The search lists them all, grouped by document,
+    // and the event loop never waits more than 33 ms while it does.
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString notes = canonical(root.path()) + QStringLiteral("/Notes");
+    for (int folder = 0; folder < 100; ++folder) {
+        const QString path = notes + QStringLiteral("/Folder %1").arg(folder, 3, 10, QLatin1Char('0'));
+        QVERIFY(QDir().mkpath(path));
+        for (int note = 0; note < 100; ++note) {
+            QFile file(path + QStringLiteral("/Note %1.md").arg(note, 3, 10, QLatin1Char('0')));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("Some words, and a needle among them.\nAnother line.\n");
+        }
+    }
+    FolderSearch::clearCache();
+    ShellFixture shell({.settings = librarySettings(notes), .root = root.path() + QStringLiteral("/app")});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    resizeWindow(window, 1440);
+    activate(window);
+    QObject *dialog = shell.object(QStringLiteral("folderSearchDialog"));
+    QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QTest::qWait(200);
+    FolderSearch *search = shell.context()->folderSearch();
+    LoopGaps gaps;
+    QElapsedTimer took;
+    took.start();
+    typeText(window, QStringLiteral("needle"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY_WITH_TIMEOUT(search->finished(), 60000);
+    const qint64 searched = took.elapsed(), first = gaps.longest();
+    QCOMPARE(search->filesSearched(), 10000);
+    QCOMPARE(search->matchCount(), 10000);
+    QCOMPARE(search->rowCount(), 10000);
+    // Again, from the cache.
+    gaps.restart();
+    took.restart();
+    search->start();
+    QTRY_VERIFY_WITH_TIMEOUT(search->finished(), 60000);
+    const qint64 again = took.elapsed(), second = gaps.longest();
+    qInfo("10,000 documents searched in %lld ms, again in %lld ms; longest gaps %lld ms and %lld ms", searched, again,
+          first, second);
+    QVERIFY2(first <= 33, qPrintable(QStringLiteral("a gap of %1 ms").arg(first)));
+    QVERIFY2(second <= 33, qPrintable(QStringLiteral("a gap of %1 ms searching again").arg(second)));
+    QCOMPARE(search->rowCount(), 10000);
+}
+
+void ParchTests::libraryMenusAndKeysOrganizeFiles()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString writing = canonical(root.path()) + QStringLiteral("/Writing");
+    writeFile(writing + QStringLiteral("/a.md"), "a\n");
+    writeFile(writing + QStringLiteral("/b.md"), "b\n");
+    QVERIFY(QDir().mkpath(writing + QStringLiteral("/Sub")));
+    ShellFixture shell({.settings = librarySettings(writing), .root = root.path() + QStringLiteral("/app")});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    resizeWindow(window, 1200);
+    activate(window);
+    QObject *tree = shell.object(QStringLiteral("libraryTree"));
+    QTRY_VERIFY(treeRow(tree, QStringLiteral("Writing")) >= 0);
+    QMetaObject::invokeMethod(tree, "expand", Q_ARG(int, treeRow(tree, QStringLiteral("Writing"))));
+    QTRY_VERIFY(libraryRow(window, QStringLiteral("a.md")));
+    QObject *panel = shell.object(QStringLiteral("libraryPanel"));
+    const auto keysOn = [&](const QString &name) {
+        tree->setProperty("focus", true);
+        static_cast<QQuickItem *>(tree)->forceActiveFocus(Qt::TabFocusReason);
+        QMetaObject::invokeMethod(panel, "moveTo", Q_ARG(QVariant, treeRow(tree, name)));
+        return QTest::qWaitFor([&] { return someRowHas(window, name, "keyboard"); }, 3000);
+    };
+    // F2 renames, the name before its ending selected.
+    QVERIFY(keysOn(QStringLiteral("a.md")));
+    QTest::keyClick(window, Qt::Key_F2);
+    QObject *names = shell.object(QStringLiteral("libraryNameDialog"));
+    QTRY_VERIFY(names->property("opened").toBool());
+    QQuickItem *nameField = shell.item(QStringLiteral("nameField"));
+    QTRY_COMPARE(window->activeFocusItem(), nameField);
+    QCOMPARE(nameField->property("selectedText").toString(), QStringLiteral("a"));
+    typeText(window, QStringLiteral("renamed"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/renamed.md")));
+    QVERIFY(!QFile::exists(writing + QStringLiteral("/a.md")));
+    QTRY_VERIFY(libraryRow(window, QStringLiteral("renamed.md")));
+    // A name already taken is said in the dialog, which waits.
+    QVERIFY(keysOn(QStringLiteral("renamed.md")));
+    QTest::keyClick(window, Qt::Key_F2);
+    QTRY_VERIFY(names->property("opened").toBool());
+    nameField->setProperty("text", QStringLiteral("bad/name"));
+    QTRY_VERIFY(!names->property("problem").toString().isEmpty());
+    QTest::keyClick(window, Qt::Key_Return);
+    QVERIFY(names->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!names->property("visible").toBool());
+    // The menu moves a document to another folder.
+    QVERIFY(keysOn(QStringLiteral("renamed.md")));
+    QTest::keyClick(window, Qt::Key_F10, Qt::ShiftModifier);
+    QObject *menu = shell.object(QStringLiteral("libraryEntryMenu"));
+    QTRY_VERIFY(menu->property("opened").toBool());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(shell.item(QStringLiteral("menuMove"))));
+    QObject *mover = shell.object(QStringLiteral("libraryMoveDialog"));
+    QTRY_VERIFY(mover->property("opened").toBool());
+    typeText(window, QStringLiteral("Sub"));
+    QTRY_COMPARE(shell.object(QStringLiteral("moveFolders"))->property("count").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/Sub/renamed.md")));
+    // Delete asks first, and then moves to the trash.
+    QVERIFY(keysOn(QStringLiteral("b.md")));
+    QTest::keyClick(window, Qt::Key_Delete);
+    QObject *trash = shell.object(QStringLiteral("libraryTrashDialog"));
+    QTRY_VERIFY(trash->property("opened").toBool());
+    QVERIFY(shell.object(QStringLiteral("trashDetail"))->property("text").toString().contains(QStringLiteral("put back")));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(footButton(trash, QStringLiteral("Move to trash"))));
+    QTRY_VERIFY(!QFile::exists(writing + QStringLiteral("/b.md")));
+    // The library folder's menu makes a document there, opened in a tab.
+    QVERIFY(keysOn(QStringLiteral("Writing")));
+    QTest::keyClick(window, Qt::Key_F10, Qt::ShiftModifier);
+    QObject *folderMenu = shell.object(QStringLiteral("libraryFolderMenu"));
+    QTRY_VERIFY(folderMenu->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Down);
+    QTest::keyClick(window, Qt::Key_Down);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(names->property("opened").toBool());
+    typeText(window, QStringLiteral("Fresh start"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/Fresh start.md")));
+    QTRY_VERIFY(shell.document() && shell.document()->path() == writing + QStringLiteral("/Fresh start.md"));
+}
+
+void ParchTests::draggingARowOntoAFolderMovesIt()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString writing = canonical(root.path()) + QStringLiteral("/Writing");
+    writeFile(writing + QStringLiteral("/loose.md"), "loose\n");
+    writeFile(writing + QStringLiteral("/index.md"), "[Loose](loose.md)\n");
+    QVERIFY(QDir().mkpath(writing + QStringLiteral("/Box")));
+    ShellFixture shell({.settings = librarySettings(writing), .root = root.path() + QStringLiteral("/app")});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    resizeWindow(window, 1200);
+    activate(window);
+    QObject *tree = shell.object(QStringLiteral("libraryTree"));
+    QTRY_VERIFY(treeRow(tree, QStringLiteral("Writing")) >= 0);
+    QMetaObject::invokeMethod(tree, "expand", Q_ARG(int, treeRow(tree, QStringLiteral("Writing"))));
+    QQuickItem *loose = nullptr, *box = nullptr;
+    QTRY_VERIFY((loose = libraryRow(window, QStringLiteral("loose.md"))) && (box = libraryRow(window, QStringLiteral("Box"))));
+    const QPoint from = centreOf(loose), to = centreOf(box);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, from);
+    for (int step = 1; step <= 10; ++step) {
+        QTest::mouseMove(window, from + (to - from) * step / 10);
+        QTest::qWait(10);
+    }
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, to);
+    // The link to it asks to be reviewed first, here.
+    QObject *links = shell.object(QStringLiteral("libraryLinkDialog"));
+    QTRY_VERIFY(links->property("opened").toBool());
+    QVERIFY(QFile::exists(writing + QStringLiteral("/loose.md")));
+    QVERIFY(shell.object(QStringLiteral("linkUpdateDetail"))->property("text").toString().contains(QStringLiteral("1 link")));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/Box/loose.md")));
+    QTRY_COMPARE(readFile(writing + QStringLiteral("/index.md")), QByteArray("[Loose](Box/loose.md)\n"));
+}
+
+void ParchTests::newControlsAreNamedAndReachedByKeys()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString writing = canonical(root.path()) + QStringLiteral("/Writing");
+    writeFile(writing + QStringLiteral("/a.md"), "# Heading\n[b](b.md)\nneedle\n");
+    writeFile(writing + QStringLiteral("/b.md"), "needle\n");
+    ShellFixture shell({.settings = librarySettings(writing), .root = root.path() + QStringLiteral("/app")});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.backend->openFiles({writing + QStringLiteral("/a.md")});
+    shell.settings()->setOutlineShown(true);
+    for (int width : {360, 1440}) {
+        resizeWindow(window, width);
+        // The find bar with its replace row: every control named, reached by
+        // Tab before the text, and fitting the window.
+        shell.item(QStringLiteral("editor"))->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_H, Qt::ControlModifier);
+        QTRY_VERIFY(shell.item(QStringLiteral("replaceField"))->isVisible());
+        QTest::qWait(20);
+        QStringList problems = unnamedAccessibleItems(window);
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(", ")));
+        QVERIFY2(tabKeyReachesEveryControl(window, &problems), qPrintable(problems.join(", ")));
+        QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join(", ")));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!shell.item(QStringLiteral("findBar"))->isVisible());
+    }
+    resizeWindow(window, 1200);
+    // Each dialog: named, and Tab reaches every control in it.
+    const auto check = [&](const char *name, const std::function<void()> &open) {
+        QObject *dialog = shell.object(QString::fromLatin1(name));
+        QVERIFY2(dialog, name);
+        open();
+        QTRY_VERIFY2(dialog->property("opened").toBool(), name);
+        QTest::qWait(20);
+        QStringList problems = unnamedAccessibleItems(window);
+        QVERIFY2(problems.isEmpty(), qPrintable(QString::fromLatin1(name) + u' ' + problems.join(", ")));
+        QVERIFY2(tabReachesEveryControlIn(window, popupItem(dialog), &problems),
+                 qPrintable(QString::fromLatin1(name) + u' ' + problems.join(", ")));
+        QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join(", ")));
+        QMetaObject::invokeMethod(dialog, "reject");
+        QTRY_VERIFY2(!dialog->property("visible").toBool(), name);
+    };
+    check("headingsDialog", [&] {
+        shell.item(QStringLiteral("editor"))->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_R, Qt::ControlModifier);
+    });
+    check("folderSearchDialog", [&] {
+        shell.item(QStringLiteral("editor"))->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier);
+        shell.context()->folderSearch()->setPattern(QStringLiteral("needle"));
+        shell.context()->folderSearch()->start();
+        QTRY_VERIFY(shell.context()->folderSearch()->finished());
+    });
+    QObject *panel = shell.object(QStringLiteral("libraryPanel"));
+    check("libraryNameDialog", [&] {
+        QMetaObject::invokeMethod(panel, "askRename", Q_ARG(QVariant, writing + QStringLiteral("/b.md")));
+    });
+    check("libraryMoveDialog", [&] {
+        QVERIFY(QDir().mkpath(writing + QStringLiteral("/Sub")));
+        QMetaObject::invokeMethod(panel, "askMove", Q_ARG(QVariant, writing + QStringLiteral("/b.md")));
+        QTRY_VERIFY(!shell.backend->organizer()->folders().isEmpty());
+    });
+    check("libraryTrashDialog", [&] {
+        QMetaObject::invokeMethod(panel, "askTrash", Q_ARG(QVariant, writing + QStringLiteral("/b.md")));
+    });
+    check("libraryLinkDialog", [&] {
+        QMetaObject::invokeMethod(panel, "moveInto", Q_ARG(QVariant, writing + QStringLiteral("/b.md")),
+                                  Q_ARG(QVariant, writing + QStringLiteral("/Sub")));
+        QTRY_VERIFY2(!shell.backend->organizer()->review().isEmpty(), qPrintable(shell.backend->problemDetail()));
+    });
+    QVERIFY(QFile::exists(writing + QStringLiteral("/b.md")));
+    // The library with its outline shown, and its menu for a document.
+    QStringList problems = unnamedAccessibleItems(window);
+    QVERIFY2(problems.isEmpty(), qPrintable(problems.join(", ")));
+    QVERIFY2(tabKeyReachesEveryControl(window, &problems), qPrintable(problems.join(", ")));
+}
 
 void ParchTests::saveOnDraftAsksForNameThenPromotes()
 {

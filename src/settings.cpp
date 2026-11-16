@@ -29,6 +29,7 @@ const auto shortcutsKey = QStringLiteral("shortcuts");
 // The family the editor has until another is chosen: the alias the theme's
 // font is set through.
 const auto themeFamily = QStringLiteral("monospace");
+const auto outlineShownKey = QStringLiteral("outlineShown");
 // More folders than anyone lists, so that a damaged file costs little.
 constexpr qsizetype maxLibraryFolders = 1000;
 
@@ -208,6 +209,15 @@ void Settings::setLastFolder(const QString &folder)
     emit changed();
 }
 
+void Settings::setOutlineShown(bool shown)
+{
+    if (shown == m_outlineShown) return;
+    m_outlineShown = shown;
+    m_stored.insert(outlineShownKey, shown);
+    write();
+    emit changed();
+}
+
 void Settings::load()
 {
     QFile file(m_file);
@@ -315,6 +325,12 @@ void Settings::load()
             m_lastFolder = folder;
         else
             ignored << lastFolderKey;
+    }
+    if (present(outlineShownKey)) {
+        if (m_stored.value(outlineShownKey).isBool())
+            m_outlineShown = m_stored.value(outlineShownKey).toBool();
+        else
+            ignored << outlineShownKey;
     }
     if (!ignored.isEmpty())
         qWarning("parch: ignoring settings out of range in %s: %s", qPrintable(m_file), qPrintable(ignored.join(", ")));

@@ -2,6 +2,7 @@
 
 #include "session.h"
 // The tabs and the library are properties QML reads, so their types must be complete here.
+#include "foldersearch.h"
 #include "librarymodel.h"
 #include "tabmodel.h"
 
@@ -29,6 +30,9 @@ class WindowContext : public QObject {
     // Whether the keys go to that folder's row. They stay with the text when
     // a document was opened with it.
     Q_PROPERTY(bool folderTakesKeys READ folderTakesKeys NOTIFY folderToShowChanged)
+    // The window's search across the library, with its query and results;
+    // null until the backend gives it one.
+    Q_PROPERTY(FolderSearch *folderSearch READ folderSearch CONSTANT)
 
 public:
     // Takes the library's model as its own.
@@ -69,6 +73,12 @@ public:
     void askToClose(Document *document, bool discarding = false);
     // The window's editor moved its cursor or scrolled.
     Q_INVOKABLE void noteViewMoved();
+    FolderSearch *folderSearch() const;
+    // Takes the search as its own; given once, before any window shows it.
+    void setFolderSearch(FolderSearch *search);
+    // Asks the window to show the front tab where its view is now, as when
+    // the view was set to a place in the text.
+    void showView();
 
 signals:
     void libraryOpenChanged();
@@ -78,6 +88,7 @@ signals:
     void folderToShowChanged();
     void textFocusRequested();
     void closeConfirmationRequested(Document *document, bool discarding);
+    void viewShowRequested();
     // Something the session keeps changed.
     void changed();
 
@@ -89,4 +100,5 @@ private:
     QSize m_size;
     QString m_folderToShow;
     bool m_folderTakesKeys = true;
+    FolderSearch *m_folderSearch = nullptr;
 };

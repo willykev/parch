@@ -48,6 +48,8 @@ class Settings : public QObject {
     Q_PROPERTY(int libraryWidth READ libraryWidth NOTIFY changed)
     // The folders the library lists, in the order they were added.
     Q_PROPERTY(QStringList libraryFolders READ libraryFolders NOTIFY changed)
+    // The library shows the outline of the document in front beneath its folders.
+    Q_PROPERTY(bool outlineShown READ outlineShown WRITE setOutlineShown NOTIFY changed)
 
 public:
     static constexpr int MinFontPixelSize = 10, MaxFontPixelSize = 40;
@@ -78,6 +80,8 @@ public:
     QString lastFolder() const { return m_lastFolder; }
     // Keeps a full path; anything else is ignored.
     void setLastFolder(const QString &folder);
+    bool outlineShown() const { return m_outlineShown; }
+    void setOutlineShown(bool shown);
 
     // Makes the text `steps` pixels larger, or smaller for a negative number,
     // within MinFontPixelSize and MaxFontPixelSize, and keeps that size. A
@@ -136,4 +140,5 @@ private:
     int m_libraryWidth = 260;
     QStringList m_libraryFolders;
     QString m_lastFolder;
+    bool m_outlineShown = false;
 };

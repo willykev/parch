@@ -47,6 +47,7 @@ moment after you pause.
 | `Ctrl+N` | New draft |
 | `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Find a document |
+| `Ctrl+F` / `Ctrl+Shift+F` | Find in the document / search the library |
 | `Ctrl+S` / `Ctrl+Shift+S` | Save now / save as |
 | `F9` | Show or hide the library |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |

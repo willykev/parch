@@ -39,6 +39,11 @@ The first version: a native Markdown writing app for Omarchy.
 
 ### Finding documents
 
+- Find and replace in a document, with case, whole-word and regular
+  expression matching; search across every library folder; go to a heading.
+- Make, rename, move and trash files from the library, with links to them
+  updated, and an outline of the document in front.
+- Each document reopens where you were in it.
 - A library of folders, drafts and recent files.
 - Find a document by name across every library folder.
 - Open files from the terminal, in the running window when there is one.

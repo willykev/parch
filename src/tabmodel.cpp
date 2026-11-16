@@ -464,3 +464,19 @@ void TabModel::documentChanged()
     }
     emit changed();
 }
+
+void TabModel::relocate(const QString &from, const QString &to)
+{
+    bool moved = false;
+    for (int i = 0; i < m_tabs.size(); ++i) {
+        Tab &tab = m_tabs[i];
+        if (tab.document) continue;
+        QString &path = tab.view.path;
+        if (path != from && !path.startsWith(from + u'/')) continue;
+        path = to + path.mid(from.size());
+        moved = true;
+        emit dataChanged(index(i), index(i));
+        if (i == m_active) emit activeChanged();
+    }
+    if (moved) emit changed();
+}

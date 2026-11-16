@@ -28,30 +28,39 @@ HEADERS += \
     ../src/commandregistry.h \
     ../src/diskfile.h \
     ../src/document.h \
+    ../src/documentfind.h \
     ../src/documentreview.h \
     ../src/documentstore.h \
     ../src/editorbinding.h \
+    ../src/fileorganizer.h \
     ../src/filepicker.h \
     ../src/filerequests.h \
     ../src/filewatch.h \
+    ../src/foldersearch.h \
     ../src/history.h \
     ../src/htmlmarkdown.h \
     ../src/hyprland.h \
     ../src/librarymodel.h \
     ../src/linktargets.h \
     ../src/markdownediting.h \
+    ../src/librarywalk.h \
+    ../src/markdownlines.h \
+    ../src/outline.h \
     ../src/pathtext.h \
     ../src/portalfilepicker.h \
     ../src/qmltypes.h \
     ../src/quitsignals.h \
+    ../src/readingpositions.h \
     ../src/recentfiles.h \
     ../src/recovery.h \
+    ../src/references.h \
     ../src/session.h \
     ../src/settings.h \
     ../src/sourceboundaries.h \
     ../src/sourcebuffer.h \
     ../src/sourcetypes.h \
     ../src/tabmodel.h \
+    ../src/textsearch.h \
     ../src/theme.h \
     ../src/themefolder.h \
     ../src/windowcontext.h \
@@ -75,29 +84,38 @@ SOURCES += \
     ../src/commandregistry.cpp \
     ../src/diskfile.cpp \
     ../src/document.cpp \
+    ../src/documentfind.cpp \
     ../src/documentreview.cpp \
     ../src/documentstore.cpp \
     ../src/editorbinding.cpp \
     ../src/editorpaste.cpp \
+    ../src/fileorganizer.cpp \
     ../src/filerequests.cpp \
     ../src/filewatch.cpp \
+    ../src/foldersearch.cpp \
     ../src/history.cpp \
     ../src/htmlmarkdown.cpp \
     ../src/hyprland.cpp \
     ../src/librarymodel.cpp \
     ../src/linktargets.cpp \
     ../src/markdownediting.cpp \
+    ../src/librarywalk.cpp \
+    ../src/markdownlines.cpp \
+    ../src/outline.cpp \
     ../src/pathtext.cpp \
     ../src/portalfilepicker.cpp \
     ../src/qmltypes.cpp \
     ../src/quitsignals.cpp \
+    ../src/readingpositions.cpp \
     ../src/recentfiles.cpp \
     ../src/recovery.cpp \
+    ../src/references.cpp \
     ../src/session.cpp \
     ../src/settings.cpp \
     ../src/sourceboundaries.cpp \
     ../src/sourcebuffer.cpp \
     ../src/tabmodel.cpp \
+    ../src/textsearch.cpp \
     ../src/theme.cpp \
     ../src/windowcontext.cpp \
     ../src/wordcounter.cpp

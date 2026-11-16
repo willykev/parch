@@ -28,6 +28,9 @@ public:
 
     // Puts a full path first, once. A path already first changes nothing.
     void note(const QString &path);
+    // A file, or a folder and everything in it, moved: its paths follow, in
+    // their places.
+    void relocate(const QString &from, const QString &to);
     QStringList paths() const;
     // Nothing is at the path any more.
     bool missing(const QString &path) const;

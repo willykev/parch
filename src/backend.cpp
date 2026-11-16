@@ -5,14 +5,18 @@
 #include "document.h"
 #include "documentreview.h"
 #include "documentstore.h"
+#include "fileorganizer.h"
 #include "filerequests.h"
+#include "foldersearch.h"
 #include "history.h"
 #include "librarymodel.h"
 #include "pathtext.h"
+#include "readingpositions.h"
 #include "recentfiles.h"
 #include "recovery.h"
 #include "settings.h"
 #include "sourcebuffer.h"
+#include "textsearch.h"
 #include "windowcontext.h"
 
 #include <QDir>
@@ -62,7 +66,9 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
       m_recentFiles(std::make_unique<RecentFiles>(paths)),
       m_libraryPool(std::make_unique<QThreadPool>()), m_sessionWriter(paths),
       m_files(std::make_unique<FileRequests>(m_store.get(), m_settings)),
-      m_review(std::make_unique<DocumentReview>(m_store.get()))
+      m_review(std::make_unique<DocumentReview>(m_store.get())),
+      m_positions(std::make_unique<ReadingPositions>(paths)),
+      m_organizer(std::make_unique<FileOrganizer>(m_store.get(), m_settings))
 {
     // Two workers: enough to list a folder while another is slow, and few
     // enough that a folder that never answers costs little.
@@ -197,6 +203,25 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     m_attachments = std::make_unique<Attachments>(paths);
     m_attachments->setLibraryFolders([this] { return m_settings->libraryFolders(); });
     connect(m_attachments.get(), &Attachments::problem, this, &Backend::notify);
+    // What the library's organizing does is said as any action's outcome is.
+    connect(m_organizer.get(), &FileOrganizer::problem, this, &Backend::notify);
+    connect(m_organizer.get(), &FileOrganizer::news, this, &Backend::inform);
+    // A new document opens in the window in front, which asked for it.
+    connect(m_organizer.get(), &FileOrganizer::created, this, [this](const QString &path) {
+        if (WindowContext *window = activeWindow()) openIn(window, {path}, Absent::NotFound)->raise();
+    });
+    // What moved keeps its tabs not read yet, its place among the recent
+    // files, and where the writer was in it.
+    connect(m_organizer.get(), &FileOrganizer::relocated, this, [this](const QString &from, const QString &to) {
+        for (WindowContext *window : std::as_const(m_windows)) window->tabs()->relocate(from, to);
+        m_recentFiles->relocate(from, to);
+        m_positions->relocate(from, to);
+        scheduleSession();
+    });
+    // Recovery takes a moved document's unsaved text at its new path at once.
+    connect(m_organizer.get(), &FileOrganizer::documentMoved, this, [this](Document *document) {
+        if (document->buffer()->modified()) m_autosave->writeNow(document);
+    });
     m_sessionTimer.setSingleShot(true);
     m_sessionTimer.setInterval(SessionDelayMs);
     connect(&m_sessionTimer, &QTimer::timeout, this, [this] { m_sessionWriter.write(collectSession()); });
@@ -252,6 +277,8 @@ void Backend::addCommands()
     m_commands->setAction(QStringLiteral("resetZoom"), [this](WindowContext *) { m_settings->resetZoom(); });
 }
 RecentFiles *Backend::recentFiles() const { return m_recentFiles.get(); }
+ReadingPositions *Backend::readingPositions() const { return m_positions.get(); }
+FileOrganizer *Backend::organizer() const { return m_organizer.get(); }
 QThreadPool *Backend::libraryPool() const { return m_libraryPool.get(); }
 QString Backend::problem() const { return m_problem; }
 QString Backend::problemDetail() const { return m_problemDetail; }
@@ -458,6 +485,7 @@ void Backend::closeWindow(WindowContext *window)
         refuseClosing(unsafe, reasons);
         return;
     }
+    rememberPositions(window);
     m_windows.removeOne(window);
     m_recent.removeOne(window);
     // The window goes first, then its tabs let go of their documents.
@@ -677,6 +705,39 @@ void Backend::openDraft(const QString &documentId)
     showDocument(window, draft)->raise();
 }
 
+void Backend::openSearchResult(const QString &path, const QString &documentId, int start, int length, int line,
+                               const QString &matched)
+{
+    clearNotice();
+    WindowContext *window = activeWindow();
+    if (!window) return;
+    WindowContext *shown = nullptr;
+    if (!path.isEmpty()) {
+        shown = openIn(window, {path}, Absent::NotFound);
+    } else {
+        Document *draft = m_store->openDraft(documentId);
+        if (!draft) {
+            notify(tr("Draft not found"), tr("This draft is no longer among parch's drafts."));
+            return;
+        }
+        shown = showDocument(window, draft);
+        shown->focusText();
+    }
+    shown->raise();
+    TabModel *tabs = shown->tabs();
+    Document *document = tabs->activeDocument();
+    // A file that went since it was searched is a tab that says so.
+    if (!document) return;
+    const QString text = document->buffer()->text();
+    const SourceRange found = TextSearch::relocate(text, start, length, line, matched);
+    ViewState view = tabs->viewState(tabs->activeIndex());
+    view.anchor = found.start;
+    view.cursor = found.start + found.length;
+    view.top = TextSearch::lineStartAbove(text, found.start, 3);
+    tabs->setViewState(tabs->activeIndex(), view);
+    shown->showView();
+}
+
 void Backend::setFilePicker(FilePicker *picker)
 {
     m_files->setPicker(picker);
@@ -754,6 +815,7 @@ WindowContext *Backend::makeWindow()
         new LibraryModel(m_paths, m_store.get(), m_recentFiles.get(), m_settings, m_libraryPool.get()), this);
     // Why a tab holds no document is worded as a notice is, a path from ~.
     window->tabs()->setShownText([this](const QString &text) { return shownText(text); });
+    window->setFolderSearch(new FolderSearch(m_paths, m_store.get(), m_settings));
     connect(window, &WindowContext::changed, this, &Backend::scheduleSession);
     connect(window->tabs(), &TabModel::documentAdded, this, &Backend::watch);
     m_windows.append(window);
@@ -893,9 +955,20 @@ WindowContext *Backend::showDocument(WindowContext *window, Document *document)
         && draft->state() == Document::State::Clean && draft->buffer()->length() == 0
         && !draft->buffer()->canUndo() && !draft->buffer()->canRedo() && viewsOf(draft) == 1) {
         tabs->openInPlaceOf(front, document);
-        return window;
+    } else {
+        tabs->openDocument(document);
     }
-    tabs->openDocument(document);
+    // A file opened again starts where the writer was in it.
+    if (!document->isDraft()) {
+        if (const auto position = m_positions->at(document->path())) {
+            ViewState view = tabs->viewState(tabs->activeIndex());
+            view.cursor = position->cursor;
+            view.anchor = position->anchor;
+            view.top = position->top;
+            tabs->setViewState(tabs->activeIndex(), view);
+            window->showView();
+        }
+    }
     return window;
 }
 
@@ -953,6 +1026,7 @@ void Backend::closeTab(WindowContext *window, int index)
 {
     TabModel *tabs = window->tabs();
     if (index < 0 || index >= tabs->rowCount()) return;
+    rememberPositions(window);
     Document *document = tabs->documentAt(index);
     // Only the last view of a document has to keep its text.
     const bool last = document && viewsOf(document) == 1;
@@ -1030,6 +1104,7 @@ void Backend::giveUp(WindowContext *window, Document *document)
     const int index = tabs->indexOf(document);
     if (index < 0) return;
     const QString id = document->id();
+    rememberPositions(window);
     tabs->closeTab(index);
     // A view opened meanwhile still shows the text, which stays.
     if (m_store->drop(document)) m_autosave->discard(id);
@@ -1092,11 +1167,23 @@ SessionState Backend::collectSession() const
 {
     SessionState state;
     for (WindowContext *window : m_windows) {
-        window->captureView();
+        rememberPositions(window);
         const WindowState kept = window->state();
         if (!kept.tabs.isEmpty()) state.windows.append(kept);
     }
     return state;
+}
+
+void Backend::rememberPositions(WindowContext *window) const
+{
+    window->captureView();
+    TabModel *tabs = window->tabs();
+    for (int i = 0; i < tabs->rowCount(); ++i) {
+        const Document *document = tabs->documentAt(i);
+        if (!document || document->isDraft()) continue;
+        const ViewState view = tabs->viewState(i);
+        m_positions->note(document->path(), {view.cursor, view.anchor, view.top});
+    }
 }
 
 void Backend::checkUnsafe()

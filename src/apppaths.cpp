@@ -41,4 +41,5 @@ QString AppPaths::registryFile() const { return data + QStringLiteral("/document
 QString AppPaths::recovery() const { return state + QStringLiteral("/recovery"); }
 QString AppPaths::sessionFile() const { return state + QStringLiteral("/session.json"); }
 QString AppPaths::recentFile() const { return state + QStringLiteral("/recent.json"); }
+QString AppPaths::positionsFile() const { return state + QStringLiteral("/positions.json"); }
 QString AppPaths::settingsFile() const { return config + QStringLiteral("/settings.json"); }

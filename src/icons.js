@@ -2,8 +2,9 @@
 
 // Adapted from sprawl's src/icons.js (MIT, copyright 2026 willykev): line
 // icons as SVG paths on a 24 unit grid, drawn by Icon.qml with a round two
-// unit stroke. The chevron is sprawl's; the search, folder, document, recent
-// and problem icons are parch's own, drawn the same way.
+// unit stroke. The right chevron is sprawl's; the up and down chevrons and
+// the search, folder, document, recent and problem icons are parch's own,
+// drawn the same way.
 var menu = "M4 6.5h16 M4 12h16 M4 17.5h16"
 var more = "M4 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0 -2.5 0Z M10.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0 -2.5 0Z M17.5 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0 -2.5 0Z"
 var plus = "M12 5v14 M5 12h14"
@@ -33,3 +34,4 @@ var link = "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5
 var image = "M4 5h16v14H4Z M4 16l5-5 4 4 2-2 5 5 M15.5 9.5h0.01"
 var codeBlock = "M4 5h16v14H4Z M9.5 10l-2 2 2 2 M14.5 10l2 2-2 2"
 var table = "M4 5h16v14H4Z M4 10h16 M4 14.5h16 M12 10v9"
+var chevronUp = "M5.5 15l6.5-6.5L18.5 15"

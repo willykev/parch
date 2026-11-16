@@ -31,4 +31,6 @@ struct AppPaths {
     QString registryFile() const;
     QString settingsFile() const;
     QString recentFile() const;
+    // Where the writer was in each file, beside the recent files.
+    QString positionsFile() const;
 };

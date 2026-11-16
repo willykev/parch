@@ -30,6 +30,7 @@ ApplicationWindow {
     readonly property bool dialogOpen: conflictDialog.visible || historyDialog.visible || closeConfirmation.visible
                                        || attachmentDialog.visible || linkCheckDialog.visible
                                        || commandPalette.visible || preferencesDialog.visible || shortcutsDialog.visible
+                                       || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -176,11 +177,13 @@ ApplicationWindow {
     }
 
     // The window's regions, in the order F6 visits them: the library, at its
-    // field; the notice bar, at its first button; and the text. A library or
-    // notice bar not shown, or a notice bar with no button, is passed over.
+    // field; the notice bar, at its first button; the find bar, at its
+    // field; and the text. A library, notice bar or find bar not shown, or a
+    // notice bar with no button, is passed over.
     readonly property int libraryRegion: 0
     readonly property int noticeRegion: 1
-    readonly property int textRegion: 2
+    readonly property int findRegion: 2
+    readonly property int textRegion: 3
     // Where the keys go once the library over the editor has closed.
     property int regionAfterDrawer: textRegion
 
@@ -190,13 +193,15 @@ ApplicationWindow {
                 return libraryRegion
             if (at === noticeBar)
                 return noticeRegion
+            if (at === findBar)
+                return findRegion
         }
         return textRegion
     }
 
     // Gives the keys to the next region shown, or the one before for a step of -1.
     function stepRegion(step) {
-        const shown = [library.visible || drawer.visible, noticeBar.reachable, true]
+        const shown = [library.visible || drawer.visible, noticeBar.reachable, findBar.visible, true]
         let region = regionOf(activeFocusItem)
         do {
             region = (region + step + shown.length) % shown.length
@@ -214,7 +219,9 @@ ApplicationWindow {
     }
 
     function focusRegion(region) {
-        if (region !== noticeRegion || !noticeBar.focusFirst())
+        if (region === findRegion && findBar.visible)
+            findBar.focusFind()
+        else if (region !== noticeRegion || !noticeBar.focusFirst())
             focusText()
     }
 
@@ -227,6 +234,67 @@ ApplicationWindow {
     function checkLinks() {
         if (document)
             linkCheckDialog.check(document)
+    }
+
+    // Find, and replace, in the document in front, in the bar above the
+    // text: opened on the selection when it is one line, with the keys in
+    // the find field, or in the replace field once there is something to
+    // find.
+    function openFind(replacing) {
+        if (!document)
+            return
+        const selected = editorPane.selectedText
+        findBar.replacing = replacing
+        findBar.visible = true
+        documentFind.setSelection(editorPane.anchorSource, editorPane.cursorSource)
+        if (selected.length > 0 && selected.indexOf("\u2029") < 0 && selected.indexOf("\n") < 0)
+            findBar.setPattern(selected)
+        if (replacing && documentFind.pattern.length > 0)
+            findBar.focusReplace()
+        else
+            findBar.focusFind()
+    }
+
+    // Closed, the bar looks for nothing and the keys go back to the text.
+    function closeFind() {
+        findBar.visible = false
+        focusText()
+    }
+
+    // The next match, or the one before; the bar shows again, without the
+    // keys, should it be closed.
+    function findStep(forward) {
+        if (!document)
+            return
+        if (!findBar.visible) {
+            findBar.visible = true
+            documentFind.setSelection(editorPane.anchorSource, editorPane.cursorSource)
+        }
+        if (documentFind.pattern.length === 0) {
+            findBar.focusFind()
+            return
+        }
+        if (forward)
+            documentFind.next()
+        else
+            documentFind.previous()
+    }
+
+    function goToHeading() {
+        if (document)
+            headingsDialog.show(document, editorPane.cursorSource)
+    }
+
+    // A heading's line at the top of the view, with the caret on it.
+    function showHeading(position) {
+        editorPane.showAtTop(position)
+        focusText()
+    }
+
+    // Search across the library, starting from the selection when it is one line.
+    function searchLibrary() {
+        const selected = document ? editorPane.selectedText : ""
+        folderSearchDialog.show(selected.indexOf("\u2029") < 0 && selected.indexOf("\n") < 0 ? selected : "")
     }
 
     // A folder the library is to show: the library opens on it, beside the
@@ -318,6 +386,7 @@ ApplicationWindow {
             window.focusText()
         }
         function onCloseConfirmationRequested(document, discarding) { closeConfirmation.ask(document, discarding) }
+        function onViewShowRequested() { window.showView() }
     }
 
     // After the editor has its width, so that the first line can be found.
@@ -351,6 +420,12 @@ ApplicationWindow {
         save: () => window.save(),
         history: () => window.showHistory(),
         checkLinks: () => window.checkLinks(),
+        findText: () => window.openFind(false),
+        replace: () => window.openFind(true),
+        findNext: () => window.findStep(true),
+        findPrevious: () => window.findStep(false),
+        searchLibrary: () => window.act(() => window.searchLibrary()),
+        goToHeading: () => window.goToHeading(),
         findDocument: () => window.findDocument(),
         library: () => window.toggleLibrary(),
         toolbar: () => window.toggleToolbar(),
@@ -556,6 +631,21 @@ ApplicationWindow {
                 }
             }
 
+            // Find and replace, above the text and in the layout, before the
+            // editor so that Tab reaches it from the window's controls.
+            FindBar {
+                id: findBar
+                objectName: "findBar"
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: noticeBar.bottom
+                height: implicitHeight
+                visible: false
+                find: documentFind
+                keys: window.keys
+                onCloseRequested: window.closeFind()
+            }
+
             // Before the editor, so that Tab reaches it from the window's
             // controls: in the editor, Tab types. It names a refused quit;
             // notices are the notice bar's.
@@ -579,7 +669,7 @@ ApplicationWindow {
                 objectName: "editorPane"
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.top: noticeBar.bottom
+                anchors.top: findBar.bottom
                 anchors.bottom: statusLine.top
                 visible: window.document !== null
                 document: window.document
@@ -594,8 +684,17 @@ ApplicationWindow {
                 onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
                 onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
                 onViewMoved: window.context.noteViewMoved()
-                // Escape in the text dismisses a notice that has nothing behind it.
-                onEscapePressed: if (backend.notice) backend.dismissNotice()
+                // Escape in the text closes the find bar, or else dismisses a
+                // notice that has nothing behind it.
+                onEscapePressed: {
+                    if (findBar.visible)
+                        window.closeFind()
+                    else if (backend.notice)
+                        backend.dismissNotice()
+                }
+                // The find follows where the selection is.
+                onCursorSourceChanged: documentFind.setSelection(anchorSource, cursorSource)
+                onAnchorSourceChanged: documentFind.setSelection(anchorSource, cursorSource)
             }
 
             // In place of the editor, for a tab whose file is not there: what
@@ -725,8 +824,23 @@ ApplicationWindow {
         parent: window.libraryDocked ? library : drawer.contentItem
         anchors.fill: parent
         context: window.context
+        caret: editorPane.cursorSource
         onOpened: drawer.visible ? drawer.close() : window.focusText()
         onLeave: drawer.visible ? drawer.close() : window.focusText()
+        onHeadingChosen: (position) => {
+            if (drawer.visible)
+                drawer.close()
+            window.showHeading(position)
+        }
+    }
+
+    // What the find bar finds in the document in front, while it is shown.
+    DocumentFind {
+        id: documentFind
+        objectName: "documentFind"
+        document: window.document
+        active: findBar.visible
+        onSelectRequested: (anchor, cursor) => editorPane.selectSource(anchor, cursor)
     }
 
     // The window's dialogs. Each gives the keys back as it closes, to the
@@ -787,6 +901,20 @@ ApplicationWindow {
         id: shortcutsDialog
         objectName: "shortcutsDialog"
         commands: window.commands
+        onClosed: window.dialogClosed()
+    }
+
+    HeadingsDialog {
+        id: headingsDialog
+        objectName: "headingsDialog"
+        onChosen: (position) => editorPane.showAtTop(position)
+        onClosed: window.dialogClosed()
+    }
+
+    FolderSearchDialog {
+        id: folderSearchDialog
+        objectName: "folderSearchDialog"
+        context: window.context
         onClosed: window.dialogClosed()
     }
 }

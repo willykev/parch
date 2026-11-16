@@ -1,12 +1,13 @@
 #pragma once
 
 #include "apppaths.h"
-// The attachments, documents, the settings, the commands and the review are
-// properties QML reads, so their types must be complete here.
+// The attachments, documents, the settings, the commands, the review and the
+// organizer are properties QML reads, so their types must be complete here.
 #include "attachments.h"
 #include "commandregistry.h"
 #include "document.h"
 #include "documentreview.h"
+#include "fileorganizer.h"
 #include "history.h"
 #include "session.h"
 #include "settings.h"
@@ -25,6 +26,7 @@ class Autosave;
 class DocumentStore;
 class FilePicker;
 class FileRequests;
+class ReadingPositions;
 class QThreadPool;
 class RecentFiles;
 class Recovery;
@@ -71,6 +73,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantMap recoveryFailures READ recoveryFailures NOTIFY recoveryFailuresChanged)
     // Where pasted images and dropped files are placed; what fails there is a notice.
     Q_PROPERTY(Attachments *attachments READ attachments CONSTANT)
+    // Makes, renames, moves and trashes the library's files and folders.
+    Q_PROPERTY(FileOrganizer *organizer READ organizer CONSTANT)
 
 public:
     enum NoticeTone { Failure, Warning, News };
@@ -91,6 +95,10 @@ public:
     CommandRegistry *commands() const;
     // The files opened, saved and named most recently.
     RecentFiles *recentFiles() const;
+    // Where the writer was in each file, which a file opened again in a new
+    // tab starts at. Kept as tabs close and as the session is written.
+    ReadingPositions *readingPositions() const;
+    FileOrganizer *organizer() const;
     // Where the libraries ask the file system, apart from where documents
     // are saved, so that a folder that never answers cannot hold up a save.
     QThreadPool *libraryPool() const;
@@ -229,6 +237,13 @@ public:
     // Opens an unnamed draft, in the window that has a tab for it, or else
     // in the window in front.
     Q_INVOKABLE void openDraft(const QString &documentId);
+    // Opens what a search found, a file or a draft, as the library opens
+    // it, with the match selected a few lines below the top of the view:
+    // where it was found, or, should the text have changed since, where the
+    // same text is now, as TextSearch::relocate() finds it. `line` counts
+    // from 1.
+    Q_INVOKABLE void openSearchResult(const QString &path, const QString &documentId, int start, int length, int line,
+                                      const QString &matched);
 
     // Asks for files to open, as openFiles() opens them.
     Q_INVOKABLE void open();
@@ -301,6 +316,9 @@ private:
     void refuseClosing(const QList<Document *> &documents, const QStringList &reasons);
     void scheduleSession();
     SessionState collectSession() const;
+    // Keeps where the window's tabs are in their files, the front one as
+    // its editor has it now.
+    void rememberPositions(WindowContext *window) const;
 
     void forgetRecoveryFailure(const QString &documentId);
 
@@ -345,6 +363,9 @@ private:
     // Both go before the store, whose documents and history they use.
     std::unique_ptr<FileRequests> m_files;
     std::unique_ptr<DocumentReview> m_review;
+    std::unique_ptr<ReadingPositions> m_positions;
+    // Goes before the store, whose documents it moves.
+    std::unique_ptr<FileOrganizer> m_organizer;
     History::Pause m_historyPause = History::Pause::None;
     QVariantMap m_recoveryFailures;
     // The documents whose tab closes once their save lands, by id.

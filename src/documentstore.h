@@ -154,6 +154,22 @@ public:
     // path, just before it is written there.
     static void setBeforePlacing(std::function<void(const QString &path)> hook);
 
+    // The open document whose file is at this canonical path, if any.
+    Document *documentOf(const QString &canonicalPath) const;
+    // Whether the document's file may be moved now: it is a named file, no
+    // save or choice of it runs, and it waits on no choice about its file.
+    // False, with why in a few words, otherwise.
+    bool canRelocate(const Document *document, QString *reason = nullptr) const;
+    // The document's file has been moved to this canonical path, as the
+    // library renames and moves files: the document follows it, keeping its
+    // identity, text, undo, history and recovery, and is watched there. The
+    // file is the same file unless `version` says what it is now, as for a
+    // copy made on another file system.
+    void relocate(Document *document, const QString &canonicalPath, const std::optional<DiskVersion> &version = {});
+    // The id history keeps a file's versions under, as opening it would
+    // give it, given now if it has none yet.
+    QString documentIdFor(const QString &canonicalPath);
+
 signals:
     // A document is open: a new draft, a draft or file read, or one restored.
     void documentOpened(Document *document);

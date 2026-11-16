@@ -164,6 +164,9 @@ public:
     // Selects from anchor to cursor and scrolls the line holding `top` to the
     // top of the view. All three are source offsets.
     Q_INVOKABLE void restore(int cursor, int anchor, int top);
+    // Selects from anchor to cursor, source offsets kept inside the text and
+    // at grapheme boundaries, and scrolls only as far as shows the caret.
+    Q_INVOKABLE void select(int anchor, int cursor);
     // The view's height has changed from `formerHeight`: a caret that was in
     // view is kept in view, by the least scroll that shows it, as when typing
     // moves it; otherwise the view keeps its top line.

@@ -89,6 +89,15 @@ Rectangle {
     }
     function restoreView(cursor, anchor, top) { binding.restore(cursor, anchor, top) }
 
+    // The selection in source offsets, and selecting there, scrolled only as
+    // far as shows the caret, as a find does; or with the line at the top of
+    // the view, as going to a heading does.
+    readonly property int cursorSource: binding.cursorSource
+    readonly property int anchorSource: binding.anchorSource
+    readonly property string selectedText: editor.selectedText
+    function selectSource(anchor, cursor) { binding.select(anchor, cursor) }
+    function showAtTop(position) { binding.restore(position, position, position) }
+
     // The cursor moved or the text scrolled.
     signal viewMoved()
     // Escape was pressed in the text, with nothing being composed.

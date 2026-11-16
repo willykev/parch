@@ -394,6 +394,8 @@ QString DocumentReview::reasonWords(History::Reason reason)
         return tr("earlier draft");
     case History::Reason::Closed:
         return tr("when closed");
+    case History::Reason::Links:
+        return tr("before links were updated");
     }
     return {};
 }

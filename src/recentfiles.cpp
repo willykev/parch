@@ -42,6 +42,19 @@ void RecentFiles::note(const QString &path)
     emit changed();
 }
 
+void RecentFiles::relocate(const QString &from, const QString &to)
+{
+    QStringList paths;
+    for (const QString &path : std::as_const(m_paths)) {
+        const QString now = path == from || path.startsWith(from + u'/') ? to + path.mid(from.size()) : path;
+        if (!paths.contains(now)) paths.append(now);
+    }
+    if (paths == m_paths) return;
+    m_paths = paths;
+    write();
+    emit changed();
+}
+
 QStringList RecentFiles::paths() const { return m_paths; }
 
 bool RecentFiles::missing(const QString &path) const { return isMissing(path); }

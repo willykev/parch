@@ -84,3 +84,13 @@ void WindowContext::setFolderToShow(const QString &path)
     emit folderToShowChanged();
 }
 void WindowContext::noteViewMoved() { emit changed(); }
+
+FolderSearch *WindowContext::folderSearch() const { return m_folderSearch; }
+
+void WindowContext::setFolderSearch(FolderSearch *search)
+{
+    m_folderSearch = search;
+    if (search) search->setParent(this);
+}
+
+void WindowContext::showView() { emit viewShowRequested(); }

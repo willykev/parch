@@ -1886,3 +1886,52 @@ void DocumentStore::writeRegistryFile(const QJsonObject &entries)
     file.write(QJsonDocument(entries).toJson());
     file.commit();
 }
+
+Document *DocumentStore::documentOf(const QString &canonicalPath) const
+{
+    if (canonicalPath.isEmpty()) return nullptr;
+    for (Document *document : m_documents)
+        if (document->m_path == canonicalPath) return document;
+    return nullptr;
+}
+
+bool DocumentStore::canRelocate(const Document *document, QString *reason) const
+{
+    const auto refuse = [reason](const QString &why) {
+        if (reason) *reason = why;
+        return false;
+    };
+    if (!document || !m_documents.contains(const_cast<Document *>(document)) || document->isDraft())
+        return refuse(tr("It is not a file of its own"));
+    if (document->m_saving || document->m_resolving || !m_claims.key(const_cast<Document *>(document)).isEmpty())
+        return refuse(tr("“%1” is being saved; try again in a moment").arg(document->title()));
+    if (document->m_problem == Document::Problem::Conflict || document->m_textless || !document->m_leadsTo.isEmpty())
+        return refuse(tr("“%1” waits for a choice about its file; make it first").arg(document->title()));
+    return true;
+}
+
+void DocumentStore::relocate(Document *document, const QString &canonicalPath, const std::optional<DiskVersion> &version)
+{
+    if (!m_documents.contains(document) || document->isDraft() || canonicalPath.isEmpty()) return;
+    m_registry.remove(document->m_path);
+    m_watch.unwatch(document->m_path);
+    document->m_path = canonicalPath;
+    if (version) document->m_diskVersion = *version;
+    else document->m_diskVersion.canonicalPath = canonicalPath;
+    watchPath(canonicalPath);
+    m_registry.insert(canonicalPath, document->m_id);
+    writeRegistry();
+    document->refresh();
+}
+
+QString DocumentStore::documentIdFor(const QString &canonicalPath)
+{
+    if (Document *open = documentOf(canonicalPath)) return open->m_id;
+    QString id = m_registry.value(canonicalPath);
+    if (id.isEmpty()) {
+        id = newId();
+        m_registry.insert(canonicalPath, id);
+        writeRegistry();
+    }
+    return id;
+}

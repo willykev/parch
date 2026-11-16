@@ -191,6 +191,35 @@ parch watches the files you have open.
   listed beneath it and follow changes on disk.
 - **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
   including folders you have not opened.
+- **Outline**, at the foot of the library, lists the headings of the document
+  in front; choosing one goes there.
+- A folder's menu (right click, or the `Menu` key) makes a **New document…**
+  or **New folder…** in it. A document's menu can **Rename…** it (`F2`),
+  **Move to…** another library folder (or drag it there), and **Move to
+  trash…** (`Delete`), from where the desktop's trash can bring it back.
+- When a renamed or moved document has links to it in other documents of the
+  library, or relative links of its own, parch lists them and offers to update
+  them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
+  A moved document keeps its tab, its history and any unsaved text.
+
+## Finding text
+
+- **Find…** (`Ctrl+F`) opens a bar above the text. `Enter` and `F3` go to the
+  next match, `Shift+Enter` and `Shift+F3` to the one before, and the bar
+  counts them ("3 of 12"). The bar's buttons match case, whole words, or a
+  regular expression.
+- **Find and replace…** (`Ctrl+H`) adds a replace field: **Replace** changes
+  the current match and **All** every match, as one step for
+  `Ctrl+Z`. With regular expressions, `$1` in the replacement is the first
+  group.
+- `Escape` closes the bar and gives the keys back to the text.
+- **Search the library…** (`Ctrl+Shift+F`) searches the text of every
+  document in the library's folders and the drafts. Matches arrive as they
+  are found, grouped by document, with the line around each; choosing one
+  opens the document there.
+- **Go to heading…** (`Ctrl+R`) lists the document's headings to jump to.
+
+Each document opens again where you were in it last time.
 
 ## Appearance
 
@@ -206,6 +235,10 @@ change the text size, and `Ctrl+0` returns to the theme's size.
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Find a document |
+| `Ctrl+F` / `Ctrl+H` | Find / find and replace |
+| `F3` / `Shift+F3` | Next / previous match |
+| `Ctrl+Shift+F` | Search the library |
+| `Ctrl+R` | Go to heading |
 | `Ctrl+S` | Save now |
 | `Ctrl+Shift+S` | Save as |
 | `Ctrl+W` | Close the tab |
@@ -266,6 +299,7 @@ window. A folder is added to the library.
 | `~/.local/state/parch/recovery/` | Text not yet in its file |
 | `~/.local/state/parch/session.json` | Open windows and tabs |
 | `~/.local/state/parch/recent.json` | Recent files |
+| `~/.local/state/parch/positions.json` | Where you were in each document |
 | `~/.config/parch/settings.json` | Settings, such as library folders, text size and your own keys |
 
 These follow `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CONFIG_HOME` when they

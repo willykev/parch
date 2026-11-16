@@ -47,7 +47,7 @@ const std::pair<History::Reason, const char *> reasonKeys[] = {
     {History::Reason::Opened, "opened"},       {History::Reason::Reload, "reload"},
     {History::Reason::Overwrite, "overwrite"}, {History::Reason::Restore, "restore"},
     {History::Reason::Recovery, "recovery"},   {History::Reason::Draft, "draft"},
-    {History::Reason::Closed, "closed"},
+    {History::Reason::Closed, "closed"},       {History::Reason::Links, "links"},
 };
 
 QString keyOf(History::Reason reason)

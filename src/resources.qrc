@@ -32,5 +32,13 @@
         <file>PreferenceSection.qml</file>
         <file>PreferenceRow.qml</file>
         <file>WritingPreferences.qml</file>
+        <file>FindBar.qml</file>
+        <file>HeadingsDialog.qml</file>
+        <file>FolderSearchDialog.qml</file>
+        <file>OutlineList.qml</file>
+        <file>NameDialog.qml</file>
+        <file>MoveDialog.qml</file>
+        <file>TrashDialog.qml</file>
+        <file>LinkUpdateDialog.qml</file>
     </qresource>
 </RCC>

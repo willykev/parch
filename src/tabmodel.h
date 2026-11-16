@@ -91,6 +91,10 @@ public:
     int indexOf(const Document *document) const;
     // How many tabs here show the document.
     int viewsOf(const Document *document) const;
+    // A file, or a folder and everything in it, moved from one path to the
+    // other: a tab that waits for a file there, not read yet or not found,
+    // waits for it at its new path.
+    void relocate(const QString &from, const QString &to);
 
     // The tabs of a session, none of them read yet. The tab in front is read
     // by loadActive(), the others when first shown.

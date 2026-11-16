@@ -6,8 +6,12 @@
 #include "commandfilter.h"
 #include "commandregistry.h"
 #include "document.h"
+#include "documentfind.h"
 #include "editorbinding.h"
+#include "fileorganizer.h"
+#include "foldersearch.h"
 #include "librarymodel.h"
+#include "outline.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "tabmodel.h"
@@ -24,6 +28,8 @@ void registerQmlTypes()
     qmlRegisterType<WordCounter>("Parch", 1, 0, "WordCounter");
     qmlRegisterUncreatableType<CommandRegistry>("Parch", 1, 0, "CommandRegistry",
                                                 QStringLiteral("The backend keeps the commands"));
+    qmlRegisterType<DocumentFind>("Parch", 1, 0, "DocumentFind");
+    qmlRegisterType<OutlineModel>("Parch", 1, 0, "OutlineModel");
     // QML reads documents, their buffers and their states by name, but never makes one.
     qmlRegisterUncreatableType<Document>("Parch", 1, 0, "Document", QStringLiteral("Documents come from the store"));
     qmlRegisterUncreatableType<SourceBuffer>("Parch", 1, 0, "SourceBuffer",
@@ -33,6 +39,8 @@ void registerQmlTypes()
                                               QStringLiteral("The backend makes one for each window"));
     qmlRegisterUncreatableType<TabModel>("Parch", 1, 0, "TabModel", QStringLiteral("A window owns its tabs"));
     qmlRegisterUncreatableType<LibraryModel>("Parch", 1, 0, "LibraryModel", QStringLiteral("A window owns its library"));
+    qmlRegisterUncreatableType<FolderSearch>("Parch", 1, 0, "FolderSearch", QStringLiteral("A window owns its search"));
+    qmlRegisterUncreatableType<FileOrganizer>("Parch", 1, 0, "FileOrganizer", QStringLiteral("The backend has one"));
     // QML reaches the one backend as a context property, and its choices by name.
     qmlRegisterUncreatableType<Backend>("Parch", 1, 0, "Backend", QStringLiteral("There is one backend"));
     qmlRegisterUncreatableType<DocumentReview>("Parch", 1, 0, "DocumentReview", QStringLiteral("The backend has one"));

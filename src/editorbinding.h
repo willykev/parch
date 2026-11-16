@@ -5,6 +5,8 @@
 #include "markdownediting.h"
 #include "sourcebuffer.h"
 #include "sourcetypes.h"
+// The binding's Vim keys are a property QML reads, so the type must be complete here.
+#include "vimmode.h"
 
 #include <QMetaMethod>
 #include <QMetaProperty>
@@ -97,6 +99,10 @@ class EditorBinding : public QObject {
     // The heading commands underline headings of levels one and two rather
     // than marking them with #.
     Q_PROPERTY(bool setextHeadings READ setextHeadings WRITE setSetextHeadings NOTIFY setextHeadingsChanged)
+    // The view takes Vim keys, in the modes `vim` keeps; every edit they
+    // make still goes through the source. Off, keys type as always.
+    Q_PROPERTY(bool vimKeys READ vimKeys WRITE setVimKeys NOTIFY vimKeysChanged)
+    Q_PROPERTY(VimMode *vim READ vim CONSTANT)
 
 public:
     // What the writer chose for a dropped Markdown file.
@@ -119,6 +125,9 @@ public:
     void setBlocked(bool blocked);
     bool setextHeadings() const { return m_setextHeadings; }
     void setSetextHeadings(bool setext);
+    bool vimKeys() const { return m_vimKeys; }
+    void setVimKeys(bool on);
+    VimMode *vim() const { return m_vim; }
 
     // Runs one of MarkdownEditing's formatting commands on this view's
     // selection, as one undo step, and selects what the command leaves
@@ -204,6 +213,7 @@ signals:
     // The projection was filled with the whole source anew, as when it is
     // first shown or shown again after a write that did not come from it.
     void projectionLoaded();
+    void vimKeysChanged();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -214,6 +224,7 @@ private slots:
     void stillQtCursor();
     void editorSelectionChanged();
     void editorWidthChanged();
+    void applyInputMethod();
 
 private:
     void attach();
@@ -312,4 +323,12 @@ private:
     QPointer<Attachments> m_attachments;
     // The drop waiting for its files to be looked at or for an answer.
     std::shared_ptr<DropRequest> m_drop;
+    // What Vim keys reach of this binding, and the keys themselves, which
+    // reach nothing as they go.
+    class VimAdapter;
+    std::unique_ptr<VimAdapter> m_vimHost;
+    VimMode *m_vim = nullptr;
+    bool m_vimKeys = false;
+    // Whether the TextEdit takes input method text: Vim keys allow it only in Insert mode.
+    bool m_inputMethodAllowed = true;
 };

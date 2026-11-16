@@ -29,6 +29,11 @@ The first version: a native Markdown writing app for Omarchy.
   heading syntax, toolbar, spelling and focus mode, applied at once in every
   window.
 - A word count and reading time for the document or the selection.
+- Optional Vim keys, off until chosen: Normal, Insert and Visual modes;
+  motions, operators and text objects with counts; registers, `.` and undo by
+  whole changes; search; and `:w`, `:q`, `:wq` and `:x`. The status line
+  shows the mode, and `Esc`, the command palette and the menu always lead
+  back out.
 
 ### Keeping text safe
 

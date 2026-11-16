@@ -26,6 +26,7 @@ const auto lastFolderKey = QStringLiteral("lastFolder");
 const auto headingSyntaxKey = QStringLiteral("headingSyntax");
 const auto toolbarKey = QStringLiteral("toolbar");
 const auto shortcutsKey = QStringLiteral("shortcuts");
+const auto vimKeysKey = QStringLiteral("vimKeys");
 // The family the editor has until another is chosen: the alias the theme's
 // font is set through.
 const auto themeFamily = QStringLiteral("monospace");
@@ -157,6 +158,15 @@ void Settings::setShowToolbar(bool show)
     if (show == m_showToolbar) return;
     m_showToolbar = show;
     m_stored.insert(toolbarKey, show);
+    write();
+    emit changed();
+}
+
+void Settings::setVimKeys(bool on)
+{
+    if (on == m_vimKeys) return;
+    m_vimKeys = on;
+    m_stored.insert(vimKeysKey, on);
     write();
     emit changed();
 }
@@ -303,6 +313,12 @@ void Settings::load()
             m_showToolbar = m_stored.value(toolbarKey).toBool();
         else
             ignored << toolbarKey;
+    }
+    if (present(vimKeysKey)) {
+        if (m_stored.value(vimKeysKey).isBool())
+            m_vimKeys = m_stored.value(vimKeysKey).toBool();
+        else
+            ignored << vimKeysKey;
     }
     if (present(shortcutsKey)) {
         // Each command's keys on their own: a list of strings, or nothing of it.

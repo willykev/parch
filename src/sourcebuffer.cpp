@@ -155,6 +155,31 @@ void SourceBuffer::redo()
     if (modified() != wasModified) emit modifiedChanged();
 }
 
+qsizetype SourceBuffer::undoDepth() const { return m_historyPosition; }
+
+void SourceBuffer::joinSince(qsizetype depth)
+{
+    // Whatever is joined, the next edit starts a step of its own.
+    m_canJoin = false;
+    if (depth < 0 || m_historyPosition - depth < 1) return;
+    const bool wasModified = modified();
+    Step &joined = m_history[depth];
+    joined.kind = EditKind::Other;
+    const qsizetype removed = m_historyPosition - depth - 1;
+    for (qsizetype i = depth + 1; i < m_historyPosition; ++i) {
+        const Step &step = m_history.at(i);
+        joined.edits += step.edits;
+        joined.lastTime = step.lastTime;
+        joined.hasLineBreak = joined.hasLineBreak || step.hasLineBreak;
+    }
+    // Redo steps after the joined ones stay after it.
+    m_history.remove(depth + 1, removed);
+    if (m_savedPosition > depth && m_savedPosition < m_historyPosition) m_savedPosition = -1;
+    else if (m_savedPosition >= m_historyPosition) m_savedPosition -= removed;
+    m_historyPosition = depth + 1;
+    if (modified() != wasModified) emit modifiedChanged();
+}
+
 void SourceBuffer::markSaved()
 {
     const bool wasModified = modified();

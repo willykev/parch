@@ -44,5 +44,6 @@
         <file>LinkUpdateDialog.qml</file>
         <file>skill.md</file>
         <file>export.css</file>
+        <file>KeysPreferences.qml</file>
     </qresource>
 </RCC>

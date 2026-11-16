@@ -283,6 +283,7 @@ void Backend::addCommands()
     // Spelling is checked in every window or in none.
     m_commands->setAction(QStringLiteral("checkSpelling"),
                           [this](WindowContext *) { setSpellchecking(!m_spelling->wanted()); });
+    m_commands->setAction(QStringLiteral("vimKeys"), [this](WindowContext *) { m_settings->setVimKeys(!m_settings->vimKeys()); });
 }
 RecentFiles *Backend::recentFiles() const { return m_recentFiles.get(); }
 ReadingPositions *Backend::readingPositions() const { return m_positions.get(); }

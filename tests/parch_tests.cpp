@@ -54,6 +54,7 @@
 #include "textsearch.h"
 #include "theme.h"
 #include "themefolder.h"
+#include "vimtests.h"
 #include "windowcontext.h"
 #include "windowtesting.h"
 
@@ -586,6 +587,23 @@ private slots:
     void toolbarShowsHidesAndRunsCommands() { EditingTests::toolbarShowsHidesAndRunsCommands(); }
     void formattingCommandsRunFromEveryEntryPoint() { EditingTests::formattingCommandsRunFromEveryEntryPoint(); }
     void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
+    // Vim keys, written in vimtests.cpp.
+    void undoStepsJoinIntoOneChange() { VimTests::undoStepsJoinIntoOneChange(); }
+    void vimKeysAreOffUntilChosenAndKept() { VimTests::vimKeysAreOffUntilChosenAndKept(); }
+    void motionsMoveAsVimDoes() { VimTests::motionsMoveAsVimDoes(); }
+    void operatorsActOnMotions() { VimTests::operatorsActOnMotions(); }
+    void commandsEditAsVimDoes() { VimTests::commandsEditAsVimDoes(); }
+    void textObjectsTakeTheirText() { VimTests::textObjectsTakeTheirText(); }
+    void visualModeSelectsAndActs() { VimTests::visualModeSelectsAndActs(); }
+    void searchFindsAndRepeats() { VimTests::searchFindsAndRepeats(); }
+    void registersKeepYanksAndPuts() { VimTests::registersKeepYanksAndPuts(); }
+    void dotRepeatsTheLastChange() { VimTests::dotRepeatsTheLastChange(); }
+    void undoTakesBackWholeChanges() { VimTests::undoTakesBackWholeChanges(); }
+    void escapeAlwaysReachesNormalMode() { VimTests::escapeAlwaysReachesNormalMode(); }
+    void insertTypesAsWithoutVimKeys() { VimTests::insertTypesAsWithoutVimKeys(); }
+    void commandLineRunsWindowCommands() { VimTests::commandLineRunsWindowCommands(); }
+    void commandLineSavesAndClosesTabs() { VimTests::commandLineSavesAndClosesTabs(); }
+    void windowShowsAndLeavesVimKeys() { VimTests::windowShowsAndLeavesVimKeys(); }
     void editorDrawsFromTheme();
     void caretBlinksThenRestsAndDrawsNothing();
     void caretIsSteadyWithoutMotionOrFlash();
@@ -10073,7 +10091,7 @@ void ParchTests::writingAidsAreNamedAndReachable()
             if (now == close) break;
             QTest::keyClick(window, Qt::Key_Tab);
         }
-        QCOMPARE(reached, (QStringList{"spellingCheck", "focusSentence", "focusParagraph", "closePreferences"}));
+        QCOMPARE(reached, (QStringList{"spellingCheck", "focusSentence", "focusParagraph", "vimKeysChoice", "closePreferences"}));
         for (const char *name : {"spellingCheck", "focusSentence", "focusParagraph", "closePreferences"}) {
             QAccessibleInterface *access = QAccessible::queryAccessibleInterface(shell.item(QString::fromLatin1(name)));
             QVERIFY2(access && !access->text(QAccessible::Name).isEmpty(), name);

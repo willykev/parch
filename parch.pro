@@ -87,6 +87,7 @@ HEADERS += \
     src/theme.h \
     src/treejson.h \
     src/themefolder.h \
+    src/vimmode.h \
     src/windowcontext.h \
     src/wordcounter.h
 
@@ -172,6 +173,7 @@ SOURCES += \
     src/textsearch.cpp \
     src/theme.cpp \
     src/treejson.cpp \
+    src/vimmode.cpp \
     src/windowcontext.cpp \
     src/wordcounter.cpp
 

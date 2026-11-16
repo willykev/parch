@@ -19,6 +19,7 @@
 #include "spellchecker.h"
 #include "spellinglayer.h"
 #include "tabmodel.h"
+#include "vimmode.h"
 #include "windowcontext.h"
 #include "wordcounter.h"
 
@@ -45,6 +46,7 @@ void registerQmlTypes()
     qmlRegisterUncreatableType<Settings>("Parch", 1, 0, "Settings", QStringLiteral("The backend keeps the settings"));
     qmlRegisterUncreatableType<WindowContext>("Parch", 1, 0, "WindowContext",
                                               QStringLiteral("The backend makes one for each window"));
+    qmlRegisterUncreatableType<VimMode>("Parch", 1, 0, "VimMode", QStringLiteral("An editor binding has its own"));
     qmlRegisterUncreatableType<TabModel>("Parch", 1, 0, "TabModel", QStringLiteral("A window owns its tabs"));
     qmlRegisterUncreatableType<LibraryModel>("Parch", 1, 0, "LibraryModel", QStringLiteral("A window owns its library"));
     qmlRegisterUncreatableType<FolderSearch>("Parch", 1, 0, "FolderSearch", QStringLiteral("A window owns its search"));

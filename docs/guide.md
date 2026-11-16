@@ -112,7 +112,131 @@ the theme's; the text size; the line height; the longest line, in
 characters; how headings are written; whether the formatting toolbar shows;
 whether spelling is checked; and what focus mode keeps bright. A window too
 narrow for the toolbar hides it until you ask for it with **Show toolbar**.
-Every change applies at once in every window.
+Every change applies at once in every window. Under **Keys**, **Edit with Vim
+keys** turns on Vim keys.
+
+## Vim keys
+
+Vim keys are off until you turn them on: **Turn on Vim keys** in the menu
+(`F10`) or the command palette, or **Edit with Vim keys** in **Preferences**.
+The editor then starts in Normal mode, the caret is a block on the character
+it is on, and the status line shows the mode (NORMAL, INSERT, VISUAL or VISUAL
+LINE) with, beside it, the command line as you type it, the keys of a command
+not yet complete, or what the last command had to say.
+
+**Leaving them.** `Esc` (or `Ctrl+[`) always returns to Normal mode, from
+Insert or Visual mode, the command line or a command half typed. The command
+palette (`Ctrl+Shift+P`) and the menu (`F10`) work in every mode, and
+**Turn off Vim keys** in either, or the box in **Preferences**, turns them off
+at once. Keys with `Ctrl` keep their meaning in parch in every mode: `Ctrl+S`
+saves, `Ctrl+Z` undoes, `Ctrl+C`, `Ctrl+X` and `Ctrl+V` copy, cut and paste,
+and so on. Vim's own `Ctrl` keys are only `Ctrl+R` (redo) and `Ctrl+[`.
+
+### Normal mode
+
+A count before a command repeats it or goes that far, up to 9999: `3w`,
+`2dd`, `d3w`, `2d3w`, `5G`. These keys are covered:
+
+- **Moving:** `h` `j` `k` `l` and the arrow keys; `Backspace` and `Space`,
+  which go on to the line before or after; `Enter`, to the first non-blank
+  character of the next line; `w` `b` `e` and `W` `B` `E`, by words and by runs of
+  everything but blanks; `0` (or `Home`), `^` and `$` (or `End`); `gg` and `G`,
+  to the first and last line or to the line counted; `{` and `}`, to the empty
+  line before or after; `%`, to the bracket that matches the one at or after
+  the cursor, or with a count that far through the document, in percent; `f`
+  `t` `F` `T` and a character, repeated with `;` and `,`; `/` `?` `n` `N` `*`
+  `#`, under Search below. `j` and `k` keep their column and move by lines of
+  the text, not by lines wrapped on screen.
+- **Operators** `d` (delete), `c` (change), `y` (yank), `>` and `<` (indent
+  and outdent, as `Tab` does: list items nest, other lines take a tab). Each
+  takes any motion above, its own key again for whole lines (`dd`, `cc`,
+  `yy`, `>>`, `<<`), or a text object: `iw` `aw` and `iW` `aW` (a word or
+  WORD, `a` with its blanks); `ip` `ap` (a paragraph, `a` with the blank
+  lines after it); `i"` `a"`, `i'` `a'` and `` i` `` `` a` `` (quoted text on
+  the line); `i(` `a(` (also `i)` `ib`), `i[` `a[` (also `i]`) and `i{` `a{`
+  (also `i}` `iB`), a bracketed block, the `a` forms with their brackets. `cw`
+  on a word changes to its end, as in Vim.
+- **Commands:** `x` (or `Delete`) and `X` delete characters; `s` and `S`
+  change characters and lines; `C` and `D` change and delete to the end of
+  the line; `Y` yanks lines; `J` joins lines with one space; `r` and a
+  character replaces characters (`r` `Enter` breaks the line); `~` switches
+  case; `p` and `P` put after and before; `u` and `Ctrl+R` undo and redo; `.`
+  repeats the last change, with a new count if you give one.
+- **Typing:** `i` (or `Insert`) and `a` insert before and after the cursor,
+  `I` and `A` at the start and end of the line, and `o` and `O` on a new
+  line below and above. A count types what you type that many times: `3ix`
+  then `Esc` types `xxx`.
+- `v` and `V` start Visual mode; `:`, `/` and `?` the command line.
+
+Keys that are no command here do nothing and type nothing.
+
+### Insert mode
+
+Insert mode types exactly as parch does without Vim keys: lists continue on
+`Enter`, `Tab` indents, `Shift+Enter` breaks the line, input methods compose,
+and paste converts rich text. `Esc` or `Ctrl+[` returns to Normal mode, one
+character to the left. Outside Insert mode the editor takes no input method,
+so that every key is a command.
+
+### Visual mode
+
+`v` selects by character and `V` by whole lines; pressing the same key
+again, or `Esc`, leaves, and the other key switches. A selection made with
+the mouse, or with `Shift` and the arrows, is a Visual mode selection too.
+Every motion and text object above moves the selection's end, and `o` goes to
+its other end. On the selection, `d` (or `x`, `Delete`), `c` (or `s`), `y`,
+`>`, `<`, `J`, `~`, `u` (lower case), `U` (upper case), `r` and a character,
+and `p` or `P` (put in its place; `p` keeps what it replaced) act on it, and
+`D` `X` `C` `S` `R` `Y` on its whole lines. A count before `>` or `<`
+indents that many times.
+
+### Registers
+
+`"` and a name before a command chooses where it yanks, deletes or puts:
+`"a` to `"z`, with `"A` to `"Z` adding to them; `"0`, the last yank; `"_`,
+which keeps nothing; and `"+` or `"*`, the clipboard. Without a name, yanks
+and deletes go to the unnamed register, which `p` puts; they stay inside
+parch, and every window shares them. `Ctrl+C` and `Ctrl+V` still copy and
+paste through the clipboard, and in Visual mode they act on the selection.
+
+### Search
+
+`/` and `?` search forward and backward for what you type, and `Enter` goes
+there; `n` and `N` go on in the same or the other direction, and `*` and `#`
+look for the whole word under the cursor. A pattern is plain text, not a
+regular expression, and its letters match either case unless it has a
+capital; `*` and `#` match the word's case. A search goes round the end of
+the document, and the status line says so; one that finds nothing says that
+instead. A search is also a motion: `d/the` and `Enter` deletes up to the
+next "the".
+
+### The command line
+
+`:` opens it in the status line; `Backspace` takes back a character, `Ctrl+V`
+pastes, `Enter` runs it and `Esc` leaves it.
+
+| Command | What it does |
+| --- | --- |
+| `:w`, `:write` | Save, as `Ctrl+S` does |
+| `:q`, `:quit` | Close the tab, which saves it first or asks, as closing a tab always does |
+| `:wq`, `:x`, `:xit`, `:exit` | Save and close the tab; a draft is named first, and its tab stays open until you `:q` |
+| `:q!`, `:wq!`, `:x!` | The same as without `!`: parch never throws text away |
+| `:` and a number | Go to that line; `:$` goes to the last |
+
+Closing a window's last tab closes the window, and closing the last window
+quits parch, which first saves everything or keeps it in recovery.
+
+### Undo
+
+Every Normal or Visual mode command is one step for `u` to take back, and so
+is a stay in Insert mode together with the command that began it: `cw`, what
+you typed and the `Esc` undo at once. A change that `.` repeats is one step
+too; `.` repeats a Visual mode change on as much text from the cursor as it
+changed.
+
+Not covered: other Vim commands, such as `gj`, `ge`, `R`, block selection,
+marks, macros and folds; regular expressions, `:s` and line ranges; Vim's
+settings and mappings.
 
 ## Saving
 

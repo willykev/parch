@@ -41,6 +41,9 @@ class Settings : public QObject {
     // Whether windows show the formatting toolbar; a narrow window still
     // hides it until asked.
     Q_PROPERTY(bool showToolbar READ showToolbar NOTIFY changed)
+    // The editor takes Vim keys: Normal, Insert and Visual modes and a
+    // command line. Off until chosen.
+    Q_PROPERTY(bool vimKeys READ vimKeys NOTIFY changed)
     // The ranges of the writing settings, for controls that set them:
     // minFontPixelSize, maxFontPixelSize, minLineHeight, maxLineHeight,
     // minLineLength and maxLineLength.
@@ -106,6 +109,7 @@ public:
     QVariantMap limits() const;
     bool setextHeadings() const { return m_setextHeadings; }
     bool showToolbar() const { return m_showToolbar; }
+    bool vimKeys() const { return m_vimKeys; }
     // Each setter keeps a value within its range, ignores one outside it,
     // and writes nothing when nothing changes. An empty family, or the
     // theme's own, returns the editor to the theme's family.
@@ -114,6 +118,7 @@ public:
     Q_INVOKABLE void setMaxLineLength(int characters);
     Q_INVOKABLE void setSetextHeadings(bool setext);
     Q_INVOKABLE void setShowToolbar(bool show);
+    Q_INVOKABLE void setVimKeys(bool on);
 
     // The writer's own key bindings, by command id, each replacing all of
     // that command's default keys; an empty list leaves the command without
@@ -145,6 +150,7 @@ private:
     QString m_editorFontFamily = QStringLiteral("monospace");
     bool m_setextHeadings = false;
     bool m_showToolbar = true;
+    bool m_vimKeys = false;
     QHash<QString, QStringList> m_shortcutOverrides;
     bool m_freshDraftOnLaunch = false;
     int m_libraryWidth = 260;

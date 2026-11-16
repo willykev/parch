@@ -56,6 +56,10 @@ ThemedDialog {
             WritingAidsPreferences {
                 width: parent.width
             }
+
+            KeysPreferences {
+                width: parent.width
+            }
         }
 
         ScrollBar.vertical: ThemedDialog.Scroller {

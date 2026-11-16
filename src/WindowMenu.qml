@@ -113,6 +113,11 @@ ThemedMenu {
     CommandEntry { command: "palette" }
     CommandEntry { objectName: "preferencesEntry"; command: "preferences" }
     CommandEntry { command: "shortcuts" }
+    CommandEntry {
+        objectName: "vimKeysEntry"
+        command: "vimKeys"
+        text: settings.vimKeys ? qsTr("Turn off Vim keys") : qsTr("Turn on Vim keys")
+    }
     MenuLine {}
     CommandEntry { command: "quit" }
 

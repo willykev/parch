@@ -37,6 +37,14 @@ public:
     bool canRedo() const;
     void undo();
     void redo();
+    // How many steps undo can take back now: a mark for joinSince().
+    qsizetype undoDepth() const;
+    // Makes every step taken since undoDepth() returned `depth` one step, as
+    // a Vim command or a stay in Insert mode is one change, and lets no later
+    // edit join it. Nothing is joined once undo has gone back past `depth`.
+    // A save among the joined steps no longer matches a step of its own, so
+    // the text then counts as modified.
+    void joinSince(qsizetype depth);
     // The current history position is what is on disk.
     void markSaved();
     // True when the history position differs from the saved one.

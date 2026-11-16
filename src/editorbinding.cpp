@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <QFontInfo>
 #include <QGuiApplication>
+#include <QInputMethod>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QQuickTextDocument>
@@ -150,10 +151,58 @@ int CrlfPairs::toSource(int position) const
     return position + int(low);
 }
 
-EditorBinding::EditorBinding(QObject *parent) : QObject(parent) {}
+// What Vim keys reach: the view's document, selection and edits, in source
+// offsets, and the TextEdit for keys typed again.
+class EditorBinding::VimAdapter : public VimHost {
+public:
+    explicit VimAdapter(EditorBinding *binding) : b(binding) {}
+
+    Document *document() const override { return b->m_loaded ? b->m_document.data() : nullptr; }
+    bool editable() const override { return b->editable() && !b->m_blocked; }
+    bool composing() const override { return b->m_composing; }
+    int cursor() const override { return b->m_loaded ? b->m_pairs.toSource(b->editorCursor()) : 0; }
+    int anchor() const override { return b->m_loaded ? b->m_pairs.toSource(b->editorAnchor()) : 0; }
+    void select(int anchor, int cursor) override
+    {
+        if (!b->m_loaded) return;
+        const int length = b->m_buffer->length();
+        b->selectEditor(b->m_pairs.toEditor(qBound(0, anchor, length)), b->m_pairs.toEditor(qBound(0, cursor, length)));
+        b->revealCursor();
+    }
+    bool apply(const TextChange &change) override { return b->m_loaded && b->apply(change); }
+    void type(int key, Qt::KeyboardModifiers modifiers, const QString &text) override
+    {
+        if (!b->m_editor) return;
+        QKeyEvent event(QEvent::KeyPress, key, modifiers, text);
+        QCoreApplication::sendEvent(b->m_editor, &event);
+    }
+    void commit(const QString &text) override
+    {
+        if (!b->m_editor) return;
+        QInputMethodEvent event;
+        event.setCommitString(text);
+        QCoreApplication::sendEvent(b->m_editor, &event);
+    }
+    void setInputMethodEnabled(bool enabled) override
+    {
+        b->m_inputMethodAllowed = enabled;
+        b->applyInputMethod();
+    }
+
+private:
+    EditorBinding *b;
+};
+
+EditorBinding::EditorBinding(QObject *parent)
+    : QObject(parent), m_vimHost(std::make_unique<VimAdapter>(this)), m_vim(new VimMode(m_vimHost.get(), this))
+{
+    // Wherever the cursor moves, Vim keys follow; their own moves they know of.
+    connect(this, &EditorBinding::cursorChanged, m_vim, &VimMode::selectionMoved);
+}
 
 // Qt removes a destroyed filter from the TextEdit by itself, and the views
-// own their projections, so nothing needs undoing here.
+// own their projections, so nothing needs undoing here. Vim keys go with
+// the binding and reach nothing of it as they go.
 EditorBinding::~EditorBinding() = default;
 
 Document *EditorBinding::document() const { return m_document; }
@@ -275,7 +324,13 @@ void EditorBinding::attach()
         m_connections.append(connect(m_editor, SIGNAL(readOnlyChanged(bool)), this, SLOT(stillQtCursor()),
                                      Qt::QueuedConnection));
     QMetaObject::invokeMethod(this, &EditorBinding::stillQtCursor, Qt::QueuedConnection);
+    // Qt lets a TextEdit take input methods again as it becomes editable.
+    if (meta->indexOfSignal("readOnlyChanged(bool)") >= 0)
+        m_connections.append(connect(m_editor, SIGNAL(readOnlyChanged(bool)), this, SLOT(applyInputMethod())));
     load();
+    // Another document, or the first: Vim keys start again in Normal mode.
+    m_vim->reset();
+    applyInputMethod();
 }
 
 void EditorBinding::stillQtCursor()
@@ -309,6 +364,7 @@ void EditorBinding::detach()
     m_topAnchor = {};
     m_cursorSource = m_anchorSource = 0;
     refreshEditable();
+    m_vim->reset();
 }
 
 void EditorBinding::editorWidthChanged()
@@ -421,7 +477,27 @@ void EditorBinding::setBlocked(bool blocked)
     m_blocked = blocked;
     // What was being composed is dropped, not written.
     if (blocked) cancelComposition();
+    m_vim->setBlocked(blocked);
     emit blockedChanged();
+}
+
+void EditorBinding::setVimKeys(bool on)
+{
+    if (on == m_vimKeys) return;
+    m_vimKeys = on;
+    // Normal mode takes no input method, so what one is composing is dropped.
+    if (on) cancelComposition();
+    m_vim->setActive(on);
+    emit vimKeysChanged();
+}
+
+void EditorBinding::applyInputMethod()
+{
+    if (!m_editor) return;
+    const bool takes = m_inputMethodAllowed && !m_editor->property("readOnly").toBool();
+    if (bool(m_editor->flags() & QQuickItem::ItemAcceptsInputMethod) == takes) return;
+    m_editor->setFlag(QQuickItem::ItemAcceptsInputMethod, takes);
+    if (m_editor->hasActiveFocus()) QGuiApplication::inputMethod()->update(Qt::ImEnabled);
 }
 
 void EditorBinding::setSetextHeadings(bool setext)
@@ -1011,10 +1087,19 @@ bool EditorBinding::eventFilter(QObject *watched, QEvent *event)
     }
     if (watched == m_editor && !m_dispatching && m_loaded) {
         if (event->type() == QEvent::InputMethod) {
-            handleInputMethod(static_cast<QInputMethodEvent *>(event));
+            auto *input = static_cast<QInputMethodEvent *>(event);
+            // Outside Insert mode, Vim keys take what an input method sends as keys.
+            if (!m_vim->handleInputMethod(input)) handleInputMethod(input);
             return true;
         }
-        if (event->type() == QEvent::KeyPress) return handleKey(static_cast<QKeyEvent *>(event));
+        if (event->type() == QEvent::KeyPress) {
+            auto *key = static_cast<QKeyEvent *>(event);
+            if (m_vim->handleKey(key)) {
+                key->accept();
+                return true;
+            }
+            return handleKey(key);
+        }
     }
     return QObject::eventFilter(watched, event);
 }

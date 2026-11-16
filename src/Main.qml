@@ -712,6 +712,7 @@ ApplicationWindow {
                 problemDetail: backend.notice ? "" : backend.shownText(backend.problemDetail)
                 selectionStart: editorPane.anchorPosition
                 selectionEnd: editorPane.cursorPosition
+                vim: settings.vimKeys ? editorPane.vim : null
             }
 
             EditorPane {
@@ -729,6 +730,7 @@ ApplicationWindow {
                 lineHeight: settings.lineHeight
                 fontFamily: settings.editorFontFamily
                 setextHeadings: settings.setextHeadings
+                vimKeys: settings.vimKeys
                 inputBlocked: window.dialogOpen
                 attachments: backend.attachments
                 spellChecker: backend.spelling
@@ -737,6 +739,8 @@ ApplicationWindow {
                 onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
                 onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
                 onViewMoved: window.context.noteViewMoved()
+                // :w saves and :q closes the tab, as their commands do.
+                onVimCommand: (command) => window.run(command)
                 // Escape in the text closes the find bar, or else leaves
                 // distraction-free writing, or else dismisses a notice that
                 // has nothing behind it.

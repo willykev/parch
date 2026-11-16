@@ -1,9 +1,11 @@
 import QtQuick
 import Parch
 
-// The line along the bottom of the editor: whether the document is saved, in
-// words, and why the last action could not be done, if it could not; and on
-// the right how many words the document has, or the selection, and how long
+// The line along the bottom of the editor: with Vim keys, their mode first,
+// and the command line being typed, the keys of a command not yet complete
+// or what the last command said; whether the document is saved, in words,
+// and why the last action could not be done, if it could not; and on the
+// right how many words the document has, or the selection, and how long
 // they take to read. The reason keeps its room first.
 Rectangle {
     id: line
@@ -17,6 +19,9 @@ Rectangle {
     // The view's selection, as source offsets, whose words are counted when it has any.
     property int selectionStart: 0
     property int selectionEnd: 0
+    // The editor's Vim keys, while it takes them.
+    property VimMode vim: null
+    readonly property bool vimShown: vim !== null && vim.active
 
     readonly property real gap: Math.round(theme.fontSize * 2 / 3)
     // A draft with nothing in it has nothing saved either, and says so
@@ -35,8 +40,52 @@ Rectangle {
     }
 
     Row {
-        id: saving
+        id: vimArea
+        objectName: "vimArea"
+        visible: line.vimShown
         anchors.left: parent.left
+        anchors.leftMargin: line.gap
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Math.round(theme.fontSize / 2)
+
+        Text {
+            id: vimMode
+            objectName: "vimMode"
+            anchors.verticalCenter: parent.verticalCenter
+            text: line.vim ? line.vim.modeName : ""
+            textFormat: Text.PlainText
+            font.family: theme.fontFamily
+            font.pixelSize: theme.fontSize
+            font.weight: Font.DemiBold
+            color: theme.accent
+            Accessible.role: Accessible.StaticText
+            Accessible.name: qsTr("Vim mode: %1").arg(text)
+        }
+
+        // At most a third of the line, the end of a long command in view.
+        Text {
+            id: vimCommand
+            objectName: "vimCommand"
+            readonly property bool said: line.vim !== null && line.vim.commandLine.length === 0
+                                         && line.vim.message.length > 0
+            anchors.verticalCenter: parent.verticalCenter
+            visible: text.length > 0
+            width: Math.min(implicitWidth, Math.max(0, line.width / 3))
+            text: !line.vim ? "" : line.vim.commandLine.length > 0 ? line.vim.commandLine
+                                   : line.vim.message.length > 0 ? line.vim.message : line.vim.pending
+            textFormat: Text.PlainText
+            font.family: theme.fontFamily
+            font.pixelSize: theme.fontSize
+            color: said ? theme.warning : theme.foreground
+            elide: Text.ElideLeft
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+    }
+
+    Row {
+        id: saving
+        anchors.left: vimArea.visible ? vimArea.right : parent.left
         anchors.leftMargin: line.gap
         anchors.verticalCenter: parent.verticalCenter
         spacing: Math.round(theme.fontSize / 2)

@@ -22,6 +22,7 @@ HEADERS += \
     citationtests.h \
     cslfixture.h \
     testfiles.h \
+    vimtests.h \
     windowtesting.h \
     ../src/apppaths.h \
     ../src/appservice.h \
@@ -100,6 +101,7 @@ HEADERS += \
     ../src/theme.h \
     ../src/treejson.h \
     ../src/themefolder.h \
+    ../src/vimmode.h \
     ../src/windowcontext.h \
     ../src/wordcounter.h
 
@@ -113,6 +115,7 @@ SOURCES += \
     citationtests.cpp \
     cslfixture.cpp \
     testfiles.cpp \
+    vimtests.cpp \
     windowtesting.cpp \
     ../src/apppaths.cpp \
     ../src/appservice.cpp \
@@ -194,6 +197,7 @@ SOURCES += \
     ../src/textsearch.cpp \
     ../src/theme.cpp \
     ../src/treejson.cpp \
+    ../src/vimmode.cpp \
     ../src/windowcontext.cpp \
     ../src/wordcounter.cpp
 

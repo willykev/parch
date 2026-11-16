@@ -37,6 +37,13 @@ Rectangle {
     function answerCopy(copy) { binding.answerCopy(copy) }
     // The heading commands underline levels one and two rather than marking them with #.
     property bool setextHeadings: false
+    // The text takes Vim keys; their mode and command line are `vim`'s.
+    property bool vimKeys: false
+    readonly property VimMode vim: binding.vim
+    // Outside Insert mode the caret is a block on the character it is on.
+    readonly property bool blockCaret: vimKeys && vim.mode !== VimMode.Insert
+    // A window command Vim keys ask for, such as :w's "save".
+    signal vimCommand(string command)
     // The view's selection, from anchor to cursor, as source offsets, and
     // whether the text takes edits.
     readonly property int cursorPosition: binding.cursorSource
@@ -250,7 +257,46 @@ Rectangle {
                 objectName: "caret"
                 width: Math.max(1, Math.round(pane.fontPixelSize / 8))
                 color: theme.accent
-                visible: pane.caretFocused && pane.caretLit
+                visible: pane.caretFocused && pane.caretLit && !pane.blockCaret
+            }
+
+            // Vim's block caret, over the character the cursor is on, or
+            // a character wide at the end of a line. It follows the layout
+            // as the cursor's rectangle does.
+            Rectangle {
+                id: block
+                objectName: "blockCaret"
+                // A rectangle only for a position the text shows: while an
+                // edit is being followed, the source can be ahead of it.
+                function boxAt(source) {
+                    const shown = binding.sourceToEditor(source)
+                    return shown < 0 ? Qt.rect(0, 0, 0, 0) : editor.positionToRectangle(Math.min(shown, editor.length))
+                }
+                // Worked out only while the block shows, so that typing
+                // without it costs nothing here.
+                readonly property rect from: {
+                    if (!pane.blockCaret)
+                        return Qt.rect(0, 0, 0, 0)
+                    editor.cursorRectangle
+                    editor.width
+                    editor.font
+                    return boxAt(pane.vim.cursor)
+                }
+                readonly property rect to: {
+                    if (!pane.blockCaret)
+                        return Qt.rect(0, 0, 0, 0)
+                    editor.cursorRectangle
+                    editor.width
+                    editor.font
+                    return boxAt(pane.vim.cursorEnd)
+                }
+                visible: pane.blockCaret && pane.caretFocused && pane.caretLit
+                x: from.x
+                y: from.y
+                width: to.y === from.y && to.x > from.x ? to.x - from.x : pane.characterWidth
+                height: from.height
+                color: theme.accent
+                opacity: 0.45
             }
 
             // The TextEdit's own editing methods edit the source, as typing does.
@@ -400,6 +446,7 @@ Rectangle {
         blocked: pane.inputBlocked
         attachments: pane.attachments
         setextHeadings: pane.setextHeadings
+        vimKeys: pane.vimKeys
         onCursorChanged: {
             pane.viewMoved()
             pane.wakeCaret()
@@ -407,5 +454,12 @@ Rectangle {
         onActivity: pane.wakeCaret()
         onIncludeAsked: (name, canInclude) => pane.includeAsked(name, canInclude)
         onCopyAsked: (names, bytes) => pane.copyAsked(names, bytes)
+    }
+
+    Connections {
+        target: binding.vim
+        function onCommandRequested(command) { pane.vimCommand(command) }
+        // A key in Normal or Visual mode lights the caret as typing does.
+        function onCursorChanged() { pane.wakeCaret() }
     }
 }

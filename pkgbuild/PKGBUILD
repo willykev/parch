@@ -8,9 +8,10 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/willykev/parch'
 # parch is MIT. The helpers bring the rest: KaTeX's fonts (OFL-1.1) inside
 # both, Eclipse ELK (EPL-2.0) inside Merman, and the licences its Rust crates
-# and JavaScript sources carry, as its third-party notices record.
+# and JavaScript sources carry, as its third-party notices record. The bundled
+# citation styles and locales are CC-BY-SA-3.0.
 license=('MIT' 'Apache-2.0' 'OFL-1.1' 'EPL-2.0' 'MPL-2.0' 'BSD-2-Clause' 'BSD-3-Clause' 'ISC' 'Zlib'
-         'Unicode-3.0' '0BSD' 'CDLA-Permissive-2.0' 'MIT-0' 'Unlicense')
+         'Unicode-3.0' '0BSD' 'CDLA-Permissive-2.0' 'MIT-0' 'Unlicense' 'CC-BY-SA-3.0')
 options=('!debug')
 # Core, GUI, OpenGL, D-Bus, networking and concurrency come from qt6-base;
 # QML, Quick, its controls and shapes from qt6-declarative; SVG from qt6-svg;
@@ -23,7 +24,9 @@ options=('!debug')
 # (KSyntaxHighlighting) colours the code in previews.
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal' 'fontconfig'
          'hunspell' 'hunspell-en_us' 'libyaml' 'syntax-highlighting')
-optdepends=('noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'
+optdepends=('qt6-imageformats: WebP and TIFF pictures in documents'
+            'kimageformats: AVIF, HEIF and JPEG XL pictures in documents'
+            'noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'
             'noto-fonts-emoji: emoji in diagrams')
 makedepends=('gcc' 'make')
 # This recipe builds a checkout. bin/release also produces a standalone

@@ -129,13 +129,15 @@ The first version: a native Markdown writing app for Omarchy.
   text to format, and the preview stays where it was.
 - Tables, code and formulas wider than the column scroll sideways by
   themselves.
-- In the preview, links open, a task's box ticks the task in the text, a
+- In the preview, web and mail links open, other kinds ask first and show
+  where they lead, a task's box ticks the task in the text, a
   double click puts the caret at the same place in the text, and what you
   select copies as plain text and with its formatting. A double click in an
   included file's text opens that file at the place, and the outline lists
   included headings, each opening its file there.
 - Preferences for the reading font, text size, line height and line length,
-  for scrolling together, and for fetching pictures from the web.
+  for scrolling together, and for pictures from the web, which are shown
+  only when you allow them, for one document or for all.
 - The outline has a command and a key of its own, and a heading chosen from
   it is shown in the preview too.
 - Distraction-free writing keeps the view: the text, the text beside its
@@ -180,6 +182,23 @@ The first version: a native Markdown writing app for Omarchy.
   that link unless you choose to follow it.
 - A file another program renames, or moves into a folder parch watches, is
   followed, with its unsaved text, history and recent-file entry.
+
+### Safe with documents from anywhere
+
+- A document can only include files, and name bibliographies and styles,
+  within its library or its own folder, and never makes parch read devices,
+  system files or endless files. Deeply nested or self-multiplying
+  bibliographies and styles are refused rather than read.
+- Pictures from the web are never fetched from this machine or the local
+  network, and are decoded only as the image they say they are.
+- Bibliography links in HTML and EPUB exports are web, mail or DOI links only.
+- Exports never write through a link at their destination.
+- History, recovery, drafts, settings and the session are readable only by
+  you.
+- The math and diagram helpers run cut off from the network, with limits on
+  memory and time.
+- Very long words, very wide tables and very long documents keep the window
+  responsive; a PDF export of one reports its progress and can be cancelled.
 
 ### Finding documents
 

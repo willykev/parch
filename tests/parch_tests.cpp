@@ -523,6 +523,7 @@ private slots:
     void tabKeysCycleAndCloseInTheWindow();
     void newFileThatAppearsIsNeverReplaced();
     void forwardWaitsUntilTheInstanceTakesTheFiles();
+    void forwardGivesUpOnAnInstanceThatNeverAccepts();
     void alreadyOpenFileComesToFrontInItsWindow();
     void backgroundViewsFollowEditsElsewhere();
     void closingUnsavableTextKeepsItsTab();
@@ -11878,6 +11879,43 @@ void ParchTests::newFileThatAppearsIsNeverReplaced()
     QVERIFY(tabs->activeDocument() && tabs->activeDocument()->isDraft());
     QCOMPARE(tabs->activeTitle(), QStringLiteral("mine"));
     QVERIFY(tabs->activePath().isEmpty());
+}
+
+void ParchTests::forwardGivesUpOnAnInstanceThatNeverAccepts()
+{
+    // An instance whose queue of connections is full, as one stuck before
+    // its event loop would leave it, holds a launch no longer than the deadline.
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    SKIP_UNLESS_SOCKET_FITS(AppService::socketPath(paths));
+    QVERIFY(DiskFile::makeFolders(paths.runtime));
+    const QByteArray name = QFile::encodeName(AppService::socketPath(paths));
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, name.constData(), size_t(name.size()));
+    const int listening = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    QVERIFY(listening >= 0);
+    const auto closeListening = qScopeGuard([listening] { ::close(listening); });
+    QVERIFY(::bind(listening, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) == 0);
+    QVERIFY(::listen(listening, 0) == 0);
+    // Fill the queue: further connections are refused with EAGAIN.
+    std::vector<int> waiting;
+    const auto closeWaiting = qScopeGuard([&waiting] { for (const int fd : waiting) ::close(fd); });
+    for (int i = 0; i < 64; ++i) {
+        const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+        if (::connect(fd, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) {
+            ::close(fd);
+            break;
+        }
+        waiting.push_back(fd);
+    }
+    QElapsedTimer clock;
+    clock.start();
+    QString why;
+    QVERIFY(!AppService::forward(paths, {QStringLiteral("/a.md")}, &why));
+    QVERIFY2(clock.elapsed() < AppService::TimeoutMs + 1000, qPrintable(QString::number(clock.elapsed())));
+    QVERIFY(!why.isEmpty());
 }
 
 void ParchTests::forwardWaitsUntilTheInstanceTakesTheFiles()

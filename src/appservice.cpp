@@ -250,11 +250,31 @@ bool AppService::forward(const AppPaths &paths, const QStringList &files, QStrin
     const int descriptor = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (descriptor < 0) return false;
     const auto closed = qScopeGuard([descriptor] { ::close(descriptor); });
-    // Nobody listening, or a socket a crash left behind: no instance to ask.
-    if (::connect(descriptor, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) return false;
+    // Non-blocking from the start, so that an instance too busy to accept
+    // cannot hold a launch past its deadline: a full backlog says EAGAIN,
+    // and the connection is tried again until the deadline.
     ::fcntl(descriptor, F_SETFL, ::fcntl(descriptor, F_GETFL) | O_NONBLOCK);
-
     const QDeadlineTimer deadline(TimeoutMs);
+    for (;;) {
+        if (::connect(descriptor, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) == 0) break;
+        if (errno == EINTR) continue;
+        if (errno == EINPROGRESS) {
+            int error = 0;
+            socklen_t length = sizeof(error);
+            if (!waitFor(descriptor, POLLOUT, deadline)
+                || ::getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &error, &length) != 0 || error != 0)
+                return fail(tr("The running parch did not answer"));
+            break;
+        }
+        if (errno == EAGAIN && !deadline.hasExpired()) {
+            ::poll(nullptr, 0, 10);
+            continue;
+        }
+        if (errno == EAGAIN) return fail(tr("The running parch did not answer"));
+        // Nobody listening, or a socket a crash left behind: no instance to ask.
+        return false;
+    }
+
     for (qsizetype sent = 0; sent < frame.size();) {
         const ssize_t count = ::send(descriptor, frame.constData() + sent, size_t(frame.size() - sent), MSG_NOSIGNAL);
         if (count > 0) {

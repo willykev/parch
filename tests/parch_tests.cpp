@@ -636,6 +636,18 @@ void ParchTests::launchParsing()
     QCOMPARE(parseLaunch({"parch", "--bogus"}).kind, Launch::Invalid);
     QVERIFY(!parseLaunch({"parch", "--bogus"}).error.isEmpty());
     QCOMPARE(versionLine(), QStringLiteral("parch 0.1.0"));
+    // A value can follow '='; an option is never taken as another's value.
+    QCOMPARE(parseLaunch({"parch", "--theme=nord", "a.md"}).themeDirectory, QStringLiteral("nord"));
+    QCOMPARE(parseLaunch({"parch", "--benchmark=out.json", "a.md"}).benchmarkOutput, QStringLiteral("out.json"));
+    QCOMPARE(parseLaunch({"parch", "--theme", "--version"}).kind, Launch::Invalid);
+    QCOMPARE(parseLaunch({"parch", "--theme="}).kind, Launch::Invalid);
+    // A single dash is an option too, refused unless it is -h.
+    QCOMPARE(parseLaunch({"parch", "-x"}).kind, Launch::Invalid);
+    QCOMPARE(parseLaunch({"parch", "-h"}).kind, Launch::Help);
+    // After "--" every argument is a file, dashes and all.
+    QCOMPARE(parseLaunch({"parch", "--", "-notes.md", "--version"}).files, (QStringList{"-notes.md", "--version"}));
+    // "open" is a subcommand only first; later it is a file's name.
+    QCOMPARE(parseLaunch({"parch", "a.md", "open"}).files, (QStringList{"a.md", "open"}));
 }
 
 void ParchTests::launchMessages()

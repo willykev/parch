@@ -73,11 +73,26 @@ QStringList withoutQtOptions(const QStringList &arguments)
 Launch parseLaunch(const QStringList &given)
 {
     Launch launch;
+    const auto refuse = [&launch](const QString &error) {
+        launch.kind = Launch::Invalid;
+        launch.error = error;
+        return launch;
+    };
     // Qt's own options are Qt's, whichever place they have.
     const QStringList arguments = withoutQtOptions(given);
+    bool onlyFiles = false;
     // The first entry is the program name.
     for (qsizetype i = 1; i < arguments.size(); ++i) {
         const QString &argument = arguments.at(i);
+        // After "--" every argument is a file, even one that starts with a dash.
+        if (onlyFiles) {
+            launch.files.append(argument);
+            continue;
+        }
+        if (argument == QLatin1String("--")) {
+            onlyFiles = true;
+            continue;
+        }
         if (argument == QLatin1String("--version")) {
             launch.kind = Launch::Version;
             return launch;
@@ -86,21 +101,25 @@ Launch parseLaunch(const QStringList &given)
             launch.kind = Launch::Help;
             return launch;
         }
-        if (argument == QLatin1String("--theme") || argument == QLatin1String("--benchmark")) {
-            if (i + 1 >= arguments.size()) {
-                launch.kind = Launch::Invalid;
-                launch.error = QCoreApplication::translate("cli", "parch: %1 needs a value").arg(argument);
-                return launch;
+        // An option with a value takes it as the next argument or after '='.
+        const qsizetype equals = argument.indexOf(u'=');
+        const QString name = equals > 0 ? argument.left(equals) : argument;
+        if (name == QLatin1String("--theme") || name == QLatin1String("--benchmark")) {
+            QString value;
+            if (equals > 0) {
+                value = argument.mid(equals + 1);
+            } else if (i + 1 < arguments.size() && !arguments.at(i + 1).startsWith(u'-')) {
+                value = arguments.at(++i);
             }
-            const QString &value = arguments.at(++i);
-            (argument == QLatin1String("--theme") ? launch.themeDirectory : launch.benchmarkOutput) = value;
+            if (value.isEmpty())
+                return refuse(QCoreApplication::translate("cli", "parch: %1 needs a value").arg(name));
+            (name == QLatin1String("--theme") ? launch.themeDirectory : launch.benchmarkOutput) = value;
             continue;
         }
-        if (argument.startsWith(QLatin1String("--"))) {
-            launch.kind = Launch::Invalid;
-            launch.error = QCoreApplication::translate("cli", "parch: unknown option %1").arg(argument);
-            return launch;
-        }
+        // Anything else that looks like an option is refused rather than
+        // opened as a file; "--" before a name that starts with a dash opens it.
+        if (argument.startsWith(u'-') && argument.size() > 1)
+            return refuse(QCoreApplication::translate("cli", "parch: unknown option %1").arg(argument));
         // The "open" word is only a subcommand before any file; afterwards it is a file name.
         if (argument == QLatin1String("open") && i == 1)
             continue;

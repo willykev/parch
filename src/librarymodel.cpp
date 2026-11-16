@@ -6,7 +6,6 @@
 #include "recentfiles.h"
 #include "settings.h"
 
-#include <QCollator>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -54,6 +53,47 @@ bool isTextDocument(const QString &name)
         if (name.endsWith(QLatin1String(ending), Qt::CaseInsensitive) && name.size() > qsizetype(std::strlen(ending)))
             return true;
     return false;
+}
+
+// Orders names as people read them: runs of digits by their value, so
+// "chapter 2" comes before "chapter 10", and the text between them without
+// regard to case, in the locale's order. Qt's collator does the first only
+// where ICU is available, which a plain C locale is not.
+int naturalCompare(const QString &a, const QString &b)
+{
+    qsizetype i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (a.at(i).isDigit() && b.at(j).isDigit()) {
+            qsizetype endA = i, endB = j;
+            while (endA < a.size() && a.at(endA).isDigit()) ++endA;
+            while (endB < b.size() && b.at(endB).isDigit()) ++endB;
+            // Leading zeros do not change a number's value.
+            qsizetype startA = i, startB = j;
+            while (startA + 1 < endA && a.at(startA).digitValue() == 0) ++startA;
+            while (startB + 1 < endB && b.at(startB).digitValue() == 0) ++startB;
+            if (endA - startA != endB - startB) return endA - startA < endB - startB ? -1 : 1;
+            for (qsizetype k = 0; k < endA - startA; ++k) {
+                const int da = a.at(startA + k).digitValue(), db = b.at(startB + k).digitValue();
+                if (da != db) return da < db ? -1 : 1;
+            }
+            i = endA;
+            j = endB;
+            continue;
+        }
+        qsizetype endA = i, endB = j;
+        while (endA < a.size() && !a.at(endA).isDigit()) ++endA;
+        while (endB < b.size() && !b.at(endB).isDigit()) ++endB;
+        const QString textA = a.mid(i, endA - i).toCaseFolded(), textB = b.mid(j, endB - j).toCaseFolded();
+        if (const int order = QString::localeAwareCompare(textA, textB); order != 0) return order;
+        // Equal text of different lengths cannot happen without the runs
+        // ending at different places; compare them as text then.
+        if (textA != textB) return textA < textB ? -1 : 1;
+        i = endA;
+        j = endB;
+    }
+    if (i < a.size()) return 1;
+    if (j < b.size()) return -1;
+    return 0;
 }
 } // namespace
 
@@ -357,12 +397,9 @@ LibraryModel::FolderListing LibraryModel::listFolder(const QString &path)
         listing.error = tr("Cannot be read: %1").arg(QString::fromLocal8Bit(std::strerror(error)));
         return listing;
     }
-    QCollator collator;
-    collator.setCaseSensitivity(Qt::CaseInsensitive);
-    collator.setNumericMode(true);
-    std::sort(listing.entries.begin(), listing.entries.end(), [&](const Entry &a, const Entry &b) {
+    std::sort(listing.entries.begin(), listing.entries.end(), [](const Entry &a, const Entry &b) {
         if (a.folder != b.folder) return a.folder;
-        const int order = collator.compare(a.name, b.name);
+        const int order = naturalCompare(a.name, b.name);
         return order != 0 ? order < 0 : a.name < b.name;
     });
     listing.ok = true;

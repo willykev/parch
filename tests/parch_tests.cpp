@@ -8852,8 +8852,16 @@ void ParchTests::tabStripKeepsTabsReadableAndScrolls()
     QTRY_VERIFY(tabAt(7));
     QQuickItem *last = tabAt(7);
     QVERIFY(last->width() >= minimum);
-    const QRectF shown = list->mapRectToScene(QRectF(0, 0, list->width(), list->height()));
-    QVERIFY(shown.adjusted(-0.5, -0.5, 0.5, 0.5).contains(last->mapRectToScene(QRectF(0, 0, last->width(), last->height()))));
+    // The strip settles once its tabs have their final widths.
+    const auto shownRect = [&] { return list->mapRectToScene(QRectF(0, 0, list->width(), list->height())); };
+    const auto lastRect = [&] { return last->mapRectToScene(QRectF(0, 0, last->width(), last->height())); };
+    const auto describeRect = [](const QRectF &r) {
+        return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
+    };
+    QTRY_VERIFY2(shownRect().adjusted(-0.5, -0.5, 0.5, 0.5).contains(lastRect()),
+                 qPrintable(QStringLiteral("strip %1, last tab %2, contentX %3")
+                                .arg(describeRect(shownRect()), describeRect(lastRect()))
+                                .arg(list->property("contentX").toReal())));
     // Each tab is named in full, however much of its name the strip shows.
     QCOMPARE(last->property("text").toString(), titles.at(7));
     QStringList problems;

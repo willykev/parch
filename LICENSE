@@ -50,3 +50,30 @@ in /usr/share/licenses/parch/ (licenses/ratex/ in this repository):
   merman contributors, under the MIT License or the Apache License 2.0. It carries work from
   Mermaid, Eclipse ELK (Eclipse Public License 2.0), RaTeX, the KaTeX fonts,
   and the other projects its third-party notices list with their licences.
+
+The citation styles and locales in src/csl come from the Citation Style
+Language project (https://citationstyles.org): the styles from
+https://github.com/citation-style-language/styles and the locales from
+https://github.com/citation-style-language/locales. They are licensed under
+the Creative Commons Attribution-ShareAlike 3.0 Unported License
+(https://creativecommons.org/licenses/by-sa/3.0/), and each file names its
+authors, contributors and translators in its info element. parch includes
+them unchanged:
+
+- apa.csl: APA Style 7th edition
+- chicago-author-date.csl: Chicago Manual of Style 18th edition (author-date)
+- chicago-notes-bibliography.csl: Chicago Manual of Style 18th edition (notes
+  and bibliography)
+- harvard-cite-them-right.csl: Cite Them Right 12th edition (author-date/Harvard)
+- ieee.csl: IEEE Reference Guide version 11.29.2023
+- modern-language-association.csl: MLA Handbook 9th edition (in-text citations)
+- nlm-citation-sequence.csl: NLM/Vancouver: Citing Medicine 2nd edition
+  (citation-sequence)
+- locales-en-US.xml and locales-en-GB.xml: the English (US) and English (UK)
+  CSL locales
+
+The tests also run fixtures from the CSL test suite,
+https://github.com/citation-style-language/test-suite (processor-tests/humans),
+by Frank G. Bennett, Jr. and the CSL contributors. They are not part of this
+repository or of the installed program: bin/fetch-test-fixtures downloads them
+for testing.

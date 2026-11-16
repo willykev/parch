@@ -18,6 +18,8 @@ HEADERS += \
     editingtests.h \
     rendertesting.h \
     markdown_tests.h \
+    citationtests.h \
+    cslfixture.h \
     testfiles.h \
     windowtesting.h \
     ../src/apppaths.h \
@@ -25,12 +27,18 @@ HEADERS += \
     ../src/attachments.h \
     ../src/autosave.h \
     ../src/backend.h \
+    ../src/bibtex.h \
     ../src/benchmark.h \
     ../src/caretrest.h \
+    ../src/citations.h \
     ../src/cli.h \
     ../src/commandfilter.h \
     ../src/commandregistry.h \
     ../src/diagramrender.h \
+    ../src/cslengine.h \
+    ../src/cslreference.h \
+    ../src/cslrichtext.h \
+    ../src/cslstyle.h \
     ../src/diskfile.h \
     ../src/document.h \
     ../src/documentfind.h \
@@ -92,6 +100,8 @@ SOURCES += \
     parch_tests.cpp \
     editingtests.cpp \
     rendertesting.cpp \
+    citationtests.cpp \
+    cslfixture.cpp \
     testfiles.cpp \
     windowtesting.cpp \
     ../src/apppaths.cpp \
@@ -99,12 +109,18 @@ SOURCES += \
     ../src/attachments.cpp \
     ../src/autosave.cpp \
     ../src/backend.cpp \
+    ../src/bibtex.cpp \
     ../src/benchmark.cpp \
     ../src/caretrest.cpp \
+    ../src/citations.cpp \
     ../src/cli.cpp \
     ../src/commandfilter.cpp \
     ../src/commandregistry.cpp \
     ../src/diagramrender.cpp \
+    ../src/cslengine.cpp \
+    ../src/cslreference.cpp \
+    ../src/cslrichtext.cpp \
+    ../src/cslstyle.cpp \
     ../src/diskfile.cpp \
     ../src/document.cpp \
     ../src/documentfind.cpp \
@@ -164,3 +180,7 @@ SOURCES += \
     ../src/wordcounter.cpp
 
 RESOURCES += ../src/resources.qrc
+RESOURCES += ../src/csl/csl.qrc
+
+CONFIG += link_pkgconfig
+PKGCONFIG += yaml-0.1

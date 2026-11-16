@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+
+# Downloads the test fixtures parch does not keep in its repository: the CSL
+# test suite's processor fixtures, at a pinned commit, into build/csl-suite.
+# Each fixture is checked against tests/csl-suite/fixtures.sha256, so the
+# tests run exactly the fixtures they were written against. Run it again at
+# any time; it does nothing once the fixtures are there.
+ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
+COMMIT=6eefc5b07c6969ab8999e48542acbcc131cba864
+LIST="$ROOT/tests/csl-suite/fixtures.sha256"
+OUT="$ROOT/build/csl-suite"
+
+if [ -d "$OUT" ] && (cd "$OUT" && sha256sum --quiet --check "$LIST") >/dev/null 2>&1; then
+    echo "The CSL test suite fixtures are in $OUT"
+    exit 0
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/parch-fixtures.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 1' HUP INT TERM
+
+echo "Downloading the CSL test suite at $COMMIT"
+curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+    -o "$WORK/suite.tar.gz" \
+    "https://github.com/citation-style-language/test-suite/archive/$COMMIT.tar.gz"
+mkdir "$WORK/suite"
+tar -xzf "$WORK/suite.tar.gz" -C "$WORK/suite" --strip-components=1 \
+    --wildcards '*/processor-tests/humans/*.txt'
+
+rm -rf "$OUT.new"
+mkdir -p "$OUT.new"
+# Only the listed fixtures are taken, and each must be the one listed.
+awk '{ print $2 }' "$LIST" | while read -r name; do
+    cp "$WORK/suite/processor-tests/humans/$name" "$OUT.new/$name"
+done
+(cd "$OUT.new" && sha256sum --quiet --check "$LIST")
+rm -rf "$OUT"
+mv "$OUT.new" "$OUT"
+echo "The CSL test suite fixtures are in $OUT: $(wc -l < "$LIST") fixtures"

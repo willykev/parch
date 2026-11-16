@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/csl">
+        <file>apa.csl</file>
+        <file>chicago-author-date.csl</file>
+        <file>chicago-notes-bibliography.csl</file>
+        <file>harvard-cite-them-right.csl</file>
+        <file>ieee.csl</file>
+        <file>modern-language-association.csl</file>
+        <file>nlm-citation-sequence.csl</file>
+        <file>locales-en-GB.xml</file>
+        <file>locales-en-US.xml</file>
+    </qresource>
+</RCC>

@@ -15,12 +15,18 @@ HEADERS += \
     src/attachments.h \
     src/autosave.h \
     src/backend.h \
+    src/bibtex.h \
     src/benchmark.h \
     src/caretrest.h \
+    src/citations.h \
     src/cli.h \
     src/commandfilter.h \
     src/commandregistry.h \
     src/diagramrender.h \
+    src/cslengine.h \
+    src/cslreference.h \
+    src/cslrichtext.h \
+    src/cslstyle.h \
     src/diskfile.h \
     src/document.h \
     src/documentfind.h \
@@ -83,12 +89,18 @@ SOURCES += \
     src/attachments.cpp \
     src/autosave.cpp \
     src/backend.cpp \
+    src/bibtex.cpp \
     src/benchmark.cpp \
     src/caretrest.cpp \
+    src/citations.cpp \
     src/cli.cpp \
     src/commandfilter.cpp \
     src/commandregistry.cpp \
     src/diagramrender.cpp \
+    src/cslengine.cpp \
+    src/cslreference.cpp \
+    src/cslrichtext.cpp \
+    src/cslstyle.cpp \
     src/diskfile.cpp \
     src/document.cpp \
     src/documentfind.cpp \
@@ -148,3 +160,10 @@ SOURCES += \
     src/wordcounter.cpp
 
 RESOURCES += src/resources.qrc
+
+# Citation styles and locales, from the official CSL repositories.
+RESOURCES += src/csl/csl.qrc
+
+# libyaml reads CSL YAML bibliographies.
+CONFIG += link_pkgconfig
+PKGCONFIG += yaml-0.1

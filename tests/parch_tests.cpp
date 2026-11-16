@@ -5,6 +5,7 @@
 #include "backend.h"
 #include "benchmark.h"
 #include "caretrest.h"
+#include "citationtests.h"
 #include "cli.h"
 #include "diskfile.h"
 #include "document.h"
@@ -328,6 +329,30 @@ private slots:
     void deletingCoalescesAdjacentRanges();
     void modifiedTracksSavedPosition();
     void editNeverJoinsTheSavedStep();
+    // Citations and bibliographies; the tests are in citationtests.cpp.
+    void citationRichTextOutput() { CitationTests::richTextOutput(); }
+    void citationBibtexSyntax() { CitationTests::bibtexSyntax(); }
+    void citationBibtexLatex() { CitationTests::bibtexLatex(); }
+    void citationBibtexNames() { CitationTests::bibtexNames(); }
+    void citationBibtexDatesTypesAndFields() { CitationTests::bibtexDatesTypesAndFields(); }
+    void citationBibliographyDiagnostics() { CitationTests::bibliographyDiagnostics(); }
+    void citationCslJsonAndYaml() { CitationTests::cslJsonAndYaml(); }
+    void citationStyleErrors() { CitationTests::styleErrors(); }
+    void citationBundledStylesLoad() { CitationTests::bundledStylesLoad(); }
+    void citationLocaleTermsAndFallbacks() { CitationTests::localeTermsAndFallbacks(); }
+    void citationApaStyle() { CitationTests::apaStyle(); }
+    void citationChicagoAuthorDateStyle() { CitationTests::chicagoAuthorDateStyle(); }
+    void citationChicagoNotesStyle() { CitationTests::chicagoNotesStyle(); }
+    void citationIeeeStyle() { CitationTests::ieeeStyle(); }
+    void citationMlaStyle() { CitationTests::mlaStyle(); }
+    void citationHarvardStyle() { CitationTests::harvardStyle(); }
+    void citationVancouverStyle() { CitationTests::vancouverStyle(); }
+    void citationLocatorParsing() { CitationTests::locatorParsing(); }
+    void citationNotePositions() { CitationTests::notePositions(); }
+    void citationKeysAndScopes() { CitationTests::keysAndScopes(); }
+    void citationWriterDefinitions() { CitationTests::writerDefinitions(); }
+    void citationFormattingOffTheUiThread() { CitationTests::formattingOffTheUiThread(); }
+    void citationCslTestSuite() { CitationTests::cslTestSuite(); }
     void untouchedFilesSaveByteIdentical();
     void invalidUtf8OpensReadOnlyWithBytesKept();
     void saveRefusesWhenDiskChanged();

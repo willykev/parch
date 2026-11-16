@@ -14,14 +14,14 @@ license=('MIT' 'Apache-2.0' 'OFL-1.1' 'EPL-2.0' 'MPL-2.0' 'BSD-2-Clause' 'BSD-3-
 options=('!debug')
 # Core, GUI, OpenGL, D-Bus, networking and concurrency come from qt6-base;
 # QML, Quick, its controls and shapes from qt6-declarative; SVG from qt6-svg;
-# spell checking from hunspell. Nothing links to qt6-wayland, the plugin
-# through which the window reaches Omarchy's compositor, to
-# xdg-desktop-portal, which draws the open and save dialogs, or to
-# hunspell-en_us, the English dictionary spell checking reads, so this list
-# is all that says they are needed. fontconfig picks the fonts diagrams are
-# drawn with.
+# spell checking from hunspell; CSL YAML bibliographies are read with
+# libyaml. Nothing links to qt6-wayland, the plugin through which the window
+# reaches Omarchy's compositor, to xdg-desktop-portal, which draws the open
+# and save dialogs, or to hunspell-en_us, the English dictionary spell
+# checking reads, so this list is all that says they are needed. fontconfig
+# picks the fonts diagrams are drawn with.
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal' 'fontconfig'
-         'hunspell' 'hunspell-en_us')
+         'hunspell' 'hunspell-en_us' 'libyaml')
 optdepends=('noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'
             'noto-fonts-emoji: emoji in diagrams')
 makedepends=('gcc' 'make')

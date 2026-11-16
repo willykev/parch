@@ -6,7 +6,7 @@ Bug reports and small improvements are welcome. Open an
 ## Build and test
 
 On Arch Linux, install `base-devel`, `qt6-base`, `qt6-declarative`,
-`qt6-svg`, `qt6-wayland`, `fontconfig` and `hunspell`. parch also uses
+`qt6-svg`, `qt6-wayland`, `fontconfig`, `hunspell` and `libyaml`. parch also uses
 `xdg-desktop-portal` for file dialogs and the `hunspell-en_us` dictionary for
 spell checking; the tests bring a small dictionary of their own.
 
@@ -15,6 +15,10 @@ bin/build
 bin/test
 build/parch
 ```
+
+`bin/fetch-helpers` downloads the pinned math and diagram helpers, and
+`bin/fetch-test-fixtures` the CSL test suite's fixtures, into `build/`; the
+tests that need them are skipped until they are there.
 
 The tests run offscreen with temporary folders and never touch your own
 documents, settings or theme. One test runs a whole benchmark and takes about

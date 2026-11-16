@@ -1,6 +1,7 @@
 #pragma once
 
 #include "apppaths.h"
+#include "testhook.h"
 
 #include <QAbstractItemModel>
 #include <QDateTime>
@@ -33,7 +34,7 @@ public:
     using QFileSystemWatcher::QFileSystemWatcher;
     void add(const QString &path);
     // For tests: called on the watch's thread as a folder is added.
-    static std::function<void(const QString &path)> beforeWatching;
+    static TestHook<const QString &> beforeWatching;
 
 signals:
     void added(const QString &path);

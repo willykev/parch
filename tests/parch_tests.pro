@@ -111,6 +111,7 @@ HEADERS += \
     ../src/sourceboundaries.h \
     ../src/sourcebuffer.h \
     ../src/sourcetypes.h \
+    ../src/testhook.h \
     ../src/spellchecker.h \
     ../src/spellinglayer.h \
     ../src/tabmodel.h \

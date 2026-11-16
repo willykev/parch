@@ -5,6 +5,7 @@
 #include "pathtext.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
+#include "testhook.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -57,7 +58,7 @@ QString leadsElsewhere(const QString &path, const QString &target)
 }
 
 // For tests: called with each asset's path just before it is written.
-std::function<void(const QString &path)> beforePlacing;
+TestHook<const QString &> beforePlacing;
 
 bool isRegularFile(const QString &path)
 {
@@ -178,7 +179,7 @@ bool placeAsset(const QString &source, const FolderRef &folder, const QString &t
         error = DocumentStore::tr("A different file is already at %1").arg(shownName);
         return false;
     }
-    if (beforePlacing) beforePlacing(target);
+    beforePlacing(target);
     // O_EXCL creates the file only while nothing, not even a link, has the
     // name, so a file that appeared after the check is not overwritten either.
     const int descriptor =
@@ -1992,7 +1993,7 @@ QString DocumentStore::shownFolder(const QString &path) const
 
 void DocumentStore::setBeforePlacing(std::function<void(const QString &path)> hook)
 {
-    beforePlacing = std::move(hook);
+    beforePlacing.set(std::move(hook));
 }
 
 void DocumentStore::setFolderNames(std::function<QString(const QString &path)> names)

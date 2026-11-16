@@ -98,11 +98,11 @@ int naturalCompare(const QString &a, const QString &b)
 }
 } // namespace
 
-std::function<void(const QString &path)> LibraryFolderWatcher::beforeWatching;
+TestHook<const QString &> LibraryFolderWatcher::beforeWatching;
 
 void LibraryFolderWatcher::add(const QString &path)
 {
-    if (beforeWatching) beforeWatching(path);
+    beforeWatching(path);
     if (addPath(path)) emit added(path);
 }
 
@@ -133,7 +133,7 @@ void LibraryWatch::give(LibraryWatch *shared)
 
 void LibraryWatch::setBeforeWatching(std::function<void(const QString &path)> hook)
 {
-    LibraryFolderWatcher::beforeWatching = std::move(hook);
+    LibraryFolderWatcher::beforeWatching.set(std::move(hook));
 }
 
 LibraryWatch::LibraryWatch(const AppPaths &paths, DocumentStore *store, QThreadPool *pool)

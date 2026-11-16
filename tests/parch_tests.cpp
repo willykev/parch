@@ -2554,7 +2554,10 @@ void ParchTests::namingDraftKeepsTextUndoAndIdentity()
     QCOMPARE(draft->buffer()->text(), QString());
     QVERIFY(!QDir(paths.drafts()).exists(before));
 
-    // The named file keeps the draft's identity after a restart too.
+    // The named file keeps the draft's identity after a restart too, once
+    // the registry's write of the new name has landed, as it has by the time
+    // a store is gone.
+    store.waitForSaves();
     DocumentStore again(paths);
     Document *reopened = again.open(target);
     QVERIFY(reopened);

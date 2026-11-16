@@ -2,6 +2,7 @@
 
 #include "apppaths.h"
 #include "diskfile.h"
+#include "documentlinks.h"
 #include "filewatch.h"
 #include "history.h"
 #include "recovery.h"
@@ -316,8 +317,13 @@ private:
         QString claim;
         // The name a naming was asked to take, said again when the save ends.
         QString name;
-        // The draft being named, whose assets go beside the target.
+        // The draft being named, whose assets go beside the target; its
+        // text, the dialect it is read in and how it is written, so that
+        // links to an asset placed under a new name can be rewritten.
         QString draftFolder;
+        QString text;
+        md::Options options;
+        TextConvention convention;
         // The save is noted in recovery before it writes, with the content
         // it replaces, so that a restart knows the file it leaves as parch's.
         bool notesSave = false;
@@ -351,6 +357,14 @@ private:
         // The draft's assets that are beside the named file now, by their
         // names within its assets folder.
         QStringList assetsPlaced;
+        // The draft's assets that took a free name beside the named file,
+        // since another file had theirs, as moves from the name they would
+        // have had there; the links to them that the named file has
+        // rewritten, in the text that was asked to be saved; and the bytes
+        // that were written.
+        QList<DocumentLinks::Move> assetsRenamed;
+        QList<DocumentLinks::Change> linksRewritten;
+        QByteArray written;
         // A file made again found its name taken by something else.
         bool nameTaken = false;
         // The text was put at the document's own name, as Put this text

@@ -195,6 +195,7 @@ void EditorBinding::pasteImage(const QMimeData *mime, const QString &alt, Source
     const QString folder = m_attachments->documentFolder(m_document);
     const QDate date = m_attachments->today();
     Attachments *attachments = m_attachments;
+    const QPointer<EditorBinding> view(this);
     attachments->run<Attachments::Placed>(
         insertion,
         [folder, date, extension, bytes, other, image] {
@@ -208,14 +209,25 @@ void EditorBinding::pasteImage(const QMimeData *mime, const QString &alt, Source
             }
             return Attachments::savePasted(folder, date, extension, data);
         },
-        [insertion, attachments, alt](Attachments::Placed placed) {
+        [insertion, attachments, alt, view](Attachments::Placed placed) {
             if (!placed.error.isEmpty()) {
                 insertion->cancel();
                 attachments->report(tr("Image not pasted"), placed.error);
                 return;
             }
-            insertion->insert(Attachments::imageMarkdown(alt, placed.relative), false);
+            const QString markdown = Attachments::imageMarkdown(alt, placed.relative);
+            const Document *document = insertion->document();
+            if (insertion->insert(markdown, false) && alt.isEmpty() && view)
+                view->inviteAltText(document, insertion->insertedAt(), int(markdown.size()));
         });
+}
+
+void EditorBinding::inviteAltText(const Document *document, int at, int length)
+{
+    if (document != m_document || !m_loaded || m_composing) return;
+    if (m_cursorSource != at + length || m_anchorSource != m_cursorSource) return;
+    // Past "![".
+    select(at + 2, at + 2);
 }
 
 bool EditorBinding::dropAt(qreal x, qreal y, const QList<QUrl> &urls, const QString &html, const QString &text)

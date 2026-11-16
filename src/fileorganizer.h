@@ -36,9 +36,14 @@ class Settings;
 // updated through their SourceBuffer, as one undo step each; others through
 // the safe save, after history has kept what they held.
 //
+// A move that was made, and the link updates it made, can be taken back
+// by undoMove() while no other move has been made since: the file or
+// folder goes back, and the links updated go back to leading there.
+//
 // Trash moves to the desktop's trash, from where it can be put back, once
 // the writer has confirmed it. What goes wrong, and what was done, is said
-// through problem() and news().
+// through problem() and news(), and a move that can be undone through
+// moved().
 class FileOrganizer : public QObject {
     Q_OBJECT
     // Something is being looked into off the UI thread.
@@ -94,6 +99,9 @@ public:
     // leave them as they are.
     Q_INVOKABLE void confirmMove(bool updateReferences);
     Q_INVOKABLE void cancelMove();
+    // Takes the move that moved() said back, with the links it updated, as
+    // a move of its own; nothing once another move has been made since.
+    Q_INVOKABLE void undoMove(quint64 move);
     // Counts what a folder holds and asks, through trashing, to confirm.
     Q_INVOKABLE void askToTrash(const QString &path);
     Q_INVOKABLE void confirmTrash();
@@ -111,6 +119,8 @@ signals:
     void foldersChanged();
     void problem(const QString &title, const QString &detail);
     void news(const QString &title, const QString &detail);
+    // A move or rename was made, which undoMove(move) can take back.
+    void moved(const QString &title, const QString &detail, quint64 move);
     // A new document is at this path, for the window that asked to open.
     void created(const QString &path);
     // What was at `from` is at `to` now: a file, or a folder with all in it.
@@ -144,6 +154,15 @@ private:
         int files = 0;
         int changes = 0;
         QStringList failed;
+        // Where the documents rewritten are.
+        QStringList paths;
+    };
+    // The move made last, and the documents whose links it updated, where
+    // they are now.
+    struct Done {
+        Plan plan;
+        QStringList updated;
+        quint64 id = 0;
     };
 
     void startMove(const QString &from, const QString &to);
@@ -156,7 +175,8 @@ private:
                                 Dialects dialects);
     // Says what a move did: what it took along, and what became of the
     // references to what moved.
-    void finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed = {});
+    void finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed = {},
+                    const QStringList &paths = {});
     void setBusy(int delta);
     // The open documents a move of this path takes along.
     QList<Document *> documentsUnder(const QString &canonical) const;
@@ -167,6 +187,8 @@ private:
     std::function<Dialects()> m_dialects;
     int m_busy = 0;
     std::optional<Plan> m_review;
+    std::optional<Done> m_done;
+    quint64 m_moves = 0;
     QVariantMap m_trashing;
     QVariantList m_folders;
     std::shared_ptr<std::atomic<bool>> m_cancel;

@@ -462,7 +462,7 @@ void FileOrganizer::updateReferences(const Plan &plan)
 {
     const QList<DocumentLinks::Move> moves{{plan.from, plan.to}};
     int changes = 0, files = 0;
-    QStringList failed;
+    QStringList failed, paths;
     QList<Rewrite> closed;
     for (const FilePlan &file : plan.files) {
         const QString now = DocumentLinks::moved(file.path, moves);
@@ -487,18 +487,20 @@ void FileOrganizer::updateReferences(const Plan &plan)
             }
             changes += int(found.size());
             ++files;
+            paths << now;
             continue;
         }
         closed.append({now, file.path, m_store->documentIdFor(canonical.isEmpty() ? now : canonical)});
     }
     if (closed.isEmpty()) {
-        finishMove(plan, true, changes, files, failed);
+        finishMove(plan, true, changes, files, failed, paths);
         return;
     }
     setBusy(1);
     QtConcurrent::run(&m_pool, &FileOrganizer::rewriteJob, closed, plan.library, moves, m_store->history(), plan.dialects)
-        .then(this, [this, plan, changes, files, failed](const Rewritten &rewritten) {
-            finishMove(plan, true, changes + rewritten.changes, files + rewritten.files, failed + rewritten.failed);
+        .then(this, [this, plan, changes, files, failed, paths](const Rewritten &rewritten) {
+            finishMove(plan, true, changes + rewritten.changes, files + rewritten.files, failed + rewritten.failed,
+                       paths + rewritten.paths);
             setBusy(-1);
         });
 }
@@ -533,12 +535,38 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString
         }
         ++done.files;
         done.changes += int(changes.size());
+        done.paths << file.path;
     }
     return done;
 }
 
-void FileOrganizer::finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed)
+void FileOrganizer::undoMove(quint64 move)
 {
+    if (!m_done || m_done->id != move) return;
+    const Done done = *std::exchange(m_done, std::nullopt);
+    const QString name = PathText::fileName(done.plan.to);
+    const bool renaming = PathText::folderOf(done.plan.from) == PathText::folderOf(done.plan.to);
+    if (m_review || busy()) {
+        emit problem(renaming ? tr("Not renamed: %1").arg(name) : tr("Not moved: %1").arg(name),
+                     tr("Another move is waiting; finish it first."));
+        return;
+    }
+    // The same move the other way, which updates again only the documents
+    // it updated, as they are now, so that their links lead where they led.
+    Plan back = done.plan;
+    std::swap(back.from, back.to);
+    back.files.clear();
+    for (const QString &path : done.updated) back.files.append({path, {}});
+    if (!perform(back)) return;
+    if (back.files.isEmpty()) finishMove(back, false, 0, 0);
+    else updateReferences(back);
+}
+
+void FileOrganizer::finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed,
+                              const QStringList &paths)
+{
+    // It can be taken back, until another move is made.
+    m_done = Done{plan, updated ? paths : QStringList(), ++m_moves};
     const QString what = PathText::fileName(plan.from);
     const bool renaming = PathText::folderOf(plan.from) == PathText::folderOf(plan.to);
     const QString title = renaming ? tr("Renamed “%1” to “%2”").arg(what, PathText::fileName(plan.to))
@@ -564,9 +592,7 @@ void FileOrganizer::finishMove(const Plan &plan, bool updated, int changes, int 
                          .arg(title + u'.', detail.join(u' '), failed.join(QStringLiteral(", "))));
         return;
     }
-    // A plain rename shows in the library and needs no word.
-    if (renaming && !plan.folder && planned == 0) return;
-    emit news(title, detail.join(u' '));
+    emit moved(title, detail.join(u' '), m_moves);
 }
 
 void FileOrganizer::askToTrash(const QString &path)

@@ -12,6 +12,7 @@
 #include "focusmode.h"
 #include "mdinclude.h"
 #include "mdtree.h"
+#include "outline.h"
 #include "preview.h"
 #include "previewbuilder.h"
 #include "previewresources.h"
@@ -1524,6 +1525,35 @@ void staleResultsNeverReplaceNewerText()
     QCOMPARE(w.lines(), (QStringList{QString(), QStringLiteral("Another"), QStringLiteral("With its own text.")}));
 }
 
+void previewSaysWhenItIsBehind()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    PreviewWindow w(longText(40));
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    w.run("viewSplit");
+    QVERIFY(w.settled());
+    QQuickItem *mark = w.shell.item(QStringLiteral("previewUpdating"));
+    QVERIFY(mark);
+    QVERIFY(!mark->isVisible());
+    // Reading the text takes long: what the preview showed stays, and after
+    // a moment it says, quietly, that it is not the text as it is now.
+    Preview::setWorkerDelay(1500);
+    const auto prompt = qScopeGuard([] { Preview::setWorkerDelay(0); });
+    w.document->buffer()->replace({3, 0}, QStringLiteral("First "));
+    QVERIFY(!w.preview->current());
+    QVERIFY(!mark->isVisible());
+    QTRY_VERIFY(mark->isVisible());
+    QVERIFY(!w.preview->current());
+    QCOMPARE(mark->property("text").toString(), QStringLiteral("Updating…"));
+    QVERIFY2(unnamedAccessibleItems(w.window).isEmpty(), qPrintable(unnamedAccessibleItems(w.window).join(", ")));
+    QVERIFY(everyVisibleItemFitsWithin(w.window));
+    // Once it has caught up, the mark goes.
+    QVERIFY(w.settled());
+    QVERIFY(!mark->isVisible());
+    QCOMPARE(w.lines().at(1), QStringLiteral("First Section 0"));
+}
+
 namespace {
 // The middle of a text of the preview's surface, in the window.
 QPoint placeOf(const PreviewWindow &w, const QString &text)
@@ -1620,6 +1650,74 @@ void previewAndSourceFindEachOther()
     // Below the text, among the notes, the source is at its end.
     const qreal bottom = document->documentLayout()->documentSize().height();
     QVERIFY(w.preview->sourceAtHeight(bottom - 2) >= last);
+}
+
+void includedTextLeadsToItsFile()
+{
+    // A book of two chapters, each a file of its own that the book includes.
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString root = QFileInfo(folder.path()).canonicalFilePath();
+    const QString book = root + QStringLiteral("/book.md"), one = root + QStringLiteral("/one.md"),
+                  two = root + QStringLiteral("/two.md");
+    const QString twoText = QStringLiteral("# Two\n\nSome words.\n\nThe second chapter ends here.\n");
+    writeFile(book, "# Book\n\nOpening words.\n\none.md\n\ntwo.md\n\nClosing words.\n");
+    writeFile(one, "# One\n\nThe first chapter.\n");
+    writeFile(two, twoText.toUtf8());
+    PreviewWindow w({});
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    w.shell.backend->openFiles({book});
+    QTRY_COMPARE(w.tabs()->activePath(), book);
+    Document *bookDocument = w.shell.document();
+    w.run("viewSplit");
+    QVERIFY(w.settled());
+    QVERIFY(w.lines().contains(QStringLiteral("The second chapter ends here.")));
+    // In the book's own text a double click stays in the book.
+    QTest::mouseDClick(w.window, Qt::LeftButton, Qt::NoModifier, placeOf(w, QStringLiteral("Opening words")));
+    QTRY_VERIFY(w.shell.binding()->cursorSource() > 0);
+    QCOMPARE(w.tabs()->activePath(), book);
+    // In a chapter it opens the chapter's file, with the caret at the place
+    // that was clicked and the keys in its text.
+    const QVariantMap place = w.preview->includedAt(
+        w.preview->textDocument()->find(QStringLiteral("second chapter ends")).selectionStart());
+    QCOMPARE(place.value(QStringLiteral("path")).toString(), two);
+    QCOMPARE(place.value(QStringLiteral("line")).toInt(), 4);
+    QCOMPARE(place.value(QStringLiteral("column")).toInt(), 4);
+    QTest::mouseDClick(w.window, Qt::LeftButton, Qt::NoModifier, placeOf(w, QStringLiteral("second chapter ends")));
+    QTRY_COMPARE(w.tabs()->activePath(), two);
+    const int ends = int(twoText.indexOf(QStringLiteral("The second chapter ends here.")));
+    QTRY_VERIFY(w.shell.binding()->cursorSource() >= ends);
+    QVERIFY(w.shell.binding()->cursorSource() <= ends + int(QStringLiteral("The second chapter ends here.").size()));
+    QTRY_COMPARE(w.window->activeFocusItem(), w.editor);
+
+    // The outline lists the chapters' headings too, at the line that
+    // includes them; one chosen opens its chapter at the heading.
+    w.tabs()->setActiveIndex(w.tabs()->indexOf(bookDocument));
+    QTRY_COMPARE(w.tabs()->activePath(), book);
+    OutlineModel outline;
+    outline.setDocument(w.shell.document());
+    outline.setActive(true);
+    QTRY_VERIFY(outline.ready());
+    QCOMPARE(outline.rowCount(), 3);
+    const auto at = [&](int row, OutlineModel::Role role) { return outline.data(outline.index(row), role); };
+    QCOMPARE(at(0, OutlineModel::TextRole).toString(), QStringLiteral("Book"));
+    QCOMPARE(at(0, OutlineModel::FileRole).toString(), QString());
+    QCOMPARE(at(2, OutlineModel::TextRole).toString(), QStringLiteral("Two"));
+    QCOMPARE(at(2, OutlineModel::FileRole).toString(), two);
+    QCOMPARE(at(2, OutlineModel::FileLineRole).toInt(), 0);
+    QCOMPARE(at(2, OutlineModel::PositionRole).toInt(), int(w.shell.document()->buffer()->text().indexOf(u"two.md")));
+    if (!w.shell.settings()->outlineShown())
+        QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, centreOf(w.shell.item(QStringLiteral("outlineToggle"))));
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY((row = [&]() -> QQuickItem * {
+        for (QQuickItem *item : visibleItems(w.window))
+            if (item->objectName() == QStringLiteral("outlineRow") && item->property("text").toString() == QStringLiteral("One"))
+                return item;
+        return nullptr;
+    }()));
+    QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, centreOf(row));
+    QTRY_COMPARE(w.tabs()->activePath(), one);
+    QTRY_COMPARE(w.shell.binding()->cursorSource(), 0);
 }
 
 void textAndPreviewScrollTogether()

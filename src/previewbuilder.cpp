@@ -428,6 +428,7 @@ struct Builder::Out {
     // Positions count from here.
     int base = 0;
     QList<Anchor> *anchors = nullptr;
+    QList<Anchor> *included = nullptr;
     int island = -1;
     // The cursor stands in an empty block, which the next block takes over.
     bool reuse = false;
@@ -559,6 +560,11 @@ int Builder::here() const { return m_out->cursor.position() - m_out->base; }
 
 void Builder::anchor(const Node &node, int length, bool block, int source)
 {
+    // Text an include brought in leads to its own file.
+    if (node.file != 0 && !node.generated && m_out->included) {
+        m_out->included->append({here(), source >= 0 ? source : node.range.start, length, block, node.file});
+        return;
+    }
     if (!m_out->anchors || node.file != 0 || node.generated || m_sourceBase < 0) return;
     m_out->anchors->append({here(), (source >= 0 ? source : node.range.start) - m_sourceBase, length, block});
 }
@@ -1083,6 +1089,7 @@ QTextTable *Builder::fillTable(QTextCursor &cursor, const std::vector<std::vecto
             out.cursor = place.firstCursorPosition();
             out.base = outer->base;
             out.anchors = outer->anchors;
+            out.included = outer->included;
             out.island = outer->island;
             Flow inner;
             inner.size = flow.size;
@@ -1143,6 +1150,7 @@ void Builder::table(const Node &node, const Flow &flow)
     out.cursor = QTextCursor(island.document);
     out.base = 0;
     out.anchors = &island.anchors;
+    out.included = &island.included;
     out.island = index;
     Out *outer = m_out;
     m_out = &out;
@@ -1186,6 +1194,7 @@ void Builder::mathBlock(const Node &node, const Flow &flow)
     Out out;
     out.cursor = QTextCursor(island.document);
     out.anchors = &island.anchors;
+    out.included = &island.included;
     out.island = index;
     Out *outer = m_out;
     m_out = &out;
@@ -1435,6 +1444,7 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
     Out out;
     out.cursor = QTextCursor(island.document);
     out.anchors = &island.anchors;
+    out.included = &island.included;
     out.island = int(m_section.islands.size()) - 1;
     Out *outer = m_out;
     m_out = &out;
@@ -2104,6 +2114,7 @@ Section Builder::build(const Part &part, QTextCursor &cursor)
     Out out;
     out.cursor = cursor;
     out.anchors = &m_section.anchors;
+    out.included = &m_section.included;
     // In place of islands, a table leaves an empty block for what follows it.
     out.reuse = m_reuseBlock;
     out.base = out.reuse ? before : before + 1;

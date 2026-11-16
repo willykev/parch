@@ -108,6 +108,8 @@ public:
     int maxLineLength() const { return m_maxLineLength; }
     QString editorFontFamily() const { return m_editorFontFamily; }
     bool freshDraftOnLaunch() const { return m_freshDraftOnLaunch; }
+    // A launch that reopens the session also opens a new draft in front.
+    Q_INVOKABLE void setFreshDraftOnLaunch(bool fresh);
     // The library's width a new window starts with: each window has its own
     // from then on, and the width chosen last in any window is kept here.
     int libraryWidth() const { return m_libraryWidth; }

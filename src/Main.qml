@@ -662,9 +662,35 @@ ApplicationWindow {
             // What edits at the caret needs the text in view; undoing and
             // redoing act on the document wherever it is shown.
             return document !== null && editorPane.editable
-                    && (editorShown || command === "undo" || command === "redo")
+                    && (editorShown || command === "undo" || command === "redo") && fitsCaret(command)
         case "document":
-            return document !== null
+            return document !== null && fitsDocument(command)
+        default:
+            return true
+        }
+    }
+
+    // The commands about a note reference that nothing defines are there
+    // while the caret is on one.
+    function fitsCaret(command) {
+        if (command !== "inlineNote" && command !== "defineNote")
+            return true
+        return editorPane.cursorSource >= 0 && editorPane.binding.acts(command)
+    }
+
+    // What a command about the document's file needs of it besides being
+    // there: to be in the library's folders, or open read-only because it
+    // is not UTF-8.
+    function fitsDocument(command) {
+        switch (command) {
+        case "renameDocument":
+        case "moveDocument":
+        case "trashDocument":
+            return backend.organizer.organizes(tabs.activePath)
+        case "newDocumentInFolder":
+            return tabs.activePath.length > 0 && backend.organizer.libraryOf(tabs.activePath).length > 0
+        case "reopenWithEncoding":
+            return document.state === Document.ReadOnly && !document.scratch
         default:
             return true
         }
@@ -709,6 +735,11 @@ ApplicationWindow {
         documentSettings: () => { if (window.document) documentSettingsDialog.show(window.document) },
         "export": () => { if (window.document) exportDialog.show(window.document, "export") },
         "print": () => { if (window.document) exportDialog.show(window.document, "print") },
+        newDocumentInFolder: () => libraryPanel.newDocumentBeside(window.tabs.activePath),
+        renameDocument: () => libraryPanel.renameDocument(window.tabs.activePath),
+        moveDocument: () => libraryPanel.moveDocument(window.tabs.activePath),
+        trashDocument: () => libraryPanel.trashDocument(window.tabs.activePath),
+        reopenWithEncoding: () => encodingDialog.choose(window.document),
         shortcuts: () => shortcutsDialog.show()
     })
 
@@ -1070,6 +1101,7 @@ ApplicationWindow {
                         if (window.editorShown)
                             editorPane.focusText()
                     }
+                    onIncludedRequested: (path, line, column) => window.act(() => backend.openAt(path, line, column))
                     // A link to another document opens it in a tab, at the
                     // heading the link names once the tab is in front.
                     // A document that could not be opened leaves this one
@@ -1283,6 +1315,11 @@ ApplicationWindow {
                 drawer.close()
             window.showHeading(position)
         }
+        onIncludedHeadingChosen: (path, line) => {
+            if (drawer.visible)
+                drawer.close()
+            window.act(() => backend.openAt(path, line, 0))
+        }
     }
 
     // What the find bar finds in the document in front, while it is shown.
@@ -1379,6 +1416,7 @@ ApplicationWindow {
         id: headingsDialog
         objectName: "headingsDialog"
         onChosen: (position) => window.showHeading(position)
+        onIncludedChosen: (path, line) => window.act(() => backend.openAt(path, line, 0))
         onClosed: window.dialogClosed()
     }
 

@@ -16,6 +16,8 @@ ThemedDialog {
 
     // A heading was chosen: the window puts its line at the top of the view.
     signal chosen(int position)
+    // A heading an include brought in was chosen: the window opens its file there.
+    signal includedChosen(string path, int line)
 
     function show(document, caret) {
         dialog.document = document
@@ -29,7 +31,11 @@ ThemedDialog {
         if (position < 0)
             return
         dialog.accept()
-        dialog.chosen(position)
+        const file = outline.fileAt(row)
+        if (file.length > 0)
+            dialog.includedChosen(file, outline.fileLineAt(row))
+        else
+            dialog.chosen(position)
     }
 
     function move(rows) {

@@ -1,6 +1,7 @@
 #include "editorbinding.h"
 
 #include "caretrest.h"
+#include "editoraccessible.h"
 #include "sourceboundaries.h"
 
 #include <QClipboard>
@@ -239,6 +240,8 @@ void EditorBinding::setEditor(QQuickItem *editor)
     detach();
     disconnect(m_editorGone);
     m_editor = editor;
+    // Assistive technology edits its text through this binding too.
+    if (editor) EditorAccessible::serve(editor, this);
     if (editor) {
         // A destroyed TextEdit takes its text document with it: detach()
         // leaves that projection alone and drops the buffer's connection, so
@@ -535,8 +538,36 @@ MarkdownEditing::Options EditorBinding::editingOptions() const
 {
     MarkdownEditing::Options options;
     options.setextHeadings = m_setextHeadings;
-    if (m_document) options.newline = m_document->newline();
+    if (m_document) {
+        options.newline = m_document->newline();
+        const md::Options dialect = m_document->markdownOptions();
+        options.footnotes = dialect.footnotes;
+        options.inlineNotes = dialect.footnotes && dialect.profile == md::Profile::Writer;
+    }
     return options;
+}
+
+bool EditorBinding::acts(const QString &command, int position) const
+{
+    if (!MarkdownEditing::isCommand(command) || !m_document || !m_loaded) return false;
+    const QString text = m_buffer->text();
+    int anchor = position, cursor = position;
+    if (position < 0) {
+        const SourceRange range = selection();
+        const bool backwards = editorCursor() < editorAnchor();
+        anchor = backwards ? range.start + range.length : range.start;
+        cursor = backwards ? range.start : range.start + range.length;
+    } else if (position > text.size()) {
+        return false;
+    }
+    const std::optional<TextChange> change = MarkdownEditing::format(command, text, anchor, cursor, editingOptions());
+    return change && !change->edits.isEmpty();
+}
+
+QString EditorBinding::undefinedNoteAt(int position) const
+{
+    if (!m_document || !m_document->markdownOptions().footnotes) return {};
+    return MarkdownEditing::undefinedNoteAt(m_buffer->text(), position);
 }
 
 bool EditorBinding::format(const QString &command)

@@ -134,6 +134,13 @@ public:
     // selected. False when the command is unknown, changes nothing, or the
     // view takes no edits now.
     Q_INVOKABLE bool format(const QString &command);
+    // Whether a formatting command would change the text with the
+    // selection as it is now, or with the caret at a source position; for
+    // commands that act only on what is at the caret.
+    Q_INVOKABLE bool acts(const QString &command, int position = -1) const;
+    // The label of a note reference at a source position that nothing
+    // defines, in a document whose dialect has notes; empty for none.
+    Q_INVOKABLE QString undefinedNoteAt(int position) const;
 
     // UTF-16 positions; -1 for a position outside the text.
     Q_INVOKABLE int sourceToEditor(int utf16) const;
@@ -256,6 +263,10 @@ private:
     // Converts HTML and puts it at the range; false when it shows nothing.
     bool insertHtml(const QString &html, SourceRange range);
     void pasteImage(const QMimeData *mime, const QString &alt, SourceRange range);
+    // An image with no alt text, `length` long, came into the document at
+    // `at`: a caret that followed it in, in this view, goes between its
+    // brackets, for the alt text to be written there.
+    void inviteAltText(const Document *document, int at, int length);
     void attachFiles(const QStringList &paths, SourceRange range);
     struct DropRequest;
     void continueDrop(const std::shared_ptr<DropRequest> &request);

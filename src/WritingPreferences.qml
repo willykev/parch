@@ -3,8 +3,8 @@ import Parch
 
 // The writing surface: its font, text size, line height and line length,
 // whether its Markdown is styled as it is written, the syntax headings are
-// written in, and the toolbar. Each change applies at once in every window
-// and is kept.
+// written in, the toolbar, and whether a launch starts with a new draft.
+// Each change applies at once in every window and is kept.
 PreferenceSection {
     id: section
 
@@ -124,6 +124,23 @@ PreferenceSection {
             checked: settings.showToolbar
             Accessible.name: text
             onToggled: settings.setShowToolbar(checked)
+        }
+    }
+
+    PreferenceRow {
+        width: parent.width
+        label: qsTr("At launch")
+
+        ThemedCheck {
+            objectName: "freshDraftChoice"
+            width: Math.min(implicitWidth, parent.width)
+            text: qsTr("Start with a new draft")
+            checked: settings.freshDraftOnLaunch
+            Accessible.name: text
+            onToggled: {
+                settings.setFreshDraftOnLaunch(checked)
+                checked = Qt.binding(() => settings.freshDraftOnLaunch)
+            }
         }
     }
 }

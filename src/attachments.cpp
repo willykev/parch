@@ -183,9 +183,16 @@ bool Insertion::insert(const QString &text, bool block)
         }
         fittedText = fitted(source, range, text, block);
     }
+    // The line breaks fitting puts before the text, in the document's own.
+    QString lead = fittedText.left(fittedText.indexOf(text));
     const QString newline = document->newline();
-    if (newline != u"\n") fittedText.replace(u'\n', newline);
-    return buffer->replace(range, fittedText, EditKind::Other) == SourceBuffer::EditOutcome::Applied;
+    if (newline != u"\n") {
+        fittedText.replace(u'\n', newline);
+        lead.replace(u'\n', newline);
+    }
+    if (buffer->replace(range, fittedText, EditKind::Other) != SourceBuffer::EditOutcome::Applied) return false;
+    m_insertedAt = range.start + int(lead.size());
+    return true;
 }
 
 QString Insertion::fitted(QStringView source, SourceRange range, const QString &text, bool block)

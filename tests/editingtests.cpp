@@ -6,6 +6,7 @@
 #include "documentstore.h"
 #include "editorbinding.h"
 #include "markdownediting.h"
+#include "mdtree.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "tabmodel.h"
@@ -261,6 +262,20 @@ void inlineFormattingWrapsAndToggles()
     QCOMPARE(formatted("inlineMath", "$«x^2»$"), QStringLiteral("«x^2»"));
     QCOMPARE(formatted("inlineMath", "‸"), QStringLiteral("$‸$"));
 
+    // Superscript and subscript write the dialect's delimited forms, which
+    // hold punctuation, and take them away again.
+    QCOMPARE(formatted("superscript", "x«2»"), QStringLiteral("x^«2»^"));
+    QCOMPARE(formatted("superscript", "x^«2»^"), QStringLiteral("x«2»"));
+    QCOMPARE(formatted("superscript", "x«^2^»"), QStringLiteral("x«2»"));
+    QCOMPARE(formatted("superscript", "y«(a+b)»"), QStringLiteral("y^«(a+b)»^"));
+    QCOMPARE(formatted("superscript", "y^(a+‸b)^"), QStringLiteral("y(a+‸b)"));
+    QCOMPARE(formatted("superscript", "x‸"), QStringLiteral("x^‸^"));
+    QCOMPARE(formatted("superscript", "x^‸^"), QStringLiteral("x‸"));
+    QCOMPARE(formatted("subscript", "H«2»O"), QStringLiteral("H~«2»~O"));
+    QCOMPARE(formatted("subscript", "H~«2»~O"), QStringLiteral("H«2»O"));
+    QCOMPARE(formatted("subscript", "x~y,‸z~"), QStringLiteral("xy,‸z"));
+    QCOMPARE(formatted("subscript", "x‸"), QStringLiteral("x~‸~"));
+
     // Code takes a delimiter longer than any run of backticks inside it.
     QCOMPARE(formatted("code", "«value»"), QStringLiteral("`«value»`"));
     QCOMPARE(formatted("code", "«a`b»"), QStringLiteral("``«a`b»``"));
@@ -415,6 +430,35 @@ void smartKeysContinueAndIndentLists()
     QCOMPARE(enter("plain‸"), QStringLiteral("(nothing)"));
     QCOMPARE(enter("‸- a"), QStringLiteral("(nothing)"));
     QCOMPARE(enter("---‸"), QStringLiteral("(nothing)"));
+    // A list of repeated numbers goes on repeating its number.
+    QCOMPARE(enter("1. a\n1. b‸"), QStringLiteral("1. a\n1. b\n1. ‸"));
+    QCOMPARE(enter("1. a‸\n1. b"), QStringLiteral("1. a\n1. ‸\n1. b"));
+    QCOMPARE(enter("1) a\n1) b\n1) c‸"), QStringLiteral("1) a\n1) b\n1) c\n1) ‸"));
+    // In a list that counts up, the items after a new one count on from it:
+    // its own items, those nested in it and the lines that continue them
+    // are its; another list, or text after a blank line, is not.
+    QCOMPARE(enter("1. a‸\n2. b\n3. c"), QStringLiteral("1. a\n2. ‸\n3. b\n4. c"));
+    QCOMPARE(enter("1. a\n2. b‸\n   more\n3. c\n   - x\n   1. y\n\n4. d\n\nAfter\n1. other"),
+             QStringLiteral("1. a\n2. b\n3. ‸\n   more\n4. c\n   - x\n   1. y\n\n5. d\n\nAfter\n1. other"));
+    QCOMPARE(enter("1. a\n   1. x‸\n   2. y\n2. b"), QStringLiteral("1. a\n   1. x\n   2. ‸\n   3. y\n2. b"));
+    QCOMPARE(enter("> 1. a‸\n> 2. b"), QStringLiteral("> 1. a\n> 2. ‸\n> 3. b"));
+    QCOMPARE(enter("8. a‸\r\n9. b", crlf()), QStringLiteral("8. a\r\n9. ‸\r\n10. b"));
+    QCOMPARE(enter("1. a‸\n2. b\n- c\n3. d"), QStringLiteral("1. a\n2. ‸\n3. b\n- c\n3. d"));
+    // One that does not count up keeps its numbers.
+    QCOMPARE(enter("1. a‸\n3. b"), QStringLiteral("1. a\n2. ‸\n3. b"));
+
+    // Renumber list counts the list holding the caret up from its first
+    // number, nested lists apart; one that counts up already is left alone.
+    const auto renumber = [](const QString &marked) { return formatted("renumberList", marked); };
+    QCOMPARE(renumber("3. a\n1. b‸\n1. c"), QStringLiteral("3. a\n4. b‸\n5. c"));
+    QCOMPARE(renumber("«1. a\n1. b»"), QStringLiteral("«1. a\n2. b»"));
+    QCOMPARE(renumber("1. a\n   1. x\n   1. y\n1. b‸"), QStringLiteral("1. a\n   1. x\n   1. y\n2. b‸"));
+    QCOMPARE(renumber("1. a\n   1. x‸\n   1. y\n1. b"), QStringLiteral("1. a\n   1. x‸\n   2. y\n1. b"));
+    QCOMPARE(renumber("1. a\n   more‸\n1. b"), QStringLiteral("1. a\n   more‸\n2. b"));
+    QCOMPARE(renumber("9. a‸\n9. b"), QStringLiteral("9. a‸\n10. b"));
+    QCOMPARE(renumber("1. a\n2. b‸"), QStringLiteral("(nothing)"));
+    QCOMPARE(renumber("- a‸\n- b"), QStringLiteral("(nothing)"));
+    QCOMPARE(renumber("plain‸"), QStringLiteral("(nothing)"));
 
     const Marked line = unmark(QStringLiteral("a‸b"));
     QCOMPARE(applied(QStringLiteral("a‸b"), MarkdownEditing::hardBreak(line.text, line.anchor, line.cursor)),
@@ -578,6 +622,16 @@ void editorKeysContinueListsAndTables()
     QCOMPARE(view.marked(), QStringLiteral("- one  \n‸"));
     view.binding->undo();
     QCOMPARE(view.text(), QStringLiteral("- one"));
+
+    // A new item in a list that counts up renumbers the items after it, in
+    // the same step.
+    Editor numbered(QStringLiteral("1. one\n2. two"));
+    QVERIFY2(numbered.ok(), qPrintable(numbered.error));
+    numbered.select(6, 6);
+    numbered.key(Qt::Key_Return);
+    QCOMPARE(numbered.marked(), QStringLiteral("1. one\n2. ‸\n3. two"));
+    numbered.binding->undo();
+    QCOMPARE(numbered.text(), QStringLiteral("1. one\n2. two"));
 
     // Elsewhere Tab types a tab and Enter a plain break.
     Editor plain(QStringLiteral("word"));
@@ -845,7 +899,18 @@ void paletteFindsAndRunsCommands()
     // The category finds commands too: every formatting command for "format".
     field->setProperty("text", QStringLiteral("format"));
     QVERIFY(matches->rowOf(QStringLiteral("italic")) >= 0);
+    QVERIFY(matches->rowOf(QStringLiteral("superscript")) >= 0);
+    QVERIFY(matches->rowOf(QStringLiteral("subscript")) >= 0);
     QCOMPARE(matches->idAt(0), QStringLiteral("formatTable"));
+    field->setProperty("text", QStringLiteral("supersc"));
+    QCOMPARE(matches->idAt(0), QStringLiteral("superscript"));
+    // What the library does to a file, the File menu does to the document in front.
+    field->setProperty("text", QStringLiteral("rename"));
+    QCOMPARE(matches->idAt(0), QStringLiteral("renameDocument"));
+    field->setProperty("text", QStringLiteral("trash"));
+    QCOMPARE(matches->idAt(0), QStringLiteral("trashDocument"));
+    field->setProperty("text", QStringLiteral("reopen as"));
+    QCOMPARE(matches->idAt(0), QStringLiteral("reopenWithEncoding"));
     // Assistive technology hears the chosen command; nothing is unnamed.
     field->setProperty("text", QStringLiteral("ital"));
     QCOMPARE(matches->idAt(0), QStringLiteral("italic"));
@@ -1037,6 +1102,14 @@ void preferencesApplyLiveToEveryWindow()
     QVERIFY(!settings->showToolbar());
     QVERIFY(!toolbar->isVisible());
     QVERIFY(!findItem(second->contentItem(), QStringLiteral("toolbar"))->isVisible());
+    // A new draft in front at every launch, off until chosen.
+    QQuickItem *fresh = control("freshDraftChoice");
+    QVERIFY(fresh);
+    QVERIFY(!fresh->property("checked").toBool());
+    QVERIFY(!settings->freshDraftOnLaunch());
+    fresh->forceActiveFocus(Qt::TabFocusReason);
+    QTest::keyClick(window, Qt::Key_Space);
+    QVERIFY(settings->freshDraftOnLaunch());
     QTest::keyClick(window, Qt::Key_Escape);
     QTRY_VERIFY(!isOpen(dialog));
     typeText(window, QStringLiteral("Title"));
@@ -1050,6 +1123,7 @@ void preferencesApplyLiveToEveryWindow()
     QVERIFY(!again.zoomed());
     QVERIFY(again.setextHeadings());
     QVERIFY(!again.showToolbar());
+    QVERIFY(again.freshDraftOnLaunch());
     QVERIFY(again.themeFontFamily());
     // Values out of range change nothing.
     again.setLineHeight(5);
@@ -1157,7 +1231,8 @@ void formattingCommandsRunFromEveryEntryPoint()
         QMetaObject::invokeMethod(format, "itemAt", Q_RETURN_ARG(QQuickItem *, item), Q_ARG(int, i));
         if (item) titles << item->property("text").toString();
     }
-    for (const char *title : {"Bold", "Italic", "Heading", "Code block", "Link", "Footnote", "Table", "Page break"})
+    for (const char *title : {"Bold", "Italic", "Superscript", "Subscript", "Heading", "Renumber list", "Code block",
+                              "Link", "Footnote", "Table", "Page break"})
         QVERIFY2(titles.contains(QString::fromUtf8(title)), title);
     // Each is one step to undo.
     shell.binding()->undo();
@@ -1174,6 +1249,166 @@ void formattingCommandsRunFromEveryEntryPoint()
     const QString before = shell.document()->buffer()->text();
     runIn(window, "bold");
     QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
+    QCOMPARE(shell.document()->buffer()->text(), before);
+}
+
+void undefinedNotesBecomeInlineOrDefined()
+{
+    // A reference no definition answers can become an inline note, which
+    // a word with a stop after it is, or get its definition at the end.
+    QCOMPARE(formatted("inlineNote", "Text[^wo‸rd]."), QStringLiteral("Text[^word‸.]."));
+    QCOMPARE(formatted("inlineNote", "Text[^word]‸."), QStringLiteral("Text[^word‸.]."));
+    QCOMPARE(formatted("defineNote", "Text[^wo‸rd]."), QStringLiteral("Text[^word].\n\n[^word]: ‸"));
+    QCOMPARE(formatted("defineNote", "A[^n‸ote]\r\n", crlf()), QStringLiteral("A[^note]\r\n\r\n[^note]: ‸\r\n"));
+    QCOMPARE(formatted("defineNote", "A[^n‸ote] and [^1].\n\n[^1]: One.\n"),
+             QStringLiteral("A[^note] and [^1].\n\n[^1]: One.\n[^note]: ‸\n"));
+    // Both make notes the Markdown engine reads with nothing missing.
+    for (const char *command : {"inlineNote", "defineNote"}) {
+        const Marked start = unmark(QStringLiteral("Text[^wo‸rd]."));
+        const auto change = MarkdownEditing::format(QString::fromLatin1(command), start.text, start.anchor, start.cursor);
+        QVERIFY(change);
+        SourceBuffer buffer(start.text);
+        QCOMPARE(buffer.replace(change->edits), SourceBuffer::EditOutcome::Applied);
+        QCOMPARE(md::parse(start.text).diagnostics.size(), size_t(1));
+        QVERIFY2(md::parse(buffer.text()).diagnostics.empty(), command);
+    }
+    // Nothing for a defined reference, a definition's own marker, code, a
+    // note that is inline already, or plain text.
+    QCOMPARE(formatted("inlineNote", "Text[^wo‸rd].\n\n[^WORD]: Defined."), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("defineNote", "[^wo‸rd]: A definition."), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("inlineNote", "`[^wo‸rd]`"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("inlineNote", "```\n[^wo‸rd]\n```"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("inlineNote", "Text[^An inline ‸note.]"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("inlineNote", "Plain wo‸rd"), QStringLiteral("(nothing)"));
+    QCOMPARE(MarkdownEditing::undefinedNoteAt(u"See[^x].", 5), QStringLiteral("x"));
+    QCOMPARE(MarkdownEditing::undefinedNoteAt(u"See[^x].", 1), QString());
+
+    // In the window: the editor's menu on the reference offers both, and
+    // the palette has them while the caret is on it.
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    EditorBinding *binding = shell.binding();
+    typeText(window, QStringLiteral("A claim[^source] here."));
+    SourceBuffer *buffer = shell.document()->buffer();
+    const auto canRun = [&](const char *command) {
+        QVariant can;
+        QMetaObject::invokeMethod(window, "canRun", Q_RETURN_ARG(QVariant, can), Q_ARG(QVariant, QString::fromLatin1(command)));
+        return can.toBool();
+    };
+    binding->select(2, 2);
+    QVERIFY(!canRun("inlineNote"));
+    QVERIFY(!canRun("defineNote"));
+    binding->select(11, 11);
+    QVERIFY(canRun("inlineNote"));
+    QVERIFY(canRun("defineNote"));
+    runIn(window, "defineNote");
+    QCOMPARE(buffer->text(), QStringLiteral("A claim[^source] here.\n\n[^source]: "));
+    QCOMPARE(binding->cursorSource(), int(buffer->text().size()));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("A claim[^source] here."));
+    // A right click on it, away from the caret.
+    binding->select(0, 0);
+    QObject *menu = shell.object(QStringLiteral("noteMenu"));
+    QVERIFY(menu);
+    QRectF place;
+    QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, place),
+                              Q_ARG(int, binding->sourceToEditor(12)));
+    QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, editor->mapToScene(place.center()).toPoint());
+    QTRY_VERIFY(isOpen(menu));
+    QQuickItem *inlineEntry = shell.item(QStringLiteral("inlineNoteEntry"));
+    QVERIFY(inlineEntry);
+    QVERIFY(shell.item(QStringLiteral("defineNoteEntry")));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(inlineEntry));
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QCOMPARE(buffer->text(), QStringLiteral("A claim[^source.] here."));
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("A claim[^source] here."));
+    // The Menu key, on the reference at the caret.
+    binding->select(12, 12);
+    QTest::keyClick(window, Qt::Key_Menu);
+    QTRY_VERIFY(isOpen(menu));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QCOMPARE(buffer->text(), QStringLiteral("A claim[^source] here."));
+}
+
+void assistiveTechnologyEditsTheSource()
+{
+    // A screen reader's or another assistive tool's edits, through the
+    // editor's editable text, are edits of the source: each one step to
+    // undo, at the place the text shows, a CRLF pair one place among them.
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString crlf = folder.filePath(QStringLiteral("crlf.md"));
+    writeFile(crlf, "one\r\ntwo\r\n");
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    typeText(window, QStringLiteral("Hello world"));
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    EditorBinding *binding = shell.binding();
+    SourceBuffer *buffer = shell.document()->buffer();
+    QAccessibleInterface *access = QAccessible::queryAccessibleInterface(editor);
+    QVERIFY(access);
+    QCOMPARE(access->role(), QAccessible::EditableText);
+    QAccessibleEditableTextInterface *editable = access->editableTextInterface();
+    QAccessibleTextInterface *text = access->textInterface();
+    QVERIFY(editable && text);
+    editable->insertText(5, QStringLiteral(","));
+    QCOMPARE(buffer->text(), QStringLiteral("Hello, world"));
+    editable->replaceText(7, 12, QStringLiteral("there"));
+    QCOMPARE(buffer->text(), QStringLiteral("Hello, there"));
+    editable->deleteText(0, 7);
+    QCOMPARE(buffer->text(), QStringLiteral("there"));
+    QTest::qWait(50);
+    QCOMPARE(text->text(0, text->characterCount()), QStringLiteral("there"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello, there"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello, world"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    // The caret and the selection are the view's.
+    text->setCursorPosition(3);
+    QCOMPARE(binding->cursorSource(), 3);
+    QCOMPARE(binding->anchorSource(), 3);
+    QCOMPARE(text->cursorPosition(), 3);
+    text->setSelection(0, 1, 4);
+    QCOMPARE(binding->anchorSource(), 1);
+    QCOMPARE(binding->cursorSource(), 4);
+    text->removeSelection(0);
+    QCOMPARE(binding->anchorSource(), binding->cursorSource());
+
+    // In a file with CRLF line breaks, a place in the shown text is the
+    // same place in the source.
+    shell.backend->openFiles({crlf});
+    QTRY_COMPARE(shell.document()->path(), QFileInfo(crlf).canonicalFilePath());
+    QAccessibleInterface *second = QAccessible::queryAccessibleInterface(shell.item(QStringLiteral("editor")));
+    QVERIFY(second && second->editableTextInterface());
+    second->editableTextInterface()->insertText(4, QStringLiteral("2: "));
+    QCOMPARE(shell.document()->buffer()->text(), QStringLiteral("one\r\n2: two\r\n"));
+    shell.binding()->undo();
+    QCOMPARE(shell.document()->buffer()->text(), QStringLiteral("one\r\ntwo\r\n"));
+
+    // A document that takes no edits takes none this way either.
+    const QString bytes = folder.filePath(QStringLiteral("bytes.md"));
+    writeFile(bytes, QByteArray("caf\xe9\n"));
+    shell.backend->openFiles({bytes});
+    QTRY_COMPARE(shell.document()->state(), Document::State::ReadOnly);
+    const QString before = shell.document()->buffer()->text();
+    QAccessibleInterface *locked = QAccessible::queryAccessibleInterface(shell.item(QStringLiteral("editor")));
+    QVERIFY(locked);
+    QVERIFY(locked->state().readOnly);
+    if (QAccessibleEditableTextInterface *refused = locked->editableTextInterface())
+        refused->insertText(0, QStringLiteral("x"));
+    QTest::qWait(50);
     QCOMPARE(shell.document()->buffer()->text(), before);
 }
 

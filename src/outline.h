@@ -27,6 +27,12 @@ struct Heading {
     // numbers its headings, and its Writer label, if it has one.
     QString slug;
     QString label;
+    // A heading an include brought in: the file it is written in, and its
+    // line there, from 0. Its position is then the start of the line in the
+    // document's own text that includes it. Empty, and -1, for the
+    // document's own headings.
+    QString file;
+    int fileLine = -1;
 };
 
 namespace Outline {
@@ -36,6 +42,8 @@ namespace Outline {
 // matter, HTML or comments. Headings with no text are left out.
 // `options` is the dialect the text is read in (Document::markdownOptions()).
 QList<Heading> headings(const QString &text, const md::Options &options = {});
+// The same with the headings of the files it includes, which `source` reads.
+QList<Heading> headings(const QString &text, const md::Options &options, const md::Source &source);
 } // namespace Outline
 
 // The headings of one document, for a list that goes to them: found off the
@@ -55,7 +63,7 @@ class OutlineModel : public QAbstractListModel {
 
 public:
     // QML reads a heading's text as "heading", since a delegate's "text" is its own.
-    enum Role { TextRole = Qt::UserRole + 1, LevelRole, PositionRole, LineRole, SlugRole, LabelRole };
+    enum Role { TextRole = Qt::UserRole + 1, LevelRole, PositionRole, LineRole, SlugRole, LabelRole, FileRole, FileLineRole };
     Q_ENUM(Role)
 
     // How long the text must rest after an edit before it is looked at again.
@@ -78,6 +86,10 @@ public:
     QList<Heading> headings() const;
     // Where the heading in this row starts, as a source offset; -1 for no row.
     Q_INVOKABLE int positionAt(int row) const;
+    // The file a heading in this row is written in when an include brought
+    // it in, and its line there; empty, and -1, for the document's own.
+    Q_INVOKABLE QString fileAt(int row) const;
+    Q_INVOKABLE int fileLineAt(int row) const;
     // The row of the heading a source offset lies under: the last that
     // starts at or before it; -1 for none.
     Q_INVOKABLE int rowAt(int position) const;
@@ -94,7 +106,8 @@ private:
         QList<Heading> headings;
         Revision revision = 0;
     };
-    static Scan scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options);
+    static Scan scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options, QString path,
+                        QString directory, QString libraryRoot);
     void schedule(int delayMs);
     void scan();
     void take(const QList<Heading> &headings);

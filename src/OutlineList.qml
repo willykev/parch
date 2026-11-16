@@ -19,6 +19,16 @@ Item {
 
     // A heading was chosen: the window puts its line at the top of the view.
     signal chosen(int position)
+    // A heading an include brought in was chosen: the window opens its file there.
+    signal includedChosen(string path, int line)
+
+    function choose(row) {
+        const file = outline.fileAt(row)
+        if (file.length > 0)
+            section.includedChosen(file, outline.fileLineAt(row))
+        else if (row >= 0)
+            section.chosen(outline.positionAt(row))
+    }
 
     // The keys go to the headings. Until they are found, and when there are
     // none, the row that shows and hides them has the keys.
@@ -88,9 +98,9 @@ Item {
             if (count > 0 || !header.activeFocus)
                 section.keysPending = false
         }
-        Keys.onReturnPressed: section.chosen(outline.positionAt(currentIndex))
-        Keys.onEnterPressed: section.chosen(outline.positionAt(currentIndex))
-        Keys.onSpacePressed: section.chosen(outline.positionAt(currentIndex))
+        Keys.onReturnPressed: section.choose(currentIndex)
+        Keys.onEnterPressed: section.choose(currentIndex)
+        Keys.onSpacePressed: section.choose(currentIndex)
 
         delegate: AbstractButton {
             id: entry
@@ -116,7 +126,7 @@ Item {
             text: heading
             Accessible.name: qsTr("%1, level %2").arg(heading).arg(level)
             Accessible.selected: marked
-            onClicked: section.chosen(position)
+            onClicked: section.choose(index)
 
             contentItem: Text {
                 text: entry.text

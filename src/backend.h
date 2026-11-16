@@ -283,6 +283,9 @@ public:
     // from 1.
     Q_INVOKABLE void openSearchResult(const QString &path, const QString &documentId, int start, int length, int line,
                                       const QString &matched);
+    // Opens a file, as one an include names, with the caret at a line and
+    // a column of it, both from 0, a few lines below the top of the view.
+    Q_INVOKABLE void openAt(const QString &path, int line, int column);
 
     // Asks for files to open, as openFiles() opens them.
     Q_INVOKABLE void open();

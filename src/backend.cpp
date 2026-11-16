@@ -285,6 +285,10 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     // What the library's organizing does is said as any action's outcome is.
     connect(m_organizer.get(), &FileOrganizer::problem, this, &Backend::notify);
     connect(m_organizer.get(), &FileOrganizer::news, this, &Backend::inform);
+    // A move or rename made can be taken back from its notice.
+    connect(m_organizer.get(), &FileOrganizer::moved, this, [this](const QString &title, const QString &detail, quint64 move) {
+        postUndoable(title, detail, [this, move] { m_organizer->undoMove(move); });
+    });
     // A new document opens in the window in front, which asked for it.
     connect(m_organizer.get(), &FileOrganizer::created, this, [this](const QString &path) {
         if (WindowContext *window = activeWindow()) openIn(window, {path}, Absent::NotFound)->raise();
@@ -884,6 +888,38 @@ void Backend::openSearchResult(const QString &path, const QString &documentId, i
     view.top = TextSearch::lineStartAbove(text, found.start, 3);
     tabs->setViewState(tabs->activeIndex(), view);
     shown->showView();
+}
+
+void Backend::openAt(const QString &path, int line, int column)
+{
+    clearNotice();
+    WindowContext *window = activeWindow();
+    if (!window || path.isEmpty()) return;
+    WindowContext *shown = openIn(window, {path}, Absent::NotFound);
+    shown->raise();
+    TabModel *tabs = shown->tabs();
+    Document *document = tabs->activeDocument();
+    if (!document) return;
+    // The line's start, counted as the text counts lines, and the column
+    // within the line.
+    const QString text = document->buffer()->text();
+    int at = 0;
+    for (int seen = 0; seen < line && at < text.size(); ++seen) {
+        const qsizetype next = text.indexOf(u'\n', at);
+        const qsizetype lone = text.indexOf(u'\r', at);
+        const qsizetype end = next < 0 ? lone : lone < 0 ? next : std::min(next, lone);
+        if (end < 0) break;
+        at = int(end) + (text.at(end) == u'\r' && end + 1 < text.size() && text.at(end + 1) == u'\n' ? 2 : 1);
+    }
+    qsizetype lineEnd = at;
+    while (lineEnd < text.size() && text.at(lineEnd) != u'\n' && text.at(lineEnd) != u'\r') ++lineEnd;
+    const int position = int(std::min<qsizetype>(at + std::max(0, column), lineEnd));
+    ViewState view = tabs->viewState(tabs->activeIndex());
+    view.anchor = view.cursor = position;
+    view.top = TextSearch::lineStartAbove(text, position, 3);
+    tabs->setViewState(tabs->activeIndex(), view);
+    shown->showView();
+    shown->focusText();
 }
 
 void Backend::setFilePicker(FilePicker *picker)

@@ -1318,6 +1318,51 @@ int Preview::sourceAt(int position, quint64 island) const
     return base + anchor.source + std::min(relative - anchor.position, anchor.length);
 }
 
+QVariantMap Preview::includedAt(int position, quint64 island) const
+{
+    const QList<Anchor> *own = nullptr, *included = nullptr;
+    int relative = position;
+    if (island) {
+        const Island *found = nullptr;
+        if (!sectionOfIsland(island, &found) || !found) return {};
+        own = &found->anchors;
+        included = &found->included;
+    } else {
+        if (m_shown.empty() || position < 0) return {};
+        const size_t index = sectionAt(position);
+        own = &m_shown[index].anchors;
+        included = &m_shown[index].included;
+        relative = position - startOf(index);
+    }
+    // The nearest place before it that says where it came from: included
+    // text when that place is one an include brought in.
+    const auto nearest = [relative](const QList<Anchor> &anchors) -> const Anchor * {
+        const Anchor *best = nullptr;
+        for (const Anchor &anchor : anchors)
+            if (anchor.position <= relative && (!best || anchor.position >= best->position)) best = &anchor;
+        return best;
+    };
+    const Anchor *in = nearest(*included);
+    const Anchor *outside = nearest(*own);
+    if (!in || (outside && outside->position > in->position) || !m_tree || in->file <= 0
+        || size_t(in->file) >= m_tree->files.size())
+        return {};
+    const md::SourceFile &file = m_tree->files[size_t(in->file)];
+    if (file.path.isEmpty()) return {};
+    const int offset = std::clamp(in->source + std::min(relative - in->position, in->length), 0, int(file.text.size()));
+    int line = 0, lineStart = 0;
+    for (int i = 0; i < offset; ++i) {
+        const QChar c = file.text.at(i);
+        if (c == u'\n' || (c == u'\r' && (i + 1 >= file.text.size() || file.text.at(i + 1) != u'\n'))) {
+            ++line;
+            lineStart = i + 1;
+        }
+    }
+    return {{QStringLiteral("path"), file.path},
+            {QStringLiteral("line"), line},
+            {QStringLiteral("column"), offset - lineStart}};
+}
+
 namespace {
 // The sections in the order of the source: the blocks of the text, before
 // the notes and the bibliography.

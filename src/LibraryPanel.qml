@@ -39,6 +39,8 @@ Item {
     signal leave()
     // A heading of the outline was chosen, at this source offset.
     signal headingChosen(int position)
+    // A heading an include brought in, in its own file.
+    signal includedHeadingChosen(string path, int line)
 
     // Where the caret is in the document in front, for its outline.
     property int caret: 0
@@ -213,13 +215,20 @@ Item {
         return path.substring(path.lastIndexOf("/") + 1)
     }
 
+    // Each question below gives the keys back to the tree once it closes;
+    // asked for the document in front, from the File menu or the palette,
+    // it gives them to the text.
+    property bool keysToText: false
+
     function askNewFile(folder) {
+        panel.keysToText = false
         nameDialog.task = { kind: "file", path: folder }
         nameDialog.ask(qsTr("New document in “%1”").arg(nameOf(folder)), qsTr("Make"), "",
                        qsTr("A name without .md, .markdown or .txt gets .md."))
     }
 
     function askNewFolder(folder) {
+        panel.keysToText = false
         nameDialog.task = { kind: "folder", path: folder }
         nameDialog.ask(qsTr("New folder in “%1”").arg(nameOf(folder)), qsTr("Make"), "", "")
     }
@@ -227,18 +236,22 @@ Item {
     function askRename(path) {
         if (!backend.organizer.organizes(path))
             return
+        panel.keysToText = false
         nameDialog.task = { kind: "rename", path: path }
         nameDialog.ask(qsTr("Rename “%1”").arg(nameOf(path)), qsTr("Rename"), nameOf(path), "")
     }
 
     function askMove(path) {
-        if (backend.organizer.organizes(path))
-            moveDialog.ask(path)
+        if (!backend.organizer.organizes(path))
+            return
+        panel.keysToText = false
+        moveDialog.ask(path)
     }
 
     // Moves what is at the path into the folder. The review it may need is
     // asked here while the organizer looks for references.
     function moveInto(path, folder) {
+        panel.keysToText = false
         backend.activate(panel.context)
         panel.awaitingReview = true
         backend.organizer.move(path, folder)
@@ -248,10 +261,38 @@ Item {
     function askTrash(path) {
         if (!backend.organizer.organizes(path))
             return
+        panel.keysToText = false
         backend.activate(panel.context)
         panel.awaitingTrash = true
         backend.organizer.askToTrash(path)
         panel.awaitingTrash = backend.organizer.busy
+    }
+
+    // The same for the document in front.
+    function renameDocument(path) {
+        askRename(path)
+        panel.keysToText = true
+    }
+    function moveDocument(path) {
+        askMove(path)
+        panel.keysToText = true
+    }
+    function trashDocument(path) {
+        askTrash(path)
+        panel.keysToText = true
+    }
+    function newDocumentBeside(path) {
+        askNewFile(path.substring(0, path.lastIndexOf("/")))
+        panel.keysToText = true
+    }
+
+    // Where the keys go once a question is closed, the review of links a
+    // move may ask next among them.
+    function keysBack() {
+        if (panel.keysToText)
+            panel.leave()
+        else
+            tree.forceActiveFocus(Qt.TabFocusReason)
     }
 
     // The row the keyboard is on, as {kind, path}.
@@ -916,6 +957,7 @@ Item {
         document: panel.context.tabs.activeDocument
         caret: panel.caret
         onChosen: (position) => panel.headingChosen(position)
+        onIncludedChosen: (path, line) => panel.includedHeadingChosen(path, line)
     }
 
     Rectangle {
@@ -1196,26 +1238,31 @@ Item {
                 panel.awaitingReview = backend.organizer.busy
             }
         }
-        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+        onClosed: panel.keysBack()
     }
 
     MoveDialog {
         id: moveDialog
         objectName: "libraryMoveDialog"
-        onChosen: (folder) => panel.moveInto(moveDialog.path, folder)
-        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+        onChosen: (folder) => {
+            // A move asked for the document in front keeps the keys for its text.
+            const toText = panel.keysToText
+            panel.moveInto(moveDialog.path, folder)
+            panel.keysToText = toText
+        }
+        onClosed: panel.keysBack()
     }
 
     TrashDialog {
         id: trashDialog
         objectName: "libraryTrashDialog"
-        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+        onClosed: panel.keysBack()
     }
 
     LinkUpdateDialog {
         id: linkDialog
         objectName: "libraryLinkDialog"
-        onClosed: tree.forceActiveFocus(Qt.TabFocusReason)
+        onClosed: panel.keysBack()
     }
 
     // The organizer's questions come to the window that asked.

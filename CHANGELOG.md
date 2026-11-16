@@ -23,6 +23,16 @@ The first version: a native Markdown writing app for Omarchy.
 - Rich text pastes as clean Markdown; `Ctrl+Shift+V` pastes plain text.
 - Pasted images and dropped files go into an `assets` folder beside the
   document; a dropped Markdown document can be linked or included.
+- A pasted image with no alt text leaves the caret between `![` and `]`, to
+  describe it there.
+- Assistive technology can edit the text, move the caret and select, each
+  edit one undo step.
+- A note reference that nothing defines can be turned into an inline note,
+  or given a definition, from the editor's menu on it or the command
+  palette.
+- A draft saved beside another document's assets gives its own assets a free
+  name (`-2`, `-3`) where another file has theirs, and updates its links to
+  them, as one undo step, before the file is written.
 - Check document lists everything wrong in a document and the files it
   includes, as file, line, column and message, without holding up the
   window: links, images and includes whose files are missing, links to
@@ -31,9 +41,12 @@ The first version: a native Markdown writing app for Omarchy.
   cannot be drawn, and more. `Enter` opens the place, in the included file
   when the problem is in one.
 - Formatting commands that write and toggle Markdown, each one undo step, from
-  the menu, a formatting toolbar, a command palette and their keys.
+  the menu, a formatting toolbar, a command palette and their keys, among
+  them superscript (`^…^`) and subscript (`~…~`).
 - Lists that continue on Enter and indent with Tab, table cells reached with
-  Tab, table formatting, and Shift+Enter for a hard line break.
+  Tab, table formatting, and Shift+Enter for a hard line break. A list of
+  repeated `1.` keeps its style, a new item in a list that counts up
+  renumbers the items after it, and Renumber list counts a list up again.
 - Keys you can change, with refusals for keys that type and swapping for keys
   taken.
 - English spell checking as you write, with wavy underlines, suggestions, a
@@ -48,7 +61,7 @@ The first version: a native Markdown writing app for Omarchy.
   copy.
 - Preferences for the writing font, text size, line height, line length,
   live formatting, heading syntax, toolbar, spelling and focus mode, applied
-  at once in every window.
+  at once in every window, and for starting each launch with a new draft.
 - A word count and reading time for the document or the selection, of the
   text a reader sees.
 - Document settings for each document, kept by parch and never in the file:
@@ -102,7 +115,8 @@ The first version: a native Markdown writing app for Omarchy.
   cannot be read in (a cycle with its chain of files), and a variable, a
   reference, a footnote or a heading link that nothing defines.
 - The preview follows the text as you type, setting again only what changed,
-  and scrolls with it; a book of 100,000 words keeps up.
+  and scrolls with it; a book of 100,000 words keeps up. A preview that has
+  not caught up after a moment says Updating….
 - It also follows the files the text uses: a picture, an included file, a
   bibliography or a `.csl` style changed on disk is shown changed, and only
   what uses it is set again.
@@ -112,7 +126,9 @@ The first version: a native Markdown writing app for Omarchy.
   themselves.
 - In the preview, links open, a task's box ticks the task in the text, a
   double click puts the caret at the same place in the text, and what you
-  select copies as plain text and with its formatting.
+  select copies as plain text and with its formatting. A double click in an
+  included file's text opens that file at the place, and the outline lists
+  included headings, each opening its file there.
 - Preferences for the reading font, text size, line height and line length,
   for scrolling together, and for fetching pictures from the web.
 - The outline has a command and a key of its own, and a heading chosen from
@@ -162,7 +178,10 @@ The first version: a native Markdown writing app for Omarchy.
 - Find and replace in a document, with case, whole-word and regular
   expression matching; search across every library folder; go to a heading.
 - Make, rename, move and trash files from the library, with links to them
-  updated, and an outline of the document in front.
+  updated, and an outline of the document in front. A rename or move, with
+  the links it updated, can be undone from its notice. Rename…, Move to…,
+  Move to trash…, New document in folder… and Reopen as… act on the
+  document in front from the menu and the command palette.
 - Each document reopens where you were in it.
 - A library of folders, drafts and recent files. Recent files can be removed
   one by one or cleared, and drafts deleted, each with Undo; a deleted

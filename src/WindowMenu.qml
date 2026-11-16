@@ -42,6 +42,11 @@ ThemedMenu {
     CommandEntry { command: "goToHeading" }
     CommandEntry { command: "save" }
     CommandEntry { command: "saveAs" }
+    CommandEntry { objectName: "newDocumentInFolderEntry"; command: "newDocumentInFolder" }
+    CommandEntry { objectName: "renameDocumentEntry"; command: "renameDocument" }
+    CommandEntry { objectName: "moveDocumentEntry"; command: "moveDocument" }
+    CommandEntry { objectName: "trashDocumentEntry"; command: "trashDocument" }
+    CommandEntry { objectName: "reopenWithEncodingEntry"; command: "reopenWithEncoding" }
     CommandEntry { objectName: "historyEntry"; command: "history" }
     CommandEntry { objectName: "checkLinksEntry"; command: "checkLinks" }
     CommandEntry { objectName: "exportEntry"; command: "export" }
@@ -57,6 +62,8 @@ ThemedMenu {
         CommandEntry { command: "italic" }
         CommandEntry { command: "strikethrough" }
         CommandEntry { command: "highlight" }
+        CommandEntry { command: "superscript" }
+        CommandEntry { command: "subscript" }
         CommandEntry { command: "code" }
         CommandEntry { command: "comment" }
         MenuLine {}
@@ -75,6 +82,7 @@ ThemedMenu {
         CommandEntry { command: "quote" }
         CommandEntry { command: "bulletList" }
         CommandEntry { command: "numberedList" }
+        CommandEntry { command: "renumberList" }
         CommandEntry { command: "taskList" }
         CommandEntry { command: "toggleTask" }
         CommandEntry { command: "codeBlock" }

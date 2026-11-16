@@ -136,6 +136,20 @@ Rectangle {
         return true
     }
 
+    // Opens the menu on a note reference that nothing defines, at a
+    // position of the editor's; false when there is none there.
+    function offerNote(position, point) {
+        const source = binding.editorToSource(position)
+        const label = binding.undefinedNoteAt(source)
+        if (label.length === 0)
+            return false
+        noteMenu.position = source
+        noteMenu.label = label
+        noteMenu.inline = binding.acts("inlineNote", source)
+        noteMenu.popup(editor, point.x, point.y)
+        return true
+    }
+
     // The cursor moved or the text scrolled.
     signal viewMoved()
     // Escape was pressed in the text, with nothing being composed.
@@ -257,7 +271,8 @@ Rectangle {
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && event.modifiers === Qt.ShiftModifier)) {
                     const caret = editor.cursorRectangle
-                    event.accepted = pane.offerSpelling(editor.cursorPosition, Qt.point(caret.x, caret.y + caret.height))
+                    const point = Qt.point(caret.x, caret.y + caret.height)
+                    event.accepted = pane.offerSpelling(editor.cursorPosition, point) || pane.offerNote(editor.cursorPosition, point)
                 }
             }
             Accessible.name: pane.title.length > 0 ? pane.title : qsTr("Text")
@@ -340,11 +355,16 @@ Rectangle {
                 }
             }
 
-            // A right click on a misspelled word opens the spelling menu; a
-            // left one goes to the text as ever.
+            // A right click on a misspelled word opens the spelling menu, and
+            // on a note reference that nothing defines the note's; a left
+            // one goes to the text as ever.
             TapHandler {
                 acceptedButtons: Qt.RightButton
-                onTapped: (point) => pane.offerSpelling(editor.positionAt(point.position.x, point.position.y), point.position)
+                onTapped: (point) => {
+                    const position = editor.positionAt(point.position.x, point.position.y)
+                    if (!pane.offerSpelling(position, point.position))
+                        pane.offerNote(position, point.position)
+                }
             }
 
             // The wavy underlines in and near the view, which Qt would draw
@@ -459,6 +479,40 @@ Rectangle {
         background: theme.background
         strength: pane.focusDimming
         normal: theme.foreground
+    }
+
+    // The menu on a note reference that nothing defines: the note made
+    // inline, or a definition for it at the end, each one step to undo.
+    ThemedMenu {
+        id: noteMenu
+        objectName: "noteMenu"
+
+        // The reference's place in the source, and its label.
+        property int position: 0
+        property string label
+        // The dialect has inline notes.
+        property bool inline: false
+
+        function run(command) {
+            binding.select(noteMenu.position, noteMenu.position)
+            binding.format(command)
+        }
+
+        title: qsTr("Note “%1”").arg(noteMenu.label)
+        onOpened: noteMenu.currentIndex = 0
+        onClosed: editor.forceActiveFocus()
+
+        MenuEntry {
+            objectName: "inlineNoteEntry"
+            text: qsTr("Turn into an inline note")
+            enabled: noteMenu.inline
+            onTriggered: noteMenu.run("inlineNote")
+        }
+        MenuEntry {
+            objectName: "defineNoteEntry"
+            text: qsTr("Add a definition for the note")
+            onTriggered: noteMenu.run("defineNote")
+        }
     }
 
     SpellingMenu {

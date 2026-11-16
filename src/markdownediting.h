@@ -33,6 +33,10 @@ struct Options {
     bool setextHeadings = false;
     // The document's line break.
     QString newline = QStringLiteral("\n");
+    // The dialect reads `[^label]` as a note reference, and, as the Writer
+    // profile does, `[^a note of its own.]` as an inline note.
+    bool footnotes = true;
+    bool inlineNotes = true;
 };
 
 // Every formatting command's id, in the order a menu lists them.
@@ -74,5 +78,14 @@ std::optional<TextChange> formatTable(QStringView text, int anchor, int cursor, 
 // The columns a text takes in a monospace font: two for a wide or fullwidth
 // character, none for a combining mark, by grapheme.
 int displayWidth(QStringView text);
+
+// The label of the note reference `[^label]` at or around a position that
+// no `[^label]:` in the text defines: a single word of letters, digits, _,
+// - and :, which the dialect reads as a reference that leads nowhere. Empty
+// for anything else, a definition's own marker and code among it. The
+// commands inlineNote, which makes it an inline note, `[^label.]`, and
+// defineNote, which adds `[^label]: ` at the end of the text for its note,
+// act on it.
+QString undefinedNoteAt(QStringView text, int position);
 
 } // namespace MarkdownEditing

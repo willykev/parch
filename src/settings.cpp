@@ -185,6 +185,15 @@ void Settings::setShowToolbar(bool show)
     emit changed();
 }
 
+void Settings::setFreshDraftOnLaunch(bool fresh)
+{
+    if (fresh == m_freshDraftOnLaunch) return;
+    m_freshDraftOnLaunch = fresh;
+    m_stored.insert(freshDraftOnLaunchKey, fresh);
+    write();
+    emit changed();
+}
+
 void Settings::setVimKeys(bool on)
 {
     if (on == m_vimKeys) return;

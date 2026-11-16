@@ -504,7 +504,8 @@ private slots:
     void documentIdentitySurvivesRestart();
     void draftCreatesNoFileUntilEdited();
     void namingDraftKeepsTextUndoAndIdentity();
-    void namingDraftCarriesAssetsAndRefusesCollisions();
+    void namingDraftCarriesAssetsAndRenamesCollisions();
+    void sameDayDraftsAreNamedIntoOneFolder();
     void namingADraftTakesAwayOnlyWhatWentWithIt();
     void aLinkAtAssetsReceivesNothing();
     void assetsGoThroughTheFoldersOpened();
@@ -693,6 +694,8 @@ private slots:
     void preferencesApplyLiveToEveryWindow() { EditingTests::preferencesApplyLiveToEveryWindow(); }
     void toolbarShowsHidesAndRunsCommands() { EditingTests::toolbarShowsHidesAndRunsCommands(); }
     void formattingCommandsRunFromEveryEntryPoint() { EditingTests::formattingCommandsRunFromEveryEntryPoint(); }
+    void undefinedNotesBecomeInlineOrDefined() { EditingTests::undefinedNotesBecomeInlineOrDefined(); }
+    void assistiveTechnologyEditsTheSource() { EditingTests::assistiveTechnologyEditsTheSource(); }
     void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
     // How much history keeps, other encodings, the library's width, files
     // renamed elsewhere, recent files and drafts, library search and the
@@ -726,7 +729,9 @@ private slots:
     void viewsShowTheTextThePreviewOrBoth() { PreviewTests::viewsShowTheTextThePreviewOrBoth(); }
     void previewFollowsEditsWithoutRebuilding() { PreviewTests::previewFollowsEditsWithoutRebuilding(); }
     void staleResultsNeverReplaceNewerText() { PreviewTests::staleResultsNeverReplaceNewerText(); }
+    void previewSaysWhenItIsBehind() { PreviewTests::previewSaysWhenItIsBehind(); }
     void previewAndSourceFindEachOther() { PreviewTests::previewAndSourceFindEachOther(); }
+    void includedTextLeadsToItsFile() { PreviewTests::includedTextLeadsToItsFile(); }
     void textAndPreviewScrollTogether() { PreviewTests::textAndPreviewScrollTogether(); }
     void linksGoWhereTheyLead() { PreviewTests::linksGoWhereTheyLead(); }
     void tasksAreTickedInTheSource() { PreviewTests::tasksAreTickedInTheSource(); }
@@ -933,6 +938,7 @@ private slots:
     void movesRewriteRelativeReferences();
     void renamingAnOpenDocumentKeepsItsIdentity();
     void movingADocumentUpdatesTheLinksToIt();
+    void undoTakesAMoveAndItsLinkUpdatesBack();
     void aMoveCanLeaveItsLinksOrNotHappen();
     void movingAFolderTakesItsDocumentsAlong();
     void organizingRefusesWhatItCannotDo();
@@ -943,6 +949,7 @@ private slots:
     void searchAcrossTheLibraryOpensTheMatch();
     void searchOfTenThousandDocumentsKeepsTheWindowResponsive();
     void libraryMenusAndKeysOrganizeFiles();
+    void fileCommandsOrganizeTheDocumentInFront();
     void draggingARowOntoAFolderMovesIt();
     void newControlsAreNamedAndReachedByKeys();
     void saveOnDraftAsksForNameThenPromotes();
@@ -2970,14 +2977,15 @@ void ParchTests::namingDraftKeepsTextUndoAndIdentity()
     QCOMPARE(reopened->id(), before);
 }
 
-void ParchTests::namingDraftCarriesAssetsAndRefusesCollisions()
+void ParchTests::namingDraftCarriesAssetsAndRenamesCollisions()
 {
     QTemporaryDir root;
     QVERIFY(root.isValid());
     const AppPaths paths = AppPaths::under(root.path());
     DocumentStore store(paths);
     Document *draft = store.newDraft();
-    const QString text = QStringLiteral("![a](assets/a.png) ![c](assets/img/c.png) ![z](assets/z.png)\n");
+    const QString text = QStringLiteral("![a](assets/a.png) ![c](assets/img/c.png) ![z](assets/z.png)\n"
+                                        "[again](<./assets/z.png> \"title\")\n`assets/z.png` stays\n");
     draft->buffer()->replace({0, 0}, text);
     store.save(draft);
     QTRY_COMPARE(draft->state(), Document::State::Clean);
@@ -2987,9 +2995,11 @@ void ParchTests::namingDraftCarriesAssetsAndRefusesCollisions()
     writeFile(draftFolder + "/assets/img/c.png", c);
     writeFile(draftFolder + "/assets/z.png", z);
 
-    // Assets are placed in name order, so a.png and img/c.png are copied before z.png collides.
+    // Assets are placed in name order, so a.png and img/c.png are copied
+    // before z.png, which cannot be read, fails; all of it is taken away again.
     const QString blocked = root.filePath("blocked"), targetAsset = blocked + "/assets/z.png";
     writeFile(targetAsset, otherBytes);
+    QVERIFY(QFile::setPermissions(draftFolder + "/assets/z.png", {}));
     store.saveAs(draft, blocked + "/doc.md");
     QTRY_COMPARE(draft->state(), Document::State::SaveFailed);
     QVERIFY(draft->isDraft());
@@ -3002,27 +3012,77 @@ void ParchTests::namingDraftCarriesAssetsAndRefusesCollisions()
              QStringList{"z.png"});
     QCOMPARE(readFile(draftFolder + "/draft.md"), text.toUtf8());
     QCOMPARE(readFile(draftFolder + "/assets/a.png"), a);
+    QVERIFY(QFile::setPermissions(draftFolder + "/assets/z.png", QFile::ReadOwner | QFile::WriteOwner));
 
-    // An identical file already in place is used as it is, and the draft folder goes last.
+    // An identical file already in place is used as it is. A different one
+    // keeps its name, and the draft's asset takes the first free name after
+    // it; the links to it are rewritten as one undo step before the named
+    // file is written, and the draft folder goes last.
     const QString named = root.filePath("named");
     writeFile(named + "/assets/a.png", a);
+    writeFile(named + "/assets/z.png", otherBytes);
+    writeFile(named + "/assets/z-2.png", otherBytes);
     writeFile(named + "/assets/unrelated.png", otherBytes);
     struct stat existing {};
     QCOMPARE(::stat(qPrintable(named + "/assets/a.png"), &existing), 0);
+    const qsizetype steps = draft->buffer()->undoDepth();
     store.saveAs(draft, named + "/doc.md");
     QTRY_COMPARE(draft->state(), Document::State::Clean);
     QVERIFY(!draft->isDraft());
     QCOMPARE(draft->id(), id);
     QVERIFY(draft->lastError().isEmpty());
-    QCOMPARE(readFile(named + "/doc.md"), text.toUtf8());
+    const QString renamed = QStringLiteral("![a](assets/a.png) ![c](assets/img/c.png) ![z](assets/z-3.png)\n"
+                                           "[again](<./assets/z-3.png> \"title\")\n`assets/z.png` stays\n");
+    QCOMPARE(readFile(named + "/doc.md"), renamed.toUtf8());
+    QCOMPARE(draft->buffer()->text(), renamed);
+    QCOMPARE(draft->buffer()->undoDepth(), steps + 1);
     QCOMPARE(readFile(named + "/assets/a.png"), a);
     QCOMPARE(readFile(named + "/assets/img/c.png"), c);
-    QCOMPARE(readFile(named + "/assets/z.png"), z);
+    QCOMPARE(readFile(named + "/assets/z.png"), otherBytes);
+    QCOMPARE(readFile(named + "/assets/z-2.png"), otherBytes);
+    QCOMPARE(readFile(named + "/assets/z-3.png"), z);
     QCOMPARE(readFile(named + "/assets/unrelated.png"), otherBytes);
     struct stat reused {};
     QCOMPARE(::stat(qPrintable(named + "/assets/a.png"), &reused), 0);
     QCOMPARE(reused.st_ino, existing.st_ino);
     QVERIFY(!QDir(paths.drafts()).exists(id));
+    draft->buffer()->undo();
+    QCOMPARE(draft->buffer()->text(), text);
+    QCOMPARE(draft->state(), Document::State::Modified);
+}
+
+void ParchTests::sameDayDraftsAreNamedIntoOneFolder()
+{
+    // Two drafts written on one day, each with a pasted screenshot, hold
+    // assets of the same name; both are named into one folder, and each
+    // keeps its own picture.
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    DocumentStore store(paths);
+    const QDate day(2026, 11, 16);
+    const QString folder = root.filePath("notes");
+    QVERIFY(QDir().mkpath(folder));
+    QStringList links;
+    for (const QByteArray &bytes : {QByteArray("first screenshot"), QByteArray("second screenshot")}) {
+        Document *draft = store.newDraft();
+        draft->buffer()->replace({0, 0}, QStringLiteral("Draft\n"));
+        store.save(draft);
+        QTRY_COMPARE(draft->state(), Document::State::Clean);
+        const Attachments::Placed pasted =
+            Attachments::savePasted(paths.drafts() + u'/' + draft->id(), day, QStringLiteral("png"), bytes);
+        QCOMPARE(pasted.relative, QStringLiteral("assets/pasted-2026-11-16-1.png"));
+        draft->buffer()->replace({draft->buffer()->length(), 0}, QStringLiteral("![](%1)\n").arg(pasted.relative));
+        store.saveAs(draft, folder + (links.isEmpty() ? QStringLiteral("/first.md") : QStringLiteral("/second.md")));
+        QTRY_COMPARE(draft->state(), Document::State::Clean);
+        QVERIFY(!draft->isDraft());
+        const QList<DocumentLinks::Link> found = DocumentLinks::find(draft->buffer()->text(), folder);
+        QCOMPARE(found.size(), 1);
+        QCOMPARE(readFile(found.first().destination.path), bytes);
+        links << found.first().written;
+    }
+    QCOMPARE(links, (QStringList{"assets/pasted-2026-11-16-1.png", "assets/pasted-2026-11-16-1-2.png"}));
+    QCOMPARE(readFile(folder + "/second.md"), QByteArray("Draft\n![](assets/pasted-2026-11-16-1-2.png)\n"));
 }
 
 void ParchTests::namingADraftTakesAwayOnlyWhatWentWithIt()
@@ -3427,8 +3487,12 @@ void ParchTests::twoDocumentsCannotTakeOneName()
     withAsset->buffer()->replace({0, 0}, "![a](assets/a.png)\n");
     store.save(withAsset);
     QTRY_COMPARE(withAsset->state(), Document::State::Clean);
-    writeFile(paths.drafts() + "/" + withAsset->id() + "/assets/a.png", "mine");
-    writeFile(blocked + "/assets/a.png", "theirs");
+    // Its asset cannot be read, so it cannot go beside the new name.
+    const QString asset = paths.drafts() + "/" + withAsset->id() + "/assets/a.png";
+    writeFile(asset, "mine");
+    QVERIFY(QFile::setPermissions(asset, {}));
+    const auto readable = qScopeGuard([&] { QFile::setPermissions(asset, QFile::ReadOwner | QFile::WriteOwner); });
+    QVERIFY(QDir().mkpath(blocked));
     store.saveAs(withAsset, blockedTarget);
     QTRY_COMPARE(withAsset->state(), Document::State::SaveFailed);
     store.saveAs(second, blockedTarget);
@@ -17160,6 +17224,9 @@ void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
     f.organizer()->rename(f.file(QStringLiteral("draft notes.md")), QStringLiteral("final notes"));
     // A document keeps its ending, its identity, its text and its undo.
     QTRY_COMPARE(document->path(), f.file(QStringLiteral("final notes.md")));
+    // A plain rename says only that it can be undone.
+    QVERIFY(f.backend->noticeInforms());
+    QVERIFY(f.backend->noticeUndoable());
     QCOMPARE(document->id(), id);
     QCOMPARE(document->buffer()->text(), QStringLiteral("Edited. # Notes\n"));
     QVERIFY(document->buffer()->canUndo());
@@ -17177,8 +17244,6 @@ void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
     // The recent files follow it.
     QVERIFY(f.backend->recentFiles()->paths().contains(f.file(QStringLiteral("final notes.md"))));
     QVERIFY(!f.backend->recentFiles()->paths().contains(f.file(QStringLiteral("draft notes.md"))));
-    // A plain rename says nothing; the library shows it.
-    QVERIFY(!f.backend->notice());
     // A save that runs as the rename is asked for lands first, at the old
     // name, and the rename goes on.
     document->buffer()->replace({0, 0}, QStringLiteral("Again. "));
@@ -17243,6 +17308,74 @@ void ParchTests::movingADocumentUpdatesTheLinksToIt()
     QVERIFY(f.backend->noticeInforms());
     QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("7 links were updated in 4 documents")),
              qPrintable(f.backend->problemDetail()));
+}
+
+void ParchTests::undoTakesAMoveAndItsLinkUpdatesBack()
+{
+    OrganizerFixture f;
+    const QByteArray other("See [the plan](../plan.md).\n");
+    writeFile(f.file(QStringLiteral("index.md")), "[Plan](plan.md)\n");
+    writeFile(f.file(QStringLiteral("notes/other.md")), other);
+    writeFile(f.file(QStringLiteral("plan.md")), "[Index](index.md)\n");
+    QVERIFY(QDir().mkpath(f.file(QStringLiteral("archive"))));
+    Document *index = f.open(QStringLiteral("index.md"));
+    QVERIFY(index);
+    f.organizer()->move(f.file(QStringLiteral("plan.md")), f.file(QStringLiteral("archive")));
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    f.organizer()->confirmMove(true);
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(QFile::exists(f.file(QStringLiteral("archive/plan.md"))));
+    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](archive/plan.md)\n"));
+    QCOMPARE(readFile(f.file(QStringLiteral("archive/plan.md"))), QByteArray("[Index](../index.md)\n"));
+    // The notice that says so takes it back: the file goes back, and so do
+    // the links, in open and closed documents and in the file itself.
+    QVERIFY(f.backend->noticeUndoable());
+    // An edit made since stays.
+    index->buffer()->replace({index->buffer()->length(), 0}, QStringLiteral("More.\n"));
+    f.backend->undoNotice();
+    QTRY_VERIFY(QFile::exists(f.file(QStringLiteral("plan.md"))));
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(!QFile::exists(f.file(QStringLiteral("archive/plan.md"))));
+    QCOMPARE(readFile(f.file(QStringLiteral("plan.md"))), QByteArray("[Index](index.md)\n"));
+    QCOMPARE(readFile(f.file(QStringLiteral("notes/other.md"))), other);
+    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](plan.md)\nMore.\n"));
+    // Taking the links back is one step of the open document's own undo.
+    index->buffer()->undo();
+    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](archive/plan.md)\nMore.\n"));
+    index->buffer()->redo();
+
+    // A plain rename has Undo too, and a document open in a tab goes back
+    // with its file.
+    Document *plan = f.open(QStringLiteral("plan.md"));
+    QVERIFY(plan);
+    writeFile(f.file(QStringLiteral("loose.md")), "loose\n");
+    f.organizer()->rename(f.file(QStringLiteral("loose.md")), QStringLiteral("tight"));
+    QTRY_VERIFY(QFile::exists(f.file(QStringLiteral("tight.md"))));
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(f.backend->noticeUndoable());
+    f.backend->undoNotice();
+    QTRY_VERIFY(QFile::exists(f.file(QStringLiteral("loose.md"))));
+    QVERIFY(!QFile::exists(f.file(QStringLiteral("tight.md"))));
+    f.organizer()->rename(f.file(QStringLiteral("plan.md")), QStringLiteral("the plan"));
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    f.organizer()->confirmMove(true);
+    QTRY_COMPARE(plan->path(), f.file(QStringLiteral("the plan.md")));
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(f.backend->noticeUndoable());
+    f.backend->undoNotice();
+    QTRY_COMPARE(plan->path(), f.file(QStringLiteral("plan.md")));
+    QTRY_VERIFY(!f.organizer()->busy());
+    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](plan.md)\nMore.\n"));
+    // What took the old name since keeps it, and nothing moves.
+    f.organizer()->rename(f.file(QStringLiteral("loose.md")), QStringLiteral("tight"));
+    QTRY_VERIFY(QFile::exists(f.file(QStringLiteral("tight.md"))));
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(f.backend->noticeUndoable());
+    writeFile(f.file(QStringLiteral("loose.md")), "someone else's\n");
+    f.backend->undoNotice();
+    QTRY_VERIFY2(f.backend->problem().contains(QStringLiteral("Not renamed")), qPrintable(f.backend->problem()));
+    QCOMPARE(readFile(f.file(QStringLiteral("loose.md"))), QByteArray("someone else's\n"));
+    QCOMPARE(readFile(f.file(QStringLiteral("tight.md"))), QByteArray("loose\n"));
 }
 
 void ParchTests::aMoveCanLeaveItsLinksOrNotHappen()
@@ -17825,6 +17958,116 @@ void ParchTests::libraryMenusAndKeysOrganizeFiles()
     QTest::keyClick(window, Qt::Key_Return);
     QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/Fresh start.md")));
     QTRY_VERIFY(shell.document() && shell.document()->path() == writing + QStringLiteral("/Fresh start.md"));
+}
+
+void ParchTests::fileCommandsOrganizeTheDocumentInFront()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString writing = canonical(root.path()) + QStringLiteral("/Writing");
+    const QString outside = canonical(root.path()) + QStringLiteral("/elsewhere.md");
+    const QString latin = writing + QStringLiteral("/latin.md");
+    writeFile(writing + QStringLiteral("/a.md"), "a\n");
+    writeFile(outside, "outside\n");
+    writeFile(latin, QByteArray("caf\xe9\n"));
+    QVERIFY(QDir().mkpath(writing + QStringLiteral("/Sub")));
+    ShellFixture shell({.settings = librarySettings(writing), .root = root.path() + QStringLiteral("/app"),
+                        .files = {writing + QStringLiteral("/a.md")}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    resizeWindow(window, 1200);
+    activate(window);
+    QTRY_VERIFY(shell.document() && shell.document()->path() == writing + QStringLiteral("/a.md"));
+    Document *first = shell.document();
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    const auto canRun = [&](const char *command) {
+        QVariant can;
+        QMetaObject::invokeMethod(window, "canRun", Q_RETURN_ARG(QVariant, can), Q_ARG(QVariant, QString::fromLatin1(command)));
+        return can.toBool();
+    };
+    // Each is in the File menu and the palette.
+    const QStringList commands{QStringLiteral("newDocumentInFolder"), QStringLiteral("renameDocument"),
+                               QStringLiteral("moveDocument"), QStringLiteral("trashDocument"),
+                               QStringLiteral("reopenWithEncoding")};
+    QObject *menu = shell.object(QStringLiteral("windowMenu"));
+    QStringList titles;
+    for (int i = 0; i < menu->property("count").toInt(); ++i) {
+        QQuickItem *item = nullptr;
+        QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, item), Q_ARG(int, i));
+        if (item) titles << item->property("text").toString();
+    }
+    for (const QString &command : commands) {
+        QVERIFY2(shell.backend->commands()->contains(command), qPrintable(command));
+        QVERIFY2(titles.contains(shell.backend->commands()->title(command)), qPrintable(command));
+    }
+    // The library need not be in view.
+    if (shell.context()->libraryOpen()) runCommand(window, "library");
+    QTRY_VERIFY(!shell.context()->libraryOpen());
+    editor->forceActiveFocus();
+
+    // Rename… names the document in front anew, and its tab follows it.
+    QVERIFY(canRun("renameDocument"));
+    runCommand(window, "renameDocument");
+    QObject *names = shell.object(QStringLiteral("libraryNameDialog"));
+    QTRY_VERIFY(names->property("opened").toBool());
+    QQuickItem *nameField = shell.item(QStringLiteral("nameField"));
+    QTRY_COMPARE(window->activeFocusItem(), nameField);
+    typeText(window, QStringLiteral("renamed"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/renamed.md")));
+    QTRY_COMPARE(shell.document()->path(), writing + QStringLiteral("/renamed.md"));
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    // Move to… puts it in another folder of the library.
+    runCommand(window, "moveDocument");
+    QObject *mover = shell.object(QStringLiteral("libraryMoveDialog"));
+    QTRY_VERIFY(mover->property("opened").toBool());
+    typeText(window, QStringLiteral("Sub"));
+    QTRY_COMPARE(shell.object(QStringLiteral("moveFolders"))->property("count").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/Sub/renamed.md")));
+    QTRY_COMPARE(shell.document()->path(), writing + QStringLiteral("/Sub/renamed.md"));
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    // New document in folder makes one beside it, opened in a tab.
+    runCommand(window, "newDocumentInFolder");
+    QTRY_VERIFY(names->property("opened").toBool());
+    typeText(window, QStringLiteral("Next"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(QFile::exists(writing + QStringLiteral("/Sub/Next.md")));
+    QTRY_COMPARE(shell.document()->path(), writing + QStringLiteral("/Sub/Next.md"));
+    // Move to trash… asks first.
+    runCommand(window, "trashDocument");
+    QObject *trash = shell.object(QStringLiteral("libraryTrashDialog"));
+    QTRY_VERIFY(trash->property("opened").toBool());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(footButton(trash, QStringLiteral("Move to trash"))));
+    QTRY_VERIFY(!QFile::exists(writing + QStringLiteral("/Sub/Next.md")));
+    QVERIFY(QFile::exists(writing + QStringLiteral("/Sub/renamed.md")));
+    // In a window too narrow for the library beside the text, too.
+    shell.context()->tabs()->setActiveIndex(shell.context()->tabs()->indexOf(first));
+    QTRY_COMPARE(shell.document()->path(), writing + QStringLiteral("/Sub/renamed.md"));
+    resizeWindow(window, 480);
+    QVERIFY(!window->property("libraryDocked").toBool());
+    runCommand(window, "renameDocument");
+    QTRY_VERIFY(names->property("opened").toBool());
+    typeText(window, QStringLiteral("narrow"));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(shell.document()->path(), writing + QStringLiteral("/Sub/narrow.md"));
+    resizeWindow(window, 1200);
+
+    // A file outside the library is not organized from here, and a file
+    // that is UTF-8 is not read again in another encoding.
+    shell.backend->openFiles({outside});
+    QTRY_COMPARE(shell.document()->path(), outside);
+    for (const QString &command : commands) QVERIFY2(!canRun(qPrintable(command)), qPrintable(command));
+    // Reopen as… is for a file open read-only because it is not UTF-8.
+    shell.backend->openFiles({latin});
+    QTRY_COMPARE(shell.document()->path(), latin);
+    QCOMPARE(shell.document()->state(), Document::State::ReadOnly);
+    QVERIFY(canRun("reopenWithEncoding"));
+    runCommand(window, "reopenWithEncoding");
+    QObject *encodings = shell.object(QStringLiteral("encodingDialog"));
+    QTRY_VERIFY(encodings->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!encodings->property("visible").toBool());
 }
 
 void ParchTests::draggingARowOntoAFolderMovesIt()
@@ -21863,11 +22106,24 @@ void ParchTests::pastedImagesAreSavedAsAssets()
     QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
     QTRY_COMPARE(buffer->text(), QStringLiteral("Look: ") + first + u'\n');
     QCOMPARE(readFile(assets + QStringLiteral("/pasted-2026-11-16-1.png")), red);
-    // The caret follows the image in.
-    QCOMPARE(view.binding->cursorSource(), 6 + int(first.size()));
+    // An image with no alt text invites one: the caret goes between its
+    // brackets, and what is typed there describes it. The paste is still
+    // one step to undo.
+    QCOMPARE(view.binding->cursorSource(), 6 + 2);
+    QCOMPARE(view.binding->anchorSource(), 6 + 2);
+    typeText(&view.window, QStringLiteral("Red"));
+    QCOMPARE(buffer->text(), QStringLiteral("Look: ![Red](assets/pasted-2026-11-16-1.png)\n"));
+    buffer->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Look: ") + first + u'\n');
+    buffer->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Look: \n"));
+    buffer->redo();
+    QCOMPARE(buffer->text(), QStringLiteral("Look: ") + first + u'\n');
+    view.cursor(6 + int(first.size()));
     // The same image again is the same file; another takes the next number.
     QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
     QTRY_COMPARE(buffer->text(), QStringLiteral("Look: ") + first + first + u'\n');
+    view.cursor(6 + 2 * int(first.size()));
     copyImage(blue);
     QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
     const QString second = QStringLiteral("![](assets/pasted-2026-11-16-2.png)");
@@ -21896,6 +22152,8 @@ void ParchTests::pastedImagesAreSavedAsAssets()
     QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
     QTRY_VERIFY(buffer->text().startsWith(QStringLiteral("![Red square](assets/pasted-2026-11-16-1.png)Look")));
     QCOMPARE(filesIn(assets).size(), 3);
+    // With its alt text the caret follows it in.
+    QCOMPARE(view.binding->cursorSource(), int(QStringLiteral("![Red square](assets/pasted-2026-11-16-1.png)").size()));
 }
 
 void ParchTests::pastedHtmlImagesLandOnceSaved()

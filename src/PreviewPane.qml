@@ -43,8 +43,20 @@ Rectangle {
     readonly property Backend application: backend
     readonly property Theme look: theme
 
-    // A double click asks for the editor's caret at this source offset.
+    // A double click asks for the editor's caret at this source offset; in
+    // text an include brought in, for the included file at that place.
     signal sourceRequested(int position)
+    signal includedRequested(string path, int line, int column)
+    function requestSource(position, island) {
+        const included = preview.includedAt(position, island)
+        if (included.path !== undefined) {
+            pane.includedRequested(included.path, included.line, included.column)
+            return
+        }
+        const source = preview.sourceAt(position, island)
+        if (source >= 0)
+            pane.sourceRequested(source)
+    }
     // A link names a document to open, and perhaps a heading of it by its slug.
     signal openRequested(string path, string heading)
     signal escapePressed()
@@ -218,11 +230,7 @@ Rectangle {
             TapHandler {
                 id: pointer
                 onPressedChanged: if (pressed) pane.keyFocus = false
-                onDoubleTapped: (point) => {
-                    const source = preview.sourceAt(surface.positionAt(point.position.x, point.position.y), 0)
-                    if (source >= 0)
-                        pane.sourceRequested(source)
-                }
+                onDoubleTapped: (point) => pane.requestSource(surface.positionAt(point.position.x, point.position.y), 0)
             }
 
             // What the preview places over the text, for the part near the view.
@@ -411,11 +419,7 @@ Rectangle {
                                     TapHandler {
                                         id: islandPointer
                                         onPressedChanged: if (pressed) pane.keyFocus = false
-                                        onDoubleTapped: (point) => {
-                                            const source = preview.sourceAt(text.positionAt(point.position.x, point.position.y), mark.island)
-                                            if (source >= 0)
-                                                pane.sourceRequested(source)
-                                        }
+                                        onDoubleTapped: (point) => pane.requestSource(text.positionAt(point.position.x, point.position.y), mark.island)
                                     }
                                 }
 
@@ -453,6 +457,55 @@ Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    // A preview that has not caught up with the text for a moment says so,
+    // quietly, so that what it still shows is never taken for the text as
+    // it is now. A quick update never shows it.
+    Rectangle {
+        id: behind
+        readonly property bool lagging: pane.active && pane.document !== null && !preview.current
+        property bool due: false
+        readonly property real pad: Math.round(theme.fontSize / 3)
+        onLaggingChanged: {
+            due = false
+            if (lagging)
+                wait.restart()
+            else
+                wait.stop()
+        }
+        visible: due && lagging
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: Math.round(pane.margin / 2)
+        width: Math.min(updating.implicitWidth + 2 * pad, parent.width - 2 * anchors.margins)
+        height: updating.implicitHeight + pad
+        radius: theme.radius
+        color: theme.background
+        opacity: 0.9
+
+        Text {
+            id: updating
+            objectName: "previewUpdating"
+            anchors.fill: parent
+            anchors.leftMargin: behind.pad
+            anchors.rightMargin: behind.pad
+            text: qsTr("Updating…")
+            textFormat: Text.PlainText
+            font.family: theme.fontFamily
+            font.pixelSize: theme.sizes.caption
+            color: preview.dimColor
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignVCenter
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+
+        Timer {
+            id: wait
+            interval: 300
+            onTriggered: behind.due = behind.lagging
         }
     }
 

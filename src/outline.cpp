@@ -1,24 +1,64 @@
 #include "outline.h"
 
+#include "mdinclude.h"
 #include "mdtree.h"
+#include "pathtext.h"
 #include "sourcebuffer.h"
 #include "textsearch.h"
 
+#include <QHash>
+#include <QSet>
 #include <QtConcurrent>
 #include <algorithm>
 #include <utility>
 
-QList<Heading> Outline::headings(const QString &text, const md::Options &options)
+namespace {
+// Where each included heading is brought in: the start of the include, in
+// the document's own text, that brings in it or what holds it.
+void includedFrom(const md::Node &node, int include, const QSet<const md::Node *> &wanted,
+                  QHash<const md::Node *, int> &places)
 {
-    const md::Document document = md::parse(text, options);
+    if (include < 0 && node.type == md::NodeType::Include && node.file == 0) include = node.range.start;
+    if (include >= 0 && wanted.contains(&node)) places.insert(&node, include);
+    for (const md::Node &child : node.children) includedFrom(child, include, wanted, places);
+}
+
+QList<Heading> headingsOf(const QString &text, const md::Document &document)
+{
+    QSet<const md::Node *> wanted;
+    for (const md::Heading &heading : document.headings)
+        if (heading.file != 0 && heading.node) wanted.insert(heading.node);
+    QHash<const md::Node *, int> places;
+    if (!wanted.isEmpty()) includedFrom(document.root, -1, wanted, places);
     QList<Heading> found;
     TextSearch::LineCounter lines(text);
     for (const md::Heading &heading : document.headings) {
-        if (heading.file != 0 || heading.text.isEmpty()) continue;
-        const int line = lines.lineOf(heading.range.start);
-        found.append({heading.level, heading.text, lines.lineStart(), line, heading.slug, heading.label});
+        if (heading.text.isEmpty()) continue;
+        if (heading.file == 0) {
+            const int line = lines.lineOf(heading.range.start);
+            found.append({heading.level, heading.text, lines.lineStart(), line, heading.slug, heading.label});
+            continue;
+        }
+        const auto place = places.constFind(heading.node);
+        if (place == places.cend() || size_t(heading.file) >= document.files.size()) continue;
+        const md::SourceFile &file = document.files[size_t(heading.file)];
+        if (file.path.isEmpty()) continue;
+        const int line = lines.lineOf(*place);
+        found.append({heading.level, heading.text, lines.lineStart(), line, heading.slug, heading.label, file.path,
+                      TextSearch::LineCounter(file.text).lineOf(heading.range.start)});
     }
     return found;
+}
+} // namespace
+
+QList<Heading> Outline::headings(const QString &text, const md::Options &options)
+{
+    return headingsOf(text, md::parse(text, options));
+}
+
+QList<Heading> Outline::headings(const QString &text, const md::Options &options, const md::Source &source)
+{
+    return headingsOf(text, md::parse(text, options, source));
 }
 
 OutlineModel::OutlineModel(QObject *parent) : QAbstractListModel(parent)
@@ -56,6 +96,10 @@ QVariant OutlineModel::data(const QModelIndex &index, int role) const
         return heading.slug;
     case LabelRole:
         return heading.label;
+    case FileRole:
+        return heading.file;
+    case FileLineRole:
+        return heading.fileLine;
     default:
         return {};
     }
@@ -64,7 +108,8 @@ QVariant OutlineModel::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> OutlineModel::roleNames() const
 {
     return {{TextRole, "heading"}, {LevelRole, "level"}, {PositionRole, "position"},
-            {LineRole, "line"},     {SlugRole, "slug"},   {LabelRole, "label"}};
+            {LineRole, "line"},     {SlugRole, "slug"},   {LabelRole, "label"},
+            {FileRole, "file"},     {FileLineRole, "fileLine"}};
 }
 
 Document *OutlineModel::document() const { return m_document; }
@@ -128,6 +173,16 @@ int OutlineModel::positionAt(int row) const
     return row >= 0 && row < m_shown.size() ? m_shown.at(row).position : -1;
 }
 
+QString OutlineModel::fileAt(int row) const
+{
+    return row >= 0 && row < m_shown.size() ? m_shown.at(row).file : QString();
+}
+
+int OutlineModel::fileLineAt(int row) const
+{
+    return row >= 0 && row < m_shown.size() ? m_shown.at(row).fileLine : -1;
+}
+
 int OutlineModel::rowAt(int position) const
 {
     const auto after = std::upper_bound(m_shown.cbegin(), m_shown.cend(), position,
@@ -150,7 +205,11 @@ void OutlineModel::scan()
     m_running = true;
     m_scanAgain = false;
     const quint64 generation = m_generation;
-    QtConcurrent::run(&m_pool, &OutlineModel::scanJob, m_document->buffer()->snapshot(), m_document->markdownOptions())
+    // The headings of included files are read from disk too, from the
+    // document's folder and its library root.
+    const QString path = m_document->path();
+    QtConcurrent::run(&m_pool, &OutlineModel::scanJob, m_document->buffer()->snapshot(), m_document->markdownOptions(),
+                      path, path.isEmpty() ? QString() : PathText::folderOf(path), m_document->libraryRoot())
         .then(this, [this, generation](const Scan &result) {
             m_running = false;
             const bool again = std::exchange(m_scanAgain, false);
@@ -165,9 +224,16 @@ void OutlineModel::scan()
         });
 }
 
-OutlineModel::Scan OutlineModel::scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options)
+OutlineModel::Scan OutlineModel::scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options,
+                                         QString path, QString directory, QString libraryRoot)
 {
-    return {Outline::headings(snapshot->text, options), snapshot->revision};
+    md::FileIncludeResolver resolver;
+    md::Source source;
+    source.path = path;
+    source.directory = directory;
+    source.libraryRoot = libraryRoot;
+    if (!directory.isEmpty()) source.resolver = &resolver;
+    return {Outline::headings(snapshot->text, options, source), snapshot->revision};
 }
 
 void OutlineModel::take(const QList<Heading> &headings)

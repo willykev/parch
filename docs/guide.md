@@ -23,7 +23,8 @@ teaches the Markdown parch reads, with examples you can edit; see
 - Run `parch new-note.md` with a name that does not exist yet to start a
   document that becomes that file when you first type.
 - A file that is not valid UTF-8 opens read-only, so its bytes stay exactly as
-  they are. **Reopen as…**, in the bar above the text, reads it in the
+  they are. **Reopen as…**, in the bar above the text, the menu or the
+  command palette, reads it in the
   encoding it was written in: Windows-1252, Latin-1, UTF-16 and every other
   your system knows, with a preview of the text in each. Once you convert
   it, you can edit it, and nothing is saved until you choose **Save as
@@ -45,6 +46,9 @@ the document's line endings.
 - A pasted image, such as a screenshot, is saved in the `assets` folder beside
   the document, named after the day as in `pasted-2026-11-16-1.png`, and
   linked where you pasted it. Pasting the same image again reuses its file.
+  An image pasted without alt text puts the caret between `![` and `]`, so
+  that you can describe it for readers who cannot see it; one undo still
+  takes the paste back.
   Images in the web page itself stay links to where they are online; nothing
   is downloaded.
 - Dropping files on the text, or pasting files copied in a file manager,
@@ -55,7 +59,10 @@ the document's line endings.
 - Dropping a Markdown document offers **Insert link** or **Include**, which
   puts its path on a line of its own so that its text is shown there.
 - A draft keeps its assets in its own folder until you save it; they then go
-  into `assets` beside the file.
+  into `assets` beside the file. An asset whose name another file already
+  has there, as a screenshot pasted into another draft on the same day, is
+  given `-2`, `-3` before its extension, and the draft's links to it are
+  changed to match before the file is written; one undo changes them back.
 - **Check document…** in the menu or the command palette lists everything
   wrong in the document and the files it includes, a line each as
   `file:line:column: message`: links, images and includes whose files are not
@@ -94,9 +101,12 @@ step for `Ctrl+Z` to take back. Find them under **Format** in the menu
 (`F10`), on the toolbar under the tabs, in the command palette, or by their
 keys.
 
-- **Bold**, **Italic**, **Strikethrough**, **Highlight** (`==`), **Inline
-  code**, **Inline math** (`$`) and **Comment** (`<!-- -->`) wrap the
-  selection, or the text of each line in a selection over several lines.
+- **Bold**, **Italic**, **Strikethrough**, **Highlight** (`==`),
+  **Superscript** (`^`), **Subscript** (`~`), **Inline code**, **Inline
+  math** (`$`) and **Comment** (`<!-- -->`) wrap the selection, or the text
+  of each line in a selection over several lines. Superscript and subscript
+  write the delimited form, as in `y^(a+b)^` and `H~2~O`, which holds
+  punctuation but no spaces, right after the letter or digit it belongs to.
   Used again on text that has them, they take the markers away. Without a
   selection they take away the markers around the caret, or put a pair
   there with the caret between them.
@@ -114,6 +124,12 @@ keys.
   inside a link, **Link** takes the link away and keeps its text.
 - **Footnote** inserts the next `[^n]` and its definition at the end of the
   document, where the caret goes for you to write the note.
+- A reference such as `[^source]` that no `[^source]:` defines leads
+  nowhere. A right click on it, or the `Menu` key with the caret on it,
+  offers **Turn into an inline note**, which makes it `[^source.]`, a note of
+  its own, and **Add a definition for the note**, which puts `[^source]: `
+  at the end of the document for you to write the note. Both are in the
+  command palette while the caret is on such a reference.
 - **Table** inserts a two-column table; **Format table** lines up a table's
   pipes and padding by its alignment row without changing a cell, and keeps
   wide characters, escaped pipes and pipes in code in their place.
@@ -123,7 +139,11 @@ keys.
 While you type:
 
 - `Enter` in a list item starts the next item: the same bullet, the next
-  number, or an unchecked box. `Enter` on an empty item ends the list.
+  number, or an unchecked box. `Enter` on an empty item ends the list. A
+  list numbered `1.`, `1.`, `1.` goes on with `1.`; in a list that counts
+  up, a new item in the middle renumbers the items after it, in the same
+  undo step. **Renumber list** in the Format menu counts the numbered list
+  at the caret up from its first number.
 - `Tab` and `Shift+Tab` indent and outdent a list item, or every line of a
   selection; elsewhere `Tab` types a tab.
 - In a table, `Tab` and `Shift+Tab` go to the next and previous cell, and
@@ -184,8 +204,10 @@ middle. A window too narrow for both shows one at a time: **Markdown** and
 **Preview** above the text choose which, as does `Ctrl+Alt+E`.
 
 The preview follows the text a moment after you pause, and keeps up while you
-type. Only what changed is set again, so it stays where you were reading. It
-follows the files the text uses as well: a picture, an included file, a
+type. Only what changed is set again, so it stays where you were reading.
+While a long document takes more than a moment to set again, the preview
+keeps what it showed and says **Updating…** in its top corner until it has
+caught up. It follows the files the text uses as well: a picture, an included file, a
 bibliography or a `.csl` style changed on disk is shown changed without an
 edit, and only what uses it is set again.
 
@@ -234,7 +256,9 @@ In the preview:
   the arrow after the note comes back.
   **Back in the preview** (`Alt+Left`) returns to where you were.
 - A click on a task's box ticks it in the text; `Ctrl+Z` takes that back.
-- A double click puts the caret at the same place in the text.
+- A double click puts the caret at the same place in the text. In text an
+  include brought in, it opens the included file in a tab, with the caret
+  at the place you clicked.
 - Select text with the mouse, or with `Shift` and the arrow keys, and copy it
   with `Ctrl+C`, as plain text and with its formatting.
 - `Up`, `Down`, `PageUp`, `PageDown`, `Space`, `Home` and `End` scroll.
@@ -330,7 +354,9 @@ another command has can be swapped. **Remove** leaves a command without keys,
 **Preferences…** (`Ctrl+,`) sets the writing font, any installed family or
 the theme's; the text size; the line height; the longest line, in
 characters; whether the Markdown is styled as you write; how headings are
-written; whether the formatting toolbar shows; whether spelling is checked;
+written; whether the formatting toolbar shows; whether parch starts with a
+new draft in front of the documents it reopens (**Start with a new
+draft**); whether spelling is checked;
 what focus mode keeps bright, and how strongly it dims the rest; and how many
 versions history keeps, for how long and in how much space. A window too
 narrow for the toolbar hides it until you ask for it with **Show toolbar**.
@@ -754,16 +780,24 @@ you chose last.
 - **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
   including folders you have not opened.
 - **Outline**, at the foot of the library, lists the headings of the document
-  in front; choosing one goes there, in the text and in the preview.
-  `Ctrl+Alt+O` shows it with the keys on the headings, and hides it.
+  in front; choosing one goes there, in the text and in the preview. The
+  headings of the files it includes are listed where it includes them, and
+  choosing one of those opens its file at the heading, as **Go to heading**
+  does. `Ctrl+Alt+O` shows it with the keys on the headings, and hides it.
 - A folder's menu (right click, or the `Menu` key) makes a **New document…**
   or **New folder…** in it. A document's menu can **Rename…** it (`F2`),
   **Move to…** another library folder (or drag it there), and **Move to
   trash…** (`Delete`), from where the desktop's trash can bring it back.
+  The same commands are in the menu (`F10`) and the command palette for the
+  document in front, with **New document in folder…**, which makes one
+  beside it, when it is in one of the library's folders.
 - When a renamed or moved document has links, images, includes or reference
   definitions leading to it in other documents of the library, or relative
   ones of its own, parch lists them and offers to update them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
   A moved document keeps its tab, its history and any unsaved text.
+- **Undo**, in the notice a rename or move leaves, puts it back where it
+  was, and the links it updated with it, as long as nothing else has taken
+  its old name and no other rename or move has been made since.
 
 ## Finding text
 
@@ -789,6 +823,10 @@ Each document opens again where you were in it last time.
 parch draws everything from your Omarchy theme and follows it as you switch
 themes, light or dark, along with the theme's font. `Ctrl+=` and `Ctrl+-`
 change the text size, and `Ctrl+0` returns to the theme's size.
+
+Screen readers and other assistive technology reach every control by name.
+They can also edit the text, place the caret and select: each edit they
+make is one step for `Ctrl+Z`, as typing is.
 
 ## Spelling and focus
 

@@ -36,6 +36,9 @@ public:
     // cannot take text, as a read-only one. The insertion is used up and
     // deleted either way.
     bool insert(const QString &text, bool block);
+    // Where the text inserted starts in the document, once insert() has put
+    // it in; -1 before.
+    int insertedAt() const { return m_insertedAt; }
     // Gives the insertion up.
     void cancel();
     // `text` as it is to stand in `source` at `range`: block text with a
@@ -49,6 +52,7 @@ private:
     QMetaObject::Connection m_following;
     int m_start = 0;
     int m_end = 0;
+    int m_insertedAt = -1;
     bool m_touched = false;
     bool m_used = false;
 };

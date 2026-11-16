@@ -66,6 +66,9 @@ struct Anchor {
     int length = 0;
     // The anchor is where a block begins.
     bool block = false;
+    // Text an include brought in: the file it came from, as an index into
+    // the document's files, with `source` counted from that file's start.
+    int file = 0;
 };
 
 // A place links go to: a heading's slug, "fn-3" for a note, "fnref-3" for a
@@ -147,6 +150,8 @@ struct Island {
     int sourceStart = 0;
     int sourceEnd = 0;
     QList<Anchor> anchors;
+    // Where the text included files brought in came from.
+    QList<Anchor> included;
     // What it is, for assistive technology.
     QString description;
     // Table: how many rows are header rows.
@@ -216,6 +221,8 @@ struct Section {
     // How many characters it has in the document, block separators included.
     int length = 0;
     QList<Anchor> anchors;
+    // Where the text included files brought in came from.
+    QList<Anchor> included;
     QList<NamedAnchor> names;
     QList<Mark> marks;
     std::vector<Island> islands;

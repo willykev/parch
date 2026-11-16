@@ -220,6 +220,10 @@ public:
     // Where a position of the surface, or of an island, came from in the
     // source; -1 when it came from none.
     Q_INVOKABLE int sourceAt(int position, quint64 island = 0) const;
+    // Where a position came from when an include brought it in: {path,
+    // line, column} of its place in the included file, lines and columns
+    // from 0; empty for the document's own text.
+    Q_INVOKABLE QVariantMap includedAt(int position, quint64 island = 0) const;
     // The source shown at the top of the view, and showing a source position there.
     Q_INVOKABLE int topSource() const;
     Q_INVOKABLE void showSource(int source);

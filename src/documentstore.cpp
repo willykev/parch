@@ -161,34 +161,50 @@ Placed makeFolders(const FolderRef &root, const QString &shownRoot, const QStrin
     return Placed::All;
 }
 
-// Puts one draft asset at its name in the folder opened for it. A file
-// already there with the same bytes is used as it is; anything else there is
-// refused, so no existing file is ever replaced.
-bool placeAsset(const QString &source, const FolderRef &folder, const QString &target, const QString &name,
-                Placement &placement, QString &error)
+// Puts one draft asset in the folder opened for it: at its own name, or,
+// when another file has that name, at the first free one after it, with -2,
+// -3 and on before its extension, as a dropped file is named. A file at a
+// name that holds the same bytes is used as it is, and nothing there is ever
+// replaced. `placedAs` is the name it has, like `name` relative to the
+// assets folder; `targetFolder` is the assets folder's path.
+bool placeAsset(const QString &source, const FolderRef &folder, const QString &targetFolder, const QString &name,
+                Placement &placement, QString &placedAs, QString &error)
 {
     const QString shownName = QStringLiteral("assets/") + name;
     if (!isRegularFile(source)) {
         error = DocumentStore::tr("Cannot read the draft's %1").arg(shownName);
         return false;
     }
-    const QByteArray leaf = QFile::encodeName(name.mid(name.lastIndexOf(u'/') + 1));
-    struct stat existing {};
-    if (::fstatat(folder->descriptor, leaf.constData(), &existing, AT_SYMLINK_NOFOLLOW) == 0) {
-        if (S_ISREG(existing.st_mode) && sameBytes(source, folder->descriptor, leaf)) return true;
-        error = DocumentStore::tr("A different file is already at %1").arg(shownName);
-        return false;
-    }
-    beforePlacing(target);
-    // O_EXCL creates the file only while nothing, not even a link, has the
-    // name, so a file that appeared after the check is not overwritten either.
-    const int descriptor =
-        ::openat(folder->descriptor, leaf.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
-    if (descriptor < 0) {
-        const int failure = errno;
-        error = failure == EEXIST ? DocumentStore::tr("A different file is already at %1").arg(shownName)
-                                  : DocumentStore::tr("Cannot copy %1: %2").arg(shownName, errorText(failure));
-        return false;
+    const qsizetype slash = name.lastIndexOf(u'/');
+    const QString within = name.left(slash + 1), own = name.mid(slash + 1);
+    // The number goes before the extension; a name that starts with its only dot has none.
+    const qsizetype dot = own.lastIndexOf(u'.');
+    const QString stem = dot > 0 ? own.left(dot) : own, extension = dot > 0 ? own.mid(dot) : QString();
+    int descriptor = -1;
+    QByteArray leaf;
+    for (int n = 1; descriptor < 0; ++n) {
+        if (n > 10000) {
+            error = DocumentStore::tr("No free name is left for %1").arg(shownName);
+            return false;
+        }
+        const QString candidate = n == 1 ? own : stem + u'-' + QString::number(n) + extension;
+        leaf = QFile::encodeName(candidate);
+        placedAs = within + candidate;
+        struct stat existing {};
+        if (::fstatat(folder->descriptor, leaf.constData(), &existing, AT_SYMLINK_NOFOLLOW) == 0) {
+            if (S_ISREG(existing.st_mode) && sameBytes(source, folder->descriptor, leaf)) return true;
+            continue;
+        }
+        beforePlacing(targetFolder + u'/' + placedAs);
+        // O_EXCL creates the file only while nothing, not even a link, has
+        // the name, so a file that appeared after the check is not
+        // overwritten either; the next name is tried instead.
+        descriptor =
+            ::openat(folder->descriptor, leaf.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+        if (descriptor < 0 && errno != EEXIST) {
+            error = DocumentStore::tr("Cannot copy %1: %2").arg(shownName, errorText(errno));
+            return false;
+        }
     }
     placement.made.append({folder, leaf, false});
     QFile output;
@@ -214,9 +230,10 @@ bool placeAsset(const QString &source, const FolderRef &folder, const QString &t
 // name order so that a failure is the same each time it is tried. When a
 // folder they would go in is not a folder of its own, as a link put there,
 // nothing is placed, and the assets stay in the draft. Every folder is
-// opened once and written through, never by its path.
+// opened once and written through, never by its path. `renamed` holds the
+// assets that took another name than their own, as {own name, new name}.
 Placed placeAssets(const QString &source, const QString &targetFolder, Placement &placement, QString &error,
-                   QStringList &placed)
+                   QStringList &placed, QList<std::pair<QString, QString>> &renamed)
 {
     QStringList names;
     const QDir sourceDir(source);
@@ -241,11 +258,13 @@ Placed placeAssets(const QString &source, const QString &targetFolder, Placement
             placement.undo();
             return made;
         }
-        if (!placeAsset(source + u'/' + name, leaf, targetFolder + QStringLiteral("/assets/") + name, name, placement,
-                        error)) {
+        QString placedAs;
+        if (!placeAsset(source + u'/' + name, leaf, targetFolder + QStringLiteral("/assets"), name, placement,
+                        placedAs, error)) {
             placement.undo();
             return Placed::Failed;
         }
+        if (placedAs != name) renamed.append({name, placedAs});
     }
     placed = names;
     return Placed::All;
@@ -1280,8 +1299,14 @@ void DocumentStore::nameAs(Document *document, const QString &path, const std::o
     job.notesSave = true;
     job.from = contentOf(document->m_diskVersion);
     // parch's own text has no draft folder, nor assets in one.
-    if (document->isDraft() && !document->m_scratch) job.draftFolder = draftFolder(document->m_id);
-    else if (!document->isDraft()) job.ownPath = document->m_path;
+    if (document->isDraft() && !document->m_scratch) {
+        job.draftFolder = draftFolder(document->m_id);
+        job.text = snapshot->text;
+        job.options = document->markdownOptions();
+        job.convention = document->m_convention;
+    } else if (!document->isDraft()) {
+        job.ownPath = document->m_path;
+    }
     job.mode = document->m_diskVersion.mode;
     m_claims.insert(job.claim, document);
     run(document, job);
@@ -1367,13 +1392,30 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
         creates = true;
     }
     Placement placement;
+    outcome.written = job.bytes;
     if (!job.draftFolder.isEmpty()) {
-        const Placed placed = placeAssets(job.draftFolder + QStringLiteral("/assets"),
-                                          PathText::folderOf(expected.canonicalPath), placement, outcome.result.error,
-                                          outcome.assetsPlaced);
+        const QString folder = PathText::folderOf(expected.canonicalPath);
+        QList<std::pair<QString, QString>> renamed;
+        const Placed placed = placeAssets(job.draftFolder + QStringLiteral("/assets"), folder, placement,
+                                          outcome.result.error, outcome.assetsPlaced, renamed);
         if (placed == Placed::Failed) return outcome;
         if (placed == Placed::Left) outcome.assetsLeft = job.draftFolder + QStringLiteral("/assets");
+        // An asset that took a free name is linked by it in the named file,
+        // as the engine reads the text's links; the text in the window
+        // takes the same edits once the save is back.
+        for (const auto &[from, to] : std::as_const(renamed))
+            outcome.assetsRenamed.append(
+                {folder + QStringLiteral("/assets/") + from, folder + QStringLiteral("/assets/") + to});
+        if (!renamed.isEmpty()) {
+            outcome.linksRewritten =
+                DocumentLinks::changes(job.text, expected.canonicalPath, {}, outcome.assetsRenamed, job.options);
+            QString text = job.text;
+            for (auto change = outcome.linksRewritten.crbegin(); change != outcome.linksRewritten.crend(); ++change)
+                text.replace(change->range.start, change->range.length, change->after);
+            outcome.written = DiskFile::encode(text, job.convention);
+        }
     }
+    const QByteArray &written = outcome.written;
     // What the file held when it was opened or reloaded goes to history
     // before the save replaces it, if it is still exactly that. A capture
     // that fails costs only that version, never the save.
@@ -1386,7 +1428,7 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
     // content without parch knowing it wrote it. A note that cannot be
     // written costs only that knowledge, never the save.
     if (job.notesSave)
-        recovery.noteSave(documentId, job.from, QCryptographicHash::hash(job.bytes, QCryptographicHash::Sha256),
+        recovery.noteSave(documentId, job.from, QCryptographicHash::hash(written, QCryptographicHash::Sha256),
                           job.revision);
     // A file written in place has its current text kept in history first,
     // so that a write cut short leaves it there to go back to, unless parch
@@ -1402,17 +1444,17 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
         return false;
     };
     if (putsHere) {
-        outcome.result = DiskFile::putAt(job.ownPath.isEmpty() ? job.target : job.ownPath, job.bytes, job.mode);
+        outcome.result = DiskFile::putAt(job.ownPath.isEmpty() ? job.target : job.ownPath, written, job.mode);
         outcome.nameTaken = outcome.result.status == SaveStatus::Conflict;
         outcome.put = true;
     } else if (creates) {
-        outcome.result = DiskFile::create(job.target, job.bytes, job.mode);
+        outcome.result = DiskFile::create(job.target, written, job.mode);
         // What took the name is said once the outcome is back, where folders are named.
         if (outcome.result.status == SaveStatus::Conflict && job.savesDraft)
             outcome.result.error = tr("A file is already where the draft goes");
         outcome.nameTaken = outcome.result.status == SaveStatus::Conflict && !job.savesDraft;
     } else {
-        outcome.result = DiskFile::save(job.target, job.bytes, expected, keep);
+        outcome.result = DiskFile::save(job.target, written, expected, keep);
     }
     if (outcome.result.status != SaveStatus::Saved) {
         placement.undo();
@@ -1420,14 +1462,14 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
     }
     // From here the file holds what the save wrote, not what it replaced.
     if (job.notesSave)
-        recovery.noteLanded(documentId, QCryptographicHash::hash(job.bytes, QCryptographicHash::Sha256), job.revision);
+        recovery.noteLanded(documentId, QCryptographicHash::hash(written, QCryptographicHash::Sha256), job.revision);
     // The version is recorded here, on the worker that wrote the file, since
     // hashing and writing it can take long and the bytes are already in hand.
     // A failed capture is not a failed save. The first save since the file
     // was opened records its text whatever the interval, beside the text it
     // replaced.
-    if (job.keepsReplaced) history->capture(documentId, job.bytes);
-    else history->captureIfDue(documentId, job.bytes);
+    if (job.keepsReplaced) history->capture(documentId, written);
+    else history->captureIfDue(documentId, written);
     // A named draft's folder goes once the save is applied. Its own file can
     // hold text other than what was named, as after a restart that showed an
     // older text: that text becomes a version first, or the folder stays.
@@ -1543,8 +1585,10 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
     // note goes.
     if (result.status == SaveStatus::Conflict && ownName) forgetSaves(document->m_id);
     else if (!saved && job.notesSave)
-        Recovery(m_paths).dropSave(document->m_id, QCryptographicHash::hash(job.bytes, QCryptographicHash::Sha256),
-                                   job.revision);
+        Recovery(m_paths).dropSave(
+            document->m_id,
+            QCryptographicHash::hash(outcome.written.isEmpty() ? job.bytes : outcome.written, QCryptographicHash::Sha256),
+            job.revision);
     // parch's own text, saved as a file, is that file's from now on.
     bool wasScratch = false;
     if (saved) {
@@ -1583,9 +1627,26 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
                 emit draftKept(document, moved ? kept : QString(), outcome.keptTitle);
             }
         }
+        // Links to assets that took a free name beside the named file change
+        // in the text too, as one undo step: the very edits the file took
+        // when the text is as it was saved, or the same links found anew in
+        // text edited since.
+        Revision written = job.revision;
+        if (!outcome.assetsRenamed.isEmpty()) {
+            const bool unchanged = document->m_buffer->revision() == job.revision;
+            const QList<DocumentLinks::Change> changes =
+                unchanged ? outcome.linksRewritten
+                          : DocumentLinks::changes(document->m_buffer->text(), document->m_path, {},
+                                                   outcome.assetsRenamed, document->markdownOptions());
+            QList<SourceEdit> edits;
+            for (const DocumentLinks::Change &change : changes) edits.append({change.range, change.after});
+            if (!edits.isEmpty() && document->m_buffer->replace(edits) == SourceBuffer::EditOutcome::Applied
+                && unchanged)
+                written = document->m_buffer->revision();
+        }
         // Only a save of the current revision makes the buffer clean; an edit
         // made while it ran still needs saving.
-        document->m_diskAhead = document->m_buffer->revision() != job.revision;
+        document->m_diskAhead = document->m_buffer->revision() != written;
         if (!document->m_diskAhead) document->m_buffer->markSaved();
     } else if (result.status == SaveStatus::Conflict && ownName) {
         document->m_problem = Document::Problem::Conflict;

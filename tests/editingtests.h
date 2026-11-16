@@ -23,6 +23,8 @@ void shortcutsDialogRebindsSwapsAndResets();
 void preferencesApplyLiveToEveryWindow();
 void toolbarShowsHidesAndRunsCommands();
 void formattingCommandsRunFromEveryEntryPoint();
+void undefinedNotesBecomeInlineOrDefined();
+void assistiveTechnologyEditsTheSource();
 void wordCountsFollowTextAndSelection();
 
 } // namespace EditingTests

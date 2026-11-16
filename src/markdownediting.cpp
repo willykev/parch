@@ -376,6 +376,10 @@ std::optional<Style> styleOf(const QString &command)
     if (command == u"strikethrough") return Style{QStringLiteral("~~"), QStringLiteral("~"), Style::AtLeastTwo};
     if (command == u"highlight") return Style{QStringLiteral("=="), QStringLiteral("="), Style::AtLeastTwo};
     if (command == u"inlineMath") return Style{QStringLiteral("$"), QStringLiteral("$"), Style::One};
+    // The delimited forms, ^(a+b)^ and ~y,z~, which hold punctuation too;
+    // two tildes are a strikethrough, never a subscript.
+    if (command == u"superscript") return Style{QStringLiteral("^"), QStringLiteral("^"), Style::One};
+    if (command == u"subscript") return Style{QStringLiteral("~"), QStringLiteral("~"), Style::One};
     return std::nullopt;
 }
 
@@ -992,16 +996,12 @@ TextChange insertTable(QStringView text, int position, const Options &options)
     return insertBlock(text, position, block, 2, 8, options);
 }
 
-TextChange insertFootnote(QStringView text, int anchor, int cursor, const Options &options)
+// A note's definition, `reference: `, at the end of the text, after a
+// blank line or straight after other definitions; and where the caret goes
+// in it, as an offset into the text after the edit.
+std::pair<SourceEdit, int> definitionAtEnd(QStringView text, const QString &reference, const Options &options)
 {
     const QString &nl = options.newline;
-    static const QRegularExpression label(QStringLiteral("\\[\\^(\\d{1,9})\\]"));
-    qint64 highest = 0;
-    for (auto match = label.globalMatch(text); match.hasNext();) highest = qMax(highest, match.next().captured(1).toLongLong());
-    const QString reference = QStringLiteral("[^%1]").arg(highest + 1);
-    const int end = qMax(anchor, cursor);
-    // The definition goes at the end, after a blank line, or straight after
-    // other definitions.
     const int size = int(text.size());
     QString lead;
     const bool endsWithBreak = size > 0 && isBreak(text[size - 1]);
@@ -1014,8 +1014,20 @@ TextChange insertFootnote(QStringView text, int anchor, int cursor, const Option
         else if (!isBlank(lastText) && !afterDefinition) lead = nl;
     }
     const QString note = lead + reference + QStringLiteral(": ") + (endsWithBreak ? nl : QString());
-    const int caret = size + int(reference.size() + lead.size() + reference.size()) + 2;
-    return TextChange{{{{end, 0}, reference}, {{size, 0}, note}}, caret, caret};
+    return {{{size, 0}, note}, size + int(lead.size() + reference.size()) + 2};
+}
+
+TextChange insertFootnote(QStringView text, int anchor, int cursor, const Options &options)
+{
+    static const QRegularExpression label(QStringLiteral("\\[\\^(\\d{1,9})\\]"));
+    qint64 highest = 0;
+    for (auto match = label.globalMatch(text); match.hasNext();) highest = qMax(highest, match.next().captured(1).toLongLong());
+    const QString reference = QStringLiteral("[^%1]").arg(highest + 1);
+    const int end = qMax(anchor, cursor);
+    // The definition goes at the end, after the reference put in before it.
+    const auto [definition, caret] = definitionAtEnd(text, reference, options);
+    return TextChange{{{{end, 0}, reference}, definition}, caret + int(reference.size()),
+                      caret + int(reference.size())};
 }
 
 // ---- Tables ----------------------------------------------------------------
@@ -1226,6 +1238,183 @@ int codePointWidth(char32_t c)
     return 1;
 }
 
+// ---- Notes that nothing defines -------------------------------------------
+
+// Whether a line lies inside a fenced code block, counting the fences
+// above it.
+bool insideFence(QStringView text, const Line &line)
+{
+    std::optional<Fence> open;
+    for (Line at = lineAt(text, 0); at.start < line.start;) {
+        if (const auto fence = fenceOf(textOf(text, at))) {
+            if (!open) open = fence;
+            else if (fence->mark == open->mark && fence->length >= open->length && !fence->hasInfo) open.reset();
+        }
+        if (!at.hasBreak()) break;
+        at = lineAt(text, at.next);
+    }
+    return open.has_value();
+}
+
+// The undefined note reference at a position, as the range of its
+// `[^label]` and its label.
+struct NoteReference {
+    int start = 0;
+    int end = 0;
+    QString label;
+};
+
+std::optional<NoteReference> noteReferenceAt(QStringView text, int position)
+{
+    const Line line = lineAt(text, position);
+    const QString own = textOf(text, line).toString();
+    static const QRegularExpression reference(QStringLiteral("\\[\\^([\\p{L}\\p{N}_:-]+)\\]"));
+    for (auto match = reference.globalMatch(own); match.hasNext();) {
+        const QRegularExpressionMatch found = match.next();
+        const int at = int(found.capturedStart()), start = line.start + at, end = line.start + int(found.capturedEnd());
+        if (position < start || position > end) continue;
+        // A definition's own marker, an escaped bracket, a code span.
+        if (end < line.end && text[end] == u':' && leadingSpaces(own) == at) return std::nullopt;
+        if (at > 0 && own[at - 1] == u'\\') return std::nullopt;
+        if (own.left(at).count(u'`') % 2 == 1) return std::nullopt;
+        if (insideFence(text, line)) return std::nullopt;
+        // Defined anywhere, by a label that differs only in case.
+        const QString label = found.captured(1);
+        const QRegularExpression definition(
+            QStringLiteral("^ {0,3}\\[\\^%1\\]:").arg(QRegularExpression::escape(label)),
+            QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+        if (definition.match(text).hasMatch()) return std::nullopt;
+        return NoteReference{start, end, label};
+    }
+    return std::nullopt;
+}
+
+// [^label] becomes [^label.], a note of its own, with the caret after the label.
+std::optional<TextChange> makeNoteInline(QStringView text, int cursor, const Options &options)
+{
+    if (!options.footnotes || !options.inlineNotes) return std::nullopt;
+    const auto reference = noteReferenceAt(text, cursor);
+    if (!reference) return std::nullopt;
+    const int at = reference->end - 1;
+    return TextChange{{{{at, 0}, QStringLiteral(".")}}, at, at};
+}
+
+// [^label]: at the end, for the note to be written there.
+std::optional<TextChange> defineNote(QStringView text, int cursor, const Options &options)
+{
+    if (!options.footnotes) return std::nullopt;
+    const auto reference = noteReferenceAt(text, cursor);
+    if (!reference) return std::nullopt;
+    const auto [edit, caret] = definitionAtEnd(text, QStringLiteral("[^%1]").arg(reference->label), options);
+    return TextChange{{edit}, caret, caret};
+}
+
+// ---- Ordered lists -------------------------------------------------------
+
+// How deep in block quotes a line is.
+int quoteDepth(QStringView line, const Parts &parts) { return int(line.left(parts.quoteEnd).count(u'>')); }
+
+struct Item {
+    Line line;
+    Parts parts;
+    // The number's place in the text.
+    SourceRange number() const { return {line.start + parts.markerStart, parts.markerEnd - parts.markerStart - 1}; }
+};
+
+// The items of the ordered list that holds the item on `line`, in order:
+// those at its indentation, in as many quotes and with its delimiter.
+// Items nested deeper, the lines that continue an item, and blank lines
+// between items are inside the list. An item less indented, one of another
+// kind at its indentation, another depth of quotes, or a line less
+// indented than the item's text that follows a blank line or starts a
+// block of its own, ends it. Empty for a line that is no numbered item.
+QList<Item> orderedList(QStringView text, const Line &line)
+{
+    const QStringView ownText = textOf(text, line);
+    const Parts own = partsOf(ownText);
+    if (!own.ordered()) return {};
+    const int depth = quoteDepth(ownText, own);
+    enum class Place { Sibling, Inside, End, Blank };
+    // Where a line stands to the list, the text of the items starting
+    // `content` columns in, and the line before it blank or not.
+    const auto place = [&](const Line &candidate, int content, bool afterBlank) {
+        const QStringView view = textOf(text, candidate);
+        const Parts parts = partsOf(view);
+        if (isBlank(view.mid(parts.quoteEnd))) return Place::Blank;
+        if (quoteDepth(view, parts) != depth) return Place::End;
+        if (parts.item()) {
+            if (parts.indent() > own.indent()) return Place::Inside;
+            if (parts.indent() < own.indent()) return Place::End;
+            return parts.ordered() && parts.delimiter == own.delimiter ? Place::Sibling : Place::End;
+        }
+        if (parts.indent() >= content) return Place::Inside;
+        const QStringView rest = view.mid(parts.quoteEnd);
+        if (afterBlank || isThematicBreak(rest) || atxOf(view, parts.quoteEnd).level > 0 || fenceOf(rest))
+            return Place::End;
+        return Place::Inside;
+    };
+    const int content = own.contentStart - own.quoteEnd;
+    // The first item, found upwards: text less indented than the items'
+    // ends the list above it when a blank line is above that text.
+    Line first = line;
+    for (auto above = lineBefore(text, line); above; above = lineBefore(text, *above)) {
+        const auto higher = lineBefore(text, *above);
+        const bool blankAbove = !higher || [&] {
+            const QStringView view = textOf(text, *higher);
+            return isBlank(view.mid(partsOf(view).quoteEnd));
+        }();
+        const Place at = place(*above, content, blankAbove);
+        if (at == Place::End) break;
+        if (at == Place::Sibling) first = *above;
+    }
+    // Then every item from the first down.
+    QList<Item> items{{first, partsOf(textOf(text, first))}};
+    bool afterBlank = false;
+    for (auto below = lineAfter(text, first); below; below = lineAfter(text, *below)) {
+        const Parts &last = items.last().parts;
+        const Place at = place(*below, last.contentStart - last.quoteEnd, afterBlank);
+        if (at == Place::End) break;
+        if (at == Place::Sibling) items.append({*below, partsOf(textOf(text, *below))});
+        afterBlank = at == Place::Blank;
+    }
+    return items;
+}
+
+// The edits that number the items from `first` on counting up from `number`,
+// for those whose number is not that already.
+QList<SourceEdit> numbered(const QList<Item> &items, qsizetype first, qint64 number)
+{
+    QList<SourceEdit> edits;
+    for (qsizetype i = first; i < items.size(); ++i, ++number)
+        if (items[i].parts.number != number) edits.append({items[i].number(), QString::number(number)});
+    return edits;
+}
+
+std::optional<TextChange> renumberList(QStringView text, int anchor, int cursor)
+{
+    // On a line that continues an item, the numbered item it belongs to:
+    // the nearest above that is no deeper than the line.
+    Line line = lineAt(text, qMin(anchor, cursor));
+    const QStringView view = textOf(text, line);
+    if (!partsOf(view).item()) {
+        const int indent = partsOf(view).indent();
+        std::optional<Line> found;
+        for (auto above = lineBefore(text, line); above && !found; above = lineBefore(text, *above)) {
+            const Parts parts = partsOf(textOf(text, *above));
+            if (!parts.item() || parts.indent() > indent) continue;
+            if (!parts.ordered()) return std::nullopt;
+            found = above;
+        }
+        if (!found) return std::nullopt;
+        line = *found;
+    }
+    const QList<Item> items = orderedList(text, line);
+    if (items.isEmpty()) return std::nullopt;
+    const QList<SourceEdit> edits = numbered(items, 0, items.first().parts.number);
+    if (edits.isEmpty()) return std::nullopt;
+    return mapped(edits, anchor, cursor);
+}
+
 } // namespace
 
 // ---- Public ----------------------------------------------------------------
@@ -1233,13 +1422,16 @@ int codePointWidth(char32_t c)
 QStringList commands()
 {
     return {QStringLiteral("bold"),        QStringLiteral("italic"),       QStringLiteral("strikethrough"),
-            QStringLiteral("highlight"),   QStringLiteral("code"),         QStringLiteral("comment"),
+            QStringLiteral("highlight"),   QStringLiteral("superscript"),  QStringLiteral("subscript"),
+            QStringLiteral("code"),        QStringLiteral("comment"),
             QStringLiteral("heading1"),    QStringLiteral("heading2"),     QStringLiteral("heading3"),
             QStringLiteral("heading4"),    QStringLiteral("heading5"),     QStringLiteral("heading6"),
             QStringLiteral("paragraph"),   QStringLiteral("quote"),        QStringLiteral("bulletList"),
-            QStringLiteral("numberedList"), QStringLiteral("taskList"),    QStringLiteral("toggleTask"),
+            QStringLiteral("numberedList"), QStringLiteral("renumberList"), QStringLiteral("taskList"),
+            QStringLiteral("toggleTask"),
             QStringLiteral("codeBlock"),   QStringLiteral("link"),         QStringLiteral("image"),
-            QStringLiteral("footnote"),    QStringLiteral("table"),        QStringLiteral("formatTable"),
+            QStringLiteral("footnote"),    QStringLiteral("inlineNote"),   QStringLiteral("defineNote"),
+            QStringLiteral("table"),       QStringLiteral("formatTable"),
             QStringLiteral("inlineMath"),  QStringLiteral("displayMath"),  QStringLiteral("thematicBreak"),
             QStringLiteral("pageBreak")};
 }
@@ -1275,6 +1467,9 @@ std::optional<TextChange> format(const QString &command, QStringView text, int a
     if (command == u"table") return insertTable(text, end, options);
     if (command == u"footnote") return insertFootnote(text, anchor, cursor, options);
     if (command == u"formatTable") return formatTable(text, anchor, cursor, options);
+    if (command == u"renumberList") return renumberList(text, anchor, cursor);
+    if (command == u"inlineNote") return makeNoteInline(text, cursor, options);
+    if (command == u"defineNote") return defineNote(text, cursor, options);
     return std::nullopt;
 }
 
@@ -1291,8 +1486,25 @@ std::optional<TextChange> newLine(QStringView text, int anchor, int cursor, cons
         return TextChange{{{{at, line.end - at}, {}}}, at, at};
     }
     QString prefix = own.left(parts.indentEnd).toString();
-    if (parts.ordered()) prefix += QString::number(parts.number + 1) + parts.delimiter;
-    else prefix += parts.bullet;
+    // A numbered list goes on repeating one number when every item has it,
+    // and otherwise counts on; when it counts up, the items after the new
+    // one count on from it, in the same step.
+    QList<SourceEdit> following;
+    if (parts.ordered()) {
+        const QList<Item> items = orderedList(text, line);
+        qsizetype here = 0;
+        while (here < items.size() && items[here].line.start != line.start) ++here;
+        bool repeated = items.size() > 1, countsUp = true;
+        for (qsizetype i = 1; i < items.size(); ++i) {
+            repeated = repeated && items[i].parts.number == items[0].parts.number;
+            countsUp = countsUp && items[i].parts.number == items[i - 1].parts.number + 1;
+        }
+        const qint64 number = repeated ? parts.number : parts.number + 1;
+        if (countsUp && !repeated) following = numbered(items, here + 1, number + 1);
+        prefix += QString::number(number) + parts.delimiter;
+    } else {
+        prefix += parts.bullet;
+    }
     const QStringView spacing = own.mid(parts.markerEnd, parts.spaceEnd - parts.markerEnd);
     prefix += spacing.isEmpty() ? QStringLiteral(" ") : spacing.toString();
     if (parts.task) prefix += QStringLiteral("[ ] ");
@@ -1300,7 +1512,9 @@ std::optional<TextChange> newLine(QStringView text, int anchor, int cursor, cons
     const int moved = leadingSpaces(text.mid(cursor, line.end - cursor));
     const QString inserted = options.newline + prefix;
     const int caret = cursor + int(inserted.size());
-    return TextChange{{{{cursor, moved}, inserted}}, caret, caret};
+    QList<SourceEdit> edits{{{cursor, moved}, inserted}};
+    edits += following;
+    return TextChange{edits, caret, caret};
 }
 
 TextChange hardBreak(QStringView, int anchor, int cursor, const Options &options)
@@ -1470,6 +1684,13 @@ std::optional<TextChange> formatTable(QStringView text, int anchor, int cursor, 
     change.anchor = reposition(anchorPlace, change.anchor);
     change.cursor = reposition(cursorPlace, change.cursor);
     return change;
+}
+
+QString undefinedNoteAt(QStringView text, int position)
+{
+    if (position < 0 || position > text.size()) return {};
+    const auto reference = noteReferenceAt(text, position);
+    return reference ? reference->label : QString();
 }
 
 int displayWidth(QStringView text)

@@ -67,6 +67,10 @@ package() {
   local merman="$srcdir/merman-cli-$CARCH-unknown-linux-gnu"
   install -Dm755 "$ratex/render-svg" "$pkgdir/usr/lib/$pkgname/render-svg"
   install -Dm755 "$merman/merman-cli" "$pkgdir/usr/lib/$pkgname/merman-cli"
+  # Their versions, which parch check reports, in bin/fetch-helpers' format:
+  # render-svg cannot say its own.
+  printf 'ratex %s\nmerman %s\n' "$_ratex" "$_merman" > "$pkgdir/usr/lib/$pkgname/.pins"
+  chmod 644 "$pkgdir/usr/lib/$pkgname/.pins"
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/ratex" licenses/ratex/*
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/merman" \
     "$merman/LICENSE-MIT" "$merman/LICENSE-APACHE" "$merman/THIRD_PARTY_NOTICES.md"

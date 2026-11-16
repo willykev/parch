@@ -7,6 +7,7 @@
 #include "caretrest.h"
 #include "citationtests.h"
 #include "settingstests.h"
+#include "diagnosticstests.h"
 #include "guidetests.h"
 #include "cli.h"
 #include "diskfile.h"
@@ -460,6 +461,17 @@ private slots:
     void citationsWithAStyleFile() { SettingsTests::citationsWithAStyleFile(); }
     void citationsWriterAndPandocTogether() { SettingsTests::writerAndPandocCitationsTogether(); }
     void citationsCheckReportsProblems() { SettingsTests::checkReportsCitationProblems(); }
+    // What parch says is wrong in a document, and what it supports; the
+    // tests are in diagnosticstests.cpp.
+    void includeLimitsAreConfigurable() { DiagnosticsTests::includeLimitsAreConfigurable(); }
+    void checkDrawsFormulasAndDiagrams() { DiagnosticsTests::checkDrawsFormulasAndDiagrams(); }
+    void checkDocumentListsEveryProblem() { DiagnosticsTests::checkDocumentListsEveryProblem(); }
+    void previewMarksWhatLeadsNowhere() { DiagnosticsTests::previewMarksWhatLeadsNowhere(); }
+    void katexCorpusDrawsAsRecorded() { DiagnosticsTests::katexCorpusDrawsAsRecorded(); }
+    void guideListsWhatMathCannotDraw() { DiagnosticsTests::guideListsWhatMathCannotDraw(); }
+    void guideNamesEveryDiagramFamily() { DiagnosticsTests::guideNamesEveryDiagramFamily(); }
+    void guideConformanceFiguresHold() { DiagnosticsTests::guideConformanceFiguresHold(); }
+    void guideStatesWhatCitationsCannotDo() { DiagnosticsTests::guideStatesWhatCitationsCannotDo(); }
     void untouchedFilesSaveByteIdentical();
     void invalidUtf8OpensReadOnlyWithBytesKept();
     void saveRefusesWhenDiskChanged();
@@ -1008,7 +1020,6 @@ private slots:
     void droppedMarkdownIsLinkedOrIncluded();
     void windowDropsCopyAndAsk();
     void missingTargetsAreListed();
-    void checkLinksShowsWhatIsMissing();
     // Math and diagram helpers, with stand-ins.
     void helpersAreFoundWhereTheyAreInstalled();
     void helpersRunWithoutNetworkEnvironmentOrHome();
@@ -22404,53 +22415,6 @@ void ParchTests::missingTargetsAreListed()
     const DocumentLinks::Checked own =
         DocumentLinks::check(QStringLiteral("# New\n\n[a](self.md#new) [b](self.md#old)\n"), self, folder);
     QCOMPARE(describe(own.missing), QStringList{QStringLiteral("3 link self.md#old (heading)")});
-}
-
-void ParchTests::checkLinksShowsWhatIsMissing()
-{
-    QAccessible::setActive(true);
-    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
-    QTemporaryDir files;
-    QVERIFY(files.isValid());
-    const QString folder = canonical(files.path());
-    const QString file = folder + QStringLiteral("/doc.md");
-    writeFile(file, "![ok](ok.png) ![gone](gone.png)\n[up](#top)\n");
-    writeFile(folder + QStringLiteral("/ok.png"), "png");
-    ShellFixture shell;
-    QVERIFY2(shell.ok(), qPrintable(shell.error));
-    QQuickWindow *window = shell.window.get();
-    activate(window);
-    shell.backend->openFiles({file});
-    QVERIFY(shell.document());
-    QObject *entry = shell.object(QStringLiteral("checkLinksEntry"));
-    QVERIFY(entry && entry->property("enabled").toBool());
-    QObject *dialog = shell.object(QStringLiteral("linkCheckDialog"));
-    QVERIFY(dialog);
-    QVERIFY(QMetaObject::invokeMethod(window, "checkLinks"));
-    QTRY_VERIFY(dialog->property("opened").toBool());
-    QTRY_VERIFY(!dialog->property("checking").toBool());
-    QCOMPARE(dialog->property("summary").toString(),
-             QStringLiteral("2 of 3 local links and images lead to files or headings that are not there."));
-    QCOMPARE(dialog->property("listing").toString(),
-             QStringLiteral("Line 1, image: gone.png\nLine 2, link: #top (no such heading)"));
-    QTest::qWait(50);
-    QStringList problems;
-    QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join("; ")));
-    QVERIFY2(unnamedAccessibleItems(window).isEmpty(), qPrintable(unnamedAccessibleItems(window).join(", ")));
-    // The keys start on Close; Tab reaches the list, to select and copy from it, and stays in the dialog.
-    QCOMPARE(window->activeFocusItem()->objectName(), QStringLiteral("closeChoice"));
-    QVERIFY(window->activeFocusItem()->property("visualFocus").toBool());
-    QCOMPARE(tabRound(window, dialog), (QStringList{QStringLiteral("closeChoice"), QStringLiteral("paneText")}));
-    QTest::keyClick(window, Qt::Key_Escape);
-    QTRY_VERIFY(!dialog->property("opened").toBool());
-    QTRY_COMPARE(window->activeFocusItem(), shell.item(QStringLiteral("editor")));
-    // Once the file is there, and the text has the heading, everything is found.
-    writeFile(folder + QStringLiteral("/gone.png"), "png");
-    shell.document()->buffer()->replace({0, 0}, QStringLiteral("# Top\n\n"));
-    QVERIFY(QMetaObject::invokeMethod(window, "checkLinks"));
-    QTRY_VERIFY(dialog->property("opened").toBool());
-    QTRY_COMPARE(dialog->property("summary").toString(),
-                 QStringLiteral("All 3 local links and images lead to files and headings that are there."));
 }
 
 namespace {

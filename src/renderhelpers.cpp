@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QMutex>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -51,6 +52,53 @@ QStringList HelperSet::searchFolders()
 HelperSet HelperSet::in(const QString &folder)
 {
     return {folder + QStringLiteral("/render-svg"), folder + QStringLiteral("/merman-cli")};
+}
+
+namespace {
+
+// The version the `.pins` file beside a helper records for it ("ratex
+// 0.1.15 <checksum>" a line), or nothing.
+QString pinnedVersion(const QString &helper, QLatin1StringView name)
+{
+    QFile pins(QFileInfo(helper).absolutePath() + QStringLiteral("/.pins"));
+    if (!pins.open(QIODevice::ReadOnly)) return {};
+    const QStringList lines = QString::fromUtf8(pins.read(64 * 1024)).split(u'\n');
+    for (const QString &line : lines) {
+        const QStringList words = line.split(u' ', Qt::SkipEmptyParts);
+        if (words.size() >= 2 && words.first() == name) return words.at(1);
+    }
+    return {};
+}
+
+} // namespace
+
+QString HelperSet::ratexVersion() const
+{
+    if (ratex.isEmpty()) return {};
+    const QString pinned = pinnedVersion(ratex, QLatin1StringView("ratex"));
+    return pinned.isEmpty() ? QStringLiteral("RaTeX (version unknown)") : QStringLiteral("RaTeX ") + pinned;
+}
+
+QString HelperSet::mermanVersion() const
+{
+    if (merman.isEmpty()) return {};
+    QString version = pinnedVersion(merman, QLatin1StringView("merman"));
+    if (version.isEmpty()) {
+        // "merman-cli 0.10.0"
+        QProcess process;
+        process.setProcessChannelMode(QProcess::SeparateChannels);
+        process.start(merman, {QStringLiteral("--version")});
+        process.closeWriteChannel();
+        if (process.waitForFinished(5000) && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
+            const QStringList words = QString::fromUtf8(process.readAllStandardOutput().left(256)).split(
+                QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+            if (words.size() >= 2 && words.first() == u"merman-cli") version = words.at(1);
+        } else {
+            process.kill();
+            process.waitForFinished(1000);
+        }
+    }
+    return version.isEmpty() ? QStringLiteral("Merman (version unknown)") : QStringLiteral("Merman ") + version;
 }
 
 HelperSet HelperSet::find()

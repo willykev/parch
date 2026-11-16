@@ -37,7 +37,8 @@ struct Reading {
 Dialect::Layers withFrontMatter(Dialect::Layers layers, const QString &text, const QString &folder);
 
 // Reads a text: `source` says where it lives and how its includes are read;
-// its library root, unless set, is the dialect's.
+// its library root, unless set, is the dialect's, and its include limits
+// are always the dialect's.
 Reading read(const QString &text, const Dialect::Layers &layers, md::Source source);
 
 } // namespace DocumentReading

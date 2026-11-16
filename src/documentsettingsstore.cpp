@@ -55,6 +55,9 @@ QVariantMap layerMap(const Dialect::Layer &layer)
         {QStringLiteral("bibliography"), layer.bibliography ? QVariant(*layer.bibliography) : QVariant()},
         {QStringLiteral("citationStyle"), layer.citationStyle},
         {QStringLiteral("libraryRoot"), layer.libraryRoot},
+        {QStringLiteral("maxIncludeDepth"), layer.maxIncludeDepth ? QVariant(*layer.maxIncludeDepth) : QVariant()},
+        {QStringLiteral("maxIncludeSize"), layer.maxIncludeSize ? QVariant(*layer.maxIncludeSize) : QVariant()},
+        {QStringLiteral("maxIncludes"), layer.maxIncludes ? QVariant(*layer.maxIncludes) : QVariant()},
     };
 }
 
@@ -222,6 +225,12 @@ QVariantMap DocumentSettingsStore::describe(Document *document) const
         {QStringLiteral("citationStyleFrom"), choice.citationStyleFrom},
         {QStringLiteral("libraryRoot"), choice.libraryRoot},
         {QStringLiteral("libraryRootFrom"), choice.libraryRootFrom},
+        {QStringLiteral("maxIncludeDepth"), choice.maxIncludeDepth},
+        {QStringLiteral("maxIncludeDepthFrom"), choice.maxIncludeDepthFrom},
+        {QStringLiteral("maxIncludeSize"), choice.maxIncludeSize},
+        {QStringLiteral("maxIncludeSizeFrom"), choice.maxIncludeSizeFrom},
+        {QStringLiteral("maxIncludes"), choice.maxIncludes},
+        {QStringLiteral("maxIncludesFrom"), choice.maxIncludesFrom},
         {QStringLiteral("library"), library},
         {QStringLiteral("libraryName"), library.isEmpty() ? QString() : PathText::fileName(library)},
         {QStringLiteral("draft"), document ? document->isDraft() : false},
@@ -334,6 +343,32 @@ bool DocumentSettingsStore::setCitationStyle(Document *document, const QString &
     }
     return edit(document, scope, [&](Dialect::Layer &layer) {
         layer.citationStyle = chosen;
+        return true;
+    });
+}
+
+bool DocumentSettingsStore::setIncludeLimit(Document *document, const QString &scope, const QString &name,
+                                            qint64 value)
+{
+    qint64 most = 0;
+    if (name == u"maxIncludeDepth") most = Dialect::MaxIncludeDepthLimit;
+    else if (name == u"maxIncludeSize") most = Dialect::MaxIncludeSizeLimit;
+    else if (name == u"maxIncludes") most = Dialect::MaxIncludesLimit;
+    if (most == 0 || value < 0 || value > most) return false;
+    return edit(document, scope, [&](Dialect::Layer &layer) {
+        if (name == u"maxIncludeDepth") layer.maxIncludeDepth = value > 0 ? std::optional<int>(int(value)) : std::nullopt;
+        else if (name == u"maxIncludeSize") layer.maxIncludeSize = value > 0 ? std::optional<qint64>(value) : std::nullopt;
+        else layer.maxIncludes = value > 0 ? std::optional<int>(int(value)) : std::nullopt;
+        return true;
+    });
+}
+
+bool DocumentSettingsStore::resetIncludeLimits(Document *document, const QString &scope)
+{
+    return edit(document, scope, [](Dialect::Layer &layer) {
+        layer.maxIncludeDepth.reset();
+        layer.maxIncludeSize.reset();
+        layer.maxIncludes.reset();
         return true;
     });
 }

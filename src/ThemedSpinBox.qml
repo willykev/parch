@@ -35,6 +35,11 @@ SpinBox {
     validator: RegularExpressionValidator { regularExpression: /[0-9.,]*\s*[a-z]*/ }
 
     contentItem: TextInput {
+        // The keys come here; the box draws that they came from the
+        // keyboard, with its own background.
+        readonly property bool visualFocus: control.visualFocus
+        readonly property Item background: control.background
+
         text: control.displayText
         font: control.font
         color: control.enabled ? theme.foreground : theme.faint

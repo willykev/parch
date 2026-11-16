@@ -6,6 +6,7 @@
 #include "cli.h"
 #include "clicommands.h"
 #include "dialectchoice.h"
+#include "documentchecker.h"
 #include "documentcheck.h"
 #include "documentcitations.h"
 #include "documentreading.h"
@@ -128,7 +129,8 @@ Ran runCli(const QString &folder, const AppPaths &paths, QStringList arguments)
     QBuffer out, err;
     out.open(QIODevice::WriteOnly);
     err.open(QIODevice::WriteOnly);
-    const Cli::Context context{folder, folder + QStringLiteral("/home"), paths, &out, &err};
+    Cli::Context context{folder, folder + QStringLiteral("/home"), paths, &out, &err};
+    context.renderCache = paths.data + QStringLiteral("/../cache/render");
     arguments.prepend(QStringLiteral("parch"));
     Ran ran;
     ran.code = Cli::run(arguments, context);
@@ -539,7 +541,7 @@ void profileChangesEveryReading()
 {
     // A document with Writer constructs. Read in the Standard profile, the
     // outline, the word count, the prose spelling reads, live formatting,
-    // Check links and the command line all read it otherwise, at once.
+    // Check document and the command line all read it otherwise, at once.
     QAccessible::setActive(true);
     const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
     QTemporaryDir files;
@@ -583,13 +585,16 @@ void profileChangesEveryReading()
             5000);
     };
     QVERIFY(styled(md::Options::writer()));
-    // Check links reads the include.
-    Attachments *attachments = shell.backend->attachments();
+    // Check document reads the include.
+    DocumentChecker checker;
+    checker.setBackend(shell.backend.get());
     const auto missingLinks = [&] {
-        QSignalSpy checked(attachments, &Attachments::linksChecked);
-        attachments->checkLinks(document);
-        if (!checked.wait(5000)) return -1;
-        return int(checked.last().at(1).toList().size());
+        checker.check(document);
+        if (!QTest::qWaitFor([&] { return !checker.checking(); }, 5000)) return -1;
+        int includes = 0;
+        for (const QVariant &problem : checker.problems())
+            if (problem.toMap().value(QStringLiteral("kind")).toString() == u"include") ++includes;
+        return includes;
     };
     QCOMPARE(missingLinks(), 1);
     // Spelling's prose leaves the comment out.

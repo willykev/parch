@@ -3,7 +3,8 @@ import Parch
 
 // The Markdown settings of one layer, as Document settings and Preferences
 // edit them: the profile, the extensions, the citation style, the
-// bibliography and, but for every document, the library root. Each row shows
+// bibliography, but for every document the library root, and the include
+// limits. Each row shows
 // what applies and where it comes from, and a change goes into the layer the
 // form edits ("document", "library" or "application") at once; Use the
 // default gives the setting back to the layers below.
@@ -338,6 +339,115 @@ Column {
             Note {
                 objectName: "libraryRootSource"
                 text: form.sourceText(form.info.libraryRootFrom)
+            }
+        }
+    }
+
+    // The guards against includes that run away: how deep they nest, how
+    // much text they bring in all, and how many there are.
+    PreferenceRow {
+        width: parent.width
+        label: qsTr("Includes")
+
+        Column {
+            width: parent.width
+            spacing: Math.round(theme.fontSize / 4)
+
+            Note {
+                text: qsTr("Past these limits an include is not read, and the document says so.")
+            }
+
+            Flow {
+                width: parent.width
+                spacing: Math.round(theme.fontSize / 2)
+
+                Limit {
+                    name: "maxIncludeDepthChoice"
+                    key: "maxIncludeDepth"
+                    title: qsTr("Depth")
+                    from: 1
+                    to: 256
+                    value: form.info.maxIncludeDepth || 32
+                }
+
+                Limit {
+                    name: "maxIncludeSizeChoice"
+                    key: "maxIncludeSize"
+                    title: qsTr("Size")
+                    unit: qsTr("MiB")
+                    from: 1
+                    to: 1024
+                    // Shown and set in MiB; a size between them shows the next one up.
+                    value: Math.max(1, Math.ceil((form.info.maxIncludeSize || 104857600) / 1048576))
+                    factor: 1048576
+                }
+
+                Limit {
+                    name: "maxIncludesChoice"
+                    key: "maxIncludes"
+                    title: qsTr("Files")
+                    from: 1
+                    to: 1000000
+                    value: form.info.maxIncludes || 10000
+                }
+
+                Reset {
+                    objectName: "includeLimitsReset"
+                    visible: form.ownSets("maxIncludeDepth") || form.ownSets("maxIncludeSize") || form.ownSets("maxIncludes")
+                    text: qsTr("Use the default limits")
+                    onClicked: form.store.resetIncludeLimits(form.document, form.scope)
+                }
+            }
+
+            Note {
+                objectName: "includeLimitsSource"
+                text: qsTr("Depth: %1. Size: %2. Includes: %3.")
+                    .arg(form.lowered(form.sourceText(form.info.maxIncludeDepthFrom)))
+                    .arg(form.lowered(form.sourceText(form.info.maxIncludeSizeFrom)))
+                    .arg(form.lowered(form.sourceText(form.info.maxIncludesFrom)))
+            }
+        }
+    }
+
+    function lowered(text) { return text.length > 0 ? text.charAt(0).toLowerCase() + text.slice(1) : text }
+
+    // One include limit, with its name before it; a change goes into the
+    // layer edited at once.
+    component Limit: Row {
+        id: limit
+
+        required property string key
+        // The box's object name.
+        property string name
+        property string title
+        property alias unit: box.unit
+        property alias from: box.from
+        property alias to: box.to
+        property int value
+        // What one step of the box stands for in the setting.
+        property real factor: 1
+
+        spacing: Math.round(theme.fontSize / 3)
+
+        Text {
+            height: box.height
+            text: limit.title
+            textFormat: Text.PlainText
+            verticalAlignment: Text.AlignVCenter
+            font.family: theme.fontFamily
+            font.pixelSize: theme.fontSize
+            color: theme.foreground
+            Accessible.ignored: true
+        }
+
+        ThemedSpinBox {
+            id: box
+            objectName: limit.name
+            value: limit.value
+            Accessible.name: qsTr("Includes: %1").arg(limit.title)
+            onValueModified: {
+                form.store.setIncludeLimit(form.document, form.scope, limit.key, box.value * limit.factor)
+                value = Qt.binding(() => limit.value)
             }
         }
     }

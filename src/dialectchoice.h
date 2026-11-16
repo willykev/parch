@@ -21,7 +21,8 @@
 //   document      what parch keeps for the document (documentsettings.h);
 //                 from the terminal only with --use-saved-settings
 //   front-matter  the document's own front matter: `bibliography:` and
-//                 `csl:` only, since the profile is never read from the text
+//                 `csl:` only, since neither the profile nor a limit is ever
+//                 read from the text
 //   library       what parch keeps for the library folder that holds the
 //                 document; from the terminal only with --use-saved-settings
 //   application   what parch keeps for every document (Preferences); from
@@ -31,10 +32,18 @@
 //
 // The profile is that of the highest layer that names one. The extensions
 // start as that profile's own, and each layer's switches apply on top, from
-// the lowest layer to the highest. The library root, the bibliography and the
-// style are each that of the highest layer that names one; a bibliography is
-// a list as a whole, never merged with a lower layer's.
+// the lowest layer to the highest. The library root, the bibliography, the
+// style and each of the three include limits are each that of the highest
+// layer that names one; a bibliography is a list as a whole, never merged
+// with a lower layer's.
 namespace Dialect {
+
+// The most each include limit may be set to: deeper nesting, more text and
+// more includes than these are no document's, and would only let a mistake
+// run long.
+inline constexpr int MaxIncludeDepthLimit = 256;
+inline constexpr qint64 MaxIncludeSizeLimit = 1024ll * 1024 * 1024;
+inline constexpr int MaxIncludesLimit = 1000000;
 
 // What one layer chooses; anything it leaves out is left to the layers below.
 struct Layer {
@@ -49,11 +58,20 @@ struct Layer {
     // A bundled style's id ("apa") or the full path of a .csl file; empty
     // leaves the style to the layers below.
     QString citationStyle;
+    // The include guards of md::Source: how deep includes may nest, how many
+    // UTF-8 bytes the document and everything it includes may hold together,
+    // and how many include lines are expanded. Each is at least 1 and at most
+    // its Max…Limit above; unset leaves it to the layers below.
+    std::optional<int> maxIncludeDepth;
+    std::optional<qint64> maxIncludeSize;
+    std::optional<int> maxIncludes;
 
     bool isEmpty() const
     {
-        return !profile && extensions.isEmpty() && libraryRoot.isEmpty() && !bibliography && citationStyle.isEmpty();
+        return !profile && extensions.isEmpty() && libraryRoot.isEmpty() && !bibliography && citationStyle.isEmpty()
+               && !hasIncludeLimits();
     }
+    bool hasIncludeLimits() const { return maxIncludeDepth || maxIncludeSize || maxIncludes; }
     bool operator==(const Layer &) const = default;
 };
 
@@ -73,29 +91,48 @@ struct Choice {
     QString libraryRoot;       // empty when there is none
     QStringList bibliography;  // the files, in the order they are searched
     QString citationStyle;     // empty when none is chosen
+    // The include guards, the engine's own unless a layer sets them.
+    int maxIncludeDepth = md::Source().maxIncludeDepth;
+    qint64 maxIncludeSize = md::Source().maxExpandedBytes;
+    int maxIncludes = md::Source().maxIncludeCount;
     // Where each came from: "flag", "document", "front-matter", "library",
     // "application" or "default".
     QString profileFrom = QStringLiteral("default");
     QString libraryRootFrom = QStringLiteral("default");
     QString bibliographyFrom = QStringLiteral("default");
     QString citationStyleFrom = QStringLiteral("default");
+    QString maxIncludeDepthFrom = QStringLiteral("default");
+    QString maxIncludeSizeFrom = QStringLiteral("default");
+    QString maxIncludesFrom = QStringLiteral("default");
     // The extensions a layer turned on or off against the profile's own, and
     // the layer that did.
     QHash<QString, QString> extensionsFrom;
     // A layer parch keeps (document, library or application) chose something.
     bool savedSettings = false;
 
+    // Gives the source of a document these include guards.
+    void limit(md::Source &source) const;
+
     // For JSON results:
     // {"version": 1, "profile": "writer", "extensions": [...on...],
     //  "libraryRoot": path or null, "bibliography": [paths],
-    //  "citationStyle": id or path or null, "savedSettings": false,
+    //  "citationStyle": id or path or null, "maxIncludeDepth": 32,
+    //  "maxIncludeSize": bytes, "maxIncludes": 10000, "savedSettings": false,
     //  "from": {"profile": "default", "libraryRoot": "default",
     //           "bibliography": "front-matter", "citationStyle": "flag",
-    //           "extensions": {"math": "flag", ...}}}
+    //           "maxIncludeDepth": "default", "maxIncludeSize": "default",
+    //           "maxIncludes": "default", "extensions": {"math": "flag", ...}}}
     QJsonObject toJson() const;
     // One line for people: "writer profile", "standard profile, with math".
     QString describe() const;
 };
+
+// A size as people read it: "40 bytes", "512 KiB", "100 MiB".
+QString sizeText(qint64 bytes);
+// A size as written on the command line: bytes, or a number followed by K,
+// M or G (KiB, MiB, GiB; KB, MB and GB are read the same), in any case.
+// Nothing for anything else, or for a size of nothing.
+std::optional<qint64> sizeNamed(const QString &written);
 
 // The choice the layers make together.
 Choice effective(const Layers &layers);

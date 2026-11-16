@@ -11,9 +11,9 @@
 // Markdown engine reads them: inline links and images, reference
 // definitions, the src and href of supported HTML, and includes. A link may
 // be split across lines; code, comments, front matter and anything the
-// engine reads as text refer to nothing. Check links lists the ones that
-// lead nowhere, and moving or renaming a file in the library updates the
-// ones that would. Pure text work apart from check(), which reads the file
+// engine reads as text refer to nothing. check() finds the ones that lead
+// nowhere, and moving or renaming a file in the library updates the ones
+// that would. Pure text work apart from check(), which reads the file
 // system; all of it is safe on any thread.
 namespace DocumentLinks {
 

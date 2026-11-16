@@ -55,6 +55,18 @@ Choice effective(const Layers &all)
             choice.citationStyle = layer->citationStyle;
             choice.citationStyleFrom = name;
         }
+        if (layer->maxIncludeDepth) {
+            choice.maxIncludeDepth = *layer->maxIncludeDepth;
+            choice.maxIncludeDepthFrom = name;
+        }
+        if (layer->maxIncludeSize) {
+            choice.maxIncludeSize = *layer->maxIncludeSize;
+            choice.maxIncludeSizeFrom = name;
+        }
+        if (layer->maxIncludes) {
+            choice.maxIncludes = *layer->maxIncludes;
+            choice.maxIncludesFrom = name;
+        }
     }
     choice.options = md::Options::forProfile(profile);
     const md::Options own = choice.options;
@@ -78,12 +90,22 @@ Choice choose(const Layer &flags, const Layer &document, const Layer &library)
     return effective(layers);
 }
 
+void Choice::limit(md::Source &source) const
+{
+    source.maxIncludeDepth = maxIncludeDepth;
+    source.maxExpandedBytes = maxIncludeSize;
+    source.maxIncludeCount = maxIncludes;
+}
+
 QJsonObject Choice::toJson() const
 {
     QJsonObject from{{QStringLiteral("profile"), profileFrom},
                      {QStringLiteral("libraryRoot"), libraryRootFrom},
                      {QStringLiteral("bibliography"), bibliographyFrom},
-                     {QStringLiteral("citationStyle"), citationStyleFrom}};
+                     {QStringLiteral("citationStyle"), citationStyleFrom},
+                     {QStringLiteral("maxIncludeDepth"), maxIncludeDepthFrom},
+                     {QStringLiteral("maxIncludeSize"), maxIncludeSizeFrom},
+                     {QStringLiteral("maxIncludes"), maxIncludesFrom}};
     QJsonObject extensions;
     for (auto it = extensionsFrom.cbegin(); it != extensionsFrom.cend(); ++it) extensions.insert(it.key(), it.value());
     from.insert(QStringLiteral("extensions"), extensions);
@@ -94,6 +116,9 @@ QJsonObject Choice::toJson() const
         {QStringLiteral("libraryRoot"), libraryRoot.isEmpty() ? QJsonValue() : QJsonValue(libraryRoot)},
         {QStringLiteral("bibliography"), QJsonArray::fromStringList(bibliography)},
         {QStringLiteral("citationStyle"), citationStyle.isEmpty() ? QJsonValue() : QJsonValue(citationStyle)},
+        {QStringLiteral("maxIncludeDepth"), maxIncludeDepth},
+        {QStringLiteral("maxIncludeSize"), maxIncludeSize},
+        {QStringLiteral("maxIncludes"), maxIncludes},
         {QStringLiteral("savedSettings"), savedSettings},
         {QStringLiteral("from"), from},
     };
@@ -118,7 +143,38 @@ QString Choice::describe() const
         for (const QString &file : bibliography) names.append(QFileInfo(file).fileName());
         line += QStringLiteral(", bibliography ") + names.join(QStringLiteral(", "));
     }
+    // The include limits a layer chose, not the engine's own.
+    if (maxIncludeDepthFrom != u"default") line += QStringLiteral(", includes at most %1 deep").arg(maxIncludeDepth);
+    if (maxIncludeSizeFrom != u"default")
+        line += QStringLiteral(", at most %1 with includes").arg(sizeText(maxIncludeSize));
+    if (maxIncludesFrom != u"default") line += QStringLiteral(", at most %1 includes").arg(maxIncludes);
     return line;
+}
+
+QString sizeText(qint64 bytes)
+{
+    constexpr qint64 kib = 1024, mib = kib * 1024, gib = mib * 1024;
+    if (bytes >= gib && bytes % gib == 0) return QStringLiteral("%1 GiB").arg(bytes / gib);
+    if (bytes >= mib && bytes % mib == 0) return QStringLiteral("%1 MiB").arg(bytes / mib);
+    if (bytes >= kib && bytes % kib == 0) return QStringLiteral("%1 KiB").arg(bytes / kib);
+    return bytes == 1 ? QStringLiteral("1 byte") : QStringLiteral("%1 bytes").arg(bytes);
+}
+
+std::optional<qint64> sizeNamed(const QString &written)
+{
+    const QString text = written.trimmed().toLower();
+    qsizetype digits = 0;
+    while (digits < text.size() && text[digits] >= u'0' && text[digits] <= u'9') ++digits;
+    if (digits == 0 || digits > 12) return std::nullopt;
+    const qint64 number = text.left(digits).toLongLong();
+    const QString unit = text.mid(digits).trimmed();
+    qint64 factor = 0;
+    if (unit.isEmpty() || unit == u"b") factor = 1;
+    else if (unit == u"k" || unit == u"kb" || unit == u"kib") factor = 1024;
+    else if (unit == u"m" || unit == u"mb" || unit == u"mib") factor = 1024 * 1024;
+    else if (unit == u"g" || unit == u"gb" || unit == u"gib") factor = 1024ll * 1024 * 1024;
+    if (factor == 0 || number <= 0) return std::nullopt;
+    return number * factor;
 }
 
 namespace {

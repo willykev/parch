@@ -30,6 +30,7 @@ Reading read(const QString &text, const Dialect::Layers &layers, md::Source sour
         reading.dialect.options.frontMatter && Dialect::linkCitations(md::parseFrontMatter(text));
     reading.citations = DocumentCitations::prepare(reading.dialect, linkCitations);
     if (source.libraryRoot.isEmpty()) source.libraryRoot = reading.dialect.libraryRoot;
+    reading.dialect.limit(source);
     source.externalCitationKeys = reading.citations.keys();
     source.citationNotes = reading.citations.noteStyle();
     reading.document = md::parse(text, reading.dialect.options, source);

@@ -1,9 +1,12 @@
 #pragma once
 
 #include "apppaths.h"
+#include "renderhelpers.h"
 
 #include <QString>
 #include <QStringList>
+
+#include <optional>
 
 class QIODevice;
 
@@ -29,6 +32,13 @@ struct Context {
     AppPaths paths;           // parch's own files, read only with --use-saved-settings
     QIODevice *out = nullptr;
     QIODevice *err = nullptr;
+    // The helpers `check` draws formulas and diagrams with; unset, they are
+    // found where HelperSet::find() looks.
+    std::optional<HelperSet> helpers;
+    // Where `check` keeps what it drew, so that another check draws only
+    // what changed; empty, the cache the window shares
+    // (RenderCache::standardFolder()).
+    QString renderCache;
 };
 
 // Whether a first argument is one of these commands, rather than a file to open.

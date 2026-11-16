@@ -140,6 +140,9 @@ class Preview : public QObject {
     Q_PROPERTY(bool current READ current NOTIFY currentChanged)
     // There is a place to go back to, after a link inside the document was followed.
     Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY trailChanged)
+    // What the text as last read marks as leading nowhere (preview::Unresolved),
+    // a sentence each, for assistive technology; empty when nothing does.
+    Q_PROPERTY(QString unresolved READ unresolved NOTIFY unresolvedChanged)
 
 public:
     // How long the text rests after an edit before it is parsed again.
@@ -191,6 +194,7 @@ public:
     QAbstractItemModel *marks() const { return m_marks; }
     bool current() const { return m_current; }
     bool canGoBack() const { return !m_trail.isEmpty(); }
+    QString unresolved() const { return m_unresolved; }
 
     // The document as it is built, its style, and how much it has built: for tests.
     QTextDocument *textDocument() const { return m_text; }
@@ -283,6 +287,7 @@ signals:
     void styleChanged();
     void currentChanged();
     void trailChanged();
+    void unresolvedChanged();
     // The surface shows other text than before: a result was taken, or a picture arrived.
     void updated();
     // The layout of what is shown changed without its text changing.
@@ -349,6 +354,7 @@ private:
     Span spanIn(size_t index, qsizetype at, const QList<preview::Anchor> &blocks) const;
     bool toggleTask(int source);
     void setCurrent(bool current);
+    void setUnresolved(const QStringList &messages);
     void pictureChanged(const QString &key);
     // A file the text depends on changed on disk: a picture is read again,
     // and an included file, a bibliography or a style has the text read again.
@@ -406,6 +412,7 @@ private:
     Revision m_planRevision = 0;
     Revision m_shownRevision = 0;
     bool m_current = false;
+    QString m_unresolved;
     quint64 m_nextId = 1;
     // The section whose first block was given no room above it.
     quint64 m_trimmed = 0;

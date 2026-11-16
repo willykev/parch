@@ -63,11 +63,14 @@ struct Problem {
     // The engine's diagnostic code, or one of the checks made here:
     // "unresolved-asset" (an image whose file is not there), "broken-link"
     // (a link to a file that is not there) and "broken-link-anchor" (a link
-    // to a heading another Markdown file does not have); or one of the
-    // citation style's (DocumentCitations::Problem).
+    // to a heading another Markdown file does not have); one of the
+    // citation style's (DocumentCitations::Problem); or one of a formula's
+    // or diagram's that its helper refused or could not draw
+    // (rendercheck.h).
     QString code;
     // What kind of problem: include, reference, link, asset, footnote,
-    // citation, bibliography, variable, table, math, front-matter or html.
+    // citation, bibliography, variable, table, math, diagram, front-matter
+    // or html.
     QString kind;
     QString message;
     // A bibliography or style the problem is in rather than the document,
@@ -81,8 +84,12 @@ struct Problem {
 // headings that are not there, then the problems of its citations, its
 // style and its bibliography. Each problem is reported once, even in a
 // file included twice. Linked Markdown files are read to check the heading a
-// link names, in the document's own dialect.
-std::vector<Problem> problems(const Loaded &loaded);
+// link names, in the document's own dialect. `more` are problems found
+// otherwise, such as formulas a helper refused, put in their places.
+std::vector<Problem> problems(const Loaded &loaded, std::vector<Problem> more = {});
+
+// Puts problems in file and source order, those of other files last.
+void order(std::vector<Problem> &problems);
 
 // Whether anything is a warning or an error. Info alone is not a problem.
 bool anyProblem(const std::vector<Problem> &problems);

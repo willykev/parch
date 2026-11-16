@@ -155,19 +155,8 @@ public:
     // The line that includes a document, quoted when it has spaces.
     static QString includeLine(const QString &included);
 
-    // Looks for the document's local links, images and includes that lead
-    // nowhere, to a file that is not there or a heading that is not in the
-    // document or file they name, off the UI thread, and says what it found
-    // with linksChecked() under the number returned. The document's text is
-    // read as it is now.
-    Q_INVOKABLE int checkLinks(Document *document);
-
 signals:
     void problem(const QString &title, const QString &detail);
-    // Each link that leads nowhere as {line, destination, kind, heading}, with
-    // kind "image", "link" or "include", and heading true when the file is
-    // there but the heading is not; `checked` counts every local link.
-    void linksChecked(int request, const QVariantList &missing, int checked);
 
 private:
     AppPaths m_paths;
@@ -176,5 +165,4 @@ private:
     qint64 m_large = LargeFileBytes;
     QThreadPool m_pool;
     std::atomic<bool> m_stopping{false};
-    int m_lastCheck = 0;
 };

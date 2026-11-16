@@ -33,6 +33,15 @@ qint64 utf8Size(const QString &text)
     return bytes;
 }
 
+// The size guard as the writer set it: "100 MiB", "512 KiB", "40 bytes".
+QString sizeText(qint64 bytes)
+{
+    constexpr qint64 kib = 1024, mib = kib * 1024;
+    if (bytes >= mib && bytes % mib == 0) return QStringLiteral("%1 MiB").arg(bytes / mib);
+    if (bytes >= kib && bytes % kib == 0) return QStringLiteral("%1 KiB").arg(bytes / kib);
+    return bytes == 1 ? QStringLiteral("1 byte") : QStringLiteral("%1 bytes").arg(bytes);
+}
+
 class Assembler {
 public:
     Assembler(ParseState &state, Document &document, const Source &source)
@@ -142,8 +151,8 @@ void Assembler::include(Block *block, int depth)
         IncludeResolver::File file = source.resolver->read(target, source.maxExpandedBytes - expandedBytes);
         if (file.tooLarge) {
             fail(block, DiagnosticCode::IncludeSizeLimit,
-                 QStringLiteral("The document and its includes are larger than %1 MiB; \"%2\" is not included")
-                     .arg(source.maxExpandedBytes / (1024 * 1024)).arg(written));
+                 QStringLiteral("The document and its includes are larger than %1; \"%2\" is not included")
+                     .arg(sizeText(source.maxExpandedBytes), written));
             return;
         }
         if (!file.ok) {
@@ -184,8 +193,8 @@ void Assembler::include(Block *block, int depth)
     }
     if (expandedBytes + entry.bytes > source.maxExpandedBytes) {
         fail(block, DiagnosticCode::IncludeSizeLimit,
-             QStringLiteral("The document and its includes are larger than %1 MiB; \"%2\" is not included")
-                 .arg(source.maxExpandedBytes / (1024 * 1024)).arg(written));
+             QStringLiteral("The document and its includes are larger than %1; \"%2\" is not included")
+                 .arg(sizeText(source.maxExpandedBytes), written));
         return;
     }
     expandedBytes += entry.bytes;

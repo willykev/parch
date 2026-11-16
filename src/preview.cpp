@@ -141,6 +141,8 @@ struct Preview::Parsed {
     // The files on disk the text depends on: its local pictures, and the
     // files it was read with (included files, bibliographies, a style file).
     QStringList pictures, files;
+    // What the preview marks as leading nowhere.
+    QStringList unresolved;
 };
 
 // Sections that go and the parts that are built in their place.
@@ -527,6 +529,7 @@ void Preview::clear()
     m_pictureFiles.clear();
     m_readFiles.clear();
     m_watch->setFiles({});
+    setUnresolved({});
     m_startsValid = 0;
     m_shownRevision = 0;
     m_trimmed = 0;
@@ -544,6 +547,14 @@ void Preview::clear()
         m_refreshing = false;
     }
     setCurrent(false);
+}
+
+void Preview::setUnresolved(const QStringList &messages)
+{
+    const QString said = messages.isEmpty() ? QString() : messages.join(QStringLiteral(". ")) + u'.';
+    if (said == m_unresolved) return;
+    m_unresolved = said;
+    emit unresolvedChanged();
 }
 
 void Preview::setCurrent(bool current)
@@ -615,6 +626,7 @@ Preview::Parsed Preview::parseJob(QSharedPointer<const SourceSnapshot> snapshot,
     preview::warm(*result.tree);
     picturesOf(reading->document, reading->document.root, result.pictures);
     result.files = filesRead(*reading);
+    result.unresolved = preview::Unresolved(reading->document).messages();
     return result;
 }
 
@@ -718,6 +730,7 @@ void Preview::plan(const Parsed &result)
     m_pictureFiles = QSet<QString>(result.pictures.cbegin(), result.pictures.cend());
     m_readFiles = QSet<QString>(result.files.cbegin(), result.files.cend());
     m_watch->setFiles(result.files + result.pictures);
+    setUnresolved(result.unresolved);
     m_planRevision = result.revision;
     ++m_updates;
     // Text that reads as it did, as after an undo and its redo, is shown already.

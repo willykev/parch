@@ -11,6 +11,8 @@
 #include <QJsonObject>
 #include <QSaveFile>
 
+#include <cmath>
+
 namespace DocumentSettings {
 namespace {
 
@@ -100,6 +102,18 @@ Dialect::Layer layerOf(const QJsonObject &entry)
     }
     const QString style = entry.value(QStringLiteral("citationStyle")).toString().trimmed();
     if (!style.isEmpty()) layer.citationStyle = style;
+    // A limit is a whole number within its range; anything else guards nothing.
+    const auto limit = [&entry](const QString &key, qint64 most) -> std::optional<qint64> {
+        const QJsonValue value = entry.value(key);
+        if (!value.isDouble()) return std::nullopt;
+        const double number = value.toDouble();
+        if (number < 1 || number > double(most) || number != std::floor(number)) return std::nullopt;
+        return qint64(number);
+    };
+    if (const auto depth = limit(QStringLiteral("maxIncludeDepth"), Dialect::MaxIncludeDepthLimit))
+        layer.maxIncludeDepth = int(*depth);
+    layer.maxIncludeSize = limit(QStringLiteral("maxIncludeSize"), Dialect::MaxIncludeSizeLimit);
+    if (const auto count = limit(QStringLiteral("maxIncludes"), Dialect::MaxIncludesLimit)) layer.maxIncludes = int(*count);
     return layer;
 }
 
@@ -118,6 +132,9 @@ QJsonObject entryOf(const Dialect::Layer &layer, QJsonObject entry)
     put(QStringLiteral("bibliography"), QJsonArray::fromStringList(layer.bibliography.value_or(QStringList())),
         layer.bibliography.has_value());
     put(QStringLiteral("citationStyle"), layer.citationStyle, !layer.citationStyle.isEmpty());
+    put(QStringLiteral("maxIncludeDepth"), layer.maxIncludeDepth.value_or(0), layer.maxIncludeDepth.has_value());
+    put(QStringLiteral("maxIncludeSize"), layer.maxIncludeSize.value_or(0), layer.maxIncludeSize.has_value());
+    put(QStringLiteral("maxIncludes"), layer.maxIncludes.value_or(0), layer.maxIncludes.has_value());
     return entry;
 }
 

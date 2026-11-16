@@ -13,7 +13,7 @@
 namespace DocumentCheck {
 namespace {
 
-const qint64 maxDocumentBytes = md::Source().maxExpandedBytes;
+const qint64 defaultDocumentBytes = md::Source().maxExpandedBytes;
 
 QString kindOf(md::DiagnosticCode code)
 {
@@ -178,6 +178,9 @@ bool load(const QString &path, const Dialect::Choice &dialect, Loaded *loaded, Q
     layers.flags.libraryRoot = dialect.libraryRoot;
     layers.flags.bibliography = dialect.bibliography;
     layers.flags.citationStyle = dialect.citationStyle;
+    layers.flags.maxIncludeDepth = dialect.maxIncludeDepth;
+    layers.flags.maxIncludeSize = dialect.maxIncludeSize;
+    layers.flags.maxIncludes = dialect.maxIncludes;
     if (!load(path, layers, loaded, error)) return false;
     loaded->dialect = dialect;
     return true;
@@ -186,6 +189,8 @@ bool load(const QString &path, const Dialect::Choice &dialect, Loaded *loaded, Q
 bool load(const QString &path, const Dialect::Layers &layers, Loaded *loaded, QString *error)
 {
     md::FileIncludeResolver resolver;
+    // A smaller size limit stops what it includes, never the document itself.
+    const qint64 maxDocumentBytes = std::max(defaultDocumentBytes, Dialect::effective(layers).maxIncludeSize);
     const md::IncludeResolver::File file = resolver.read(path, maxDocumentBytes);
     if (file.missing) {
         *error = QStringLiteral("%1 does not exist").arg(path);
@@ -196,7 +201,7 @@ bool load(const QString &path, const Dialect::Layers &layers, Loaded *loaded, QS
         return false;
     }
     if (file.tooLarge) {
-        *error = QStringLiteral("%1 is larger than %2 MiB").arg(path).arg(maxDocumentBytes / (1024 * 1024));
+        *error = QStringLiteral("%1 is larger than %2").arg(path, Dialect::sizeText(maxDocumentBytes));
         return false;
     }
     if (!file.ok) {
@@ -243,10 +248,22 @@ Position positionOf(QStringView text, int offset)
     return LineIndex(text).at(offset);
 }
 
-std::vector<Problem> problems(const Loaded &loaded)
+void order(std::vector<Problem> &problems)
+{
+    // Those of other files (a bibliography) come last.
+    std::stable_sort(problems.begin(), problems.end(), [](const Problem &a, const Problem &b) {
+        const unsigned fileA = unsigned(a.file), fileB = unsigned(b.file);
+        if (fileA != fileB) return fileA < fileB;
+        if (a.path != b.path) return a.path < b.path;
+        if (a.file < 0) return a.position.line < b.position.line;
+        return a.range.start < b.range.start;
+    });
+}
+
+std::vector<Problem> problems(const Loaded &loaded, std::vector<Problem> more)
 {
     const md::Document &document = loaded.document;
-    std::vector<Problem> found;
+    std::vector<Problem> found = std::move(more);
     for (const md::Diagnostic &diagnostic : document.diagnostics) {
         Problem problem;
         problem.file = diagnostic.file;
@@ -282,14 +299,7 @@ std::vector<Problem> problems(const Loaded &loaded)
     }
 
     // A file included twice is in the tree twice; its problems are once.
-    // Those of other files (a bibliography) come last.
-    std::stable_sort(found.begin(), found.end(), [](const Problem &a, const Problem &b) {
-        const unsigned fileA = unsigned(a.file), fileB = unsigned(b.file);
-        if (fileA != fileB) return fileA < fileB;
-        if (a.path != b.path) return a.path < b.path;
-        if (a.file < 0) return a.position.line < b.position.line;
-        return a.range.start < b.range.start;
-    });
+    order(found);
     QSet<QString> seen;
     std::vector<Problem> unique;
     std::vector<std::unique_ptr<LineIndex>> lines(document.files.size());

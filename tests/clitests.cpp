@@ -66,7 +66,8 @@ public:
         QBuffer out, err;
         out.open(QIODevice::WriteOnly);
         err.open(QIODevice::WriteOnly);
-        const Cli::Context context{m_root, home(), paths(), &out, &err};
+        Cli::Context context{m_root, home(), paths(), &out, &err};
+        context.renderCache = path(QStringLiteral("app/cache/render"));
         arguments.prepend(QStringLiteral("parch"));
         // No math or diagram helpers, unless a test names some: what an
         // export writes does not hang on what is installed, and nothing is

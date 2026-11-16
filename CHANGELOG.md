@@ -23,8 +23,13 @@ The first version: a native Markdown writing app for Omarchy.
 - Rich text pastes as clean Markdown; `Ctrl+Shift+V` pastes plain text.
 - Pasted images and dropped files go into an `assets` folder beside the
   document; a dropped Markdown document can be linked or included.
-- Check links lists the links, images and includes whose files are missing,
-  and the links to headings that are not there.
+- Check document lists everything wrong in a document and the files it
+  includes, as file, line, column and message, without holding up the
+  window: links, images and includes whose files are missing, links to
+  headings that are not there, references, notes, citations and variables
+  that lead nowhere, include cycles and limits, formulas and diagrams that
+  cannot be drawn, and more. `Enter` opens the place, in the included file
+  when the problem is in one.
 - Formatting commands that write and toggle Markdown, each one undo step, from
   the menu, a formatting toolbar, a command palette and their keys.
 - Lists that continue on Enter and indent with Tab, table cells reached with
@@ -48,10 +53,11 @@ The first version: a native Markdown writing app for Omarchy.
   text a reader sees.
 - Document settings for each document, kept by parch and never in the file:
   the Markdown profile (Writer-compatible or Standard), its extensions, the
-  citation style, the bibliography and the library root, with defaults for a
+  citation style, the bibliography, the library root and the limits on
+  includes (depth, size and number), with defaults for a
   library folder and, in Preferences, for every document. The dialog shows
   where each setting comes from, and live formatting, spelling, the outline,
-  the word count and Check links read the document as they say.
+  the word count and Check document read the document as they say.
 - Citations and bibliographies: Writer `[p. 23][#key]` and Pandoc
   `[@key, p. 23]` citations, with words before each key
   (`[see @doe99, p. 33; also @roe04]`), `[-@key]` without the author and
@@ -60,7 +66,9 @@ The first version: a native Markdown writing app for Omarchy.
   JSON and CSL YAML files, chosen in Document settings or with
   `bibliography:` and `csl:` in the front matter. Seven bundled CSL styles
   (APA, Chicago author-date and notes, IEEE, MLA, Harvard, Vancouver) or a
-  `.csl` file of your own; note styles put citations in footnotes.
+  `.csl` file of your own; note styles put citations in footnotes. Only
+  English locales are bundled, CSL-M styles are refused, and 746 of the 809
+  English fixtures of the CSL test suite pass; the user guide says so.
 - Optional Vim keys, off until chosen: Normal, Insert and Visual modes;
   motions, operators and text objects with counts; registers, `.` and undo by
   whole changes; search; and `:w`, `:q`, `:wq` and `:x`. The status line
@@ -76,10 +84,23 @@ The first version: a native Markdown writing app for Omarchy.
   merged cells, code coloured by language, task lists, definition lists,
   footnotes with links both ways, citations and a bibliography, a table of
   contents, images, math and Mermaid diagrams, and included files.
+- Math in the LaTeX KaTeX 0.16 supports, tested with an expression for each
+  command on its list: 1,037 of 1,043 draw. The user guide names the rest
+  and the other differences.
+- The user guide's conformance section gives both profiles' results on the
+  CommonMark 0.31.2 and GFM examples and the raw HTML elements and
+  attributes that are supported; everything else is shown as text.
+- Mermaid diagrams in Mermaid 12.3 syntax, drawn through Merman 0.10: 23
+  families, from flowcharts and sequence diagrams to Gantt charts, C4,
+  mind maps and ZenUML, each named in the user guide.
 - Citations and the bibliography read as the document's citation style
   writes them, author and date, numbers or notes, and a key that nothing
   defines stays in view. The preview reads a document in its own settings,
   the Standard profile too, and follows a change of them at once.
+- What leads nowhere is shown as written in the theme's danger colour and
+  says why when pointed at, to assistive technology too: an include that
+  cannot be read in (a cycle with its chain of files), and a variable, a
+  reference, a footnote or a heading link that nothing defines.
 - The preview follows the text as you type, setting again only what changed,
   and scrolls with it; a book of 100,000 words keeps up.
 - It also follows the files the text uses: a picture, an included file, a
@@ -159,7 +180,9 @@ The first version: a native Markdown writing app for Omarchy.
 - `parch check` reports what is wrong in documents and the files they
   include, with file, line and column: includes, references, footnotes,
   citations and variables that lead nowhere, missing images, links to files
-  or headings that are not there, and more.
+  or headings that are not there, formulas and Mermaid diagrams that cannot
+  be drawn, and more. Its JSON names the RaTeX and Merman versions that drew
+  them.
 - `parch render` writes a document's HTML, plain text, outline or semantic
   tree, and `parch stats` counts its words, characters, reading time and
   headings.
@@ -168,7 +191,8 @@ The first version: a native Markdown writing app for Omarchy.
   never over the document and never over another file unless asked.
 - Every command needs no display, takes `--json`, and reads the Writer
   profile unless `--profile`, `--extension` or `--use-saved-settings` say
-  otherwise.
+  otherwise. `--max-include-depth`, `--max-include-size` and
+  `--max-includes` change the limits on includes.
 - `parch render` and `parch export --to html` format citations and the
   bibliography in the document's citation style; `--bibliography` and
   `--csl` choose them, and `parch check` reports missing and duplicate keys,

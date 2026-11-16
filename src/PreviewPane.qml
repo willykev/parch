@@ -139,7 +139,9 @@ Rectangle {
             // Nothing is typed here, so there is no caret to show.
             cursorDelegate: Item {}
             Accessible.name: pane.title.length > 0 ? qsTr("Preview of %1").arg(pane.title) : qsTr("Preview")
-            Accessible.description: qsTr("The document as it reads. It cannot be edited here.")
+            Accessible.description: preview.unresolved.length > 0
+                                    ? qsTr("The document as it reads. It cannot be edited here. What leads nowhere: %1").arg(preview.unresolved)
+                                    : qsTr("The document as it reads. It cannot be edited here.")
 
             onActiveFocusChanged: if (activeFocus && !pointer.pressed && !pane.quietFocus) pane.keyFocus = true
             // The place that was clicked is where the cursor now is.

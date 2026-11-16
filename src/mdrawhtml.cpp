@@ -13,6 +13,7 @@
 //   td, th: colspan rowspan align
 // Every other attribute is dropped. A link or image whose URL is a script
 // or a non-image data URL loses that URL.
+#include "mdhtml.h"
 #include "mdparser_p.h"
 
 namespace md::detail {
@@ -37,16 +38,21 @@ const TagEntry supportedTags[] = {
     {"tfoot", false, true},   {"tr", false, true},      {"th", false, true},     {"td", false, true},
 };
 
+struct AttributeEntry {
+    const char *tag;
+    const char *attribute;
+};
+
+const AttributeEntry allowedAttributes[] = {
+    {"a", "href"},       {"a", "title"},      {"img", "src"},      {"img", "alt"},       {"img", "title"},
+    {"img", "width"},    {"img", "height"},   {"ol", "start"},     {"td", "colspan"},    {"td", "rowspan"},
+    {"td", "align"},     {"th", "colspan"},   {"th", "rowspan"},   {"th", "align"},
+};
+
 bool attributeAllowed(QStringView tag, QStringView attribute)
 {
-    auto is = [&](QLatin1StringView a) { return attribute == a; };
-    if (tag == u"a") return is(QLatin1StringView("href")) || is(QLatin1StringView("title"));
-    if (tag == u"img")
-        return is(QLatin1StringView("src")) || is(QLatin1StringView("alt")) || is(QLatin1StringView("title"))
-            || is(QLatin1StringView("width")) || is(QLatin1StringView("height"));
-    if (tag == u"ol") return is(QLatin1StringView("start"));
-    if (tag == u"td" || tag == u"th")
-        return is(QLatin1StringView("colspan")) || is(QLatin1StringView("rowspan")) || is(QLatin1StringView("align"));
+    for (const AttributeEntry &entry : allowedAttributes)
+        if (tag == QLatin1StringView(entry.tag) && attribute == QLatin1StringView(entry.attribute)) return true;
     return false;
 }
 
@@ -362,3 +368,17 @@ void parseHtmlFragment(ParseState &state, const QString &raw, int file, Range bl
 }
 
 } // namespace md::detail
+
+namespace md {
+
+HtmlPolicy htmlPolicy()
+{
+    HtmlPolicy policy;
+    for (const detail::TagEntry &entry : detail::supportedTags)
+        (entry.block ? policy.blockElements : policy.textElements).append(QLatin1StringView(entry.name));
+    for (const detail::AttributeEntry &entry : detail::allowedAttributes)
+        policy.attributes[QLatin1StringView(entry.tag)].append(QLatin1StringView(entry.attribute));
+    return policy;
+}
+
+} // namespace md

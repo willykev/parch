@@ -2,6 +2,8 @@
 
 #include "mdtree.h"
 
+#include <QHash>
+
 // HTML from a parsed document: what the HTML export writes, and the form in
 // which the engine is checked against the CommonMark and GFM examples.
 //
@@ -93,5 +95,15 @@ QString escapeHtml(QStringView text);
 // A URL as an href carries it: characters outside the URL syntax
 // percent-encoded as UTF-8, existing escapes kept.
 QString encodeUrl(QStringView url);
+
+// The raw HTML policy above as data, for reports and the user guide: the
+// supported elements, text level and blocks, in the order above, and the
+// attributes each element keeps.
+struct HtmlPolicy {
+    QStringList textElements;
+    QStringList blockElements;
+    QHash<QString, QStringList> attributes;
+};
+HtmlPolicy htmlPolicy();
 
 } // namespace md

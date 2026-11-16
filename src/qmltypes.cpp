@@ -6,6 +6,7 @@
 #include "commandfilter.h"
 #include "commandregistry.h"
 #include "document.h"
+#include "documentchecker.h"
 #include "documentfind.h"
 #include "documentsettingsstore.h"
 #include "editorbinding.h"
@@ -45,6 +46,7 @@ void registerQmlTypes()
     qmlRegisterUncreatableType<CommandRegistry>("Parch", 1, 0, "CommandRegistry",
                                                 QStringLiteral("The backend keeps the commands"));
     qmlRegisterType<DocumentFind>("Parch", 1, 0, "DocumentFind");
+    qmlRegisterType<DocumentChecker>("Parch", 1, 0, "DocumentChecker");
     qmlRegisterType<EncodingChoice>("Parch", 1, 0, "EncodingChoice");
     qmlRegisterType<OutlineModel>("Parch", 1, 0, "OutlineModel");
     // QML reads documents, their buffers and their states by name, but never makes one.

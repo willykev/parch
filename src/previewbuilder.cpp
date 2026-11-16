@@ -96,9 +96,10 @@ QStringList missingKeys(const Node &citation)
 // Everything about a node and what it holds that decides how it reads,
 // which is everything but where it lies in its file. A citation reads as
 // its style words it, which depends on the bibliography and on every
-// citation before it.
-void hashNode(const Node &node, Hasher &h, const Citations *citations)
+// citation before it; what leads nowhere says why.
+void hashNode(const Node &node, Hasher &h, const Citations *citations, const preview::Unresolved *unresolved)
 {
+    if (unresolved) h.add(unresolved->of(node));
     h.add(quint64(node.type) | quint64(node.align) << 8 | quint64(node.level) << 16
           | quint64(node.marker.unicode()) << 24 | quint64(node.tight) << 40 | quint64(node.ordered) << 41
           | quint64(node.task) << 42 | quint64(node.checked) << 43 | quint64(node.header) << 44
@@ -122,14 +123,20 @@ void hashNode(const Node &node, Hasher &h, const Citations *citations)
         }
     }
     h.add(quint64(node.children.size()));
-    for (const Node &child : node.children) hashNode(child, h, citations);
+    for (const Node &child : node.children) hashNode(child, h, citations, unresolved);
 }
 
 // A node's own source too, so that equal keys mean equal offsets inside it.
-void hashWithSource(const md::Document &document, const Node &node, Hasher &h, const Citations *citations)
+void hashWithSource(const md::Document &document, const Node &node, Hasher &h, const Citations *citations,
+                    const preview::Unresolved *unresolved)
 {
     if (node.file == 0 && !node.generated) h.add(document.source(node));
-    hashNode(node, h, citations);
+    hashNode(node, h, citations, unresolved);
+}
+
+quint64 placeKey(int file, int start)
+{
+    return quint64(quint32(file)) << 32 | quint32(start);
 }
 
 // The definition in the document's own text that an entry of the style's
@@ -182,9 +189,79 @@ QString oneBlock(const QString &text, bool collapse)
 
 } // namespace
 
+Unresolved::Unresolved(const md::Document &document) : m_references(document.files.size())
+{
+    using C = md::DiagnosticCode;
+    for (const md::Diagnostic &diagnostic : document.diagnostics) {
+        switch (diagnostic.code) {
+        case C::UnresolvedReference:
+            if (diagnostic.file >= 0 && size_t(diagnostic.file) < m_references.size())
+                m_references[size_t(diagnostic.file)].push_back({diagnostic.range, diagnostic.message});
+            break;
+        case C::UnresolvedVariable:
+        case C::MissingFootnote:
+        case C::UnresolvedAnchor:
+        case C::IncludeNotFound:
+        case C::IncludeUnreadable:
+        case C::IncludeCycle:
+        case C::IncludeDepthLimit:
+        case C::IncludeSizeLimit:
+        case C::IncludeCountLimit:
+        case C::IncludeNoLibrary:
+        case C::IncludeNoBaseFolder: {
+            const quint64 key = placeKey(diagnostic.file, diagnostic.range.start);
+            if (!m_nodes.contains(key)) m_nodes.insert(key, diagnostic.message);
+            break;
+        }
+        default:
+            continue;
+        }
+        if (!m_messages.contains(diagnostic.message)) m_messages.append(diagnostic.message);
+    }
+    for (auto &references : m_references)
+        std::stable_sort(references.begin(), references.end(),
+                         [](const auto &a, const auto &b) { return a.first.start < b.first.start; });
+}
+
+std::vector<std::pair<md::Range, QString>> Unresolved::references(const Node &node) const
+{
+    std::vector<std::pair<md::Range, QString>> found;
+    if (node.generated || node.file < 0 || size_t(node.file) >= m_references.size()) return found;
+    const auto &references = m_references[size_t(node.file)];
+    // From the last reference that starts at or before the text, each that
+    // starts before the text ends.
+    auto from = std::upper_bound(references.cbegin(), references.cend(), node.range.start,
+                                 [](int start, const auto &reference) { return start < reference.first.start; });
+    if (from != references.cbegin()) --from;
+    for (auto it = from; it != references.cend() && it->first.start < node.range.end; ++it)
+        if (it->first.end > node.range.start) found.push_back(*it);
+    return found;
+}
+
+QString Unresolved::of(const Node &node) const
+{
+    switch (node.type) {
+    case NodeType::Text:
+    case NodeType::Escape:
+    case NodeType::Entity: {
+        QStringList said;
+        for (const auto &[range, message] : references(node)) said.append(message);
+        return said.join(u'\n');
+    }
+    case NodeType::Include:
+    case NodeType::Variable:
+    case NodeType::FootnoteReference:
+    case NodeType::Link:
+        return node.resolved ? QString() : m_nodes.value(placeKey(node.file, node.range.start));
+    default:
+        return {};
+    }
+}
+
 std::vector<Part> parts(const md::Document &document, const DocumentCitations::Formatted *given)
 {
     const Citations *citations = active(given);
+    const Unresolved unresolved(document);
     std::vector<Part> list;
     list.reserve(document.root.children.size() + document.footnotes.size()
                  + (citations ? size_t(citations->bibliography.size()) : document.bibliography.size()) + 2);
@@ -195,7 +272,7 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
         part.node = &node;
         Hasher h;
         h.add(quint64(Part::Block));
-        hashWithSource(document, node, h, citations);
+        hashWithSource(document, node, h, citations, &unresolved);
         part.key = h.value;
         list.push_back(part);
     }
@@ -208,7 +285,7 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
             h.add(quint64(quint32(note.number)) << 32 | quint32(note.references));
             // Every note is set to the width of the widest number.
             h.add(quint64(QString::number(document.footnotes.size()).size()));
-            if (note.content) hashWithSource(document, *note.content, h, citations);
+            if (note.content) hashWithSource(document, *note.content, h, citations, &unresolved);
             list.push_back({Part::Note, nullptr, int(i), h.value});
         }
     }
@@ -245,7 +322,7 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
             h.add(quint64(quint32(entry.number)) << 1 | quint64(entry.external));
             h.add(quint64(QString::number(document.bibliography.size()).size()));
             h.add(entry.key);
-            if (entry.definition) hashWithSource(document, *entry.definition, h, nullptr);
+            if (entry.definition) hashWithSource(document, *entry.definition, h, nullptr, &unresolved);
             list.push_back({Part::Entry, nullptr, int(i), h.value});
         }
     }
@@ -380,7 +457,7 @@ struct Builder::Cell {
 
 Builder::Builder(const md::Document &document, const PreviewStyle &style, Resources *resources,
                  const BuildOptions &options)
-    : m_document(document), m_style(style), m_resources(resources), m_options(options)
+    : m_document(document), m_style(style), m_resources(resources), m_options(options), m_unresolved(document)
 {
 }
 
@@ -657,8 +734,11 @@ void Builder::block(const Node &node, const Flow &flow)
                 && m_sourceBase >= 0)
                 m_section.anchors.append({0, node.range.start - m_sourceBase, 0, true});
         } else {
+            // Its line, in the danger ink, saying why it could not be read
+            // in: for a cycle, the chain of files that leads back.
             Char state = bodyChar(flow);
-            state.ink = PreviewStyle::Dim;
+            state.tip = m_unresolved.of(node);
+            state.ink = state.tip.isEmpty() ? PreviewStyle::Dim : PreviewStyle::Danger;
             openBlock(flow, flow.size, 0, gap, &node, state);
             text(m_document.source(node).toString(), state);
         }
@@ -1532,13 +1612,36 @@ void Builder::inlines(const std::vector<Node> &nodes, const Char &state)
     }
 }
 
-void Builder::inl(const Node &node, const Char &state)
+void Builder::inl(const Node &node, const Char &given)
 {
+    // What leads nowhere stays in view, in the danger ink, and says why.
+    Char state = given;
+    if (node.type != NodeType::Text) {
+        if (const QString why = m_unresolved.of(node); !why.isEmpty()) {
+            state.ink = PreviewStyle::Danger;
+            state.tip = why;
+        }
+    }
     switch (node.type) {
-    case NodeType::Text:
+    case NodeType::Text: {
         anchor(node, state.html ? 0 : int(node.text.size()));
-        text(node.text, state);
+        // A reference that leads nowhere reads as the text it was written
+        // as, which may run on before and after it: only it is marked. The
+        // text is its source, so their places line up.
+        int at = 0;
+        for (const auto &[range, why] : m_unresolved.references(node)) {
+            const int from = std::clamp(range.start - node.range.start, at, int(node.text.size()));
+            const int to = std::clamp(range.end - node.range.start, from, int(node.text.size()));
+            if (from > at) text(node.text.mid(at, from - at), state);
+            Char marked = state;
+            marked.ink = PreviewStyle::Danger;
+            marked.tip = why;
+            if (to > from) text(node.text.mid(from, to - from), marked);
+            at = to;
+        }
+        if (at < node.text.size()) text(at == 0 ? node.text : node.text.mid(at), state);
         break;
+    }
     case NodeType::Escape:
     case NodeType::Entity:
         anchor(node, 0);
@@ -1627,6 +1730,11 @@ void Builder::inl(const Node &node, const Char &state)
             inner.ink = PreviewStyle::Link;
             inner.underline = true;
             inner.tip = node.title.isEmpty() ? node.dest : node.title;
+        }
+        // A heading that is not there.
+        if (state.ink == PreviewStyle::Danger && !node.resolved) {
+            inner.ink = PreviewStyle::Danger;
+            inner.tip = state.tip;
         }
         anchor(node, 0);
         inlines(node.children, inner);

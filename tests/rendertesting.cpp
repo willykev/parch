@@ -75,6 +75,7 @@ echo "end $$" >> "$LOG"
 PATH=/usr/bin:/bin
 LOG=%1
 DIR=%2
+if [ "$1" = --version ]; then echo "merman-cli 0.0.7"; exit 0; fi
 echo "start $$" >> "$LOG"
 format=svg
 scale=1

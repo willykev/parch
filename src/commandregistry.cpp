@@ -80,7 +80,7 @@ QList<CommandInfo> standardCommands()
         command("save", "Save", "File", {QStringLiteral("Ctrl+S")}, Needs::Document),
         command("saveAs", "Save as…", "File", {QStringLiteral("Ctrl+Shift+S")}, Needs::Document),
         command("history", "Version history…", "File", {}, Needs::Document),
-        command("checkLinks", "Check links…", "File", {}, Needs::Document),
+        command("checkLinks", "Check document…", "File", {}, Needs::Document),
         command("export", "Export…", "File", {QStringLiteral("Ctrl+Shift+E")}, Needs::Document),
         command("exportAgain", "Export again", "File", {}, Needs::Document),
         command("print", "Print…", "File", {QStringLiteral("Ctrl+P")}, Needs::Document),

@@ -164,6 +164,32 @@ struct Part {
     quint64 key = 0;
 };
 
+// What a document's preview marks as leading nowhere, in the danger ink
+// with the engine's diagnostic as its tooltip: an include that could not
+// be read in (for a cycle, the chain of files), and a variable, a reference,
+// a note or an anchor that nothing defines. An unresolved reference reads
+// as the text it was written as, so the text it covers is marked. Plain
+// data made once for a document, for any thread.
+class Unresolved {
+public:
+    explicit Unresolved(const md::Document &document);
+    // What is said of a node: its own diagnostic, or for text, that of the
+    // unresolved references it is part of; empty when there is none.
+    QString of(const md::Node &node) const;
+    // The unresolved references a piece of text (a Text, Escape or Entity
+    // node) runs into, in order: a piece of text may run on before and
+    // after one.
+    std::vector<std::pair<md::Range, QString>> references(const md::Node &node) const;
+    // Each of them, in file and source order.
+    QStringList messages() const { return m_messages; }
+
+private:
+    QHash<quint64, QString> m_nodes;
+    // By file, in source order: the ranges of unresolved references.
+    std::vector<std::vector<std::pair<md::Range, QString>>> m_references;
+    QStringList m_messages;
+};
+
 // The parts of a document, in the order they are read; `citations` when a
 // citation style formatted the document, whose words are then part of each
 // key and whose bibliography is the one listed. A pure function of the
@@ -317,6 +343,7 @@ private:
     PreviewStyle m_style;
     Resources *m_resources;
     BuildOptions m_options;
+    Unresolved m_unresolved;
 
     // The section being built and where its text goes.
     Section m_section;

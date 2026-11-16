@@ -34,6 +34,15 @@ struct HelperSet {
     static HelperSet find();
     // Both helpers in one folder, whether or not they are there.
     static HelperSet in(const QString &folder);
+
+    // Which version each helper is, for reports: "RaTeX 0.1.15", "Merman
+    // 0.10.0"; empty for a helper that is not there. The versions come from
+    // the `.pins` file beside a helper, which bin/fetch-helpers and the
+    // package write ("ratex 0.1.15 …" a line); without one, merman-cli is
+    // asked (--version), while render-svg cannot say and is "RaTeX (version
+    // unknown)". Runs merman-cli, so not for the GUI thread.
+    QString ratexVersion() const;
+    QString mermanVersion() const;
 };
 
 // How hard a helper may be pushed. A helper that runs past its time or

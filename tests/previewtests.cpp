@@ -1071,8 +1071,9 @@ void previewPartsKeepTheirKeysAndSources()
     QCOMPARE(chapter.anchors.size(), 1);
     QCOMPARE(chapter.anchors.first().source, 0);
     QVERIFY(included->names().contains(QStringLiteral("chapter")));
-    // A line that could not be included is shown, dimmed.
-    QCOMPARE(inkOf(included->formatOf(QStringLiteral("missing.md"))), int(PreviewStyle::Dim));
+    // A line that could not be included is shown in the danger ink, saying why.
+    QCOMPARE(inkOf(included->formatOf(QStringLiteral("missing.md"))), int(PreviewStyle::Danger));
+    QVERIFY(included->formatOf(QStringLiteral("missing.md")).toolTip().contains(QStringLiteral("does not exist")));
 }
 
 void previewBuildsInPlaceForPaper()

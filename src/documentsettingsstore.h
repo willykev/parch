@@ -57,10 +57,12 @@ public:
     //   profile, profileFrom; extensions [{name, title, on, from}];
     //   bibliography [paths], bibliographyFrom; citationStyle,
     //   citationStyleTitle, citationStyleFrom; libraryRoot, libraryRootFrom;
-    //   library (the folder holding it, or empty), draft; and `layers`, what
-    //   each of "document", "library" and "application" sets on its own:
-    //   {profile, extensions {name: bool}, bibliography [paths] or null,
-    //   citationStyle, libraryRoot}.
+    //   maxIncludeDepth, maxIncludeSize (bytes), maxIncludes and where each
+    //   comes from (…From); library (the folder holding it, or empty), draft;
+    //   and `layers`, what each of "document", "library" and "application"
+    //   sets on its own: {profile, extensions {name: bool}, bibliography
+    //   [paths] or null, citationStyle, libraryRoot, maxIncludeDepth,
+    //   maxIncludeSize and maxIncludes or null}.
     // A source is "document", "front-matter", "library", "application",
     // "default", or for an extension also "profile".
     Q_INVOKABLE QVariantMap describe(Document *document) const;
@@ -80,6 +82,11 @@ public:
     Q_INVOKABLE bool setCitationStyle(Document *document, const QString &scope, const QString &style);
     // A folder's full path; empty resets it. Not for "application".
     Q_INVOKABLE bool setLibraryRoot(Document *document, const QString &scope, const QString &folder);
+    // An include limit, by its name: "maxIncludeDepth", "maxIncludeSize"
+    // (bytes) or "maxIncludes"; 0 resets it, and a value past the limit's
+    // range is refused.
+    Q_INVOKABLE bool setIncludeLimit(Document *document, const QString &scope, const QString &name, qint64 value);
+    Q_INVOKABLE bool resetIncludeLimits(Document *document, const QString &scope);
 
     // The library folder that holds the document, the nearest when several
     // do; empty for a draft or a file outside the library.

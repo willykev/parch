@@ -28,7 +28,7 @@ ApplicationWindow {
     // nothing moves them out of it, the editor behind it takes no input, and
     // the window's shortcuts wait.
     readonly property bool dialogOpen: conflictDialog.visible || historyDialog.visible || closeConfirmation.visible
-                                       || attachmentDialog.visible || linkCheckDialog.visible
+                                       || attachmentDialog.visible || checkDocumentDialog.visible
                                        || commandPalette.visible || preferencesDialog.visible || shortcutsDialog.visible
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
                                        || encodingDialog.visible
@@ -452,10 +452,11 @@ ApplicationWindow {
             historyDialog.review(document)
     }
 
-    // The document in front's local links and images that lead nowhere.
-    function checkLinks() {
+    // Everything wrong in the document in front, its links and images
+    // that lead nowhere among it.
+    function checkDocument() {
         if (document)
-            linkCheckDialog.check(document)
+            checkDocumentDialog.check(document)
     }
 
     // Find, and replace, in the document in front, in the bar above the
@@ -599,7 +600,7 @@ ApplicationWindow {
         historyDialog.close()
         closeConfirmation.close()
         attachmentDialog.close()
-        linkCheckDialog.close()
+        checkDocumentDialog.close()
         documentSettingsDialog.close()
         exportDialog.close()
     }
@@ -674,7 +675,7 @@ ApplicationWindow {
     readonly property var windowActions: ({
         save: () => window.save(),
         history: () => window.showHistory(),
-        checkLinks: () => window.checkLinks(),
+        checkLinks: () => window.checkDocument(),
         findText: () => window.openFind(false),
         replace: () => window.openFind(true),
         findNext: () => window.findStep(true),
@@ -1334,9 +1335,9 @@ ApplicationWindow {
         onClosed: window.dialogClosed()
     }
 
-    LinkCheckDialog {
-        id: linkCheckDialog
-        objectName: "linkCheckDialog"
+    CheckDocumentDialog {
+        id: checkDocumentDialog
+        objectName: "checkDocumentDialog"
         onClosed: window.dialogClosed()
     }
 

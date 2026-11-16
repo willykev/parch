@@ -18,7 +18,9 @@
 //                         "extensions": {"math": true, "footnotes": false},
 //                         "libraryRoot": "/full/path",
 //                         "bibliography": ["/full/path/refs.bib"],
-//                         "citationStyle": "/full/path/style.csl"}
+//                         "citationStyle": "/full/path/style.csl",
+//                         "maxIncludeDepth": 8, "maxIncludeSize": 1048576,
+//                         "maxIncludes": 100}
 //     },
 //     "libraries": {
 //       "/full/path/of/a/library/folder": {"profile": "writer",
@@ -30,8 +32,10 @@
 // canonical path, so its settings follow it when parch sees it renamed. A
 // draft has an id and settings of its own before it has a file. Every key of
 // an entry is optional; `bibliography` is a list of files, chosen as a whole
-// (an empty list chooses none), and `citationStyle` is the id of a bundled
-// style or the full path of a .csl file. A library's entry applies to every
+// (an empty list chooses none), `citationStyle` is the id of a bundled
+// style or the full path of a .csl file, and the three include limits are
+// whole numbers within their ranges (dialectchoice.h), the size in bytes;
+// one out of its range is not read. A library's entry applies to every
 // document beneath its folder; the nearest library folder holding a
 // document is its library, and also where its `/rooted` includes are found
 // unless a setting says otherwise. The application's entry applies to every

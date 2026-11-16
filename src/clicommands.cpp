@@ -8,6 +8,8 @@
 #include "exporter.h"
 #include "htmlexport.h"
 #include "mdhtml.h"
+#include "rendercheck.h"
+#include "renderservice.h"
 #include "treejson.h"
 #include "wordcounter.h"
 
@@ -194,6 +196,17 @@ void addDialectOptions(Command &command)
                  QStringLiteral("The citation style: a bundled one (%1) or a .csl file")
                      .arg(bundledStyleNames().join(QStringLiteral(", "))),
                  QStringLiteral("STYLE")});
+    command.add({QStringLiteral("max-include-depth"),
+                 QStringLiteral("How deep includes may nest (the default is %1)").arg(md::Source().maxIncludeDepth),
+                 QStringLiteral("N")});
+    command.add({QStringLiteral("max-include-size"),
+                 QStringLiteral("How much text the document and its includes may hold together, in bytes or with "
+                                "K, M or G (the default is %1)")
+                     .arg(QStringLiteral("%1M").arg(md::Source().maxExpandedBytes / (1024 * 1024))),
+                 QStringLiteral("SIZE")});
+    command.add({QStringLiteral("max-includes"),
+                 QStringLiteral("How many includes are read in all (the default is %1)").arg(md::Source().maxIncludeCount),
+                 QStringLiteral("N")});
     command.add({QStringLiteral("use-saved-settings"),
                  QStringLiteral("Read the document in the settings parch keeps for it, its library and every "
                                 "document")});
@@ -276,6 +289,34 @@ std::optional<int> readDialectFlags(Command &command, const Context &context, Di
                                      .arg(bundledStyleNames().join(QStringLiteral(", ")), written),
                                  context);
         flags->layer.citationStyle = style;
+    }
+    // The include limits: whole numbers from 1, sizes with an optional unit.
+    const auto count = [&](const QString &name, int most, std::optional<int> *into) -> std::optional<int> {
+        if (!parser.isSet(name)) return std::nullopt;
+        const QString written = parser.value(name);
+        bool ok = false;
+        const int value = written.trimmed().toInt(&ok);
+        if (!ok || value < 1 || value > most)
+            return command.usage(QStringLiteral("--%1 takes a whole number from 1 to %2, not \"%3\"")
+                                     .arg(name).arg(most).arg(written),
+                                 context);
+        *into = value;
+        return std::nullopt;
+    };
+    if (const auto done = count(QStringLiteral("max-include-depth"), Dialect::MaxIncludeDepthLimit,
+                                &flags->layer.maxIncludeDepth))
+        return done;
+    if (const auto done = count(QStringLiteral("max-includes"), Dialect::MaxIncludesLimit, &flags->layer.maxIncludes))
+        return done;
+    if (parser.isSet(QStringLiteral("max-include-size"))) {
+        const QString written = parser.value(QStringLiteral("max-include-size"));
+        const std::optional<qint64> size = Dialect::sizeNamed(written);
+        if (!size || *size > Dialect::MaxIncludeSizeLimit)
+            return command.usage(QStringLiteral("--max-include-size takes a size from 1 byte to %1, such as 512K or "
+                                                "20M, not \"%2\"")
+                                     .arg(Dialect::sizeText(Dialect::MaxIncludeSizeLimit), written),
+                                 context);
+        flags->layer.maxIncludeSize = size;
     }
     flags->useSaved = parser.isSet(QStringLiteral("use-saved-settings"));
     return std::nullopt;
@@ -410,12 +451,16 @@ int check(const QStringList &arguments, const Context &context)
                     QStringLiteral("Read Markdown documents, with the files they include, and report what is wrong:\n"
                                    "includes that cannot be read, references, footnotes, citations and variables\n"
                                    "that lead nowhere, images whose files are missing, links to files or headings\n"
-                                   "that are not there, malformed table rows, unclosed math, front matter, and\n"
-                                   "HTML that is shown as text. Each problem has its file, line and column."));
+                                   "that are not there, malformed table rows, unclosed math, formulas and diagrams\n"
+                                   "that cannot be drawn, front matter, and HTML that is shown as text. Each\n"
+                                   "problem has its file, line and column."));
     addDialectOptions(command);
     command.add({QStringLiteral("json"), jsonDescription});
     command.notes = dialectNotes() +
-                    QStringLiteral("\n\nExit status: 0 nothing wrong (notes of severity info alone are not problems),\n"
+                    QStringLiteral("\n\nFormulas are drawn with render-svg (RaTeX) and diagrams with merman-cli (Merman),\n"
+                                   "as the preview draws them. When one cannot be found, what it draws is not checked,\n"
+                                   "and check says so without counting it as a problem.\n\n"
+                                   "Exit status: 0 nothing wrong (notes of severity info alone are not problems),\n"
                                    "1 a wrong command line, 2 problems found, 3 a document could not be read.");
     if (const auto done = command.parse(arguments, context)) return *done;
     const QStringList files = command.parser.positionalArguments();
@@ -423,6 +468,11 @@ int check(const QStringList &arguments, const Context &context)
     DialectFlags flags;
     if (const auto done = readDialectFlags(command, context, &flags)) return *done;
 
+    // Formulas and diagrams are drawn as the preview draws them, by a
+    // service made the first time a document has one.
+    const HelperSet helpers = context.helpers ? *context.helpers : HelperSet::find();
+    std::unique_ptr<RenderService> service;
+    int skippedFormulas = 0, skippedDiagrams = 0;
     QJsonArray documents;
     bool anyProblem = false, anyUnreadable = false;
     for (const QString &file : files) {
@@ -437,7 +487,23 @@ int check(const QStringList &arguments, const Context &context)
             if (!command.wantsJson()) line(context.err, QStringLiteral("parch check: %1").arg(error));
             continue;
         }
-        const std::vector<DocumentCheck::Problem> problems = DocumentCheck::problems(loaded);
+        std::vector<RenderCheck::Item> drawn;
+        for (RenderCheck::Item &item : RenderCheck::items(loaded.document)) {
+            if (RenderCheck::canDraw(helpers, item.kind)) drawn.push_back(std::move(item));
+            else ++(item.isMath() ? skippedFormulas : skippedDiagrams);
+        }
+        std::vector<DocumentCheck::Problem> drawingProblems;
+        if (!drawn.empty()) {
+            if (!service) {
+                RenderService::Options options;
+                options.helpers = helpers;
+                options.findHelpers = false;
+                options.cacheFolder = context.renderCache;
+                service = std::make_unique<RenderService>(options);
+            }
+            drawingProblems = RenderCheck::wait(*service, drawn);
+        }
+        const std::vector<DocumentCheck::Problem> problems = DocumentCheck::problems(loaded, std::move(drawingProblems));
         const bool problemsFound = DocumentCheck::anyProblem(problems);
         anyProblem = anyProblem || problemsFound;
         int counts[3] = {0, 0, 0};
@@ -474,10 +540,40 @@ int check(const QStringList &arguments, const Context &context)
     if (command.wantsJson()) {
         QJsonObject result = header(QStringLiteral("check"));
         result.insert(QStringLiteral("ok"), code == Ok);
-        result.insert(QStringLiteral("renderers"), renderers({"markdown"}));
-        result.insert(QStringLiteral("helpers"), QJsonObject());
+        QJsonObject used = renderers({"markdown"});
+        QJsonObject helperPaths;
+        if (!helpers.ratex.isEmpty()) {
+            used.insert(QStringLiteral("math"), helpers.ratexVersion());
+            helperPaths.insert(QStringLiteral("render-svg"), helpers.ratex);
+        }
+        if (!helpers.merman.isEmpty()) {
+            used.insert(QStringLiteral("diagram"), helpers.mermanVersion());
+            helperPaths.insert(QStringLiteral("merman-cli"), helpers.merman);
+        }
+        result.insert(QStringLiteral("renderers"), used);
+        result.insert(QStringLiteral("helpers"), helperPaths);
+        // What the documents hold that could not be checked, for want of its helper.
+        QJsonArray skipped;
+        if (skippedFormulas > 0) skipped.append(QStringLiteral("math"));
+        if (skippedDiagrams > 0) skipped.append(QStringLiteral("diagram"));
+        result.insert(QStringLiteral("skipped"), skipped);
         result.insert(QStringLiteral("documents"), documents);
         json(context.out, result);
+    } else if (skippedFormulas > 0 || skippedDiagrams > 0) {
+        QStringList what, missing;
+        if (skippedFormulas > 0) {
+            what << plural(skippedFormulas, "formula", "formulas");
+            missing << QStringLiteral("render-svg");
+        }
+        if (skippedDiagrams > 0) {
+            what << plural(skippedDiagrams, "diagram", "diagrams");
+            missing << QStringLiteral("merman-cli");
+        }
+        const bool one = skippedFormulas + skippedDiagrams == 1;
+        line(context.err, QStringLiteral("parch check: %1 %2 not checked, since %3 %4 not found")
+                              .arg(what.join(QStringLiteral(" and ")), one ? QStringLiteral("was") : QStringLiteral("were"),
+                                   missing.join(QStringLiteral(" and ")),
+                                   missing.size() == 1 ? QStringLiteral("was") : QStringLiteral("were")));
     }
     return code;
 }

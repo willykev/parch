@@ -1,0 +1,6271 @@
+{
+    "about": "One expression for each command on the list of functions KaTeX 0.16 supports, by the list's groups. `drawn` is whether parch's math helper draws it; `diagnostic` is what the helper said when it did not.",
+    "expressions": [
+        {
+            "command": "\\tilde",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\tilde{u}"
+        },
+        {
+            "command": "\\mathring",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\mathring{u}"
+        },
+        {
+            "command": "\\widetilde",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\widetilde{PQ}"
+        },
+        {
+            "command": "\\overgroup",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overgroup{PQ}"
+        },
+        {
+            "command": "\\prime",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "g^{\\prime}(t)"
+        },
+        {
+            "command": "\\utilde",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\utilde{PQ}"
+        },
+        {
+            "command": "\\undergroup",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\undergroup{PQ}"
+        },
+        {
+            "command": "\\acute",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\acute{u}"
+        },
+        {
+            "command": "\\vec",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\vec{u}"
+        },
+        {
+            "command": "\\Overrightarrow",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\Overrightarrow{PQ}"
+        },
+        {
+            "command": "\\bar",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\bar{u}"
+        },
+        {
+            "command": "\\overleftarrow",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overleftarrow{PQ}"
+        },
+        {
+            "command": "\\overrightarrow",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overrightarrow{PQ}"
+        },
+        {
+            "command": "\\breve",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\breve{u}"
+        },
+        {
+            "command": "\\underleftarrow",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\underleftarrow{PQ}"
+        },
+        {
+            "command": "\\underrightarrow",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\underrightarrow{PQ}"
+        },
+        {
+            "command": "\\check",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\check{u}"
+        },
+        {
+            "command": "\\overleftharpoon",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overleftharpoon{PQ}"
+        },
+        {
+            "command": "\\overrightharpoon",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overrightharpoon{PQ}"
+        },
+        {
+            "command": "\\dot",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\dot{u}"
+        },
+        {
+            "command": "\\overleftrightarrow",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overleftrightarrow{PQ}"
+        },
+        {
+            "command": "\\overbrace",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overbrace{p+q+r}^{m}"
+        },
+        {
+            "command": "\\ddot",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\ddot{u}"
+        },
+        {
+            "command": "\\underleftrightarrow",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\underleftrightarrow{PQ}"
+        },
+        {
+            "command": "\\underbrace",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\underbrace{p+q+r}_{m}"
+        },
+        {
+            "command": "\\dddot",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\dddot{u}"
+        },
+        {
+            "command": "\\overline",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overline{PQ}"
+        },
+        {
+            "command": "\\overlinesegment",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\overlinesegment{PQ}"
+        },
+        {
+            "command": "\\ddddot",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\ddddot{u}"
+        },
+        {
+            "command": "\\underline",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\underline{PQ}"
+        },
+        {
+            "command": "\\underlinesegment",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\underlinesegment{PQ}"
+        },
+        {
+            "command": "\\grave",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\grave{u}"
+        },
+        {
+            "command": "\\widecheck",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\widecheck{PQ}"
+        },
+        {
+            "command": "\\underbar",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\underbar{u}"
+        },
+        {
+            "command": "\\hat",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\hat{u}"
+        },
+        {
+            "command": "\\widehat",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "\\widehat{PQ}"
+        },
+        {
+            "command": "'",
+            "drawn": true,
+            "group": "Accents",
+            "tex": "g'(t) + g''(t)"
+        },
+        {
+            "command": "\\'",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\'{o}}"
+        },
+        {
+            "command": "\\~",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\~{o}}"
+        },
+        {
+            "command": "\\.",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\.{o}}"
+        },
+        {
+            "command": "\\H",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\H{o}}"
+        },
+        {
+            "command": "\\`",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\`{o}}"
+        },
+        {
+            "command": "\\=",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\={o}}"
+        },
+        {
+            "command": "\\\"",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\\"{o}}"
+        },
+        {
+            "command": "\\v",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\v{o}}"
+        },
+        {
+            "command": "\\^",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\^{o}}"
+        },
+        {
+            "command": "\\u",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\u{o}}"
+        },
+        {
+            "command": "\\r",
+            "drawn": true,
+            "group": "Accents in text",
+            "tex": "\\text{\\r{o}}"
+        },
+        {
+            "command": "\\lparen",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lparen w \\right."
+        },
+        {
+            "command": "\\rparen",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rparen"
+        },
+        {
+            "command": "\\lceil",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lceil w \\right."
+        },
+        {
+            "command": "\\rceil",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rceil"
+        },
+        {
+            "command": "\\uparrow",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\uparrow w \\right."
+        },
+        {
+            "command": "\\lbrack",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lbrack w \\right."
+        },
+        {
+            "command": "\\rbrack",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rbrack"
+        },
+        {
+            "command": "\\lfloor",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lfloor w \\right."
+        },
+        {
+            "command": "\\rfloor",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rfloor"
+        },
+        {
+            "command": "\\downarrow",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\downarrow w \\right."
+        },
+        {
+            "command": "\\{",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\{ w \\right."
+        },
+        {
+            "command": "\\}",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\}"
+        },
+        {
+            "command": "\\lbrace",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lbrace w \\right."
+        },
+        {
+            "command": "\\rbrace",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rbrace"
+        },
+        {
+            "command": "\\lmoustache",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lmoustache w \\right."
+        },
+        {
+            "command": "\\rmoustache",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rmoustache"
+        },
+        {
+            "command": "\\updownarrow",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\updownarrow w \\right."
+        },
+        {
+            "command": "\\langle",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\langle w \\right."
+        },
+        {
+            "command": "\\rangle",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rangle"
+        },
+        {
+            "command": "\\lgroup",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lgroup w \\right."
+        },
+        {
+            "command": "\\rgroup",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rgroup"
+        },
+        {
+            "command": "\\Uparrow",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\Uparrow w \\right."
+        },
+        {
+            "command": "\\vert",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\vert w \\right."
+        },
+        {
+            "command": "\\ulcorner",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\ulcorner w \\right."
+        },
+        {
+            "command": "\\urcorner",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\urcorner"
+        },
+        {
+            "command": "\\Downarrow",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\Downarrow w \\right."
+        },
+        {
+            "command": "\\Vert",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\Vert w \\right."
+        },
+        {
+            "command": "\\llcorner",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\llcorner w \\right."
+        },
+        {
+            "command": "\\lrcorner",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\lrcorner"
+        },
+        {
+            "command": "\\Updownarrow",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\Updownarrow w \\right."
+        },
+        {
+            "command": "\\lvert",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lvert w \\right."
+        },
+        {
+            "command": "\\rvert",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rvert"
+        },
+        {
+            "command": "\\lVert",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lVert w \\right."
+        },
+        {
+            "command": "\\rVert",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rVert"
+        },
+        {
+            "command": "\\backslash",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "P \\backslash Q"
+        },
+        {
+            "command": "\\lang",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left\\lang w \\right."
+        },
+        {
+            "command": "\\rang",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rang"
+        },
+        {
+            "command": "\\lt",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "m \\lt n"
+        },
+        {
+            "command": "\\gt",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "m \\gt n"
+        },
+        {
+            "command": "\\llbracket",
+            "diagnostic": "Parse error: ParseError at position 0: Expected delimiter as argument to '\\left'",
+            "drawn": false,
+            "group": "Delimiters",
+            "tex": "\\left\\llbracket w \\right."
+        },
+        {
+            "command": "\\rrbracket",
+            "diagnostic": "Parse error: ParseError at position 0: Expected delimiter as argument to '\\right'",
+            "drawn": false,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rrbracket"
+        },
+        {
+            "command": "\\lBrace",
+            "diagnostic": "Parse error: ParseError at position 0: Expected delimiter as argument to '\\left'",
+            "drawn": false,
+            "group": "Delimiters",
+            "tex": "\\left\\lBrace w \\right."
+        },
+        {
+            "command": "\\rBrace",
+            "diagnostic": "Parse error: ParseError at position 0: Expected delimiter as argument to '\\right'",
+            "drawn": false,
+            "group": "Delimiters",
+            "tex": "\\left. w \\right\\rBrace"
+        },
+        {
+            "command": "\\llbracket (alone)",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\llbracket w"
+        },
+        {
+            "command": "\\rrbracket (alone)",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\rrbracket w"
+        },
+        {
+            "command": "\\lBrace (alone)",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\lBrace w"
+        },
+        {
+            "command": "\\rBrace (alone)",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\rBrace w"
+        },
+        {
+            "command": "\\left",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left( \\frac{p}{q} \\right)"
+        },
+        {
+            "command": "\\right",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\left[ w^2 \\right]"
+        },
+        {
+            "command": "( )",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "(w)"
+        },
+        {
+            "command": "[ ]",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "[w]"
+        },
+        {
+            "command": "|",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "|w|"
+        },
+        {
+            "command": "\\|",
+            "drawn": true,
+            "group": "Delimiters",
+            "tex": "\\|w\\|"
+        },
+        {
+            "command": "\\big",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\big( w \\big)"
+        },
+        {
+            "command": "\\Big",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\Big( w \\Big)"
+        },
+        {
+            "command": "\\bigg",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\bigg( w \\bigg)"
+        },
+        {
+            "command": "\\Bigg",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\Bigg( w \\Bigg)"
+        },
+        {
+            "command": "\\bigl",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\bigl( w \\bigr)"
+        },
+        {
+            "command": "\\bigm",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "p \\bigm| q"
+        },
+        {
+            "command": "\\bigr",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\bigl[ w \\bigr]"
+        },
+        {
+            "command": "\\middle",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\left\\{ s \\middle| s > 0 \\right\\}"
+        },
+        {
+            "command": "\\Bigl",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\Bigl( w \\Bigr)"
+        },
+        {
+            "command": "\\Bigm",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "p \\Bigm| q"
+        },
+        {
+            "command": "\\Bigr",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\Bigl[ w \\Bigr]"
+        },
+        {
+            "command": "\\biggl",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\biggl( w \\biggr)"
+        },
+        {
+            "command": "\\biggm",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "p \\biggm| q"
+        },
+        {
+            "command": "\\biggr",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\biggl[ w \\biggr]"
+        },
+        {
+            "command": "\\Biggl",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\Biggl( w \\Biggr)"
+        },
+        {
+            "command": "\\Biggm",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "p \\Biggm| q"
+        },
+        {
+            "command": "\\Biggr",
+            "drawn": true,
+            "group": "Delimiter sizing",
+            "tex": "\\Biggl[ w \\Biggr]"
+        },
+        {
+            "command": "{matrix}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{matrix} p & q \\\\ r & s \\end{matrix}"
+        },
+        {
+            "command": "{pmatrix}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{pmatrix} p & q \\\\ r & s \\end{pmatrix}"
+        },
+        {
+            "command": "{bmatrix}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{bmatrix} p & q \\\\ r & s \\end{bmatrix}"
+        },
+        {
+            "command": "{vmatrix}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{vmatrix} p & q \\\\ r & s \\end{vmatrix}"
+        },
+        {
+            "command": "{Vmatrix}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{Vmatrix} p & q \\\\ r & s \\end{Vmatrix}"
+        },
+        {
+            "command": "{Bmatrix}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{Bmatrix} p & q \\\\ r & s \\end{Bmatrix}"
+        },
+        {
+            "command": "{smallmatrix}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{smallmatrix} p & q \\\\ r & s \\end{smallmatrix}"
+        },
+        {
+            "command": "{matrix*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{matrix*}[r] 10 & 2 \\\\ 3 & 40 \\end{matrix*}"
+        },
+        {
+            "command": "{pmatrix*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{pmatrix*}[r] 10 & 2 \\\\ 3 & 40 \\end{pmatrix*}"
+        },
+        {
+            "command": "{bmatrix*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{bmatrix*}[r] 10 & 2 \\\\ 3 & 40 \\end{bmatrix*}"
+        },
+        {
+            "command": "{Bmatrix*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{Bmatrix*}[r] 10 & 2 \\\\ 3 & 40 \\end{Bmatrix*}"
+        },
+        {
+            "command": "{vmatrix*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{vmatrix*}[r] 10 & 2 \\\\ 3 & 40 \\end{vmatrix*}"
+        },
+        {
+            "command": "{Vmatrix*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{Vmatrix*}[r] 10 & 2 \\\\ 3 & 40 \\end{Vmatrix*}"
+        },
+        {
+            "command": "{array}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{array}{lr} p & q \\\\ r & s \\end{array}"
+        },
+        {
+            "command": "{array} with rules",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{array}{c|c:c} p & q & r \\\\ \\hline s & t & u \\\\ \\hdashline v & w & x \\end{array}"
+        },
+        {
+            "command": "\\arraystretch",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\def\\arraystretch{2}\\begin{array}{cc} p & q \\\\ r & s \\end{array}"
+        },
+        {
+            "command": "{darray}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{darray}{cc} \\frac12 & q \\\\ r & s \\end{darray}"
+        },
+        {
+            "command": "{cases}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "f(t) = \\begin{cases} 1 & \\text{when } t > 0 \\\\ 0 & \\text{otherwise} \\end{cases}"
+        },
+        {
+            "command": "{dcases}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "f(t) = \\begin{dcases} \\frac12 & t > 0 \\\\ 0 & t \\le 0 \\end{dcases}"
+        },
+        {
+            "command": "{rcases}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{rcases} t > 0 \\\\ t < 9 \\end{rcases} \\Rightarrow q"
+        },
+        {
+            "command": "{drcases}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{drcases} \\frac t2 > 0 \\\\ t < 9 \\end{drcases} \\Rightarrow q"
+        },
+        {
+            "command": "{subarray}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\sum_{\\begin{subarray}{c} m<4 \\\\ n<5 \\end{subarray}} m n"
+        },
+        {
+            "command": "{equation}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{equation} E = mc^2 \\end{equation}"
+        },
+        {
+            "command": "{equation*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{equation*} E = mc^2 \\end{equation*}"
+        },
+        {
+            "command": "{split}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{equation} \\begin{split} p &= q + r \\\\ &= s \\end{split} \\end{equation}"
+        },
+        {
+            "command": "{align}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{align} p &= q + r \\\\ s &= t \\end{align}"
+        },
+        {
+            "command": "{align*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{align*} p &= q + r \\\\ s &= t \\end{align*}"
+        },
+        {
+            "command": "{gather}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{gather} p = q \\\\ r = s + t \\end{gather}"
+        },
+        {
+            "command": "{gather*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{gather*} p = q \\\\ r = s + t \\end{gather*}"
+        },
+        {
+            "command": "{alignat}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{alignat}{2} 2&p + &5&q = 1 \\\\ 7&p + &1&q = 3 \\end{alignat}"
+        },
+        {
+            "command": "{alignat*}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{alignat*}{2} 2&p + &5&q = 1 \\\\ 7&p + &1&q = 3 \\end{alignat*}"
+        },
+        {
+            "command": "{gathered}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{gathered} p = q \\\\ r = s \\end{gathered}"
+        },
+        {
+            "command": "{aligned}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{aligned} p &= q \\\\ r &= s \\end{aligned}"
+        },
+        {
+            "command": "{alignedat}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{alignedat}{2} p &= q &\\quad r &= s \\end{alignedat}"
+        },
+        {
+            "command": "{CD}",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{CD} P @>f>> Q \\\\ @VgVV @AAhA \\\\ R @= S \\end{CD}"
+        },
+        {
+            "command": "\\tag",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{align} p &= q \\tag{a} \\\\ r &= s \\end{align}"
+        },
+        {
+            "command": "\\notag",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{align} p &= q \\notag \\\\ r &= s \\end{align}"
+        },
+        {
+            "command": "\\nonumber",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{align} p &= q \\nonumber \\\\ r &= s \\end{align}"
+        },
+        {
+            "command": "\\cr",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{matrix} p & q \\cr r & s \\end{matrix}"
+        },
+        {
+            "command": "\\\\[distance]",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{matrix} p \\\\[1em] q \\end{matrix}"
+        },
+        {
+            "command": "\\hline",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{array}{c} p \\\\ \\hline q \\end{array}"
+        },
+        {
+            "command": "\\hdashline",
+            "drawn": true,
+            "group": "Environments",
+            "tex": "\\begin{array}{c} p \\\\ \\hdashline q \\end{array}"
+        },
+        {
+            "command": "\\href",
+            "drawn": true,
+            "group": "HTML",
+            "tex": "\\href{https://example.org/}{w}"
+        },
+        {
+            "command": "\\url",
+            "drawn": true,
+            "group": "HTML",
+            "tex": "\\url{https://example.org/}"
+        },
+        {
+            "command": "\\includegraphics",
+            "diagnostic": "Parse error: ParseError at position 0: Undefined control sequence: \\includegraphics",
+            "drawn": false,
+            "group": "HTML",
+            "tex": "\\includegraphics[height=1em, alt=a dot]{dot.png}"
+        },
+        {
+            "command": "\\htmlId",
+            "drawn": true,
+            "group": "HTML",
+            "tex": "\\htmlId{here}{w}"
+        },
+        {
+            "command": "\\htmlClass",
+            "drawn": true,
+            "group": "HTML",
+            "tex": "\\htmlClass{mine}{w}"
+        },
+        {
+            "command": "\\htmlStyle",
+            "drawn": true,
+            "group": "HTML",
+            "tex": "\\htmlStyle{font-weight: bold;}{w}"
+        },
+        {
+            "command": "\\htmlData",
+            "drawn": true,
+            "group": "HTML",
+            "tex": "\\htmlData{kind=sum, size=2}{w}"
+        },
+        {
+            "command": "\\Alpha",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Alpha"
+        },
+        {
+            "command": "\\Beta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Beta"
+        },
+        {
+            "command": "\\Gamma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Gamma"
+        },
+        {
+            "command": "\\Delta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Delta"
+        },
+        {
+            "command": "\\Epsilon",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Epsilon"
+        },
+        {
+            "command": "\\Zeta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Zeta"
+        },
+        {
+            "command": "\\Eta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Eta"
+        },
+        {
+            "command": "\\Theta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Theta"
+        },
+        {
+            "command": "\\Iota",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Iota"
+        },
+        {
+            "command": "\\Kappa",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Kappa"
+        },
+        {
+            "command": "\\Lambda",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Lambda"
+        },
+        {
+            "command": "\\Mu",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Mu"
+        },
+        {
+            "command": "\\Nu",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Nu"
+        },
+        {
+            "command": "\\Xi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Xi"
+        },
+        {
+            "command": "\\Omicron",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Omicron"
+        },
+        {
+            "command": "\\Pi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Pi"
+        },
+        {
+            "command": "\\Rho",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Rho"
+        },
+        {
+            "command": "\\Sigma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Sigma"
+        },
+        {
+            "command": "\\Tau",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Tau"
+        },
+        {
+            "command": "\\Upsilon",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Upsilon"
+        },
+        {
+            "command": "\\Phi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Phi"
+        },
+        {
+            "command": "\\Chi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Chi"
+        },
+        {
+            "command": "\\Psi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Psi"
+        },
+        {
+            "command": "\\Omega",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\Omega"
+        },
+        {
+            "command": "\\varGamma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varGamma"
+        },
+        {
+            "command": "\\varDelta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varDelta"
+        },
+        {
+            "command": "\\varTheta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varTheta"
+        },
+        {
+            "command": "\\varLambda",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varLambda"
+        },
+        {
+            "command": "\\varXi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varXi"
+        },
+        {
+            "command": "\\varPi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varPi"
+        },
+        {
+            "command": "\\varSigma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varSigma"
+        },
+        {
+            "command": "\\varUpsilon",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varUpsilon"
+        },
+        {
+            "command": "\\varPhi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varPhi"
+        },
+        {
+            "command": "\\varPsi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varPsi"
+        },
+        {
+            "command": "\\varOmega",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varOmega"
+        },
+        {
+            "command": "\\alpha",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\alpha"
+        },
+        {
+            "command": "\\beta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\beta"
+        },
+        {
+            "command": "\\gamma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\gamma"
+        },
+        {
+            "command": "\\delta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\delta"
+        },
+        {
+            "command": "\\epsilon",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\epsilon"
+        },
+        {
+            "command": "\\zeta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\zeta"
+        },
+        {
+            "command": "\\eta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\eta"
+        },
+        {
+            "command": "\\theta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\theta"
+        },
+        {
+            "command": "\\iota",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\iota"
+        },
+        {
+            "command": "\\kappa",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\kappa"
+        },
+        {
+            "command": "\\lambda",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\lambda"
+        },
+        {
+            "command": "\\mu",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\mu"
+        },
+        {
+            "command": "\\nu",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\nu"
+        },
+        {
+            "command": "\\xi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\xi"
+        },
+        {
+            "command": "\\omicron",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\omicron"
+        },
+        {
+            "command": "\\pi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\pi"
+        },
+        {
+            "command": "\\rho",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\rho"
+        },
+        {
+            "command": "\\sigma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\sigma"
+        },
+        {
+            "command": "\\tau",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\tau"
+        },
+        {
+            "command": "\\upsilon",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\upsilon"
+        },
+        {
+            "command": "\\phi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\phi"
+        },
+        {
+            "command": "\\chi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\chi"
+        },
+        {
+            "command": "\\psi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\psi"
+        },
+        {
+            "command": "\\omega",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\omega"
+        },
+        {
+            "command": "\\varepsilon",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varepsilon"
+        },
+        {
+            "command": "\\varkappa",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varkappa"
+        },
+        {
+            "command": "\\vartheta",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\vartheta"
+        },
+        {
+            "command": "\\thetasym",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\thetasym"
+        },
+        {
+            "command": "\\varpi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varpi"
+        },
+        {
+            "command": "\\varrho",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varrho"
+        },
+        {
+            "command": "\\varsigma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varsigma"
+        },
+        {
+            "command": "\\varphi",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\varphi"
+        },
+        {
+            "command": "\\digamma",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "\\digamma"
+        },
+        {
+            "command": "Greek, typed",
+            "drawn": true,
+            "group": "Greek letters",
+            "tex": "α β γ Δ Ω ϵ ϑ ϖ"
+        },
+        {
+            "command": "\\imath",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\imath"
+        },
+        {
+            "command": "\\nabla",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\nabla"
+        },
+        {
+            "command": "\\Im",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Im"
+        },
+        {
+            "command": "\\Reals",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Reals"
+        },
+        {
+            "command": "\\OE",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\OE}"
+        },
+        {
+            "command": "\\jmath",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\jmath"
+        },
+        {
+            "command": "\\partial",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\partial"
+        },
+        {
+            "command": "\\image",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\image"
+        },
+        {
+            "command": "\\wp",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\wp"
+        },
+        {
+            "command": "\\o",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\o}"
+        },
+        {
+            "command": "\\aleph",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\aleph"
+        },
+        {
+            "command": "\\Game",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Game"
+        },
+        {
+            "command": "\\Bbbk",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Bbbk"
+        },
+        {
+            "command": "\\weierp",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\weierp"
+        },
+        {
+            "command": "\\O",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\O}"
+        },
+        {
+            "command": "\\alef",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\alef"
+        },
+        {
+            "command": "\\Finv",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Finv"
+        },
+        {
+            "command": "\\N",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\N"
+        },
+        {
+            "command": "\\Z",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Z"
+        },
+        {
+            "command": "\\ss",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\ss}"
+        },
+        {
+            "command": "\\alefsym",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\alefsym"
+        },
+        {
+            "command": "\\cnums",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\cnums"
+        },
+        {
+            "command": "\\natnums",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\natnums"
+        },
+        {
+            "command": "\\aa",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\aa}"
+        },
+        {
+            "command": "\\i",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\i}"
+        },
+        {
+            "command": "\\beth",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\beth"
+        },
+        {
+            "command": "\\Complex",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Complex"
+        },
+        {
+            "command": "\\R",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\R"
+        },
+        {
+            "command": "\\AA",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\AA}"
+        },
+        {
+            "command": "\\j",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\j}"
+        },
+        {
+            "command": "\\gimel",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\gimel"
+        },
+        {
+            "command": "\\ell",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\ell"
+        },
+        {
+            "command": "\\Re",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\Re"
+        },
+        {
+            "command": "\\ae",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\ae}"
+        },
+        {
+            "command": "\\daleth",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\daleth"
+        },
+        {
+            "command": "\\hbar",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\hbar"
+        },
+        {
+            "command": "\\real",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\real"
+        },
+        {
+            "command": "\\AE",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\AE}"
+        },
+        {
+            "command": "\\eth",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\eth"
+        },
+        {
+            "command": "\\hslash",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\hslash"
+        },
+        {
+            "command": "\\reals",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\reals"
+        },
+        {
+            "command": "\\oe",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{\\oe}"
+        },
+        {
+            "command": "Letters, typed",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "∂ ∇ ℑ ℵ ℏ ð"
+        },
+        {
+            "command": "Accented letters, typed",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "\\text{àéîõü çñ}"
+        },
+        {
+            "command": "Script characters, typed",
+            "drawn": true,
+            "group": "Other letters",
+            "tex": "P² + Q₁"
+        },
+        {
+            "command": "\\char",
+            "drawn": true,
+            "group": "Unicode",
+            "tex": "\\char\"263A"
+        },
+        {
+            "command": "Double-struck, typed",
+            "drawn": true,
+            "group": "Unicode",
+            "tex": "ℝ ℕ ℤ ℚ ℂ"
+        },
+        {
+            "command": "Mathematical alphanumerics",
+            "drawn": true,
+            "group": "Unicode",
+            "tex": "𝐀 𝑨 𝒜 𝔄 𝔸 𝖠"
+        },
+        {
+            "command": "Cyrillic in text",
+            "drawn": true,
+            "group": "Unicode",
+            "tex": "\\text{Привет}"
+        },
+        {
+            "command": "CJK in text",
+            "drawn": true,
+            "group": "Unicode",
+            "tex": "\\text{日本語}"
+        },
+        {
+            "command": "Hebrew in text",
+            "drawn": true,
+            "group": "Unicode",
+            "tex": "\\text{שלום}"
+        },
+        {
+            "command": "\\cancel",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\cancel{7}"
+        },
+        {
+            "command": "\\bcancel",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\bcancel{7}"
+        },
+        {
+            "command": "\\xcancel",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\xcancel{PQ}"
+        },
+        {
+            "command": "\\sout",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\sout{pqr}"
+        },
+        {
+            "command": "\\not",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "p \\not = q"
+        },
+        {
+            "command": "\\boxed",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\boxed{E = mc^2}"
+        },
+        {
+            "command": "\\angl",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "w_{\\angl n}"
+        },
+        {
+            "command": "\\angln",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "w_\\angln"
+        },
+        {
+            "command": "\\phase",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\phase{-45^\\circ}"
+        },
+        {
+            "command": "\\tag (display)",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\tag{1} p + q = r"
+        },
+        {
+            "command": "\\tag*",
+            "drawn": true,
+            "group": "Annotation",
+            "tex": "\\tag*{(a)} p + q = r"
+        },
+        {
+            "command": "\\nobreak",
+            "drawn": true,
+            "group": "Line breaks",
+            "tex": "p + \\nobreak q"
+        },
+        {
+            "command": "\\allowbreak",
+            "drawn": true,
+            "group": "Line breaks",
+            "tex": "pq\\allowbreak rs"
+        },
+        {
+            "command": "\\\\",
+            "drawn": true,
+            "group": "Line breaks",
+            "tex": "p + q \\\\ r + s"
+        },
+        {
+            "command": "\\newline",
+            "drawn": true,
+            "group": "Line breaks",
+            "tex": "p + q \\newline r + s"
+        },
+        {
+            "command": "_ ^",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "w_m^n"
+        },
+        {
+            "command": "\\stackrel",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "\\stackrel{?}{=}"
+        },
+        {
+            "command": "\\overset",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "\\overset{def}{=}"
+        },
+        {
+            "command": "\\underset",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "\\underset{n}{\\max}"
+        },
+        {
+            "command": "\\atop",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "{p \\atop q}"
+        },
+        {
+            "command": "\\raisebox",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "p\\raisebox{0.3em}{$q$}r"
+        },
+        {
+            "command": "\\vcenter",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "p + \\left(\\vcenter{\\hbox{$\\frac{q}{r}$}}\\right)"
+        },
+        {
+            "command": "\\hbox",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "\\hbox{some words}"
+        },
+        {
+            "command": "\\substack",
+            "drawn": true,
+            "group": "Vertical layout",
+            "tex": "\\sum_{\\substack{0<m<4 \\\\ 0<n<5}} mn"
+        },
+        {
+            "command": "\\mathllap",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "{=}\\mathllap{/\\,}"
+        },
+        {
+            "command": "\\mathrlap",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "\\mathrlap{\\,/}{=}"
+        },
+        {
+            "command": "\\mathclap",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "\\sum_{\\mathclap{1 \\le m \\le n}} w_m"
+        },
+        {
+            "command": "\\llap",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "\\llap{/}="
+        },
+        {
+            "command": "\\rlap",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "\\rlap{/}="
+        },
+        {
+            "command": "\\clap",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "\\clap{/}="
+        },
+        {
+            "command": "\\smash",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "\\left( w^{\\smash{2}} \\right)"
+        },
+        {
+            "command": "\\smash[b]",
+            "drawn": true,
+            "group": "Overlap and spacing",
+            "tex": "\\sqrt{\\smash[b]{g}}"
+        },
+        {
+            "command": "\\,",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\,q"
+        },
+        {
+            "command": "\\>",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\>q"
+        },
+        {
+            "command": "\\:",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\:q"
+        },
+        {
+            "command": "\\;",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\;q"
+        },
+        {
+            "command": "\\!",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\!q"
+        },
+        {
+            "command": "\\thinspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\thinspace q"
+        },
+        {
+            "command": "\\medspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\medspace q"
+        },
+        {
+            "command": "\\thickspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\thickspace q"
+        },
+        {
+            "command": "\\enspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\enspace q"
+        },
+        {
+            "command": "\\quad",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\quad q"
+        },
+        {
+            "command": "\\qquad",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\qquad q"
+        },
+        {
+            "command": "\\negthinspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\negthinspace q"
+        },
+        {
+            "command": "\\negmedspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\negmedspace q"
+        },
+        {
+            "command": "\\negthickspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\negthickspace q"
+        },
+        {
+            "command": "\\nobreakspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\nobreakspace q"
+        },
+        {
+            "command": "\\space",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\space q"
+        },
+        {
+            "command": "~",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p~q"
+        },
+        {
+            "command": "\\ (control space)",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\ q"
+        },
+        {
+            "command": "\\kern",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\kern{1em}q"
+        },
+        {
+            "command": "\\kern (unbraced)",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\kern1em q"
+        },
+        {
+            "command": "\\mkern",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\mkern18mu q"
+        },
+        {
+            "command": "\\mskip",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\mskip18mu q"
+        },
+        {
+            "command": "\\hskip",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\hskip1em q"
+        },
+        {
+            "command": "\\hspace",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\hspace{1em}q"
+        },
+        {
+            "command": "\\hspace*",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\hspace*{1em}q"
+        },
+        {
+            "command": "\\phantom",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\phantom{qq}r"
+        },
+        {
+            "command": "\\hphantom",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "p\\hphantom{qq}r"
+        },
+        {
+            "command": "\\vphantom",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "\\vphantom{\\int}p"
+        },
+        {
+            "command": "\\mathstrut",
+            "drawn": true,
+            "group": "Spacing",
+            "tex": "\\sqrt{\\mathstrut p}"
+        },
+        {
+            "command": "em",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1em}{4pt}"
+        },
+        {
+            "command": "ex",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1ex}{4pt}"
+        },
+        {
+            "command": "mu",
+            "drawn": true,
+            "group": "Units",
+            "tex": "p\\mkern18mu q"
+        },
+        {
+            "command": "pt",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1pt}{4pt}"
+        },
+        {
+            "command": "mm",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1mm}{4pt}"
+        },
+        {
+            "command": "cm",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1cm}{4pt}"
+        },
+        {
+            "command": "in",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1in}{4pt}"
+        },
+        {
+            "command": "bp",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1bp}{4pt}"
+        },
+        {
+            "command": "pc",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1pc}{4pt}"
+        },
+        {
+            "command": "dd",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1dd}{4pt}"
+        },
+        {
+            "command": "cc",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1cc}{4pt}"
+        },
+        {
+            "command": "nd",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1nd}{4pt}"
+        },
+        {
+            "command": "nc",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1nc}{4pt}"
+        },
+        {
+            "command": "sp",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1sp}{4pt}"
+        },
+        {
+            "command": "\\rule",
+            "drawn": true,
+            "group": "Units",
+            "tex": "\\rule{1em}{0.5em}"
+        },
+        {
+            "command": "\\forall",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\forall q"
+        },
+        {
+            "command": "\\complement",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\complement q"
+        },
+        {
+            "command": "\\therefore",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\therefore q"
+        },
+        {
+            "command": "\\emptyset",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\emptyset q"
+        },
+        {
+            "command": "\\exists",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\exists q"
+        },
+        {
+            "command": "\\subset",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\subset q"
+        },
+        {
+            "command": "\\because",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\because q"
+        },
+        {
+            "command": "\\empty",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\empty q"
+        },
+        {
+            "command": "\\exist",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\exist q"
+        },
+        {
+            "command": "\\supset",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\supset q"
+        },
+        {
+            "command": "\\mapsto",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\mapsto q"
+        },
+        {
+            "command": "\\varnothing",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\varnothing q"
+        },
+        {
+            "command": "\\nexists",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\nexists q"
+        },
+        {
+            "command": "\\mid",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\mid q"
+        },
+        {
+            "command": "\\to",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\to q"
+        },
+        {
+            "command": "\\implies",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\implies q"
+        },
+        {
+            "command": "\\in",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\in q"
+        },
+        {
+            "command": "\\land",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\land q"
+        },
+        {
+            "command": "\\gets",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\gets q"
+        },
+        {
+            "command": "\\impliedby",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\impliedby q"
+        },
+        {
+            "command": "\\isin",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\isin q"
+        },
+        {
+            "command": "\\lor",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\lor q"
+        },
+        {
+            "command": "\\leftrightarrow",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\leftrightarrow q"
+        },
+        {
+            "command": "\\iff",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\iff q"
+        },
+        {
+            "command": "\\notin",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\notin q"
+        },
+        {
+            "command": "\\ni",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\ni q"
+        },
+        {
+            "command": "\\notni",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\notni q"
+        },
+        {
+            "command": "\\neg",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\neg q"
+        },
+        {
+            "command": "\\lnot",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "p \\lnot q"
+        },
+        {
+            "command": "\\set",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "\\set{m | m < 5}"
+        },
+        {
+            "command": "\\Set",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "\\Set{ m | m < \\frac 1 2 }"
+        },
+        {
+            "command": "Logic, typed",
+            "drawn": true,
+            "group": "Logic and set theory",
+            "tex": "∀ m ∈ ℕ ∃ n"
+        },
+        {
+            "command": "\\def",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\def\\double#1{#1#1}\\double{w}"
+        },
+        {
+            "command": "\\gdef",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\gdef\\square#1{#1^2}\\square{w}"
+        },
+        {
+            "command": "\\edef",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\edef\\twice{ww}\\twice"
+        },
+        {
+            "command": "\\xdef",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\xdef\\twice{ww}\\twice"
+        },
+        {
+            "command": "\\let",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\let\\same=\\equiv p \\same q"
+        },
+        {
+            "command": "\\futurelet",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\futurelet\\next\\relax w"
+        },
+        {
+            "command": "\\global",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\global\\def\\mine{w}\\mine"
+        },
+        {
+            "command": "\\newcommand",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\newcommand{\\sq}[1]{#1^2}\\sq{w}"
+        },
+        {
+            "command": "\\renewcommand",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\renewcommand{\\vec}[1]{\\mathbf{#1}}\\vec{w}"
+        },
+        {
+            "command": "\\providecommand",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\providecommand{\\half}{\\frac12}\\half"
+        },
+        {
+            "command": "\\long",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\long\\def\\mine{w}\\mine"
+        },
+        {
+            "command": "\\mathchoice",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\mathchoice{D}{T}{S}{SS}"
+        },
+        {
+            "command": "\\TextOrMath",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\TextOrMath{t}{m}"
+        },
+        {
+            "command": "\\@ifstar",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\def\\mine{\\@ifstar{p}{q}}\\mine*"
+        },
+        {
+            "command": "\\@ifnextchar",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\def\\mine{\\@ifnextchar[{p}{q}}\\mine["
+        },
+        {
+            "command": "\\@firstoftwo",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\@firstoftwo{p}{q}"
+        },
+        {
+            "command": "\\@secondoftwo",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\@secondoftwo{p}{q}"
+        },
+        {
+            "command": "\\relax",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "p\\relax q"
+        },
+        {
+            "command": "\\expandafter",
+            "diagnostic": "Parse error: ParseError at position 12: Undefined control sequence: \\expandafter",
+            "drawn": false,
+            "group": "Macros",
+            "tex": "\\def\\mine{w}\\expandafter\\mine"
+        },
+        {
+            "command": "\\noexpand",
+            "drawn": true,
+            "group": "Macros",
+            "tex": "\\edef\\mine{\\noexpand\\alpha}\\mine"
+        },
+        {
+            "command": "\\sum",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\sum_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\prod",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\prod_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigotimes",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigotimes_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigvee",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigvee_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\int",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\int_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\coprod",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\coprod_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigoplus",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigoplus_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigwedge",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigwedge_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\iint",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\iint_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\intop",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\intop_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigodot",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigodot_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigcap",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigcap_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\iiint",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\iiint_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\smallint",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\smallint_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\biguplus",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\biguplus_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigcup",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigcup_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\oint",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\oint_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\oiint",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\oiint_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\oiiint",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\oiiint_{m=1}^{n} w_m"
+        },
+        {
+            "command": "\\bigsqcup",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "\\bigsqcup_{m=1}^{n} w_m"
+        },
+        {
+            "command": "Big operators, typed",
+            "drawn": true,
+            "group": "Big operators",
+            "tex": "∑ ∏ ∫ ∮ ⋃"
+        },
+        {
+            "command": "\\cdot",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\cdot q"
+        },
+        {
+            "command": "\\gtrdot",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\gtrdot q"
+        },
+        {
+            "command": "\\pmod",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "w \\pmod{7}"
+        },
+        {
+            "command": "\\cdotp",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\cdotp q"
+        },
+        {
+            "command": "\\intercal",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\intercal q"
+        },
+        {
+            "command": "\\pod",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "w \\pod{7}"
+        },
+        {
+            "command": "\\centerdot",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\centerdot q"
+        },
+        {
+            "command": "\\rhd",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\rhd q"
+        },
+        {
+            "command": "\\circ",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\circ q"
+        },
+        {
+            "command": "\\leftthreetimes",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\leftthreetimes q"
+        },
+        {
+            "command": "\\rightthreetimes",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\rightthreetimes q"
+        },
+        {
+            "command": "\\amalg",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\amalg q"
+        },
+        {
+            "command": "\\circledast",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\circledast q"
+        },
+        {
+            "command": "\\ldotp",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\ldotp q"
+        },
+        {
+            "command": "\\rtimes",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\rtimes q"
+        },
+        {
+            "command": "\\And",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\And q"
+        },
+        {
+            "command": "\\circledcirc",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\circledcirc q"
+        },
+        {
+            "command": "\\setminus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\setminus q"
+        },
+        {
+            "command": "\\ast",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\ast q"
+        },
+        {
+            "command": "\\circleddash",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\circleddash q"
+        },
+        {
+            "command": "\\lessdot",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\lessdot q"
+        },
+        {
+            "command": "\\smallsetminus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\smallsetminus q"
+        },
+        {
+            "command": "\\barwedge",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\barwedge q"
+        },
+        {
+            "command": "\\Cup",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\Cup q"
+        },
+        {
+            "command": "\\lhd",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\lhd q"
+        },
+        {
+            "command": "\\sqcap",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\sqcap q"
+        },
+        {
+            "command": "\\bigcirc",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\bigcirc q"
+        },
+        {
+            "command": "\\cup",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\cup q"
+        },
+        {
+            "command": "\\ltimes",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\ltimes q"
+        },
+        {
+            "command": "\\sqcup",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\sqcup q"
+        },
+        {
+            "command": "\\bmod",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "w \\bmod 7"
+        },
+        {
+            "command": "\\curlyvee",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\curlyvee q"
+        },
+        {
+            "command": "\\mod",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "w \\mod 7"
+        },
+        {
+            "command": "\\times",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\times q"
+        },
+        {
+            "command": "\\boxdot",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\boxdot q"
+        },
+        {
+            "command": "\\curlywedge",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\curlywedge q"
+        },
+        {
+            "command": "\\mp",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\mp q"
+        },
+        {
+            "command": "\\unlhd",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\unlhd q"
+        },
+        {
+            "command": "\\boxminus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\boxminus q"
+        },
+        {
+            "command": "\\div",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\div q"
+        },
+        {
+            "command": "\\odot",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\odot q"
+        },
+        {
+            "command": "\\unrhd",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\unrhd q"
+        },
+        {
+            "command": "\\boxplus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\boxplus q"
+        },
+        {
+            "command": "\\divideontimes",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\divideontimes q"
+        },
+        {
+            "command": "\\ominus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\ominus q"
+        },
+        {
+            "command": "\\uplus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\uplus q"
+        },
+        {
+            "command": "\\boxtimes",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\boxtimes q"
+        },
+        {
+            "command": "\\dotplus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\dotplus q"
+        },
+        {
+            "command": "\\oplus",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\oplus q"
+        },
+        {
+            "command": "\\vee",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\vee q"
+        },
+        {
+            "command": "\\bullet",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\bullet q"
+        },
+        {
+            "command": "\\doublebarwedge",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\doublebarwedge q"
+        },
+        {
+            "command": "\\otimes",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\otimes q"
+        },
+        {
+            "command": "\\veebar",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\veebar q"
+        },
+        {
+            "command": "\\Cap",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\Cap q"
+        },
+        {
+            "command": "\\doublecap",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\doublecap q"
+        },
+        {
+            "command": "\\oslash",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\oslash q"
+        },
+        {
+            "command": "\\wedge",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\wedge q"
+        },
+        {
+            "command": "\\cap",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\cap q"
+        },
+        {
+            "command": "\\doublecup",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\doublecup q"
+        },
+        {
+            "command": "\\pm",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\pm q"
+        },
+        {
+            "command": "\\plusmn",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\plusmn q"
+        },
+        {
+            "command": "\\wr",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p \\wr q"
+        },
+        {
+            "command": "+ - / *",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p + q - r / s * t"
+        },
+        {
+            "command": "Binary operators, typed",
+            "drawn": true,
+            "group": "Binary operators",
+            "tex": "p ⋅ q × r ÷ s ± t"
+        },
+        {
+            "command": "\\frac",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\frac{p}{q}"
+        },
+        {
+            "command": "\\frac (unbraced)",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\frac pq"
+        },
+        {
+            "command": "\\tfrac",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\tfrac{p}{q}"
+        },
+        {
+            "command": "\\dfrac",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\dfrac{p}{q}"
+        },
+        {
+            "command": "\\cfrac",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\cfrac{1}{1 + \\cfrac{1}{w}}"
+        },
+        {
+            "command": "\\genfrac",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\genfrac[ ){1pt}{0}{p}{q+1}"
+        },
+        {
+            "command": "\\over",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "{p \\over q}"
+        },
+        {
+            "command": "\\above",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "{p \\above{1pt} q}"
+        },
+        {
+            "command": "\\binom",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\binom{n}{r}"
+        },
+        {
+            "command": "\\dbinom",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\dbinom{n}{r}"
+        },
+        {
+            "command": "\\tbinom",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "\\tbinom{n}{r}"
+        },
+        {
+            "command": "\\choose",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "{n \\choose r}"
+        },
+        {
+            "command": "\\brace",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "{n \\brace r}"
+        },
+        {
+            "command": "\\brack",
+            "drawn": true,
+            "group": "Fractions and binomials",
+            "tex": "{n \\brack r}"
+        },
+        {
+            "command": "\\arcsin",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\arcsin w"
+        },
+        {
+            "command": "\\cosec",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\cosec w"
+        },
+        {
+            "command": "\\deg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\deg w"
+        },
+        {
+            "command": "\\sec",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sec w"
+        },
+        {
+            "command": "\\arccos",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\arccos w"
+        },
+        {
+            "command": "\\cosh",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\cosh w"
+        },
+        {
+            "command": "\\dim",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\dim w"
+        },
+        {
+            "command": "\\sin",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sin w"
+        },
+        {
+            "command": "\\arctan",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\arctan w"
+        },
+        {
+            "command": "\\cot",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\cot w"
+        },
+        {
+            "command": "\\exp",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\exp w"
+        },
+        {
+            "command": "\\sinh",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sinh w"
+        },
+        {
+            "command": "\\arctg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\arctg w"
+        },
+        {
+            "command": "\\cotg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\cotg w"
+        },
+        {
+            "command": "\\hom",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\hom w"
+        },
+        {
+            "command": "\\sh",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sh w"
+        },
+        {
+            "command": "\\arcctg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\arcctg w"
+        },
+        {
+            "command": "\\coth",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\coth w"
+        },
+        {
+            "command": "\\ker",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\ker w"
+        },
+        {
+            "command": "\\tan",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\tan w"
+        },
+        {
+            "command": "\\arg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\arg w"
+        },
+        {
+            "command": "\\csc",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\csc w"
+        },
+        {
+            "command": "\\lg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\lg w"
+        },
+        {
+            "command": "\\tanh",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\tanh w"
+        },
+        {
+            "command": "\\ch",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\ch w"
+        },
+        {
+            "command": "\\ctg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\ctg w"
+        },
+        {
+            "command": "\\ln",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\ln w"
+        },
+        {
+            "command": "\\tg",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\tg w"
+        },
+        {
+            "command": "\\cos",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\cos w"
+        },
+        {
+            "command": "\\cth",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\cth w"
+        },
+        {
+            "command": "\\log",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\log w"
+        },
+        {
+            "command": "\\th",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\th w"
+        },
+        {
+            "command": "\\operatorname",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\operatorname{sgn} w"
+        },
+        {
+            "command": "\\argmax",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\argmax_{n} w_n"
+        },
+        {
+            "command": "\\injlim",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\injlim_{n} w_n"
+        },
+        {
+            "command": "\\min",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\min_{n} w_n"
+        },
+        {
+            "command": "\\varinjlim",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\varinjlim_{n} w_n"
+        },
+        {
+            "command": "\\argmin",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\argmin_{n} w_n"
+        },
+        {
+            "command": "\\lim",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\lim_{n} w_n"
+        },
+        {
+            "command": "\\plim",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\plim_{n} w_n"
+        },
+        {
+            "command": "\\varliminf",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\varliminf_{n} w_n"
+        },
+        {
+            "command": "\\det",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\det_{n} w_n"
+        },
+        {
+            "command": "\\liminf",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\liminf_{n} w_n"
+        },
+        {
+            "command": "\\Pr",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\Pr_{n} w_n"
+        },
+        {
+            "command": "\\varlimsup",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\varlimsup_{n} w_n"
+        },
+        {
+            "command": "\\gcd",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\gcd_{n} w_n"
+        },
+        {
+            "command": "\\limsup",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\limsup_{n} w_n"
+        },
+        {
+            "command": "\\projlim",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\projlim_{n} w_n"
+        },
+        {
+            "command": "\\varprojlim",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\varprojlim_{n} w_n"
+        },
+        {
+            "command": "\\inf",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\inf_{n} w_n"
+        },
+        {
+            "command": "\\max",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\max_{n} w_n"
+        },
+        {
+            "command": "\\sup",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sup_{n} w_n"
+        },
+        {
+            "command": "\\operatorname*",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\operatorname*{ess\\,sup}_{w} f"
+        },
+        {
+            "command": "\\operatornamewithlimits",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\operatornamewithlimits{ess\\,sup}_{w} f"
+        },
+        {
+            "command": "\\limits",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sum\\limits_{m} w_m"
+        },
+        {
+            "command": "\\sqrt",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sqrt{w}"
+        },
+        {
+            "command": "\\sqrt[n]",
+            "drawn": true,
+            "group": "Math operators",
+            "tex": "\\sqrt[3]{w}"
+        },
+        {
+            "command": "\\doteqdot",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\doteqdot q"
+        },
+        {
+            "command": "\\lessapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\lessapprox q"
+        },
+        {
+            "command": "\\smile",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\smile q"
+        },
+        {
+            "command": "\\eqcirc",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\eqcirc q"
+        },
+        {
+            "command": "\\lesseqgtr",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\lesseqgtr q"
+        },
+        {
+            "command": "\\sqsubset",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\sqsubset q"
+        },
+        {
+            "command": "\\eqcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\eqcolon q"
+        },
+        {
+            "command": "\\minuscolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\minuscolon q"
+        },
+        {
+            "command": "\\lesseqqgtr",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\lesseqqgtr q"
+        },
+        {
+            "command": "\\sqsubseteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\sqsubseteq q"
+        },
+        {
+            "command": "\\Eqcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Eqcolon q"
+        },
+        {
+            "command": "\\minuscoloncolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\minuscoloncolon q"
+        },
+        {
+            "command": "\\lessgtr",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\lessgtr q"
+        },
+        {
+            "command": "\\sqsupset",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\sqsupset q"
+        },
+        {
+            "command": "\\approx",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\approx q"
+        },
+        {
+            "command": "\\eqqcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\eqqcolon q"
+        },
+        {
+            "command": "\\equalscolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\equalscolon q"
+        },
+        {
+            "command": "\\lesssim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\lesssim q"
+        },
+        {
+            "command": "\\sqsupseteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\sqsupseteq q"
+        },
+        {
+            "command": "\\approxcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\approxcolon q"
+        },
+        {
+            "command": "\\Eqqcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Eqqcolon q"
+        },
+        {
+            "command": "\\equalscoloncolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\equalscoloncolon q"
+        },
+        {
+            "command": "\\ll",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\ll q"
+        },
+        {
+            "command": "\\Subset",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Subset q"
+        },
+        {
+            "command": "\\approxcoloncolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\approxcoloncolon q"
+        },
+        {
+            "command": "\\eqsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\eqsim q"
+        },
+        {
+            "command": "\\lll",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\lll q"
+        },
+        {
+            "command": "\\sub",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\sub q"
+        },
+        {
+            "command": "\\approxeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\approxeq q"
+        },
+        {
+            "command": "\\eqslantgtr",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\eqslantgtr q"
+        },
+        {
+            "command": "\\llless",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\llless q"
+        },
+        {
+            "command": "\\subseteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\subseteq q"
+        },
+        {
+            "command": "\\sube",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\sube q"
+        },
+        {
+            "command": "\\asymp",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\asymp q"
+        },
+        {
+            "command": "\\eqslantless",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\eqslantless q"
+        },
+        {
+            "command": "\\subseteqq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\subseteqq q"
+        },
+        {
+            "command": "\\backepsilon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\backepsilon q"
+        },
+        {
+            "command": "\\equiv",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\equiv q"
+        },
+        {
+            "command": "\\succ",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\succ q"
+        },
+        {
+            "command": "\\backsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\backsim q"
+        },
+        {
+            "command": "\\fallingdotseq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\fallingdotseq q"
+        },
+        {
+            "command": "\\models",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\models q"
+        },
+        {
+            "command": "\\succapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\succapprox q"
+        },
+        {
+            "command": "\\backsimeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\backsimeq q"
+        },
+        {
+            "command": "\\frown",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\frown q"
+        },
+        {
+            "command": "\\multimap",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\multimap q"
+        },
+        {
+            "command": "\\succcurlyeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\succcurlyeq q"
+        },
+        {
+            "command": "\\between",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\between q"
+        },
+        {
+            "command": "\\ge",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\ge q"
+        },
+        {
+            "command": "\\origof",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\origof q"
+        },
+        {
+            "command": "\\succeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\succeq q"
+        },
+        {
+            "command": "\\bowtie",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\bowtie q"
+        },
+        {
+            "command": "\\geq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\geq q"
+        },
+        {
+            "command": "\\owns",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\owns q"
+        },
+        {
+            "command": "\\succsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\succsim q"
+        },
+        {
+            "command": "\\bumpeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\bumpeq q"
+        },
+        {
+            "command": "\\geqq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\geqq q"
+        },
+        {
+            "command": "\\parallel",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\parallel q"
+        },
+        {
+            "command": "\\Supset",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Supset q"
+        },
+        {
+            "command": "\\Bumpeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Bumpeq q"
+        },
+        {
+            "command": "\\geqslant",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\geqslant q"
+        },
+        {
+            "command": "\\perp",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\perp q"
+        },
+        {
+            "command": "\\circeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\circeq q"
+        },
+        {
+            "command": "\\gg",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\gg q"
+        },
+        {
+            "command": "\\pitchfork",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\pitchfork q"
+        },
+        {
+            "command": "\\supseteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\supseteq q"
+        },
+        {
+            "command": "\\supe",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\supe q"
+        },
+        {
+            "command": "\\colonapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\colonapprox q"
+        },
+        {
+            "command": "\\ggg",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\ggg q"
+        },
+        {
+            "command": "\\prec",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\prec q"
+        },
+        {
+            "command": "\\supseteqq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\supseteqq q"
+        },
+        {
+            "command": "\\Colonapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Colonapprox q"
+        },
+        {
+            "command": "\\coloncolonapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\coloncolonapprox q"
+        },
+        {
+            "command": "\\gggtr",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\gggtr q"
+        },
+        {
+            "command": "\\precapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\precapprox q"
+        },
+        {
+            "command": "\\thickapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\thickapprox q"
+        },
+        {
+            "command": "\\coloneq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\coloneq q"
+        },
+        {
+            "command": "\\colonminus",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\colonminus q"
+        },
+        {
+            "command": "\\preccurlyeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\preccurlyeq q"
+        },
+        {
+            "command": "\\thicksim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\thicksim q"
+        },
+        {
+            "command": "\\Coloneq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Coloneq q"
+        },
+        {
+            "command": "\\coloncolonminus",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\coloncolonminus q"
+        },
+        {
+            "command": "\\gtrapprox",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\gtrapprox q"
+        },
+        {
+            "command": "\\preceq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\preceq q"
+        },
+        {
+            "command": "\\trianglelefteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\trianglelefteq q"
+        },
+        {
+            "command": "\\coloneqq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\coloneqq q"
+        },
+        {
+            "command": "\\colonequals",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\colonequals q"
+        },
+        {
+            "command": "\\gtreqless",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\gtreqless q"
+        },
+        {
+            "command": "\\precsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\precsim q"
+        },
+        {
+            "command": "\\triangleq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\triangleq q"
+        },
+        {
+            "command": "\\Coloneqq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Coloneqq q"
+        },
+        {
+            "command": "\\coloncolonequals",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\coloncolonequals q"
+        },
+        {
+            "command": "\\gtreqqless",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\gtreqqless q"
+        },
+        {
+            "command": "\\propto",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\propto q"
+        },
+        {
+            "command": "\\trianglerighteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\trianglerighteq q"
+        },
+        {
+            "command": "\\colonsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\colonsim q"
+        },
+        {
+            "command": "\\gtrless",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\gtrless q"
+        },
+        {
+            "command": "\\risingdotseq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\risingdotseq q"
+        },
+        {
+            "command": "\\varpropto",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\varpropto q"
+        },
+        {
+            "command": "\\Colonsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Colonsim q"
+        },
+        {
+            "command": "\\coloncolonsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\coloncolonsim q"
+        },
+        {
+            "command": "\\gtrsim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\gtrsim q"
+        },
+        {
+            "command": "\\shortmid",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\shortmid q"
+        },
+        {
+            "command": "\\vartriangle",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\vartriangle q"
+        },
+        {
+            "command": "\\cong",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\cong q"
+        },
+        {
+            "command": "\\imageof",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\imageof q"
+        },
+        {
+            "command": "\\shortparallel",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\shortparallel q"
+        },
+        {
+            "command": "\\vartriangleleft",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\vartriangleleft q"
+        },
+        {
+            "command": "\\curlyeqprec",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\curlyeqprec q"
+        },
+        {
+            "command": "\\sim",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\sim q"
+        },
+        {
+            "command": "\\vartriangleright",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\vartriangleright q"
+        },
+        {
+            "command": "\\curlyeqsucc",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\curlyeqsucc q"
+        },
+        {
+            "command": "\\Join",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Join q"
+        },
+        {
+            "command": "\\simcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\simcolon q"
+        },
+        {
+            "command": "\\vcentcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\vcentcolon q"
+        },
+        {
+            "command": "\\ratio",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\ratio q"
+        },
+        {
+            "command": "\\dashv",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\dashv q"
+        },
+        {
+            "command": "\\le",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\le q"
+        },
+        {
+            "command": "\\simcoloncolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\simcoloncolon q"
+        },
+        {
+            "command": "\\vdash",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\vdash q"
+        },
+        {
+            "command": "\\dblcolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\dblcolon q"
+        },
+        {
+            "command": "\\coloncolon",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\coloncolon q"
+        },
+        {
+            "command": "\\leq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\leq q"
+        },
+        {
+            "command": "\\simeq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\simeq q"
+        },
+        {
+            "command": "\\vDash",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\vDash q"
+        },
+        {
+            "command": "\\doteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\doteq q"
+        },
+        {
+            "command": "\\leqq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\leqq q"
+        },
+        {
+            "command": "\\smallfrown",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\smallfrown q"
+        },
+        {
+            "command": "\\Vdash",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Vdash q"
+        },
+        {
+            "command": "\\Doteq",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Doteq q"
+        },
+        {
+            "command": "\\leqslant",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\leqslant q"
+        },
+        {
+            "command": "\\smallsmile",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\smallsmile q"
+        },
+        {
+            "command": "\\Vvdash",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p \\Vvdash q"
+        },
+        {
+            "command": "= < > :",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p = q < r > s : t"
+        },
+        {
+            "command": "Relations, typed",
+            "drawn": true,
+            "group": "Relations",
+            "tex": "p ≤ q ≥ r ≠ s ≈ t ≡ u"
+        },
+        {
+            "command": "\\gnapprox",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\gnapprox q"
+        },
+        {
+            "command": "\\ngeqslant",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ngeqslant q"
+        },
+        {
+            "command": "\\nsubseteq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nsubseteq q"
+        },
+        {
+            "command": "\\precneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\precneqq q"
+        },
+        {
+            "command": "\\gneq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\gneq q"
+        },
+        {
+            "command": "\\ngtr",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ngtr q"
+        },
+        {
+            "command": "\\nsubseteqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nsubseteqq q"
+        },
+        {
+            "command": "\\precnsim",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\precnsim q"
+        },
+        {
+            "command": "\\gneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\gneqq q"
+        },
+        {
+            "command": "\\nleq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nleq q"
+        },
+        {
+            "command": "\\nsucc",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nsucc q"
+        },
+        {
+            "command": "\\subsetneq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\subsetneq q"
+        },
+        {
+            "command": "\\gnsim",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\gnsim q"
+        },
+        {
+            "command": "\\nleqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nleqq q"
+        },
+        {
+            "command": "\\nsucceq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nsucceq q"
+        },
+        {
+            "command": "\\subsetneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\subsetneqq q"
+        },
+        {
+            "command": "\\gvertneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\gvertneqq q"
+        },
+        {
+            "command": "\\nleqslant",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nleqslant q"
+        },
+        {
+            "command": "\\nsupseteq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nsupseteq q"
+        },
+        {
+            "command": "\\succnapprox",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\succnapprox q"
+        },
+        {
+            "command": "\\lnapprox",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\lnapprox q"
+        },
+        {
+            "command": "\\nless",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nless q"
+        },
+        {
+            "command": "\\nsupseteqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nsupseteqq q"
+        },
+        {
+            "command": "\\succneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\succneqq q"
+        },
+        {
+            "command": "\\lneq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\lneq q"
+        },
+        {
+            "command": "\\nmid",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nmid q"
+        },
+        {
+            "command": "\\ntriangleleft",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ntriangleleft q"
+        },
+        {
+            "command": "\\succnsim",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\succnsim q"
+        },
+        {
+            "command": "\\lneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\lneqq q"
+        },
+        {
+            "command": "\\ntrianglelefteq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ntrianglelefteq q"
+        },
+        {
+            "command": "\\supsetneq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\supsetneq q"
+        },
+        {
+            "command": "\\lnsim",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\lnsim q"
+        },
+        {
+            "command": "\\ntriangleright",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ntriangleright q"
+        },
+        {
+            "command": "\\supsetneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\supsetneqq q"
+        },
+        {
+            "command": "\\lvertneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\lvertneqq q"
+        },
+        {
+            "command": "\\nparallel",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nparallel q"
+        },
+        {
+            "command": "\\ntrianglerighteq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ntrianglerighteq q"
+        },
+        {
+            "command": "\\varsubsetneq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\varsubsetneq q"
+        },
+        {
+            "command": "\\ncong",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ncong q"
+        },
+        {
+            "command": "\\nprec",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nprec q"
+        },
+        {
+            "command": "\\nvdash",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nvdash q"
+        },
+        {
+            "command": "\\varsubsetneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\varsubsetneqq q"
+        },
+        {
+            "command": "\\ne",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ne q"
+        },
+        {
+            "command": "\\npreceq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\npreceq q"
+        },
+        {
+            "command": "\\nvDash",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nvDash q"
+        },
+        {
+            "command": "\\varsupsetneq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\varsupsetneq q"
+        },
+        {
+            "command": "\\neq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\neq q"
+        },
+        {
+            "command": "\\nshortmid",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nshortmid q"
+        },
+        {
+            "command": "\\nVDash",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nVDash q"
+        },
+        {
+            "command": "\\varsupsetneqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\varsupsetneqq q"
+        },
+        {
+            "command": "\\ngeq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ngeq q"
+        },
+        {
+            "command": "\\nshortparallel",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nshortparallel q"
+        },
+        {
+            "command": "\\nVdash",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nVdash q"
+        },
+        {
+            "command": "\\ngeqq",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\ngeqq q"
+        },
+        {
+            "command": "\\nsim",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\nsim q"
+        },
+        {
+            "command": "\\precnapprox",
+            "drawn": true,
+            "group": "Negated relations",
+            "tex": "p \\precnapprox q"
+        },
+        {
+            "command": "\\circlearrowleft",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\circlearrowleft Q"
+        },
+        {
+            "command": "\\leftharpoonup",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftharpoonup Q"
+        },
+        {
+            "command": "\\rArr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rArr Q"
+        },
+        {
+            "command": "\\circlearrowright",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\circlearrowright Q"
+        },
+        {
+            "command": "\\leftleftarrows",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftleftarrows Q"
+        },
+        {
+            "command": "\\rarr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rarr Q"
+        },
+        {
+            "command": "\\curvearrowleft",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\curvearrowleft Q"
+        },
+        {
+            "command": "\\restriction",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\restriction Q"
+        },
+        {
+            "command": "\\curvearrowright",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\curvearrowright Q"
+        },
+        {
+            "command": "\\Leftrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Leftrightarrow Q"
+        },
+        {
+            "command": "\\rightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightarrow Q"
+        },
+        {
+            "command": "\\Darr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Darr Q"
+        },
+        {
+            "command": "\\leftrightarrows",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftrightarrows Q"
+        },
+        {
+            "command": "\\Rightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Rightarrow Q"
+        },
+        {
+            "command": "\\dArr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\dArr Q"
+        },
+        {
+            "command": "\\leftrightharpoons",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftrightharpoons Q"
+        },
+        {
+            "command": "\\rightarrowtail",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightarrowtail Q"
+        },
+        {
+            "command": "\\darr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\darr Q"
+        },
+        {
+            "command": "\\leftrightsquigarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftrightsquigarrow Q"
+        },
+        {
+            "command": "\\rightharpoondown",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightharpoondown Q"
+        },
+        {
+            "command": "\\dashleftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\dashleftarrow Q"
+        },
+        {
+            "command": "\\Lleftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Lleftarrow Q"
+        },
+        {
+            "command": "\\rightharpoonup",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightharpoonup Q"
+        },
+        {
+            "command": "\\dashrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\dashrightarrow Q"
+        },
+        {
+            "command": "\\longleftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\longleftarrow Q"
+        },
+        {
+            "command": "\\rightleftarrows",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightleftarrows Q"
+        },
+        {
+            "command": "\\Longleftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Longleftarrow Q"
+        },
+        {
+            "command": "\\rightleftharpoons",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightleftharpoons Q"
+        },
+        {
+            "command": "\\longleftrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\longleftrightarrow Q"
+        },
+        {
+            "command": "\\rightrightarrows",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightrightarrows Q"
+        },
+        {
+            "command": "\\downdownarrows",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\downdownarrows Q"
+        },
+        {
+            "command": "\\Longleftrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Longleftrightarrow Q"
+        },
+        {
+            "command": "\\rightsquigarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\rightsquigarrow Q"
+        },
+        {
+            "command": "\\downharpoonleft",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\downharpoonleft Q"
+        },
+        {
+            "command": "\\longmapsto",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\longmapsto Q"
+        },
+        {
+            "command": "\\Rrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Rrightarrow Q"
+        },
+        {
+            "command": "\\downharpoonright",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\downharpoonright Q"
+        },
+        {
+            "command": "\\longrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\longrightarrow Q"
+        },
+        {
+            "command": "\\Rsh",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Rsh Q"
+        },
+        {
+            "command": "\\Longrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Longrightarrow Q"
+        },
+        {
+            "command": "\\searrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\searrow Q"
+        },
+        {
+            "command": "\\Harr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Harr Q"
+        },
+        {
+            "command": "\\looparrowleft",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\looparrowleft Q"
+        },
+        {
+            "command": "\\swarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\swarrow Q"
+        },
+        {
+            "command": "\\hArr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\hArr Q"
+        },
+        {
+            "command": "\\looparrowright",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\looparrowright Q"
+        },
+        {
+            "command": "\\harr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\harr Q"
+        },
+        {
+            "command": "\\Lrarr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Lrarr Q"
+        },
+        {
+            "command": "\\twoheadleftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\twoheadleftarrow Q"
+        },
+        {
+            "command": "\\hookleftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\hookleftarrow Q"
+        },
+        {
+            "command": "\\lrArr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\lrArr Q"
+        },
+        {
+            "command": "\\twoheadrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\twoheadrightarrow Q"
+        },
+        {
+            "command": "\\hookrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\hookrightarrow Q"
+        },
+        {
+            "command": "\\lrarr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\lrarr Q"
+        },
+        {
+            "command": "\\Uarr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Uarr Q"
+        },
+        {
+            "command": "\\Lsh",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Lsh Q"
+        },
+        {
+            "command": "\\uArr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\uArr Q"
+        },
+        {
+            "command": "\\uarr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\uarr Q"
+        },
+        {
+            "command": "\\nearrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nearrow Q"
+        },
+        {
+            "command": "\\Larr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Larr Q"
+        },
+        {
+            "command": "\\nleftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nleftarrow Q"
+        },
+        {
+            "command": "\\lArr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\lArr Q"
+        },
+        {
+            "command": "\\nLeftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nLeftarrow Q"
+        },
+        {
+            "command": "\\larr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\larr Q"
+        },
+        {
+            "command": "\\nleftrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nleftrightarrow Q"
+        },
+        {
+            "command": "\\leadsto",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leadsto Q"
+        },
+        {
+            "command": "\\nLeftrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nLeftrightarrow Q"
+        },
+        {
+            "command": "\\upharpoonleft",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\upharpoonleft Q"
+        },
+        {
+            "command": "\\leftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftarrow Q"
+        },
+        {
+            "command": "\\nrightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nrightarrow Q"
+        },
+        {
+            "command": "\\upharpoonright",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\upharpoonright Q"
+        },
+        {
+            "command": "\\Leftarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Leftarrow Q"
+        },
+        {
+            "command": "\\nRightarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nRightarrow Q"
+        },
+        {
+            "command": "\\upuparrows",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\upuparrows Q"
+        },
+        {
+            "command": "\\leftarrowtail",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftarrowtail Q"
+        },
+        {
+            "command": "\\nwarrow",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\nwarrow Q"
+        },
+        {
+            "command": "\\leftharpoondown",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\leftharpoondown Q"
+        },
+        {
+            "command": "\\Rarr",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P \\Rarr Q"
+        },
+        {
+            "command": "Arrows, typed",
+            "drawn": true,
+            "group": "Arrows",
+            "tex": "P → Q ⇒ R ↦ S"
+        },
+        {
+            "command": "\\xleftarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xleftarrow{f} Q"
+        },
+        {
+            "command": "\\xrightarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xrightarrow{f} Q"
+        },
+        {
+            "command": "\\xLeftarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xLeftarrow{f} Q"
+        },
+        {
+            "command": "\\xRightarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xRightarrow{f} Q"
+        },
+        {
+            "command": "\\xleftrightarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xleftrightarrow{f} Q"
+        },
+        {
+            "command": "\\xLeftrightarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xLeftrightarrow{f} Q"
+        },
+        {
+            "command": "\\xhookleftarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xhookleftarrow{f} Q"
+        },
+        {
+            "command": "\\xhookrightarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xhookrightarrow{f} Q"
+        },
+        {
+            "command": "\\xtwoheadleftarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xtwoheadleftarrow{f} Q"
+        },
+        {
+            "command": "\\xtwoheadrightarrow",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xtwoheadrightarrow{f} Q"
+        },
+        {
+            "command": "\\xleftharpoonup",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xleftharpoonup{f} Q"
+        },
+        {
+            "command": "\\xrightharpoonup",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xrightharpoonup{f} Q"
+        },
+        {
+            "command": "\\xleftharpoondown",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xleftharpoondown{f} Q"
+        },
+        {
+            "command": "\\xrightharpoondown",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xrightharpoondown{f} Q"
+        },
+        {
+            "command": "\\xleftrightharpoons",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xleftrightharpoons{f} Q"
+        },
+        {
+            "command": "\\xrightleftharpoons",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xrightleftharpoons{f} Q"
+        },
+        {
+            "command": "\\xtofrom",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xtofrom{f} Q"
+        },
+        {
+            "command": "\\xmapsto",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xmapsto{f} Q"
+        },
+        {
+            "command": "\\xlongequal",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xlongequal{f} Q"
+        },
+        {
+            "command": "\\xrightarrow[…]",
+            "drawn": true,
+            "group": "Extensible arrows",
+            "tex": "P \\xrightarrow[g]{f} Q"
+        },
+        {
+            "command": "\\bra",
+            "drawn": true,
+            "group": "Bra-ket notation",
+            "tex": "\\bra{\\chi}"
+        },
+        {
+            "command": "\\ket",
+            "drawn": true,
+            "group": "Bra-ket notation",
+            "tex": "\\ket{\\chi}"
+        },
+        {
+            "command": "\\braket",
+            "drawn": true,
+            "group": "Bra-ket notation",
+            "tex": "\\braket{\\chi|\\omega}"
+        },
+        {
+            "command": "\\Bra",
+            "drawn": true,
+            "group": "Bra-ket notation",
+            "tex": "\\Bra{\\chi}"
+        },
+        {
+            "command": "\\Ket",
+            "drawn": true,
+            "group": "Bra-ket notation",
+            "tex": "\\Ket{\\chi}"
+        },
+        {
+            "command": "\\Braket",
+            "drawn": true,
+            "group": "Bra-ket notation",
+            "tex": "\\Braket{ \\chi | \\frac{\\partial^2}{\\partial s^2} | \\omega }"
+        },
+        {
+            "command": "\\mathbin",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathbin{\\#} q"
+        },
+        {
+            "command": "\\mathclose",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathclose{\\#} q"
+        },
+        {
+            "command": "\\mathinner",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathinner{\\#} q"
+        },
+        {
+            "command": "\\mathop",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathop{\\#} q"
+        },
+        {
+            "command": "\\mathopen",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathopen{\\#} q"
+        },
+        {
+            "command": "\\mathord",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathord{\\#} q"
+        },
+        {
+            "command": "\\mathpunct",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathpunct{\\#} q"
+        },
+        {
+            "command": "\\mathrel",
+            "drawn": true,
+            "group": "Class assignment",
+            "tex": "p \\mathrel{\\#} q"
+        },
+        {
+            "command": "\\color",
+            "drawn": true,
+            "group": "Color",
+            "tex": "\\color{teal} E = mc^2"
+        },
+        {
+            "command": "\\textcolor",
+            "drawn": true,
+            "group": "Color",
+            "tex": "\\textcolor{purple}{E = mc^2}"
+        },
+        {
+            "command": "\\textcolor (hex)",
+            "drawn": true,
+            "group": "Color",
+            "tex": "\\textcolor{#1E90FF}{E = mc^2}"
+        },
+        {
+            "command": "\\colorbox",
+            "drawn": true,
+            "group": "Color",
+            "tex": "\\colorbox{yellow}{$E = mc^2$}"
+        },
+        {
+            "command": "\\fcolorbox",
+            "drawn": true,
+            "group": "Color",
+            "tex": "\\fcolorbox{navy}{yellow}{$E = mc^2$}"
+        },
+        {
+            "command": "\\mathrm",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathrm{Pq7}"
+        },
+        {
+            "command": "\\mathbf",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathbf{Pq7}"
+        },
+        {
+            "command": "\\mathsf",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathsf{Pq7}"
+        },
+        {
+            "command": "\\mathnormal",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathnormal{Pq7}"
+        },
+        {
+            "command": "\\textbf",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textbf{Pq7}"
+        },
+        {
+            "command": "\\textsf",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textsf{Pq7}"
+        },
+        {
+            "command": "\\textrm",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textrm{Pq7}"
+        },
+        {
+            "command": "\\bf",
+            "drawn": true,
+            "group": "Font",
+            "tex": "{\\bf Pq7}"
+        },
+        {
+            "command": "\\sf",
+            "drawn": true,
+            "group": "Font",
+            "tex": "{\\sf Pq7}"
+        },
+        {
+            "command": "\\rm",
+            "drawn": true,
+            "group": "Font",
+            "tex": "{\\rm Pq7}"
+        },
+        {
+            "command": "\\bold",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\bold{Pq7}"
+        },
+        {
+            "command": "\\mathsfit",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathsfit{Pq7}"
+        },
+        {
+            "command": "\\textnormal",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textnormal{Pq7}"
+        },
+        {
+            "command": "\\boldsymbol",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\boldsymbol{Pq7}"
+        },
+        {
+            "command": "\\Bbb",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\Bbb{PQ}"
+        },
+        {
+            "command": "\\bm",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\bm{Pq7}"
+        },
+        {
+            "command": "\\mathbb",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathbb{PQ}"
+        },
+        {
+            "command": "\\textup",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textup{Pq7}"
+        },
+        {
+            "command": "\\textmd",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textmd{Pq7}"
+        },
+        {
+            "command": "\\frak",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\frak{Pq7}"
+        },
+        {
+            "command": "\\mathit",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathit{Pq7}"
+        },
+        {
+            "command": "\\mathtt",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathtt{Pq7}"
+        },
+        {
+            "command": "\\mathfrak",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathfrak{Pq7}"
+        },
+        {
+            "command": "\\textit",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textit{Pq7}"
+        },
+        {
+            "command": "\\texttt",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\texttt{Pq7}"
+        },
+        {
+            "command": "\\mathcal",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathcal{PQ}"
+        },
+        {
+            "command": "\\it",
+            "drawn": true,
+            "group": "Font",
+            "tex": "{\\it Pq7}"
+        },
+        {
+            "command": "\\tt",
+            "drawn": true,
+            "group": "Font",
+            "tex": "{\\tt Pq7}"
+        },
+        {
+            "command": "\\cal",
+            "drawn": true,
+            "group": "Font",
+            "tex": "{\\cal Pq7}"
+        },
+        {
+            "command": "\\emph",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\emph{Pq7}"
+        },
+        {
+            "command": "\\mathscr",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\mathscr{PQ}"
+        },
+        {
+            "command": "\\pmb",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\pmb{Pq7}"
+        },
+        {
+            "command": "\\text",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\text{some words}"
+        },
+        {
+            "command": "\\text with math",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\text{if $p > 0$}"
+        },
+        {
+            "command": "\\textsf{\\textbf{…}}",
+            "drawn": true,
+            "group": "Font",
+            "tex": "\\textsf{\\textbf{P}}"
+        },
+        {
+            "command": "\\Huge",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\Huge PQ}"
+        },
+        {
+            "command": "\\normalsize",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\normalsize PQ}"
+        },
+        {
+            "command": "\\huge",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\huge PQ}"
+        },
+        {
+            "command": "\\small",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\small PQ}"
+        },
+        {
+            "command": "\\LARGE",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\LARGE PQ}"
+        },
+        {
+            "command": "\\footnotesize",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\footnotesize PQ}"
+        },
+        {
+            "command": "\\Large",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\Large PQ}"
+        },
+        {
+            "command": "\\scriptsize",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\scriptsize PQ}"
+        },
+        {
+            "command": "\\large",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\large PQ}"
+        },
+        {
+            "command": "\\tiny",
+            "drawn": true,
+            "group": "Size",
+            "tex": "{\\tiny PQ}"
+        },
+        {
+            "command": "\\displaystyle",
+            "drawn": true,
+            "group": "Style",
+            "tex": "\\displaystyle\\sum_{m=1}^n w_m"
+        },
+        {
+            "command": "\\textstyle",
+            "drawn": true,
+            "group": "Style",
+            "tex": "\\textstyle\\sum_{m=1}^n w_m"
+        },
+        {
+            "command": "\\scriptstyle",
+            "drawn": true,
+            "group": "Style",
+            "tex": "\\scriptstyle w"
+        },
+        {
+            "command": "\\scriptscriptstyle",
+            "drawn": true,
+            "group": "Style",
+            "tex": "\\scriptscriptstyle w"
+        },
+        {
+            "command": "\\nolimits",
+            "drawn": true,
+            "group": "Style",
+            "tex": "\\lim\\nolimits_{w}"
+        },
+        {
+            "command": "\\verb",
+            "drawn": true,
+            "group": "Style",
+            "tex": "\\verb|w^2|"
+        },
+        {
+            "command": "\\dots",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dots"
+        },
+        {
+            "command": "\\KaTeX",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\KaTeX"
+        },
+        {
+            "command": "\\%",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\%"
+        },
+        {
+            "command": "\\cdots",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\cdots"
+        },
+        {
+            "command": "\\LaTeX",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\LaTeX"
+        },
+        {
+            "command": "\\#",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\#"
+        },
+        {
+            "command": "\\ddots",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\ddots"
+        },
+        {
+            "command": "\\TeX",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\TeX"
+        },
+        {
+            "command": "\\&",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\&"
+        },
+        {
+            "command": "\\ldots",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\ldots"
+        },
+        {
+            "command": "\\_",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\_"
+        },
+        {
+            "command": "\\vdots",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\vdots"
+        },
+        {
+            "command": "\\infty",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\infty"
+        },
+        {
+            "command": "\\textunderscore",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textunderscore}"
+        },
+        {
+            "command": "\\dotsb",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dotsb"
+        },
+        {
+            "command": "\\infin",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\infin"
+        },
+        {
+            "command": "\\dotsc",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dotsc"
+        },
+        {
+            "command": "\\checkmark",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\checkmark"
+        },
+        {
+            "command": "\\textendash",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textendash}"
+        },
+        {
+            "command": "\\dotsi",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dotsi"
+        },
+        {
+            "command": "\\dag",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dag"
+        },
+        {
+            "command": "\\dotsm",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dotsm"
+        },
+        {
+            "command": "\\dagger",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dagger"
+        },
+        {
+            "command": "\\textemdash",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textemdash}"
+        },
+        {
+            "command": "\\dotso",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\dotso"
+        },
+        {
+            "command": "\\textdagger",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textdagger}"
+        },
+        {
+            "command": "\\textasciitilde",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textasciitilde}"
+        },
+        {
+            "command": "\\sdot",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\sdot"
+        },
+        {
+            "command": "\\ddag",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\ddag"
+        },
+        {
+            "command": "\\textasciicircum",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textasciicircum}"
+        },
+        {
+            "command": "\\mathellipsis",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\mathellipsis"
+        },
+        {
+            "command": "\\ddagger",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\ddagger"
+        },
+        {
+            "command": "\\textellipsis",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textellipsis}"
+        },
+        {
+            "command": "\\textdaggerdbl",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textdaggerdbl}"
+        },
+        {
+            "command": "\\textquoteleft",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textquoteleft}"
+        },
+        {
+            "command": "\\Box",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\Box"
+        },
+        {
+            "command": "\\Dagger",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\Dagger"
+        },
+        {
+            "command": "\\lq",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\lq"
+        },
+        {
+            "command": "\\square",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\square"
+        },
+        {
+            "command": "\\angle",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\angle"
+        },
+        {
+            "command": "\\textquoteright",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textquoteright}"
+        },
+        {
+            "command": "\\blacksquare",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\blacksquare"
+        },
+        {
+            "command": "\\measuredangle",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\measuredangle"
+        },
+        {
+            "command": "\\rq",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\rq"
+        },
+        {
+            "command": "\\triangle",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\triangle"
+        },
+        {
+            "command": "\\sphericalangle",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\sphericalangle"
+        },
+        {
+            "command": "\\textquotedblleft",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textquotedblleft}"
+        },
+        {
+            "command": "\\triangledown",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\triangledown"
+        },
+        {
+            "command": "\\top",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\top"
+        },
+        {
+            "command": "\\triangleleft",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\triangleleft"
+        },
+        {
+            "command": "\\bot",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\bot"
+        },
+        {
+            "command": "\\textquotedblright",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textquotedblright}"
+        },
+        {
+            "command": "\\triangleright",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\triangleright"
+        },
+        {
+            "command": "\\$",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\$"
+        },
+        {
+            "command": "\\colon",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\colon"
+        },
+        {
+            "command": "\\bigtriangledown",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\bigtriangledown"
+        },
+        {
+            "command": "\\textdollar",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textdollar}"
+        },
+        {
+            "command": "\\backprime",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\backprime"
+        },
+        {
+            "command": "\\bigtriangleup",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\bigtriangleup"
+        },
+        {
+            "command": "\\pounds",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\pounds"
+        },
+        {
+            "command": "\\blacktriangle",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\blacktriangle"
+        },
+        {
+            "command": "\\mathsterling",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\mathsterling"
+        },
+        {
+            "command": "\\textless",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textless}"
+        },
+        {
+            "command": "\\blacktriangledown",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\blacktriangledown"
+        },
+        {
+            "command": "\\textsterling",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textsterling}"
+        },
+        {
+            "command": "\\textgreater",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textgreater}"
+        },
+        {
+            "command": "\\blacktriangleleft",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\blacktriangleleft"
+        },
+        {
+            "command": "\\yen",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\yen"
+        },
+        {
+            "command": "\\textbar",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textbar}"
+        },
+        {
+            "command": "\\blacktriangleright",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\blacktriangleright"
+        },
+        {
+            "command": "\\surd",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\surd"
+        },
+        {
+            "command": "\\textbardbl",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textbardbl}"
+        },
+        {
+            "command": "\\diamond",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\diamond"
+        },
+        {
+            "command": "\\degree",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\degree"
+        },
+        {
+            "command": "\\textbraceleft",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textbraceleft}"
+        },
+        {
+            "command": "\\Diamond",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\Diamond"
+        },
+        {
+            "command": "\\textdegree",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textdegree}"
+        },
+        {
+            "command": "\\textbraceright",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textbraceright}"
+        },
+        {
+            "command": "\\lozenge",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\lozenge"
+        },
+        {
+            "command": "\\mho",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\mho"
+        },
+        {
+            "command": "\\textbackslash",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textbackslash}"
+        },
+        {
+            "command": "\\blacklozenge",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\blacklozenge"
+        },
+        {
+            "command": "\\diagdown",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\diagdown"
+        },
+        {
+            "command": "\\P",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\P"
+        },
+        {
+            "command": "\\star",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\star"
+        },
+        {
+            "command": "\\diagup",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\diagup"
+        },
+        {
+            "command": "\\S",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\S"
+        },
+        {
+            "command": "\\bigstar",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\bigstar"
+        },
+        {
+            "command": "\\flat",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\flat"
+        },
+        {
+            "command": "\\sect",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\sect}"
+        },
+        {
+            "command": "\\clubsuit",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\clubsuit"
+        },
+        {
+            "command": "\\natural",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\natural"
+        },
+        {
+            "command": "\\copyright",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\copyright"
+        },
+        {
+            "command": "\\clubs",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\clubs"
+        },
+        {
+            "command": "\\sharp",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\sharp"
+        },
+        {
+            "command": "\\circledR",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\circledR"
+        },
+        {
+            "command": "\\diamondsuit",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\diamondsuit"
+        },
+        {
+            "command": "\\heartsuit",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\heartsuit"
+        },
+        {
+            "command": "\\textregistered",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textregistered}"
+        },
+        {
+            "command": "\\diamonds",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\diamonds"
+        },
+        {
+            "command": "\\hearts",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\hearts"
+        },
+        {
+            "command": "\\circledS",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\circledS"
+        },
+        {
+            "command": "\\spadesuit",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\spadesuit"
+        },
+        {
+            "command": "\\spades",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\spades"
+        },
+        {
+            "command": "\\textcircled",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{\\textcircled w}"
+        },
+        {
+            "command": "\\maltese",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\maltese"
+        },
+        {
+            "command": "\\minuso",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\minuso"
+        },
+        {
+            "command": "% comment",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "p + q % a comment"
+        },
+        {
+            "command": "\\text{--} \\text{---}",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "\\text{p--q---r}"
+        },
+        {
+            "command": "` and \"",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "`p\" q"
+        },
+        {
+            "command": "Symbols, typed",
+            "drawn": true,
+            "group": "Symbols and punctuation",
+            "tex": "§ ¶ £ ¥ ∞ ∠ ♠ ♭ ✓ …"
+        }
+    ],
+    "helper": "RaTeX 0.1.15",
+    "katex": "0.16.22"
+}

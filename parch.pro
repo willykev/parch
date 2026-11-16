@@ -40,6 +40,7 @@ HEADERS += \
     src/diskfile.h \
     src/document.h \
     src/documentcheck.h \
+    src/documentchecker.h \
     src/documentcitations.h \
     src/documentfind.h \
     src/documentlinks.h \
@@ -100,6 +101,7 @@ HEADERS += \
     src/recovery.h \
     src/remotefetcher.h \
     src/rendercache.h \
+    src/rendercheck.h \
     src/renderhelpers.h \
     src/renderrequest.h \
     src/renderservice.h \
@@ -146,6 +148,7 @@ SOURCES += \
     src/diskfile.cpp \
     src/document.cpp \
     src/documentcheck.cpp \
+    src/documentchecker.cpp \
     src/documentcitations.cpp \
     src/documentfind.cpp \
     src/documentlinks.cpp \
@@ -211,6 +214,7 @@ SOURCES += \
     src/recovery.cpp \
     src/remotefetcher.cpp \
     src/rendercache.cpp \
+    src/rendercheck.cpp \
     src/renderhelpers.cpp \
     src/renderrequest.cpp \
     src/renderservice.cpp \

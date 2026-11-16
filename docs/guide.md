@@ -56,10 +56,18 @@ the document's line endings.
   puts its path on a line of its own so that its text is shown there.
 - A draft keeps its assets in its own folder until you save it; they then go
   into `assets` beside the file.
-- **Check links…** in the menu lists the links, images and includes whose
-  files are not there, and the links to headings (`#a-heading`,
-  `other.md#a-heading`) that the document, with what it includes, or that
-  other document does not have.
+- **Check document…** in the menu or the command palette lists everything
+  wrong in the document and the files it includes, a line each as
+  `file:line:column: message`: links, images and includes whose files are not
+  there, links to headings (`#a-heading`, `other.md#a-heading`) that the
+  document, with what it includes, or that other document does not have,
+  references, notes, citations and variables that lead nowhere, include
+  cycles (with the chain of files) and limits, malformed table rows,
+  unclosed math, formulas and diagrams that cannot be drawn, citation and
+  bibliography problems, and HTML shown as text. It reads the text as it is
+  when you ask, without holding up the window. `Up` and `Down` move through
+  the list, and `Enter` opens the place, in the included file when the
+  problem is in one.
 
 ## The Markdown guide
 
@@ -205,7 +213,13 @@ What it shows:
   them, with a note style's citations among the notes; see
   [Citations and bibliographies](#citations-and-bibliographies).
 - Not comments or front matter. Raw HTML that parch supports is formatted;
-  anything else is shown as the text it is and never run.
+  anything else is shown as the text it is and never run (see
+  [Raw HTML](#raw-html)).
+- What leads nowhere stays as you wrote it, in the theme's danger colour,
+  and pointing at it says why: an include that cannot be read in (for a
+  cycle, the chain of files that leads back), and a variable, a reference,
+  a footnote or a heading link that nothing defines. Assistive technology
+  hears the same with the preview's description.
 
 The preview reads the document as its [document settings](#document-settings)
 say: a document in the Standard profile is previewed as Standard.
@@ -225,6 +239,79 @@ In the preview:
   with `Ctrl+C`, as plain text and with its formatting.
 - `Up`, `Down`, `PageUp`, `PageDown`, `Space`, `Home` and `End` scroll.
   `F6` moves the keys between the library, the text and the preview.
+
+## Math and diagrams
+
+parch draws formulas and diagrams itself, with two programs that come with
+it: RaTeX for TeX math and Merman for Mermaid diagrams. Both run on your
+computer, cut off from the network, and only while they draw. What they
+cannot draw keeps its source in place, with the reason (**Check document**
+and `parch check` list them too).
+
+### Math
+
+Formulas are written in the LaTeX that KaTeX 0.16 supports: the commands on
+KaTeX's list of supported functions, from accents, delimiters and
+environments (`matrix`, `cases`, `aligned`, `align`, `gather`, `CD` and the
+rest) to operators, relations, arrows, fonts, colours, sizes, spacing and
+macros (`\def`, `\newcommand`). parch is tested against a corpus with one
+expression for each command on that list, 1,043 in all, drawn with RaTeX
+0.1.15, the version parch comes with: 1,037 of its 1,043 expressions draw.
+
+These do not draw: `\left` and `\right` with `\llbracket`, `\rrbracket`,
+`\lBrace` and `\rBrace` (the four draw at their own size, without
+`\left`); `\includegraphics`; and `\expandafter`.
+
+Other differences from KaTeX:
+
+- Right-to-left text in a formula, such as Hebrew or Arabic in `\text{…}`,
+  comes out with its letters in reverse order.
+- `\href` and `\url` draw their text, but a formula is a picture, so it is
+  not a link. `\htmlId`, `\htmlClass`, `\htmlStyle` and `\htmlData` draw
+  what they hold and nothing more.
+- A formula is a picture of the formula: its text cannot be selected, and
+  assistive technology reads its TeX.
+
+### Diagrams
+
+A fenced block marked `mermaid` is a diagram. Diagrams are written in
+Mermaid 12.3 syntax and drawn through Merman 0.10, the version parch comes
+with, in the colours of your theme. These 23 families are drawn and tested,
+each a block that starts with its keyword:
+
+| Family | Keyword |
+| --- | --- |
+| Flowchart | `flowchart` or `graph` |
+| Sequence diagram | `sequenceDiagram` |
+| Class diagram | `classDiagram` or `classDiagram-v2` |
+| State diagram | `stateDiagram` or `stateDiagram-v2` |
+| Entity relationship diagram | `erDiagram` |
+| User journey | `journey` |
+| Gantt chart | `gantt` |
+| Pie chart | `pie` |
+| Quadrant chart | `quadrantChart` |
+| Requirement diagram | `requirementDiagram` |
+| Git graph | `gitGraph` |
+| C4 diagram | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic` or `C4Deployment` |
+| Mind map | `mindmap` |
+| Timeline | `timeline` |
+| Sankey diagram | `sankey-beta` |
+| XY chart | `xychart-beta` |
+| Block diagram | `block-beta` |
+| Packet diagram | `packet-beta` |
+| Kanban board | `kanban` |
+| Architecture diagram | `architecture-beta` |
+| Radar chart | `radar-beta` |
+| Treemap | `treemap-beta` |
+| ZenUML | `zenuml` |
+
+A diagram's `accTitle:` and `accDescr:` are what assistive technology
+hears; without them it hears the kind of diagram and its words. Where
+Merman differs from Mermaid: a C4 diagram's relation labels sit on their
+lines, a label such as `"A & <B>"` loses what follows the `&`, Markdown in
+a label (`"**Bold** label"`) keeps its asterisks, and the colours of a
+Sankey diagram's nodes and of architecture icons are Mermaid's own rather
+than the theme's. A diagram is a picture: its text cannot be selected.
 
 ## Commands and keys
 
@@ -273,6 +360,12 @@ the document in front is read, and where each setting comes from:
   [Citations and bibliographies](#citations-and-bibliographies).
 - **Library root**: the folder that includes starting with `/` are found in;
   the library folder that holds the document unless you choose another.
+- **Includes**: the limits that keep included files from running away: how
+  deep includes may nest (**Depth**, 32 by default), how much text the
+  document and everything it includes may hold together (**Size**, 100 MiB),
+  and how many includes are read in all (**Files**, 10,000). An include past
+  a limit is not read, the preview and **Check document** say which and why,
+  and an export of the document is refused.
 
 Each setting is the first of these that has one: the document's own
 settings; its front matter (the bibliography and the citation style only);
@@ -284,7 +377,7 @@ Choose **This document** to change the document alone, or **Every document
 in the library folder** to change every document in it; a setting of the
 document itself still wins over its folder's. **Use the default** gives a
 setting back to the next of these. A change applies at once to the preview,
-live formatting, spelling, the outline, the word count and **Check links**. It
+live formatting, spelling, the outline, the word count and **Check document**. It
 changes how the text is read, never the text: parch keeps these settings
 itself, in `~/.local/share/parch/document-settings.json`, and they follow a
 document when parch renames or moves it. A draft has settings of its own
@@ -353,6 +446,18 @@ changes.
 defines, a key given to two entries of one file or found in two files, a
 bibliography that cannot be read or has errors, with their lines, a style
 that cannot be used, and citations of a bibliography with no style chosen.
+
+What citations cannot do yet:
+
+- Only English is bundled: US English, and British English for the styles
+  written for it. A style written for another language is formatted with
+  US English words and dates, and `parch check` says so.
+- Styles are CSL 1.0.2. A CSL-M style, the legal extension of CSL, is
+  refused with the element it uses that CSL does not define.
+- parch formats citations with its own CSL processor, checked against the
+  CSL test suite's English fixtures: 746 of the 809 pass. Most of the rest
+  are rare cases of telling authors and years apart, of "ibid." across
+  notes and the text, and of capitalisation.
 
 ## Export and printing
 
@@ -816,7 +921,12 @@ parch stats book.md                  # Words, characters, reading time, headings
   citations, bibliography files and citation styles (a problem in a
   bibliography file is reported at its line there). Notes of severity
   `info` (HTML shown as text, a footnote nothing refers to) are listed but do
-  not count as problems.
+  not count as problems. Every formula and Mermaid diagram is drawn as the
+  preview draws it, and one that RaTeX or Merman refuses is reported
+  (`invalid-math`, `invalid-diagram`) with what the helper said; when a
+  helper cannot be found, check says what it could not check and does not
+  count it as a problem. With `--json` it reports the RaTeX and Merman
+  versions under `renderers`.
 - **render** writes the HTML fragment the preview and exports are made from
   (`html`, the default), the text a reader sees (`text`), the headings
   indented by level (`outline`), or the whole semantic tree with source ranges
@@ -855,6 +965,9 @@ machine. These options change it, the highest first:
 - `--library DIR`: the folder `/rooted` includes are found in.
 - `--bibliography FILE` (given again for more) and `--csl STYLE`: the
   bibliography and the citation style, a bundled one or a `.csl` file.
+- `--max-include-depth N`, `--max-include-size SIZE` (bytes, or with `K`,
+  `M` or `G`, as in `20M`) and `--max-includes N`: the include limits of
+  [document settings](#document-settings).
 - `--use-saved-settings`: read the document as the window reads it, with the
   [document settings](#document-settings) kept for the document, its library
   folder and every document, and the library folder for `/rooted` includes.
@@ -863,8 +976,8 @@ machine. These options change it, the highest first:
 The front matter's `bibliography:` and `csl:` choose the bibliography and the
 style unless the options, or with `--use-saved-settings` the document's own
 settings, choose them. JSON results report the profile, the extensions, the
-bibliography and the style, where each came from, the dialect version, and
-the version of what drew the result.
+bibliography, the style and the include limits, where each came from, the
+dialect version, and the version of what drew the result.
 
 ### Exit codes
 
@@ -884,6 +997,75 @@ installs it as `~/.agents/skills/parch/SKILL.md`, with a link to it from
 `~/.claude/skills/parch` when `~/.claude` exists. Running it again updates
 it; other skills, and a file or link there that is not parch's, are left
 alone.
+
+## Conformance
+
+### Profiles
+
+parch reads Markdown in one of two profiles, chosen in
+[document settings](#document-settings) or with `--profile`:
+
+- **Writer-compatible**, the default: the syntax of iA Writer (merged table
+  cells, inline notes, `//` comment lines, `+++` page breaks, included
+  files, heading labels, ordered lists numbered from 1) and parch's
+  extensions (math, Mermaid, definition lists, footnotes, citations,
+  highlights, superscript and subscript, `{{TOC}}`, front matter and
+  variables), on top of CommonMark and GFM.
+- **Standard**: CommonMark 0.31.2 with the four GFM extensions, tables,
+  strikethrough, task lists and bare web and e-mail addresses as links,
+  and nothing else.
+
+### CommonMark and GFM
+
+parch's own Markdown reader is checked against the examples of the
+specifications, each rendered to HTML and compared with the HTML the
+specification gives:
+
+- CommonMark: with bare addresses read as text, as CommonMark has them,
+  parch gives the specification's HTML for all 652 examples of the
+  CommonMark 0.31.2 specification. In the Standard profile as it is, with
+  GFM's bare links, 648 of the 652 pass; examples 602, 608, 611 and 612 differ
+  by design, as GFM makes a link of a bare `https://…` or e-mail address that
+  CommonMark leaves as text.
+- GFM: all 23 examples of the GFM 0.29 extensions pass (8 tables, 2 task
+  list items, 2 strikethrough and 11 autolinks), in both profiles; parch
+  writes the task box's `<input … />` closed, as it writes `<br />`.
+- The Writer-compatible profile gives the same HTML for 637 of the 652
+  CommonMark examples. The rest differ where Writer syntax means something
+  else: `+++` is a page break, `---` at the very top starts front matter, an
+  ordered list is numbered from 1 whatever its first number, and bare
+  addresses are links.
+
+Those comparisons pass raw HTML through, as the specification's own HTML
+does. parch itself never does: under its HTML policy (below), 579 of the 652
+examples give the same HTML. The other 73 are the four bare-address examples
+above and 69 that hold raw HTML parch shows as text, attributes it leaves
+out, or HTML comments, which it leaves out of what it shows.
+
+### Raw HTML
+
+HTML in a document is read under one policy, in the preview, the HTML
+export and `parch render` alike. These elements are supported and shown as
+what they mean:
+
+- **Text level**: `a`, `b`, `i`, `em`, `strong`, `u`, `s`, `del`, `ins`, `mark`, `code`, `kbd`, `sub`, `sup`, `br`, `img`
+- **Blocks**: `p`, `blockquote`, `pre`, `h1`, `h2`, `h3`, `h4`, `h5`, `h6`, `ul`, `ol`, `li`, `dl`, `dt`, `dd`, `hr`, `table`, `caption`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`
+
+They keep only these attributes; any other is left out, and a link or image
+whose address is a script loses it:
+
+| Element | Attributes kept |
+| --- | --- |
+| `a` | `href`, `title` |
+| `img` | `src`, `alt`, `title`, `width`, `height` |
+| `ol` | `start` |
+| `td`, `th` | `colspan`, `rowspan`, `align` |
+
+Every other element, such as `<div>`, `<span>`, `<script>`, `<style>` or
+`<iframe>`, is shown as the text it is, and nothing in a document ever runs.
+A tag without its partner is shown as text too. HTML comments are kept in
+the text and left out of what is shown. **Check document** and `parch check`
+report each of these as a note.
 
 ## Files parch keeps
 

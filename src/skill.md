@@ -25,9 +25,12 @@ errors to stderr.
   citations and variables that lead nowhere (`reference`, `footnote`,
   `citation`, `variable`), bibliography files that cannot be read or give a
   key twice (`bibliography`), images whose files are missing (`asset`), links
-  to files or headings that are not there (`link`), malformed table rows,
-  unclosed math, front matter, and HTML shown as text. Exit 0 means nothing
-  wrong (info notes alone do not count), 2 means problems were found.
+  to files or headings that are not there (`link`), formulas and Mermaid
+  diagrams their renderers refuse (`math`, `diagram`, with the renderer's
+  own message), malformed table rows, unclosed math, front matter, and HTML
+  shown as text. Exit 0 means nothing wrong (info notes alone do not count),
+  2 means problems were found. When the renderers are not installed,
+  `skipped` in the JSON lists what was not checked.
 - Render: `parch render notes.md --to html|text|outline|json-tree [-o out]`.
   `html` is a safe fragment (no page around it), `text` the reading text,
   `outline` the headings indented by level, `json-tree` the whole semantic
@@ -93,6 +96,8 @@ tables, strikethrough, task lists and bare links, plus:
 `--extension NAME` and `--no-extension NAME` switch one extension;
 `parch help check` lists them. `--bibliography FILE` and `--csl STYLE`
 choose a bibliography and a citation style over the front matter's.
+`--max-include-depth N`, `--max-include-size SIZE` (such as `20M`) and
+`--max-includes N` change the limits on includes (32 deep, 100 MiB, 10,000).
 `--use-saved-settings` reads a document the way the person set it up in the
 window; without it, the result is the same on every machine. JSON results
 say which profile, extensions, bibliography and style were used.

@@ -414,38 +414,3 @@ QString Attachments::includeLine(const QString &included)
     const bool spaced = std::any_of(included.cbegin(), included.cend(), [](QChar c) { return c.isSpace(); });
     return spaced ? u'"' + included + u'"' : included;
 }
-
-int Attachments::checkLinks(Document *document)
-{
-    const int request = ++m_lastCheck;
-    if (!document) {
-        QTimer::singleShot(0, this, [this, request] { emit linksChecked(request, {}, 0); });
-        return request;
-    }
-    const QString text = document->buffer()->text();
-    const QString path = document->isDraft() ? QString() : document->path();
-    const QString folder = documentFolder(document);
-    // Where its settings find `/rooted` includes, the library holding it by default.
-    const QString library = document->libraryRoot().isEmpty() ? libraryOf(document) : document->libraryRoot();
-    const md::Options options = document->markdownOptions();
-    using Found = std::pair<QVariantList, int>;
-    run<Found>(
-        this,
-        [text, path, folder, library, options] {
-            const DocumentLinks::Checked checked = DocumentLinks::check(text, path, folder, library, options);
-            QVariantList missing;
-            for (const DocumentLinks::Missing &found : checked.missing) {
-                const DocumentLinks::Link &link = found.link;
-                const QString kind = link.kind == DocumentLinks::Link::Kind::Image     ? QStringLiteral("image")
-                                     : link.kind == DocumentLinks::Link::Kind::Include ? QStringLiteral("include")
-                                                                                        : QStringLiteral("link");
-                missing.append(QVariantMap{{QStringLiteral("line"), link.line + 1},
-                                           {QStringLiteral("destination"), link.written},
-                                           {QStringLiteral("kind"), kind},
-                                           {QStringLiteral("heading"), found.heading}});
-            }
-            return Found{missing, checked.checked};
-        },
-        [this, request](Found found) { emit linksChecked(request, found.first, found.second); });
-    return request;
-}

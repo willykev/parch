@@ -1,9 +1,10 @@
 import QtQuick
 import Parch
 
-// Check links: the document's local links, images and includes whose files
-// are not there, each by its line, found off the UI thread in the text as it
-// was when the check began. The list can be selected and copied.
+// Check links: the document's local links, images and includes that lead
+// nowhere, to a file that is not there or to a heading the document or file
+// they name does not have, each by its line, found off the UI thread in the
+// text as it was when the check began. The list can be selected and copied.
 ThemedDialog {
     id: dialog
 
@@ -32,18 +33,19 @@ ThemedDialog {
             return qsTr("Checking links…")
         if (dialog.missing.length === 0) {
             if (dialog.checked === 0)
-                return qsTr("This document has no links or images to local files.")
-            return dialog.checked === 1 ? qsTr("Its one local link leads to a file that is there.")
-                                        : qsTr("All %1 local links and images lead to files that are there.").arg(dialog.checked)
+                return qsTr("This document has no links or images to local files or headings.")
+            return dialog.checked === 1 ? qsTr("Its one local link leads to something that is there.")
+                                        : qsTr("All %1 local links and images lead to files and headings that are there.").arg(dialog.checked)
         }
-        return qsTr("%1 of %2 local links and images lead to files that are not there.")
+        return qsTr("%1 of %2 local links and images lead to files or headings that are not there.")
             .arg(dialog.missing.length).arg(dialog.checked)
     }
 
     readonly property string listing: {
         const lines = []
         for (const target of dialog.missing)
-            lines.push(qsTr("Line %1, %2: %3").arg(target.line).arg(dialog.kindText(target.kind)).arg(target.destination))
+            lines.push((target.heading ? qsTr("Line %1, %2: %3 (no such heading)") : qsTr("Line %1, %2: %3"))
+                       .arg(target.line).arg(dialog.kindText(target.kind)).arg(target.destination))
         return lines.join("\n")
     }
 

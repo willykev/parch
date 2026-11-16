@@ -35,14 +35,51 @@ const ExtensionName extensions[] = {
     {"heading-labels", &Options::headingLabels},
 };
 
-void appendPlain(const Node &node, QString &out)
+// A range of the document's own text that plain text keeps to.
+struct Clip {
+    QStringView text; // file 0
+    Range range;
+
+    // Nothing of the node lies in the range. A node of no length lies in it
+    // when its position does.
+    bool excludes(const Node &node) const
+    {
+        if (node.file != 0) return true;
+        if (node.range.isEmpty()) return !range.contains(node.range.start);
+        return node.range.end <= range.start || node.range.start >= range.end;
+    }
+    bool holds(const Node &node) const { return node.range.start >= range.start && node.range.end <= range.end; }
+    // The source of the part of `part` inside the range.
+    QStringView cut(Range part) const
+    {
+        const int start = std::clamp(std::max(part.start, range.start), 0, int(text.size()));
+        const int end = std::clamp(std::min(part.end, range.end), start, int(text.size()));
+        return text.sliced(start, end - start);
+    }
+};
+
+// What a code span, inline math or code block holds, between its markers.
+Range contentOf(const Node &node)
 {
+    return {node.open.isEmpty() ? node.range.start : node.open.end,
+            node.close.isEmpty() ? node.range.end : node.close.start};
+}
+
+void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
+{
+    if (clip && clip->excludes(node)) return;
     switch (node.type) {
     case NodeType::Text:
-    case NodeType::Escape:
-    case NodeType::Entity:
+        if (clip) out.append(clip->cut(node.range));
+        else out.append(node.text);
+        return;
     case NodeType::Code:
     case NodeType::MathInline:
+        if (clip && !clip->holds(node)) out.append(clip->cut(contentOf(node)));
+        else out.append(node.text);
+        return;
+    case NodeType::Escape:
+    case NodeType::Entity:
         out.append(node.text);
         return;
     case NodeType::SoftBreak:
@@ -65,12 +102,13 @@ void appendPlain(const Node &node, QString &out)
     default:
         break;
     }
-    for (const Node &child : node.children) appendPlain(child, out);
+    for (const Node &child : node.children) appendPlain(child, out, clip);
 }
 
 // The text of the blocks of a document, one block per line.
-void appendBlocks(const Node &node, const PlainTextOptions &options, QString &out)
+void appendBlocks(const Node &node, const PlainTextOptions &options, QString &out, const Clip *clip = nullptr)
 {
+    if (clip && clip->excludes(node)) return;
     auto line = [&](const QString &text) {
         if (text.isEmpty()) return;
         out.append(text);
@@ -81,7 +119,7 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
     case NodeType::Heading:
     case NodeType::DefinitionTerm: {
         QString text;
-        appendPlain(node, text);
+        appendPlain(node, text, clip);
         if (options.notes) {
             // Inline notes are read where they are written.
             std::vector<const Node *> pending{&node};
@@ -90,8 +128,9 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
                 pending.pop_back();
                 for (const Node &child : current->children) {
                     if (child.type == NodeType::InlineNote) {
+                        if (clip && clip->excludes(child)) continue;
                         text.append(u' ');
-                        for (const Node &inner : child.children) appendPlain(inner, text);
+                        for (const Node &inner : child.children) appendPlain(inner, text, clip);
                     } else if (!child.children.empty()) {
                         pending.push_back(&child);
                     }
@@ -102,13 +141,15 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
         return;
     }
     case NodeType::CodeBlock:
-        if (options.code) line(node.text.trimmed());
+        if (!options.code) return;
+        if (clip && !clip->holds(node)) line(clip->cut(contentOf(node)).trimmed().toString());
+        else line(node.text.trimmed());
         return;
     case NodeType::TableRow: {
         QStringList cells;
         for (const Node &cell : node.children) {
             QString text;
-            appendPlain(cell, text);
+            appendPlain(cell, text, clip);
             cells.append(text.trimmed());
         }
         line(cells.join(u'\t').trimmed());
@@ -119,7 +160,7 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
         break;
     case NodeType::HtmlBlock: {
         QString text;
-        appendPlain(node, text);
+        appendPlain(node, text, clip);
         line(text.simplified());
         return;
     }
@@ -136,7 +177,7 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
     default:
         break;
     }
-    for (const Node &child : node.children) appendBlocks(child, options, out);
+    for (const Node &child : node.children) appendBlocks(child, options, out, clip);
 }
 
 // The Include node whose children are the blocks of a file.
@@ -406,7 +447,13 @@ std::vector<Range> Document::proseRanges(int file) const
 QString Document::plainText(const PlainTextOptions &options) const
 {
     QString out;
-    appendBlocks(root, options, out);
+    if (options.range) {
+        if (files.empty() || options.range->isEmpty()) return out;
+        const Clip clip{files.front().text, *options.range};
+        appendBlocks(root, options, out, &clip);
+    } else {
+        appendBlocks(root, options, out);
+    }
     if (out.endsWith(u'\n')) out.chop(1);
     return out;
 }
@@ -533,7 +580,7 @@ QString encodeDestination(QStringView path)
     for (const QChar ch : path) {
         const char16_t c = ch.unicode();
         const bool encode = c <= 0x20 || c == 0x7f || c == u'(' || c == u')' || c == u'<' || c == u'>' || c == u'#'
-            || c == u'%' || c == u'\\' || c == u'"';
+            || c == u'%' || c == u'\\' || c == u'"' || c == u'&' || c == u':';
         if (!encode) {
             out.append(ch);
             continue;

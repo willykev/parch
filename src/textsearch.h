@@ -72,6 +72,23 @@ SourceRange relocate(const QString &text, int start, int length, int line, const
 // the top of a view.
 int lineStartAbove(const QString &text, int position, int lines);
 
+// The lines of a text, counted forward: CR, LF and CRLF each end one.
+// Positions are best asked about in order, each counted from the last.
+class LineCounter {
+public:
+    explicit LineCounter(QStringView text) : m_text(text) {}
+    // The line, from 0, that holds the position.
+    int lineOf(int position);
+    // Where the line last asked about starts.
+    int lineStart() const { return m_start; }
+
+private:
+    QStringView m_text;
+    int m_at = 0;
+    int m_line = 0;
+    int m_start = 0;
+};
+
 // One change of a text: its range, in the text as it was, and what goes there.
 struct Edit {
     SourceRange range;

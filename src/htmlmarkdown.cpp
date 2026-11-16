@@ -1,5 +1,7 @@
 #include "htmlmarkdown.h"
 
+#include "mdtree.h"
+
 #include <QHash>
 #include <QList>
 #include <QSet>
@@ -1220,7 +1222,7 @@ private:
                 altText();
                 return;
             }
-            destination = HtmlMarkdown::encodePath(path);
+            destination = md::encodeDestination(path);
         } else if (source.isEmpty() || isUnsafeUrl(source) || source.startsWith(QStringLiteral("blob:"))
                    || source.startsWith(QStringLiteral("cid:"))) {
             altText();
@@ -1568,24 +1570,6 @@ QString HtmlMarkdown::escapeText(const QString &text)
     Run run;
     run.text(text, 0);
     return run.render(Breaks::Space, false);
-}
-
-QString HtmlMarkdown::encodePath(const QString &path)
-{
-    // Unreserved characters, "/" between folders, and a few that are plain
-    // in file names and mean nothing in a destination.
-    static const QByteArray kept = QByteArrayLiteral("/!$'*+,;=@");
-    QString encoded;
-    for (char byte : path.toUtf8()) {
-        const auto c = static_cast<unsigned char>(byte);
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.'
-            || c == '_' || c == '~' || kept.contains(char(c))) {
-            encoded += QLatin1Char(char(c));
-            continue;
-        }
-        encoded += QStringLiteral("%%1").arg(int(c), 2, 16, QLatin1Char('0')).toUpper();
-    }
-    return encoded;
 }
 
 QString HtmlMarkdown::encodeUrl(const QString &url)

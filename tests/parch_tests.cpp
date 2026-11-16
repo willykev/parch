@@ -26,7 +26,7 @@
 #include "htmlmarkdown.h"
 #include "hyprland.h"
 #include "librarymodel.h"
-#include "linktargets.h"
+#include "documentlinks.h"
 #include "outline.h"
 #include "markdown_tests.h"
 #include "pathtext.h"
@@ -36,7 +36,6 @@
 #include "readingpositions.h"
 #include "recentfiles.h"
 #include "recovery.h"
-#include "references.h"
 #include "diagramrender.h"
 #include "mathrender.h"
 #include "rendercache.h"
@@ -47,7 +46,6 @@
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
 #include "spellchecker.h"
-#include "spellingexclusions.h"
 #include "spellinglayer.h"
 #include "tabmodel.h"
 #include "testfiles.h"
@@ -741,7 +739,7 @@ private slots:
     void findStepsRoundTheMatchesAndFollowsEdits();
     void replaceAndReplaceAllAreEachOneUndoStep();
     void findInALargeDocumentRunsOffTheUiThread();
-    void headingsFollowTheLineRules();
+    void headingsAreTheEnginesOutline();
     void outlineFollowsEditsOffTheUiThread();
     void folderSearchStreamsResultsGroupedByDocument();
     void folderSearchReusesWhatItRead();
@@ -9437,11 +9435,14 @@ struct SpellingFixture {
 
 void ParchTests::spellingSkipsWhatIsNotProse()
 {
-    // Only prose is checked: front matter, code of every kind, URLs and email
-    // addresses, HTML comments and tags, math, link destinations, labels and
-    // reference definitions, Writer comment lines and words with digits are
-    // left alone; currency stays prose, and so does a list item's
-    // continuation, and an inline footnote's words.
+    // Only prose is checked, as the Markdown engine reads it: front matter,
+    // code of every kind, URLs and email addresses, HTML comments, tags and
+    // blocks, math, link destinations and titles, labels and reference
+    // definitions, notes' labels, citations, variables, a table of contents,
+    // include lines, task boxes, Writer comment lines and words with digits
+    // are left alone; currency stays prose, and so do a list item's
+    // continuation, an inline footnote's words and a link's text, also when
+    // the link is split across lines.
     const QString text = QStringLiteral(
         "---\ntitle: frontword\n---\n\n"
         "Prose wordone.\n\n"
@@ -9449,41 +9450,53 @@ void ParchTests::spellingSkipsWhatIsNotProse()
         "~~~ text\ntildeword\n~~~\n\n"
         "    indentword\n\n"
         "Inline `spanword` text and https://example.org/urlword and <https://auto.example/autoword>"
-        " and www.wwwword.org and mail@mailword.org.\n"
-        "<!-- commentword --> after <span class=\"tagword\">inside</span>.\n"
+        " and www.wwwword.org and mail@mailword.org and ssh://host.example/schemeword.\n"
+        "Then <!-- commentword --> after <span class=\"tagword\">inside</span>.\n"
         "<!-- multi\ncommentline\n\nstill -->\n"
-        "Math $mathword$ and $$displayword$$ and $5 and $10 dollars.\n"
+        "Math $mathword$ and $$displayword$$ and $5 and $10 dollars.\n\n"
         "$$\nblockword\n$$\n\n"
+        "<div class=\"divword\">\nhtmlblockword\n</div>\n\n"
         "A [linktext](https://destword.org \"titleword\") and [ref text][refword] and note[^noteword] "
-        "and [^inline note words] and [#citeword] and [%varword] and {{TOC}}.\n\n"
+        "and [^inline note words] and [p. 4][#citeword] and [%varword].\n\n"
+        "The [split\nlink](\nsplitword.md\n\"splittitle\") ends.\n\n"
+        "{{TOC}}\n\n"
+        "chapters/includeword.md\n\n"
+        "- [x] task done\n\n"
         "[refword]: https://defword.org \"deftitle\"\n"
         "[^noteword]: Footnote prose.\n"
         "// lineword\n"
         "abc123 x\n\n"
         "- item\n\n    continued\n");
-    const QList<SourceRange> excluded = spellingExclusions(text);
-    for (qsizetype i = 1; i < excluded.size(); ++i)
-        QVERIFY(excluded[i].start > excluded[i - 1].start + excluded[i - 1].length);
+    const std::vector<md::Range> prose = spellingProse(text);
+    for (size_t i = 0; i < prose.size(); ++i) {
+        QVERIFY(prose[i].end > prose[i].start);
+        if (i > 0) QVERIFY(prose[i].start > prose[i - 1].end);
+    }
     QStringList words;
-    for (const SourceRange &word : spellingWords(text, 0, int(text.size()), excluded)) words << text.mid(word.start, word.length);
-    QCOMPARE(words, (QStringList{"Prose", "wordone", "Inline", "text", "and", "and", "and", "and", "after", "inside",
-                                 "Math", "and", "and", "and", "dollars", "linktext", "and", "ref", "text", "and", "note",
-                                 "and", "inline", "note", "words", "and", "and", "and", "Footnote", "prose", "item",
-                                 "continued"}));
+    for (const SourceRange &word : spellingWords(text, 0, int(text.size()), prose)) words << text.mid(word.start, word.length);
+    QCOMPARE(words, (QStringList{"Prose", "wordone", "Inline", "text", "and", "and", "and", "and", "and", "Then", "after",
+                                 "inside", "Math", "and", "and", "and", "dollars", "linktext", "and", "ref", "text", "and",
+                                 "note", "and", "inline", "note", "words", "and", "and", "The", "split", "link", "ends",
+                                 "task", "done", "Footnote", "prose", "item", "continued"}));
     // The same with CRLF line breaks and a byte order mark.
     QString crlf = text;
     crlf.replace(QStringLiteral("\n"), QStringLiteral("\r\n"));
     crlf.prepend(QChar(0xfeff));
     QStringList again;
-    const QList<SourceRange> excludedAgain = spellingExclusions(crlf);
-    for (const SourceRange &word : spellingWords(crlf, 0, int(crlf.size()), excludedAgain))
+    for (const SourceRange &word : spellingWords(crlf, 0, int(crlf.size()), spellingProse(crlf)))
         again << crlf.mid(word.start, word.length);
     QCOMPARE(again, words);
     // Only within the range asked for.
     const int from = int(text.indexOf(QStringLiteral("Math")));
     QStringList part;
-    for (const SourceRange &word : spellingWords(text, from, from + 20, excluded)) part << text.mid(word.start, word.length);
+    for (const SourceRange &word : spellingWords(text, from, from + 20, prose)) part << text.mid(word.start, word.length);
     QCOMPARE(part, (QStringList{"Math", "and"}));
+    // Markup inside a word parts it, as do escapes and underscores.
+    const QString marked = QStringLiteral("it**alic**s and snake\\_case\n");
+    QStringList parted;
+    for (const SourceRange &word : spellingWords(marked, 0, int(marked.size()), spellingProse(marked)))
+        parted << marked.mid(word.start, word.length);
+    QCOMPARE(parted, (QStringList{"it", "alic", "and", "snake", "case"}));
 }
 
 void ParchTests::spellingSegmentsUnicodeWords()
@@ -9496,7 +9509,8 @@ void ParchTests::spellingSegmentsUnicodeWords()
                                            "snake_case Ελληνικά 東京 x2y file.txt a I ")
         + QStringLiteral("café au‑pair");
     QStringList words;
-    for (const SourceRange &word : spellingWords(text, 0, int(text.size()), {})) words << text.mid(word.start, word.length);
+    for (const SourceRange &word : spellingWords(text, 0, int(text.size()), {{0, int(text.size())}}))
+        words << text.mid(word.start, word.length);
     QCOMPARE(words, (QStringList{QStringLiteral("The"), QString::fromUtf8("writer’s"), QStringLiteral("well-known"),
                                  QString::fromUtf8("café"), QStringLiteral("don't"), QStringLiteral("state-of-the-art"),
                                  QString::fromUtf8("naïve"), QString::fromUtf8("résumé"), QStringLiteral("snake"),
@@ -15646,8 +15660,11 @@ struct OrganizerFixture {
 };
 } // namespace
 
-void ParchTests::headingsFollowTheLineRules()
+void ParchTests::headingsAreTheEnginesOutline()
 {
+    // The outline is the Markdown engine's, which {{TOC}} and anchors are
+    // made from: headings in quotes and list items too, none in front
+    // matter, code or comments, a Writer label kept apart from the text.
     const QString text = QStringLiteral(
         "---\ntitle: # not a heading\n---\n"
         "# One #\n"
@@ -15666,12 +15683,28 @@ void ParchTests::headingsFollowTheLineRules()
         "<!-- # In a comment\n# Still -->\n"
         "###### Six\n"
         "####### Seven\n");
-    QCOMPARE(headingList(Outline::headings(text)).split(u'|'),
+    const QList<Heading> found = Outline::headings(text);
+    QCOMPARE(headingList(found).split(u'|'),
              (QStringList{"1:One@31", "2:Two@49", "1:A paragraph that goes on@175", "2:Setext two@205",
-                          "6:Six@283"}));
+                          "1:In a quote@236", "6:Six@283"}));
+    QStringList lines, slugs, labels;
+    for (const Heading &heading : found) {
+        lines << QString::number(heading.line);
+        slugs << heading.slug;
+        labels << heading.label;
+    }
+    QCOMPARE(lines, (QStringList{"3", "5", "17", "21", "25", "28"}));
+    QCOMPARE(slugs, (QStringList{"one", "two", "a-paragraph-that-goes-on", "setext-two", "in-a-quote", "six"}));
+    QCOMPARE(labels, (QStringList{"", "Second label", "", "", "", ""}));
+    // Formatting is no part of the text; duplicates get numbered slugs; a
+    // heading with no text is left out; a heading inside a list item counts.
+    QCOMPARE(headingList(Outline::headings(QStringLiteral("# *Same* `code`\n\n#\n\n- ## Same code\n"))),
+             QStringLiteral("1:Same code@0|2:Same code@20"));
+    QCOMPARE(Outline::headings(QStringLiteral("# Same\n# Same\n")).last().slug, QStringLiteral("same-2"));
     // Positions count CRLF and CR line breaks as the text holds them.
-    QCOMPARE(headingList(Outline::headings(QStringLiteral("x\r\n# A\r\n\r\nB\r\n=\r\n"))), QStringLiteral("1:A@3|1:B@10"));
-    QCOMPARE(headingList(Outline::headings(QStringLiteral("x\r# A\r"))), QStringLiteral("1:A@2"));
+    QCOMPARE(headingList(Outline::headings(QStringLiteral("x\r\n\r\n# A\r\n\r\nB\r\n=\r\n"))), QStringLiteral("1:A@5|1:B@12"));
+    QCOMPARE(Outline::headings(QStringLiteral("x\r\n\r\n# A\r\n\r\nB\r\n=\r\n")).last().line, 4);
+    QCOMPARE(headingList(Outline::headings(QStringLiteral("x\r\r# A\r"))), QStringLiteral("1:A@3"));
     QVERIFY(Outline::headings(QString()).isEmpty());
 }
 
@@ -15835,30 +15868,50 @@ void ParchTests::folderSearchStopsWhenCancelled()
 
 void ParchTests::referencesAreFoundOutsideCode()
 {
+    // Links as the Markdown engine reads them: inline links and images,
+    // reference definitions, includes and HTML, also split across lines and
+    // inside quotes, never in code; each where its destination is written.
     const QString text = QStringLiteral(
         "# Notes\n"
         "[Plan](plan%20one.md#goals \"The plan\") and ![chart](<images/my chart.png>)\n"
         "`[code](plan%20one.md)` stays\n"
         "```\n[fenced](plan%20one.md)\n```\n"
-        "[web](https://example.org/a.md) [here](#notes)\n"
+        "[web](https://example.org/a.md) [here](#notes) [used][ref]\n"
+        "\n"
         "[ref]: ./plan%20one.md\n"
         "[^note]: a footnote\n"
         "\n"
         "\"chapters/opening one.md\" \"Opening\"\n"
         "\n"
-        "/chapters/closing.md\n");
+        "/chapters/closing.md\n"
+        "\n"
+        "> A [split\n> link](\n> split.md \"Title\") and <img src=\"pic.png\">\n"
+        "\n"
+        "[defined]:\n  <far away.md>\n");
     QStringList found;
-    for (const References::Reference &reference : References::find(text)) {
-        QCOMPARE(text.mid(reference.range.start, reference.range.length), reference.destination);
-        found << QStringLiteral("%1:%2:%3%4")
-                     .arg(int(reference.kind))
-                     .arg(reference.line)
-                     .arg(reference.destination)
-                     .arg(reference.enclosed ? QStringLiteral("!") : QString());
+    const QList<DocumentLinks::Link> links = DocumentLinks::find(text, QStringLiteral("/lib"), QStringLiteral("/lib"));
+    for (const DocumentLinks::Link &link : links) {
+        if (!link.html) QCOMPARE(text.mid(link.range.start, link.range.length), link.written);
+        found << QStringLiteral("%1:%2:%3%4%5")
+                     .arg(int(link.kind))
+                     .arg(link.line)
+                     .arg(link.written)
+                     .arg(link.enclosed ? QStringLiteral("!") : QString())
+                     .arg(link.html ? QStringLiteral(" html") : QString());
     }
     QCOMPARE(found, (QStringList{"0:1:plan%20one.md#goals", "1:1:images/my chart.png!", "0:6:https://example.org/a.md",
-                                 "0:6:#notes", "2:7:./plan%20one.md", "3:10:chapters/opening one.md!",
-                                 "3:12:/chapters/closing.md"}));
+                                 "0:6:#notes", "2:8:./plan%20one.md", "3:11:chapters/opening one.md!",
+                                 "3:13:/chapters/closing.md", "0:17:split.md", "1:17:pic.png html",
+                                 "2:20:far away.md!"}));
+    // Each says where it leads.
+    QCOMPARE(links[0].destination.path, QStringLiteral("/lib/plan one.md"));
+    QCOMPARE(links[0].destination.fragment, QStringLiteral("goals"));
+    QCOMPARE(links[2].destination.kind, md::Destination::Kind::Remote);
+    QCOMPARE(links[3].destination.kind, md::Destination::Kind::Anchor);
+    QCOMPARE(links[6].destination.path, QStringLiteral("/lib/chapters/closing.md"));
+    QCOMPARE(links[9].destination.path, QStringLiteral("/lib/far away.md"));
+    // Without a library, an include from its root leads nowhere.
+    QVERIFY(DocumentLinks::find(QStringLiteral("/chapters/closing.md\n"), QStringLiteral("/lib")).first().destination.path.isEmpty());
 }
 
 void ParchTests::movesRewriteRelativeReferences()
@@ -15866,15 +15919,16 @@ void ParchTests::movesRewriteRelativeReferences()
     const QString text = QStringLiteral(
         "[Plan](plan%20one.md#goals \"The plan\") and ![chart](<images/my chart.png>)\n"
         "`[code](plan%20one.md)` [web](https://example.org/plan%20one.md)\n"
+        "\n"
         "[ref]: ./plan%20one.md\n"
         "\n"
         "\"chapters/opening one.md\" \"Opening\"\n"
         "\n"
         "/chapters/closing.md\n");
     const QString library = QStringLiteral("/lib");
-    const auto apply = [&](const QString &path, const QList<References::Move> &moves) {
+    const auto apply = [&](const QString &path, const QList<DocumentLinks::Move> &moves) {
         QStringList shown;
-        for (const References::Change &change : References::changes(text, path, library, moves))
+        for (const DocumentLinks::Change &change : DocumentLinks::changes(text, path, library, moves))
             shown << change.before + QStringLiteral(" -> ") + change.after;
         return shown;
     };
@@ -15894,7 +15948,7 @@ void ParchTests::movesRewriteRelativeReferences()
     // A bare path that takes a space is encoded; an include that takes one is quoted.
     const QString plain = QStringLiteral("[x](plan.md) ![y](img/a.png)\n\nchapters/one.md\n");
     QStringList shown;
-    for (const References::Change &change : References::changes(
+    for (const DocumentLinks::Change &change : DocumentLinks::changes(
              plain, QStringLiteral("/lib/n.md"), library,
              {{QStringLiteral("/lib/plan.md"), QStringLiteral("/lib/my plans/plan.md")},
               {QStringLiteral("/lib/chapters"), QStringLiteral("/lib/my chapters")}})) {
@@ -15904,9 +15958,47 @@ void ParchTests::movesRewriteRelativeReferences()
     }
     QCOMPARE(shown, (QStringList{"my%20plans/plan.md", "\"my chapters/one.md\""}));
     // Nothing moved that it leads to, nothing changes.
-    QVERIFY(References::changes(text, QStringLiteral("/lib/notes.md"), library,
-                                {{QStringLiteral("/lib/other.md"), QStringLiteral("/lib/x/other.md")}})
+    QVERIFY(DocumentLinks::changes(text, QStringLiteral("/lib/notes.md"), library,
+                                   {{QStringLiteral("/lib/other.md"), QStringLiteral("/lib/x/other.md")}})
                 .isEmpty());
+
+    // Links split across lines and in quotes, definitions whose destination
+    // is on the next line, `file:` URLs, includes in single quotes and
+    // percent-encoding beyond ASCII are all followed; HTML is left as it is.
+    const QString split = QStringLiteral(
+        "> See [the\n> plan](\n> plan.md\n> \"Plan\") and <img src=\"plan.md\">.\n"
+        "\n"
+        "[later]:\n   <plan.md> 'Title'\n"
+        "\n"
+        "[home](file:///lib/plan.md#top) [ü](caf%C3%A9/plan.md)\n"
+        "\n"
+        "'chapters/one.md'\n");
+    const QList<DocumentLinks::Move> moves{{QStringLiteral("/lib/plan.md"), QStringLiteral("/lib/archive/plan.md")},
+                                           {QStringLiteral("/lib/café"), QStringLiteral("/lib/über café")},
+                                           {QStringLiteral("/lib/chapters"), QStringLiteral("/lib/my chapters")}};
+    const QList<DocumentLinks::Change> found = DocumentLinks::changes(split, QStringLiteral("/lib/n.md"), library, moves);
+    QStringList listed;
+    QList<TextSearch::Edit> edits;
+    for (const DocumentLinks::Change &change : found) {
+        listed << QStringLiteral("%1:%2 -> %3").arg(change.line).arg(change.before, change.after);
+        edits.append({change.range, change.after});
+    }
+    QCOMPARE(listed, (QStringList{"2:plan.md -> archive/plan.md", "6:plan.md -> archive/plan.md",
+                                  "8:file:///lib/plan.md#top -> file:///lib/archive/plan.md#top",
+                                  "8:caf%C3%A9/plan.md -> %C3%BCber%20caf%C3%A9/plan.md",
+                                  "10:chapters/one.md -> my chapters/one.md"}));
+    // Once changed, every link but the HTML leads where the moves took what it led to.
+    QString updated = split;
+    const TextSearch::Edit edit = TextSearch::combine(split, edits);
+    updated.replace(edit.range.start, edit.range.length, edit.text);
+    const QList<DocumentLinks::Link> before = DocumentLinks::find(split, library, library);
+    const QList<DocumentLinks::Link> after = DocumentLinks::find(updated, library, library);
+    QCOMPARE(after.size(), before.size());
+    for (qsizetype i = 0; i < before.size(); ++i) {
+        const QString expected = before[i].html ? before[i].destination.path
+                                                : DocumentLinks::moved(before[i].destination.path, moves);
+        QCOMPARE(after[i].destination.path, expected);
+    }
 }
 
 void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
@@ -15961,8 +16053,10 @@ void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
 void ParchTests::movingADocumentUpdatesTheLinksToIt()
 {
     OrganizerFixture f;
-    writeFile(f.file(QStringLiteral("index.md")), "[Plan](plan.md)\n![](plan.md#top)\n");
-    writeFile(f.file(QStringLiteral("notes/other.md")), "See [the plan](../plan.md).\n");
+    writeFile(f.file(QStringLiteral("index.md")), "[Plan](plan.md)\n![](plan.md#top)\n\nA [split\nlink](\nplan.md) here.\n");
+    writeFile(f.file(QStringLiteral("notes/other.md")),
+              "See [the plan][plan] and [it](../plan.md).\n\n[plan]:\n  ../plan.md \"Plan\"\n");
+    writeFile(f.file(QStringLiteral("book.md")), "# Book\n\nplan.md \"The plan\"\n\n```\nplan.md\n```\n");
     writeFile(f.file(QStringLiteral("plan.md")), "[Index](index.md)\n");
     QVERIFY(QDir().mkpath(f.file(QStringLiteral("archive"))));
     Document *index = f.open(QStringLiteral("index.md"));
@@ -15971,28 +16065,35 @@ void ParchTests::movingADocumentUpdatesTheLinksToIt()
     QVERIFY(f.organizer()->busy());
     QTRY_VERIFY(!f.organizer()->review().isEmpty());
     const QVariantMap review = f.organizer()->review();
-    QCOMPARE(review.value(QStringLiteral("changes")).toInt(), 4);
-    QCOMPARE(review.value(QStringLiteral("files")).toInt(), 3);
+    QCOMPARE(review.value(QStringLiteral("changes")).toInt(), 7);
+    QCOMPARE(review.value(QStringLiteral("files")).toInt(), 4);
     // Nothing moves while the writer reviews.
     QVERIFY(QFile::exists(f.file(QStringLiteral("plan.md"))));
     f.organizer()->confirmMove(true);
     QTRY_VERIFY(!f.organizer()->busy());
     QVERIFY(QFile::exists(f.file(QStringLiteral("archive/plan.md"))));
-    // Closed documents are written; the moved one's own link follows it.
-    QCOMPARE(readFile(f.file(QStringLiteral("notes/other.md"))), QByteArray("See [the plan](../archive/plan.md).\n"));
+    // Closed documents are written, reference definitions and includes
+    // too; the moved one's own link follows it.
+    QCOMPARE(readFile(f.file(QStringLiteral("notes/other.md"))),
+             QByteArray("See [the plan][plan] and [it](../archive/plan.md).\n\n[plan]:\n  ../archive/plan.md \"Plan\"\n"));
+    QCOMPARE(readFile(f.file(QStringLiteral("book.md"))),
+             QByteArray("# Book\n\narchive/plan.md \"The plan\"\n\n```\nplan.md\n```\n"));
     QCOMPARE(readFile(f.file(QStringLiteral("archive/plan.md"))), QByteArray("[Index](../index.md)\n"));
-    // An open one is edited as one undo step, and saved as any edit is.
-    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](archive/plan.md)\n![](archive/plan.md#top)\n"));
+    // An open one is edited as one undo step, and saved as any edit is,
+    // a link split across lines included.
+    QCOMPARE(index->buffer()->text(),
+             QStringLiteral("[Plan](archive/plan.md)\n![](archive/plan.md#top)\n\nA [split\nlink](\narchive/plan.md) here.\n"));
     index->buffer()->undo();
-    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](plan.md)\n![](plan.md#top)\n"));
+    QCOMPARE(index->buffer()->text(), QStringLiteral("[Plan](plan.md)\n![](plan.md#top)\n\nA [split\nlink](\nplan.md) here.\n"));
     // What a closed document held is in its history.
     const QString otherId = f.backend->store()->documentIdFor(f.file(QStringLiteral("notes/other.md")));
     const QList<History::Version> versions = f.backend->history()->versions(otherId);
     QVERIFY(!versions.isEmpty());
     QCOMPARE(versions.first().reason, History::Reason::Links);
-    QCOMPARE(f.backend->history()->read(otherId, versions.first().id), QByteArray("See [the plan](../plan.md).\n"));
+    QCOMPARE(f.backend->history()->read(otherId, versions.first().id),
+             QByteArray("See [the plan][plan] and [it](../plan.md).\n\n[plan]:\n  ../plan.md \"Plan\"\n"));
     QVERIFY(f.backend->noticeInforms());
-    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("4 links were updated in 3 documents")),
+    QVERIFY2(f.backend->problemDetail().contains(QStringLiteral("7 links were updated in 4 documents")),
              qPrintable(f.backend->problemDetail()));
 }
 
@@ -20253,7 +20354,7 @@ void ParchTests::htmlDataImagesGoToTheSink()
     QCOMPARE(saved.size(), 1);
     QCOMPARE(saved.first().first, png);
     QCOMPARE(saved.first().second, QStringLiteral("image/png"));
-    QCOMPARE(markdown, QStringLiteral("See ![chart (v2)](assets/pasted%201%20%28%C3%BC%29.png) and "
+    QCOMPARE(markdown, QStringLiteral("See ![chart (v2)](assets/pasted%201%20%28ü%29.png) and "
                                       "![lazy](https://example.org/real.png)"));
     // Kept nowhere, the image leaves its alt text.
     const QString withoutImage = QStringLiteral("See chart (v2) and ![lazy](https://example.org/real.png)");
@@ -20322,12 +20423,20 @@ void ParchTests::hostileHtmlConvertsInTime()
 
 void ParchTests::markdownPathsAndTextAreEncoded()
 {
-    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("assets/my photo (1).png")),
+    // Paths are written as the Markdown engine encodes them, and read back
+    // by it as the same path.
+    QCOMPARE(md::encodeDestination(QStringLiteral("assets/my photo (1).png")),
              QStringLiteral("assets/my%20photo%20%281%29.png"));
-    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("assets/café #2?.png")), QStringLiteral("assets/caf%C3%A9%20%232%3F.png"));
-    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("../notes/a_b-c.d~e+f.pdf")), QStringLiteral("../notes/a_b-c.d~e+f.pdf"));
-    QCOMPARE(HtmlMarkdown::encodePath(QStringLiteral("100%[x]<y>&z:\\.png")),
-             QStringLiteral("100%25%5Bx%5D%3Cy%3E%26z%3A%5C.png"));
+    QCOMPARE(md::encodeDestination(QStringLiteral("assets/café #2?.png")), QStringLiteral("assets/café%20%232?.png"));
+    QCOMPARE(md::encodeDestination(QStringLiteral("../notes/a_b-c.d~e+f.pdf")), QStringLiteral("../notes/a_b-c.d~e+f.pdf"));
+    QCOMPARE(md::encodeDestination(QStringLiteral("100%[x]<y>&z:\\.png")),
+             QStringLiteral("100%25[x]%3Cy%3E%26z%3A%5C.png"));
+    for (const QString &path : {QStringLiteral("assets/café #2?.png"), QStringLiteral("100%[x]<y>&amp;z:\\.png")}) {
+        const QList<DocumentLinks::Link> links =
+            DocumentLinks::find(Attachments::linkMarkdown(QStringLiteral("x"), path), QStringLiteral("/n"));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links.first().destination.path, QStringLiteral("/n/") + path);
+    }
     QCOMPARE(HtmlMarkdown::encodeUrl(QStringLiteral("https://en.wikipedia.org/wiki/Foo_(bar)")),
              QStringLiteral("https://en.wikipedia.org/wiki/Foo_(bar)"));
     QCOMPARE(HtmlMarkdown::encodeUrl(QStringLiteral("https://x.example/a b)c<d>é")),
@@ -20337,7 +20446,7 @@ void ParchTests::markdownPathsAndTextAreEncoded()
     QCOMPARE(Attachments::imageMarkdown(QStringLiteral("photo one"), QStringLiteral("assets/photo one.png")),
              QStringLiteral("![photo one](assets/photo%20one.png)"));
     QCOMPARE(Attachments::linkMarkdown(QStringLiteral("café [1].pdf"), QStringLiteral("assets/café [1].pdf")),
-             QStringLiteral("[café \\[1\\].pdf](assets/caf%C3%A9%20%5B1%5D.pdf)"));
+             QStringLiteral("[café \\[1\\].pdf](assets/café%20[1].pdf)"));
     QCOMPARE(Attachments::includeLine(QStringLiteral("./chapters/one.md")), QStringLiteral("./chapters/one.md"));
     QCOMPARE(Attachments::includeLine(QStringLiteral("../my chapter.md")), QStringLiteral("\"../my chapter.md\""));
     QVERIFY(Attachments::isImageFile(QStringLiteral("Photo.JPG")));
@@ -20553,7 +20662,7 @@ void ParchTests::draftAssetsFollowTheNamedFile()
     QCOMPARE(attachments->documentFolder(draft), draftFolder);
     QCOMPARE(readFile(draftFolder + QStringLiteral("/assets/pasted-2026-11-16-1.png")), red);
     QCOMPARE(QFile::permissions(draftFolder) & (QFileDevice::ReadGroup | QFileDevice::ReadOther), QFileDevice::Permissions());
-    QVERIFY(LinkTargets::missing(draft->buffer()->text(), draftFolder).isEmpty());
+    QVERIFY(DocumentLinks::check(draft->buffer()->text(), {}, draftFolder).missing.isEmpty());
     // Named, its assets go beside its file, and its link still leads to the image.
     QTemporaryDir target;
     QVERIFY(target.isValid());
@@ -20563,7 +20672,7 @@ void ParchTests::draftAssetsFollowTheNamedFile()
     QVERIFY(!draft->isDraft());
     QCOMPARE(attachments->documentFolder(draft), canonical(target.path()));
     QCOMPARE(readFile(canonical(target.path()) + QStringLiteral("/assets/pasted-2026-11-16-1.png")), red);
-    QVERIFY(LinkTargets::missing(draft->buffer()->text(), attachments->documentFolder(draft)).isEmpty());
+    QVERIFY(DocumentLinks::check(draft->buffer()->text(), file, attachments->documentFolder(draft)).missing.isEmpty());
     // Pasted again, the image goes beside the named file.
     view.cursor(0);
     copyImage(pngOf(Qt::blue));
@@ -20620,11 +20729,11 @@ void ParchTests::droppedFilesAreCopiedOrLinked()
     QVERIFY(QFile::exists(folders.outside + QStringLiteral("/photo one.png")));
     // Any other file is copied and linked, its name encoded.
     QCOMPARE(dropped(0, {folders.outside + QStringLiteral("/café.pdf")}),
-             QStringLiteral("[café.pdf](assets/caf%C3%A9.pdf)Start end\n"));
+             QStringLiteral("[café.pdf](assets/café.pdf)Start end\n"));
     QCOMPARE(readFile(assets + QStringLiteral("/café.pdf")), QByteArray("pdf"));
     // Several files are a paragraph each.
     QCOMPARE(dropped(6, {folders.outside + QStringLiteral("/photo one.png"), folders.outside + QStringLiteral("/café.pdf")}),
-             QStringLiteral("Start \n\n![photo one](assets/photo%20one.png)\n\n[café.pdf](assets/caf%C3%A9.pdf)\n\nend\n"));
+             QStringLiteral("Start \n\n![photo one](assets/photo%20one.png)\n\n[café.pdf](assets/café.pdf)\n\nend\n"));
     // A folder is not attached, and says so.
     QSignalSpy problems(attachments.get(), &Attachments::problem);
     QVERIFY(dropFiles(view, 0, {folders.outside + QStringLiteral("/folder")}));
@@ -20814,7 +20923,7 @@ void ParchTests::droppedMarkdownIsLinkedOrIncluded()
     QTest::qWait(100);
     QCOMPARE(buffer->text(), original);
     // The included document resolves where it is.
-    QVERIFY(LinkTargets::missing(QStringLiteral("./chapters/one.md\n"), folders.notes).isEmpty());
+    QVERIFY(DocumentLinks::check(QStringLiteral("./chapters/one.md\n"), {}, folders.notes).missing.isEmpty());
 }
 
 void ParchTests::windowDropsCopyAndAsk()
@@ -20933,44 +21042,62 @@ void ParchTests::missingTargetsAreListed()
                        "// ![comment](writer-comment.png)\n"
                        "![abs](")
         + folder + QStringLiteral("/here.png) ![url](file://") + root
-        + QStringLiteral("/nothing.png) ![fragment](here.png#x) ![\\[escaped\\]](missing%20%28x%29.png)\n");
-    const auto describe = [](const QList<LinkTargets::Target> &targets) {
+        + QStringLiteral("/nothing.png) ![fragment](here.png#x) ![\\[escaped\\]](missing%20%28x%29.png)\n"
+                         "\n"
+                         "[c](#one) [t](sub/two.md#two) [t](sub/two.md#nope) [self](#title-ok-gone) [split\n"
+                         "link](\nnowhere.md)\n");
+    const auto describe = [](const QList<DocumentLinks::Missing> &missing) {
         QStringList found;
-        for (const LinkTargets::Target &target : targets) {
-            const QString kind = target.kind == LinkTargets::Target::Image   ? QStringLiteral("image")
-                                 : target.kind == LinkTargets::Target::Include ? QStringLiteral("include")
-                                                                               : QStringLiteral("link");
-            found << QStringLiteral("%1 %2 %3").arg(target.line).arg(kind, target.destination);
+        for (const DocumentLinks::Missing &each : missing) {
+            const DocumentLinks::Link &link = each.link;
+            const QString kind = link.kind == DocumentLinks::Link::Kind::Image     ? QStringLiteral("image")
+                                 : link.kind == DocumentLinks::Link::Kind::Include ? QStringLiteral("include")
+                                                                                    : QStringLiteral("link");
+            found << QStringLiteral("%1 %2 %3%4")
+                         .arg(link.line + 1)
+                         .arg(kind, link.written, each.heading ? QStringLiteral(" (heading)") : QString());
         }
         return found;
     };
-    const QList<LinkTargets::Target> missing = LinkTargets::missing(text, folder, library);
-    QCOMPARE(describe(missing),
+    // Files that are not there, and headings that are not there: in this
+    // document (included chapters too) or in the Markdown file a link names.
+    const DocumentLinks::Checked checked = DocumentLinks::check(text, {}, folder, library);
+    QCOMPARE(describe(checked.missing),
              (QStringList{QStringLiteral("4 image missing.png"), QStringLiteral("5 link no such.pdf"),
-                          QStringLiteral("6 image html.png"), QStringLiteral("6 link html-link.pdf"),
-                          QStringLiteral("16 link refs/missing.png"), QStringLiteral("23 include ./sub/three.md"),
+                          QStringLiteral("5 link #top (heading)"), QStringLiteral("6 image html.png"),
+                          QStringLiteral("6 link html-link.pdf"), QStringLiteral("16 link refs/missing.png"),
+                          QStringLiteral("23 include ./sub/three.md"),
                           QStringLiteral("26 image file://") + root + QStringLiteral("/nothing.png"),
-                          QStringLiteral("26 image missing%20%28x%29.png")}));
-    // Every target says where it is written.
-    const QList<LinkTargets::Target> all = LinkTargets::local(text, folder, library);
-    QCOMPARE(all.size(), 15);
-    for (const LinkTargets::Target &target : all)
-        QCOMPARE(text.mid(target.position, target.destination.size()), target.destination);
-    QCOMPARE(all.first().path, folder + QStringLiteral("/here.png"));
-    QCOMPARE(missing.last().path, folder + QStringLiteral("/missing (x).png"));
+                          QStringLiteral("26 image missing%20%28x%29.png"),
+                          QStringLiteral("28 link sub/two.md#nope (heading)"), QStringLiteral("30 link nowhere.md")}));
+    QCOMPARE(checked.checked, 21);
+    // Every link says where it is written; remote ones and mail are links too,
+    // but not local ones to check.
+    const QList<DocumentLinks::Link> all = DocumentLinks::find(text, folder, library);
+    QCOMPARE(all.size(), 23);
+    for (const DocumentLinks::Link &link : all)
+        if (!link.html) QCOMPARE(text.mid(link.range.start, link.range.length), link.written);
+    QCOMPARE(all.first().destination.path, folder + QStringLiteral("/here.png"));
+    QCOMPARE(checked.missing[8].link.destination.path, folder + QStringLiteral("/missing (x).png"));
     // Without a library, an include from its root resolves nowhere.
-    const QList<LinkTargets::Target> unrooted = LinkTargets::missing(QStringLiteral("/chapters/one.md\n"), folder);
-    QCOMPARE(unrooted.size(), 1);
-    QVERIFY(unrooted.first().path.isEmpty());
+    const DocumentLinks::Checked unrooted = DocumentLinks::check(QStringLiteral("/chapters/one.md\n"), {}, folder);
+    QCOMPARE(unrooted.missing.size(), 1);
+    QVERIFY(unrooted.missing.first().link.destination.path.isEmpty());
     // A path in two lines, or one inside prose, is no include.
-    QVERIFY(LinkTargets::local(QStringLiteral("Read\nother.md\n\nSee other.md too.\n"), folder).isEmpty());
+    QVERIFY(DocumentLinks::find(QStringLiteral("Read\nother.md\n\nSee other.md too.\n"), folder).isEmpty());
     // The library that holds a path is the nearest.
-    QCOMPARE(LinkTargets::libraryOf(QStringLiteral("/a/b/c.md"), {QStringLiteral("/a"), QStringLiteral("/a/b"), QStringLiteral("/x")}),
+    QCOMPARE(DocumentLinks::libraryOf(QStringLiteral("/a/b/c.md"), {QStringLiteral("/a"), QStringLiteral("/a/b"), QStringLiteral("/x")}),
              QStringLiteral("/a/b"));
-    QCOMPARE(LinkTargets::libraryOf(QStringLiteral("/ab/c.md"), {QStringLiteral("/a")}), QString());
+    QCOMPARE(DocumentLinks::libraryOf(QStringLiteral("/ab/c.md"), {QStringLiteral("/a")}), QString());
     // CRLF lines count the same.
     QString crlf = QStringLiteral("a\r\n\r\n![x](gone.png)\r\n");
-    QCOMPARE(LinkTargets::missing(crlf, folder).first().line, 3);
+    QCOMPARE(DocumentLinks::check(crlf, {}, folder).missing.first().link.line, 2);
+    // A link to the document's own file finds its headings as they are now.
+    const QString self = folder + QStringLiteral("/self.md");
+    writeFile(self, "# Old\n");
+    const DocumentLinks::Checked own =
+        DocumentLinks::check(QStringLiteral("# New\n\n[a](self.md#new) [b](self.md#old)\n"), self, folder);
+    QCOMPARE(describe(own.missing), QStringList{QStringLiteral("3 link self.md#old (heading)")});
 }
 
 void ParchTests::checkLinksShowsWhatIsMissing()
@@ -20981,7 +21108,7 @@ void ParchTests::checkLinksShowsWhatIsMissing()
     QVERIFY(files.isValid());
     const QString folder = canonical(files.path());
     const QString file = folder + QStringLiteral("/doc.md");
-    writeFile(file, "![ok](ok.png) ![gone](gone.png)\n");
+    writeFile(file, "![ok](ok.png) ![gone](gone.png)\n[up](#top)\n");
     writeFile(folder + QStringLiteral("/ok.png"), "png");
     ShellFixture shell;
     QVERIFY2(shell.ok(), qPrintable(shell.error));
@@ -20997,8 +21124,9 @@ void ParchTests::checkLinksShowsWhatIsMissing()
     QTRY_VERIFY(dialog->property("opened").toBool());
     QTRY_VERIFY(!dialog->property("checking").toBool());
     QCOMPARE(dialog->property("summary").toString(),
-             QStringLiteral("1 of 2 local links and images lead to files that are not there."));
-    QCOMPARE(dialog->property("listing").toString(), QStringLiteral("Line 1, image: gone.png"));
+             QStringLiteral("2 of 3 local links and images lead to files or headings that are not there."));
+    QCOMPARE(dialog->property("listing").toString(),
+             QStringLiteral("Line 1, image: gone.png\nLine 2, link: #top (no such heading)"));
     QTest::qWait(50);
     QStringList problems;
     QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join("; ")));
@@ -21010,12 +21138,13 @@ void ParchTests::checkLinksShowsWhatIsMissing()
     QTest::keyClick(window, Qt::Key_Escape);
     QTRY_VERIFY(!dialog->property("opened").toBool());
     QTRY_COMPARE(window->activeFocusItem(), shell.item(QStringLiteral("editor")));
-    // Once the file is there, everything is found.
+    // Once the file is there, and the text has the heading, everything is found.
     writeFile(folder + QStringLiteral("/gone.png"), "png");
+    shell.document()->buffer()->replace({0, 0}, QStringLiteral("# Top\n\n"));
     QVERIFY(QMetaObject::invokeMethod(window, "checkLinks"));
     QTRY_VERIFY(dialog->property("opened").toBool());
     QTRY_COMPARE(dialog->property("summary").toString(),
-                 QStringLiteral("All 2 local links and images lead to files that are there."));
+                 QStringLiteral("All 3 local links and images lead to files and headings that are there."));
 }
 
 namespace {

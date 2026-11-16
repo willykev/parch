@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mdtree.h"
 #include "sourcetypes.h"
 
 #include <QHash>
@@ -12,16 +13,26 @@
 #include <QStringView>
 #include <QThreadPool>
 #include <memory>
+#include <vector>
 
 class Hunspell;
 
-// The words of the prose in [from, to) of `text`, leaving out the ranges in
-// `excluded` (in order and apart), as Unicode segments them: apostrophes
-// inside a word, accents and other marks belong to it, and a word joined to
-// the next by a hyphen is one word with it. Underscores part words. A word
-// with a digit in it, one of a single letter, one with no Latin letter, and
-// one with a dot or colon inside, as a domain or "e.g", is no word to check.
-QList<SourceRange> spellingWords(QStringView text, int from, int to, const QList<SourceRange> &excluded);
+// The prose of a Markdown text, which spelling checks: the Markdown
+// engine's prose ranges (md::Document::proseRanges), in order, those that
+// touch joined into one. Code, math, URLs, comments, front matter, raw
+// HTML, link destinations, labels and keys, and Markdown punctuation are
+// not prose.
+std::vector<md::Range> spellingProse(const QString &text);
+
+// The words in [from, to) of `text` within the ranges of prose (in order and
+// apart), as Unicode segments them: apostrophes inside a word, accents and
+// other marks belong to it, and a word joined to the next by a hyphen is one
+// word with it. What lies between two ranges parts words, and so do
+// underscores. A word with a digit in it, one of a single letter, one with
+// no Latin letter, one with a dot or colon inside, as a domain or "e.g",
+// and one in a URL written as text (`scheme://…`, `mailto:…`), is no word
+// to check.
+QList<SourceRange> spellingWords(QStringView text, int from, int to, const std::vector<md::Range> &prose);
 
 // The checking itself, shared by every view and their workers: Hunspell with
 // one dictionary, the personal dictionary and the words ignored for the

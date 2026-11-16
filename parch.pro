@@ -33,6 +33,7 @@ HEADERS += \
     src/document.h \
     src/documentcheck.h \
     src/documentfind.h \
+    src/documentlinks.h \
     src/documentreview.h \
     src/documentsettings.h \
     src/documentstore.h \
@@ -51,11 +52,9 @@ HEADERS += \
     src/htmlmarkdown.h \
     src/hyprland.h \
     src/librarymodel.h \
-    src/linktargets.h \
     src/markdownediting.h \
     src/markdownexport.h \
     src/librarywalk.h \
-    src/markdownlines.h \
     src/outline.h \
     src/mathrender.h \
     src/mdhtml.h \
@@ -69,7 +68,6 @@ HEADERS += \
     src/readingpositions.h \
     src/recentfiles.h \
     src/recovery.h \
-    src/references.h \
     src/rendercache.h \
     src/renderhelpers.h \
     src/renderrequest.h \
@@ -80,7 +78,6 @@ HEADERS += \
     src/sourcebuffer.h \
     src/sourcetypes.h \
     src/spellchecker.h \
-    src/spellingexclusions.h \
     src/spellinglayer.h \
     src/tabmodel.h \
     src/textsearch.h \
@@ -116,6 +113,7 @@ SOURCES += \
     src/document.cpp \
     src/documentcheck.cpp \
     src/documentfind.cpp \
+    src/documentlinks.cpp \
     src/documentreview.cpp \
     src/documentsettings.cpp \
     src/documentstore.cpp \
@@ -134,11 +132,9 @@ SOURCES += \
     src/htmlmarkdown.cpp \
     src/hyprland.cpp \
     src/librarymodel.cpp \
-    src/linktargets.cpp \
     src/markdownediting.cpp \
     src/markdownexport.cpp \
     src/librarywalk.cpp \
-    src/markdownlines.cpp \
     src/outline.cpp \
     src/mathrender.cpp \
     src/mdblocks.cpp \
@@ -157,7 +153,6 @@ SOURCES += \
     src/readingpositions.cpp \
     src/recentfiles.cpp \
     src/recovery.cpp \
-    src/references.cpp \
     src/rendercache.cpp \
     src/renderhelpers.cpp \
     src/renderrequest.cpp \
@@ -167,7 +162,6 @@ SOURCES += \
     src/sourceboundaries.cpp \
     src/sourcebuffer.cpp \
     src/spellchecker.cpp \
-    src/spellingexclusions.cpp \
     src/spellinglayer.cpp \
     src/tabmodel.cpp \
     src/textsearch.cpp \

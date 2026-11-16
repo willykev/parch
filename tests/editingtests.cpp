@@ -1188,6 +1188,25 @@ void wordCountsFollowTextAndSelection()
     QCOMPARE(WordCounter::count(u"これはペンです"), 7);
     QCOMPARE(WordCounter::count(u"Qt 6 は良い"), 5);
     QCOMPARE(WordCounter::count(u"안녕 세상"), 2);
+    // What a reader sees, as the Markdown engine gives it: no link
+    // destinations, task boxes, comments, front matter, definitions or
+    // labels; link text, image alt text, code and notes are read.
+    QCOMPARE(WordCounter::count(u"---\ntitle: My long title\n---\n\n"
+                                u"See [the plan](https://example.org/plan/page \"A title\") and ![a chart](chart.png).\n"
+                                u"- [x] done\n"
+                                u"<!-- not counted at all -->\n"
+                                u"// a comment line\n"
+                                u"Run `make all` now.[^1]\n\n"
+                                u"[^1]: A note.\n\n"
+                                u"[plan]: https://example.org/plan \"Plan\"\n\n"
+                                u"# Heading [Label]\n"),
+             14);
+    // A selection counts what is written within it, read in the whole text.
+    const QString linked = QStringLiteral("One [two three](https://example.org/four/five) six\n\n```\nseven eight\n```\n");
+    QCOMPARE(WordCounter::count(linked, 0, int(linked.size())), WordCounter::count(linked));
+    QCOMPARE(WordCounter::count(linked, int(linked.indexOf(u"three")), int(linked.indexOf(u"six")) + 3), 2);
+    QCOMPARE(WordCounter::count(linked, int(linked.indexOf(u"four")), int(linked.indexOf(u"six")) - 1), 0);
+    QCOMPARE(WordCounter::count(linked, int(linked.indexOf(u"eight")), int(linked.size())), 1);
     QCOMPARE(WordCounter::count(u"café naïve été"), 3);
 
     ShellFixture shell;

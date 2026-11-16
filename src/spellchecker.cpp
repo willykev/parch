@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QTextBoundaryFinder>
 #include <algorithm>
@@ -69,23 +70,47 @@ void wordsIn(QStringView text, int start, int end, QList<SourceRange> &out)
         if (checkable(piece.sliced(word.start, word.end - word.start))) out.append({start + word.start, word.end - word.start});
 }
 
+// The words of one run of prose, but for those of a URL written as text,
+// which the engine leaves as text when it is no autolink.
+void proseWords(QStringView text, int start, int end, QList<SourceRange> &out)
+{
+    static const QRegularExpression url(QStringLiteral(R"((?<![\w/])(?:[A-Za-z][A-Za-z0-9+.-]*://|mailto:)\S+)"));
+    int at = start;
+    for (auto match = url.globalMatchView(text.sliced(start, end - start)); match.hasNext();) {
+        const QRegularExpressionMatch found = match.next();
+        const int urlStart = start + int(found.capturedStart());
+        if (urlStart > at) wordsIn(text, at, urlStart, out);
+        at = start + int(found.capturedEnd());
+    }
+    if (end > at) wordsIn(text, at, end, out);
+}
+
 } // namespace
 
-QList<SourceRange> spellingWords(QStringView text, int from, int to, const QList<SourceRange> &excluded)
+std::vector<md::Range> spellingProse(const QString &text)
+{
+    std::vector<md::Range> prose;
+    md::parse(text).forEachProseRange(0, [&](md::Range range) {
+        if (!prose.empty() && prose.back().end >= range.start) prose.back().end = std::max(prose.back().end, range.end);
+        else prose.push_back(range);
+    });
+    return prose;
+}
+
+QList<SourceRange> spellingWords(QStringView text, int from, int to, const std::vector<md::Range> &prose)
 {
     QList<SourceRange> words;
     from = qBound(0, from, int(text.size()));
     to = qBound(from, to, int(text.size()));
-    auto next = std::partition_point(excluded.begin(), excluded.end(),
-                                     [from](const SourceRange &range) { return range.start + range.length <= from; });
-    int at = from;
-    while (at < to) {
-        const bool before = next != excluded.end() && next->start < to;
-        const int end = before ? qMax(at, next->start) : to;
-        if (end > at) wordsIn(text, at, end, words);
-        if (!before) break;
-        at = qMax(at, next->start + next->length);
-        ++next;
+    auto next =
+        std::partition_point(prose.begin(), prose.end(), [from](const md::Range &range) { return range.end <= from; });
+    for (; next != prose.end() && next->start < to; ++next) {
+        const int start = qMax(from, next->start);
+        int end = next->end;
+        // Ranges that touch are one run of prose.
+        while (next + 1 != prose.end() && (next + 1)->start <= end) end = qMax(end, (++next)->end);
+        end = qMin(end, to);
+        if (end > start) proseWords(text, start, end, words);
     }
     return words;
 }

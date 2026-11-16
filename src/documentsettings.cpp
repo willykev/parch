@@ -1,6 +1,6 @@
 #include "documentsettings.h"
 
-#include "linktargets.h"
+#include "documentlinks.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -60,7 +60,7 @@ bool read(const AppPaths &paths, const QString &canonicalPath, Saved *saved, QSt
     QStringList folders = libraries.keys();
     for (const QJsonValue &folder : settings->value(QStringLiteral("libraryFolders")).toArray())
         if (folder.toString().startsWith(u'/')) folders.append(folder.toString());
-    saved->libraryFolder = LinkTargets::libraryOf(canonicalPath, folders);
+    saved->libraryFolder = DocumentLinks::libraryOf(canonicalPath, folders);
     if (!saved->libraryFolder.isEmpty()) {
         // A key may be written with a final slash.
         QJsonObject entry = libraries.value(saved->libraryFolder).toObject();

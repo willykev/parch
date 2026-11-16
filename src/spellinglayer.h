@@ -16,8 +16,9 @@
 // in the given colour. The text is checked on the spell checker's worker,
 // never as it is typed: once the view shows it, and again once typing has
 // paused for SettleMs. Each check reads a copy of the text, finds what is
-// prose there (spellingExclusions), and checks it a paragraph at a time, the
-// paragraphs in view first, handing each paragraph's words over as it goes.
+// prose there as the Markdown engine reads it (spellingProse), and checks it
+// a paragraph at a time, the paragraphs in view first, handing each
+// paragraph's words over as it goes.
 // A paragraph edited since the copy was taken is not taken; it is checked
 // again. A paragraph whose text and prose are unchanged since an earlier
 // check is not checked again. A word added to the dictionary or ignored

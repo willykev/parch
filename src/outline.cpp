@@ -1,129 +1,22 @@
 #include "outline.h"
 
-#include "markdownlines.h"
+#include "mdtree.h"
 #include "sourcebuffer.h"
+#include "textsearch.h"
 
-#include <QRegularExpression>
 #include <QtConcurrent>
 #include <algorithm>
 #include <utility>
 
-namespace {
-using namespace MarkdownLines;
-
-const QRegularExpression &atxHeading()
-{
-    static const QRegularExpression expression(QStringLiteral("^ {0,3}(#{1,6})(?:[ \\t]+(.*?))?(?:[ \\t]+#+)?[ \\t]*$"));
-    return expression;
-}
-
-const QRegularExpression &setextUnderline()
-{
-    static const QRegularExpression expression(QStringLiteral("^ {0,3}(=+|-+)[ \\t]*$"));
-    return expression;
-}
-
-const QRegularExpression &thematicBreak()
-{
-    static const QRegularExpression expression(QStringLiteral("^ {0,3}(?:(?:-[ \\t]*){3,}|(?:\\*[ \\t]*){3,}|(?:_[ \\t]*){3,})$"));
-    return expression;
-}
-
-// The start of a block quote or a list item, whose headings belong to them.
-const QRegularExpression &containerStart()
-{
-    static const QRegularExpression expression(QStringLiteral("^ {0,3}(?:>|[-*+](?:[ \\t]|$)|\\d{1,9}[.)](?:[ \\t]|$))"));
-    return expression;
-}
-
-// A heading's text as shown: without a Writer label in brackets at its end,
-// which names it for links and is not printed.
-QString shownText(QString text)
-{
-    static const QRegularExpression label(QStringLiteral("[ \\t]*\\[[^\\[\\]]+\\][ \\t]*$"));
-    const QRegularExpressionMatch match = label.match(text);
-    if (match.hasMatch() && match.capturedStart() > 0) text.truncate(match.capturedStart());
-    return text.trimmed();
-}
-} // namespace
-
 QList<Heading> Outline::headings(const QString &text)
 {
+    const md::Document document = md::parse(text);
     QList<Heading> found;
-    const QList<Line> lines = split(text);
-    const auto lineAt = [&](qsizetype i) {
-        return QStringView(text).sliced(lines.at(i).start, lines.at(i).end - lines.at(i).start);
-    };
-    qsizetype i = frontMatterLines(text, lines);
-    Fence fence;
-    bool inComment = false;
-    // The paragraph being read, from its first line, and whether a Setext
-    // underline can make it a heading.
-    qsizetype paragraph = -1;
-    bool plain = false;
-    for (; i < lines.size(); ++i) {
-        const QStringView line = lineAt(i);
-        if (fence.length > 0) {
-            if (closes(line, fence)) fence = {};
-            continue;
-        }
-        if (inComment) {
-            if (line.contains(u"-->")) inComment = false;
-            continue;
-        }
-        if (blank(line)) {
-            paragraph = -1;
-            continue;
-        }
-        const int indent = indentOf(line);
-        if (paragraph >= 0 && indent <= 3) {
-            const QRegularExpressionMatch underline = setextUnderline().matchView(line);
-            if (underline.hasMatch()) {
-                if (plain) {
-                    QStringList parts;
-                    for (qsizetype j = paragraph; j < i; ++j) parts << lineAt(j).trimmed().toString();
-                    const QString shown = shownText(parts.join(u' '));
-                    if (!shown.isEmpty())
-                        found.append({underline.captured(1).startsWith(u'=') ? 1 : 2, shown, lines.at(paragraph).start,
-                                      int(paragraph)});
-                }
-                paragraph = -1;
-                continue;
-            }
-        }
-        // Indented code, or a line that carries on a paragraph: no heading either way.
-        if (indent >= 4) continue;
-        if (const Fence opened = fenceOf(line); opened.length > 0) {
-            fence = opened;
-            paragraph = -1;
-            continue;
-        }
-        const QStringView rest = unindented(line);
-        if (rest.startsWith(u"<!--")) {
-            inComment = !rest.sliced(4).contains(u"-->");
-            paragraph = -1;
-            continue;
-        }
-        if (const QRegularExpressionMatch atx = atxHeading().matchView(line); atx.hasMatch()) {
-            const QString shown = shownText(atx.captured(2));
-            if (!shown.isEmpty()) found.append({int(atx.capturedLength(1)), shown, lines.at(i).start, int(i)});
-            paragraph = -1;
-            continue;
-        }
-        if (thematicBreak().matchView(line).hasMatch()) {
-            paragraph = -1;
-            continue;
-        }
-        if (containerStart().matchView(line).hasMatch()) {
-            // What follows, lazily, belongs to the quote or the item.
-            paragraph = i;
-            plain = false;
-            continue;
-        }
-        if (paragraph < 0) {
-            paragraph = i;
-            plain = true;
-        }
+    TextSearch::LineCounter lines(text);
+    for (const md::Heading &heading : document.headings) {
+        if (heading.file != 0 || heading.text.isEmpty()) continue;
+        const int line = lines.lineOf(heading.range.start);
+        found.append({heading.level, heading.text, lines.lineStart(), line, heading.slug, heading.label});
     }
     return found;
 }
@@ -159,6 +52,10 @@ QVariant OutlineModel::data(const QModelIndex &index, int role) const
         return heading.position;
     case LineRole:
         return heading.line;
+    case SlugRole:
+        return heading.slug;
+    case LabelRole:
+        return heading.label;
     default:
         return {};
     }
@@ -166,7 +63,8 @@ QVariant OutlineModel::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> OutlineModel::roleNames() const
 {
-    return {{TextRole, "heading"}, {LevelRole, "level"}, {PositionRole, "position"}, {LineRole, "line"}};
+    return {{TextRole, "heading"}, {LevelRole, "level"}, {PositionRole, "position"},
+            {LineRole, "line"},     {SlugRole, "slug"},   {LabelRole, "label"}};
 }
 
 Document *OutlineModel::document() const { return m_document; }

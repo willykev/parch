@@ -14,7 +14,8 @@ The first version: a native Markdown writing app for Omarchy.
 - Rich text pastes as clean Markdown; `Ctrl+Shift+V` pastes plain text.
 - Pasted images and dropped files go into an `assets` folder beside the
   document; a dropped Markdown document can be linked or included.
-- Check links lists the links and images whose files are missing.
+- Check links lists the links, images and includes whose files are missing,
+  and the links to headings that are not there.
 - Formatting commands that write and toggle Markdown, each one undo step, from
   the menu, a formatting toolbar, a command palette and their keys.
 - Lists that continue on Enter and indent with Tab, table cells reached with
@@ -28,7 +29,8 @@ The first version: a native Markdown writing app for Omarchy.
 - Preferences for the writing font, text size, line height, line length,
   heading syntax, toolbar, spelling and focus mode, applied at once in every
   window.
-- A word count and reading time for the document or the selection.
+- A word count and reading time for the document or the selection, of the
+  text a reader sees.
 - Optional Vim keys, off until chosen: Normal, Insert and Visual modes;
   motions, operators and text objects with counts; registers, `.` and undo by
   whole changes; search; and `:w`, `:q`, `:wq` and `:x`. The status line

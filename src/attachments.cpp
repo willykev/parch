@@ -3,7 +3,8 @@
 #include "diskfile.h"
 #include "document.h"
 #include "htmlmarkdown.h"
-#include "linktargets.h"
+#include "documentlinks.h"
+#include "mdtree.h"
 #include "pathtext.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
@@ -278,7 +279,7 @@ QString Attachments::libraryOf(const Document *document) const
         const QString canonical = QFileInfo(folder).canonicalFilePath();
         roots << (canonical.isEmpty() ? folder : canonical);
     }
-    return LinkTargets::libraryOf(documentFolder(document), roots);
+    return DocumentLinks::libraryOf(documentFolder(document), roots);
 }
 
 void Attachments::report(const QString &title, const QString &detail)
@@ -396,13 +397,13 @@ QList<Attachments::Dropped> Attachments::plan(const QStringList &paths, const QS
 
 QString Attachments::imageMarkdown(const QString &alt, const QString &relative)
 {
-    return QStringLiteral("![") + HtmlMarkdown::escapeText(alt) + QStringLiteral("](") + HtmlMarkdown::encodePath(relative)
+    return QStringLiteral("![") + HtmlMarkdown::escapeText(alt) + QStringLiteral("](") + md::encodeDestination(relative)
            + u')';
 }
 
 QString Attachments::linkMarkdown(const QString &text, const QString &relative)
 {
-    return u'[' + HtmlMarkdown::escapeText(text) + QStringLiteral("](") + HtmlMarkdown::encodePath(relative) + u')';
+    return u'[' + HtmlMarkdown::escapeText(text) + QStringLiteral("](") + md::encodeDestination(relative) + u')';
 }
 
 QString Attachments::includeLine(const QString &included)
@@ -419,24 +420,26 @@ int Attachments::checkLinks(Document *document)
         return request;
     }
     const QString text = document->buffer()->text();
+    const QString path = document->isDraft() ? QString() : document->path();
     const QString folder = documentFolder(document);
     const QString library = libraryOf(document);
     using Found = std::pair<QVariantList, int>;
     run<Found>(
         this,
-        [text, folder, library] {
-            const QList<LinkTargets::Target> targets = LinkTargets::local(text, folder, library);
+        [text, path, folder, library] {
+            const DocumentLinks::Checked checked = DocumentLinks::check(text, path, folder, library);
             QVariantList missing;
-            for (const LinkTargets::Target &target : targets) {
-                if (!target.path.isEmpty() && QFileInfo::exists(target.path)) continue;
-                const QString kind = target.kind == LinkTargets::Target::Image   ? QStringLiteral("image")
-                                     : target.kind == LinkTargets::Target::Include ? QStringLiteral("include")
-                                                                                   : QStringLiteral("link");
-                missing.append(QVariantMap{{QStringLiteral("line"), target.line},
-                                           {QStringLiteral("destination"), target.destination},
-                                           {QStringLiteral("kind"), kind}});
+            for (const DocumentLinks::Missing &found : checked.missing) {
+                const DocumentLinks::Link &link = found.link;
+                const QString kind = link.kind == DocumentLinks::Link::Kind::Image     ? QStringLiteral("image")
+                                     : link.kind == DocumentLinks::Link::Kind::Include ? QStringLiteral("include")
+                                                                                        : QStringLiteral("link");
+                missing.append(QVariantMap{{QStringLiteral("line"), link.line + 1},
+                                           {QStringLiteral("destination"), link.written},
+                                           {QStringLiteral("kind"), kind},
+                                           {QStringLiteral("heading"), found.heading}});
             }
-            return Found{missing, int(targets.size())};
+            return Found{missing, checked.checked};
         },
         [this, request](Found found) { emit linksChecked(request, found.first, found.second); });
     return request;

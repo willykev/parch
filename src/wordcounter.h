@@ -11,16 +11,19 @@
 #include <QTimer>
 
 // The words of a document, or of the selection when there is one, and how
-// long they take to read at WordsPerMinute. Words are found by Unicode's
-// word boundaries (QTextBoundaryFinder), so punctuation, Markdown markers
-// and spaces are no words, and letters joined by apostrophes are one. Chinese
-// and Japanese, written without spaces, count each Han, Hiragana and
-// Katakana character as a word.
+// long they take to read at WordsPerMinute. What is counted is the text a
+// reader sees, as the Markdown engine gives it (md::Document::plainText):
+// link destinations, task boxes, comments, front matter, raw markup and
+// Markdown punctuation are no words; code and notes are read. A selection
+// counts what of that text is written within it. Words are found by
+// Unicode's word boundaries (QTextBoundaryFinder), so letters joined by
+// apostrophes are one. Chinese and Japanese, written without spaces, count
+// each Han, Hiragana and Katakana character as a word.
 //
-// Edits are counted a moment after typing pauses. A short text is counted
-// at once; a long one on a worker thread of its own, from a copy of the
-// text, and its count is shown only while the text and selection are still
-// those it was made for, so a stale count never replaces a newer one.
+// Edits are counted a moment after typing pauses. A short document is
+// counted at once; a long one on a worker thread of its own, from a copy of
+// the text, and its count is shown only while the text and selection are
+// still those it was made for, so a stale count never replaces a newer one.
 class WordCounter : public QObject {
     Q_OBJECT
     Q_PROPERTY(Document *document READ document WRITE setDocument NOTIFY documentChanged)
@@ -37,7 +40,7 @@ class WordCounter : public QObject {
 
 public:
     static constexpr int WordsPerMinute = 200;
-    // Longer texts are counted on the worker.
+    // Longer documents are read and counted on the worker.
     static constexpr int ImmediateUnits = 20000;
     // How long typing pauses before a count.
     static constexpr int DelayMs = 120;
@@ -61,7 +64,12 @@ public:
     // The worker's pool, which a test can hold up.
     QThreadPool *pool() { return &m_pool; }
 
-    static int count(QStringView text);
+    // The words of a Markdown text, or of what is written from `from` to
+    // `to` in it.
+    static int count(QStringView markdown);
+    static int count(const QString &markdown, int from, int to);
+    // The words of plain text.
+    static int countWords(QStringView text);
 
 signals:
     void documentChanged();

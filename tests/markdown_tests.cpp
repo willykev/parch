@@ -762,7 +762,9 @@ void linksAndImages()
     QCOMPARE(d.path, QStringLiteral("/tmp/a b.png"));
     // Paths that the application writes into Markdown read back as the same path.
     for (const QString &path : {QStringLiteral("pics/my image (1).png"), QStringLiteral("100% #1 <draft>.md"),
-                                QStringLiteral("caf\u00e9/na\u00efve \"x\".txt"), QStringLiteral("plain.md")}) {
+                                QStringLiteral("caf\u00e9/na\u00efve \"x\".txt"), QStringLiteral("plain.md"),
+                                QStringLiteral("a&amp;b [1].png"), QStringLiteral("ab:c.png"), QStringLiteral("mailto:x.md"),
+                                QStringLiteral("back\\slash?.md")}) {
         const QString encoded = md::encodeDestination(path);
         QVERIFY2(!encoded.contains(u' ') && !encoded.contains(u'('), qPrintable(encoded));
         const md::Document linked = md::parse(QStringLiteral("[t](%1) ![i](%1 \"title\")").arg(encoded));
@@ -771,6 +773,8 @@ void linksAndImages()
     }
     QCOMPARE(md::encodeDestination(u"pics/my image (1).png"), QStringLiteral("pics/my%20image%20%281%29.png"));
     QCOMPARE(md::encodeDestination(u"plain.md"), QStringLiteral("plain.md"));
+    // An entity or a scheme is never read into a path.
+    QCOMPARE(md::encodeDestination(u"a&amp;b:c.md"), QStringLiteral("a%26amp;b%3Ac.md"));
 
     // A document knows the folder of each of its files.
     md::Source source;
@@ -2747,6 +2751,28 @@ void outlineAndPlainText()
     // Counting words is splitting that text.
     QCOMPARE(plain.plainText(proseOnly).split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts).size(), 28);
     QCOMPARE(md::parse(QString()).plainText(), QString());
+    // Within a range, as of a selection: what is written there, by the same
+    // rules, a construct cut through giving the part of it inside.
+    const auto within = [&](const QString &from, const QString &to) {
+        md::PlainTextOptions options;
+        const int start = int(prose.indexOf(from));
+        const int end = int(prose.indexOf(to, start)) + int(to.size());
+        options.range = md::Range{start, end};
+        return plain.plainText(options);
+    };
+    QCOMPARE(within(QStringLiteral("bold**"), QStringLiteral("link](")), QStringLiteral("bold text with code, a link"));
+    QCOMPARE(within(QStringLiteral("old**"), QStringLiteral("cod")), QStringLiteral("old text with cod"));
+    QCOMPARE(within(QStringLiteral("example.org),"), QStringLiteral("image")), QStringLiteral(", an image"));
+    QCOMPARE(within(QStringLiteral("- one"), QStringLiteral("| c |")), QStringLiteral("one\ntwo\na\tb\nc"));
+    QCOMPARE(within(QStringLiteral("line\n```"), QStringLiteral("hidden")), QStringLiteral("line"));
+    QCOMPARE(within(QStringLiteral("title: T"), QStringLiteral("---")), QString());
+    QCOMPARE(within(QStringLiteral("title: T"), QStringLiteral("# A")), QStringLiteral("A"));
+    QCOMPARE(within(QStringLiteral("An inline"), QStringLiteral("[ref]: /url")), plain.plainText().section(u'\n', 9));
+    md::PlainTextOptions everything;
+    everything.range = md::Range{0, int(prose.size())};
+    QCOMPARE(plain.plainText(everything), plain.plainText());
+    everything.range = md::Range{3, 3};
+    QCOMPARE(plain.plainText(everything), QString());
     QCOMPARE(md::plainText(*first(plain, NodeType::Heading)), QStringLiteral("A title"));
     QCOMPARE(md::plainText(*first(plain, NodeType::Image)), QStringLiteral("image alt"));
     QCOMPARE(md::plainText(*first(plain, NodeType::List)), QStringLiteral("one\ntwo"));

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "references.h"
+#include "documentlinks.h"
 
 #include <QHash>
 #include <QList>
@@ -115,7 +115,7 @@ signals:
 private:
     struct FilePlan {
         QString path;
-        QList<References::Change> changes;
+        QList<DocumentLinks::Change> changes;
     };
     struct Plan {
         QString from;
@@ -143,7 +143,7 @@ private:
     // when it could not.
     bool perform(const Plan &plan);
     void updateReferences(const Plan &plan);
-    static Rewritten rewriteJob(QList<Rewrite> files, QString library, QList<References::Move> moves, History *history);
+    static Rewritten rewriteJob(QList<Rewrite> files, QString library, QList<DocumentLinks::Move> moves, History *history);
     // Says what a move did: what it took along, and what became of the
     // references to what moved.
     void finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed = {});

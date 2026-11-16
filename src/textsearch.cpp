@@ -55,6 +55,21 @@ SourceRange TextSearch::relocate(const QString &text, int start, int length, int
     return {within.start, 0};
 }
 
+int TextSearch::LineCounter::lineOf(int position)
+{
+    position = std::clamp(position, 0, int(m_text.size()));
+    if (position < m_at) m_at = m_line = m_start = 0;
+    for (; m_at < position; ++m_at) {
+        const QChar c = m_text[m_at];
+        if (c != u'\n' && c != u'\r') continue;
+        // A CR before an LF ends no line of its own.
+        if (c == u'\r' && m_at + 1 < m_text.size() && m_text[m_at + 1] == u'\n') continue;
+        ++m_line;
+        m_start = m_at + 1;
+    }
+    return m_line;
+}
+
 int TextSearch::lineStartAbove(const QString &text, int position, int lines)
 {
     qsizetype at = std::clamp<qsizetype>(position, 0, text.size());

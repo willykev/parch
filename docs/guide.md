@@ -44,7 +44,9 @@ the document's line endings.
 - A draft keeps its assets in its own folder until you save it; they then go
   into `assets` beside the file.
 - **Check links…** in the menu lists the links, images and includes whose
-  files are not there.
+  files are not there, and the links to headings (`#a-heading`,
+  `other.md#a-heading`) that the document, with what it includes, or that
+  other document does not have.
 
 ## Writing and formatting
 
@@ -90,8 +92,10 @@ While you type:
 - `Shift+Enter` ends the line with a Markdown hard line break.
 
 The status line counts the words of the document, or of the selection, and
-how many minutes they take to read at 200 words a minute. Chinese and
-Japanese count each character as a word.
+how many minutes they take to read at 200 words a minute. It counts what a
+reader sees: link addresses, task boxes, comments, front matter and
+Markdown punctuation are not words. Chinese and Japanese count each
+character as a word.
 
 ## Commands and keys
 
@@ -323,9 +327,9 @@ parch watches the files you have open.
   or **New folder…** in it. A document's menu can **Rename…** it (`F2`),
   **Move to…** another library folder (or drag it there), and **Move to
   trash…** (`Delete`), from where the desktop's trash can bring it back.
-- When a renamed or moved document has links to it in other documents of the
-  library, or relative links of its own, parch lists them and offers to update
-  them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
+- When a renamed or moved document has links, images, includes or reference
+  definitions leading to it in other documents of the library, or relative
+  ones of its own, parch lists them and offers to update them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
   A moved document keeps its tab, its history and any unsaved text.
 
 ## Finding text

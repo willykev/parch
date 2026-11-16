@@ -1,5 +1,6 @@
 #include "wordcounter.h"
 
+#include "mdtree.h"
 #include "sourcebuffer.h"
 
 #include <QCoreApplication>
@@ -41,7 +42,19 @@ WordCounter::~WordCounter()
     m_pool.waitForDone();
 }
 
-int WordCounter::count(QStringView text)
+int WordCounter::count(QStringView markdown)
+{
+    return countWords(md::parse(markdown.toString()).plainText());
+}
+
+int WordCounter::count(const QString &markdown, int from, int to)
+{
+    md::PlainTextOptions options;
+    options.range = md::Range{from, to};
+    return countWords(md::parse(markdown).plainText(options));
+}
+
+int WordCounter::countWords(QStringView text)
 {
     int words = 0;
     QTextBoundaryFinder finder(QTextBoundaryFinder::Word, text);
@@ -114,15 +127,19 @@ void WordCounter::start()
     const int first = qBound(0, qMin(m_selectionStart, m_selectionEnd), length);
     const int last = qBound(0, qMax(m_selectionStart, m_selectionEnd), length);
     const bool selection = first < last;
-    if (selection) text = text.mid(first, last - first);
-    if (text.size() <= ImmediateUnits) {
-        take(count(text), selection);
+    // A selection is read as part of the whole text, so that what it holds
+    // means what it means there.
+    const auto counted = [selection, first, last](const QString &text) {
+        return selection ? count(text, first, last) : count(text);
+    };
+    if (length <= ImmediateUnits) {
+        take(counted(text), selection);
         return;
     }
     // A count still running is of older text; its result will be dropped.
     m_running = m_generation;
     m_runningSelection = selection;
-    m_watcher.setFuture(QtConcurrent::run(&m_pool, [text = std::move(text)] { return count(text); }));
+    m_watcher.setFuture(QtConcurrent::run(&m_pool, [text = std::move(text), counted] { return counted(text); }));
 }
 
 void WordCounter::take(int words, bool ofSelection)

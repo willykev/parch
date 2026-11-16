@@ -313,7 +313,7 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
 FileOrganizer::Plan FileOrganizer::planJob(Plan plan, QHash<std::pair<quint64, quint64>, QString> open,
                                            std::shared_ptr<std::atomic<bool>> cancel)
 {
-    const QList<References::Move> moves{{plan.from, plan.to}};
+    const QList<DocumentLinks::Move> moves{{plan.from, plan.to}};
     LibraryWalk::walk({plan.library}, [&](const LibraryWalk::Found &found) {
         if (plan.folder && found.path.startsWith(plan.from + u'/')) ++plan.documents;
         if (!isMarkdown(found.path)) return true;
@@ -321,7 +321,7 @@ FileOrganizer::Plan FileOrganizer::planJob(Plan plan, QHash<std::pair<quint64, q
         const auto opened = open.constFind({found.device, found.inode});
         if (opened != open.cend()) text = *opened;
         else if (!FolderSearch::readText(found.path, found.size, found.modified, &text)) return true;
-        QList<References::Change> changes = References::changes(text, found.path, plan.library, moves);
+        QList<DocumentLinks::Change> changes = DocumentLinks::changes(text, found.path, plan.library, moves);
         if (!changes.isEmpty()) plan.files.append({found.path, std::move(changes)});
         return true;
     }, cancel.get());
@@ -336,7 +336,7 @@ QVariantMap FileOrganizer::review() const
     int changes = 0;
     QVariantList rows;
     for (const FilePlan &file : plan.files) {
-        for (const References::Change &change : file.changes) {
+        for (const DocumentLinks::Change &change : file.changes) {
             ++changes;
             if (rows.size() >= shownChanges) continue;
             rows.append(QVariantMap{{QStringLiteral("file"), PathText::fileName(file.path)},
@@ -458,12 +458,12 @@ bool FileOrganizer::perform(const Plan &plan)
 
 void FileOrganizer::updateReferences(const Plan &plan)
 {
-    const QList<References::Move> moves{{plan.from, plan.to}};
+    const QList<DocumentLinks::Move> moves{{plan.from, plan.to}};
     int changes = 0, files = 0;
     QStringList failed;
     QList<Rewrite> closed;
     for (const FilePlan &file : plan.files) {
-        const QString now = References::moved(file.path, moves);
+        const QString now = DocumentLinks::moved(file.path, moves);
         const QString canonical = QFileInfo(now).canonicalFilePath();
         if (Document *open = m_store->documentOf(canonical)) {
             // An open document is updated as it is now, as one undo step.
@@ -473,10 +473,10 @@ void FileOrganizer::updateReferences(const Plan &plan)
             }
             SourceBuffer *buffer = open->buffer();
             const QString text = buffer->text();
-            const QList<References::Change> found = References::changes(text, file.path, plan.library, moves);
+            const QList<DocumentLinks::Change> found = DocumentLinks::changes(text, file.path, plan.library, moves);
             if (found.isEmpty()) continue;
             QList<TextSearch::Edit> edits;
-            for (const References::Change &change : found) edits.append({change.range, change.after});
+            for (const DocumentLinks::Change &change : found) edits.append({change.range, change.after});
             const TextSearch::Edit edit = TextSearch::combine(text, edits);
             if (buffer->replace(edit.range, edit.text, EditKind::Other) != SourceBuffer::EditOutcome::Applied) {
                 failed << PathText::fileName(now);
@@ -501,7 +501,7 @@ void FileOrganizer::updateReferences(const Plan &plan)
 }
 
 FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString library,
-                                                   QList<References::Move> moves, History *history)
+                                                   QList<DocumentLinks::Move> moves, History *history)
 {
     Rewritten done;
     for (const Rewrite &file : files) {
@@ -510,10 +510,10 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString
             done.failed << PathText::fileName(file.path);
             continue;
         }
-        const QList<References::Change> changes = References::changes(loaded.text, file.oldPath, library, moves);
+        const QList<DocumentLinks::Change> changes = DocumentLinks::changes(loaded.text, file.oldPath, library, moves);
         if (changes.isEmpty()) continue;
         QList<TextSearch::Edit> edits;
-        for (const References::Change &change : changes) edits.append({change.range, change.after});
+        for (const DocumentLinks::Change &change : changes) edits.append({change.range, change.after});
         const TextSearch::Edit edit = TextSearch::combine(loaded.text, edits);
         QString text = loaded.text;
         text.replace(edit.range.start, edit.range.length, edit.text);

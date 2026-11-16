@@ -36,11 +36,6 @@ bool isLoneImage(const QString &html, QString *alt = nullptr);
 // Text as Markdown shows it literally inside a line, as a link's text.
 QString escapeText(const QString &text);
 
-// A local path as a link destination: every character that is not plainly
-// safe in one, spaces, parentheses and non-ASCII among them, percent-encoded
-// as UTF-8, with "/" kept between folders.
-QString encodePath(const QString &path);
-
 // A URL as a link destination, as little changed as Markdown allows: spaces
 // and angle brackets percent-encoded, unbalanced parentheses escaped.
 QString encodeUrl(const QString &url);

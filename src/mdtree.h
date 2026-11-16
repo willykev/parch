@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 // The Markdown engine: the one interpretation of a document that the editor's
@@ -326,6 +327,10 @@ struct Source {
 struct PlainTextOptions {
     bool code = true;        // code blocks and code spans
     bool notes = true;       // footnote definitions and inline notes
+    // Only what is written within this range of the document's own text
+    // (file 0), as for a selection; the whole document when unset. Of a
+    // construct the range cuts through, the part of its source inside it.
+    std::optional<Range> range;
 };
 
 class Document {
@@ -403,7 +408,8 @@ Destination classifyDestination(const QString &destination, const QString &baseD
 Destination classifyDestination(const Document &document, const Node &linkOrImage);
 
 // A file path as a link or image destination can carry it: spaces,
-// parentheses, angle brackets, `#`, `%` and control characters are
+// parentheses, angle brackets, `#`, `%`, `&` (which could start an entity),
+// `:` (which could end a scheme), `\`, `"` and control characters are
 // percent-encoded, so that `[text](destination)` reads back as the path.
 QString encodeDestination(QStringView path);
 

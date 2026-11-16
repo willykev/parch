@@ -2,7 +2,6 @@
 
 #include "document.h"
 #include "sourcebuffer.h"
-#include "spellingexclusions.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -200,7 +199,7 @@ void SpellingLayer::start()
         if (check.cancelled->load()) return;
         const Revision revision = check.revision;
         const QString &text = check.text;
-        const QList<SourceRange> excluded = spellingExclusions(text);
+        const std::vector<md::Range> prose = spellingProse(text);
         std::vector<SourceRange> paragraphs = paragraphsOf(text);
         // The paragraphs in view first, then the rest in order.
         const int top = check.visible.start, bottom = check.visible.start + check.visible.length;
@@ -229,11 +228,10 @@ void SpellingLayer::start()
             const QStringView words = QStringView(text).sliced(paragraph.start, paragraph.length);
             // Its text and where its prose is say what it holds.
             size_t key = qHash(words);
-            auto from = std::partition_point(excluded.begin(), excluded.end(), [&](const SourceRange &range) {
-                return range.start + range.length <= paragraph.start;
-            });
-            for (; from != excluded.end() && from->start < paragraph.start + paragraph.length; ++from)
-                key = qHashMulti(key, from->start - paragraph.start, from->length);
+            auto from = std::partition_point(prose.begin(), prose.end(),
+                                             [&](const md::Range &range) { return range.end <= paragraph.start; });
+            for (; from != prose.end() && from->start < paragraph.start + paragraph.length; ++from)
+                key = qHashMulti(key, from->start - paragraph.start, from->length());
             std::vector<std::pair<int, int>> misspelled;
             bool known = false;
             {
@@ -245,7 +243,7 @@ void SpellingLayer::start()
             }
             if (!known) {
                 for (const SourceRange &word :
-                     spellingWords(text, paragraph.start, paragraph.start + paragraph.length, excluded))
+                     spellingWords(text, paragraph.start, paragraph.start + paragraph.length, prose))
                     if (!check.engine->check(text.mid(word.start, word.length)))
                         misspelled.emplace_back(word.start - paragraph.start, word.length);
                 QMutexLocker lock(&cache->mutex);

@@ -16,21 +16,23 @@
 struct Heading {
     // 1 to 6.
     int level = 1;
-    // What it says, without its marks or a trailing [label].
+    // What it says, without its marks, formatting or a trailing [label].
     QString text;
     // Where its first line starts, as a source offset.
     int position = 0;
     // Which line that is, from 0.
     int line = 0;
+    // The anchor a `#slug` link reaches it by, numbered as the document alone
+    // numbers its headings, and its Writer label, if it has one.
+    QString slug;
+    QString label;
 };
 
 namespace Outline {
-// The headings of a Markdown text, found by line rules alone until the
-// dialect's parser gives an outline of its own; this is the one place that
-// finds them, so that the parser's outline can take its place. ATX headings,
-// # to ######, and Setext headings, a paragraph underlined with = or -, are
-// found, but none inside fenced or indented code, front matter or an HTML
-// comment, nor in a block quote or a list item.
+// The headings of a Markdown text as the Markdown engine reads them, the
+// outline that {{TOC}} and anchors are made from: ATX and Setext headings,
+// wherever they stand, quotes and list items too, but never in code, front
+// matter, HTML or comments. Headings with no text are left out.
 QList<Heading> headings(const QString &text);
 } // namespace Outline
 
@@ -51,7 +53,7 @@ class OutlineModel : public QAbstractListModel {
 
 public:
     // QML reads a heading's text as "heading", since a delegate's "text" is its own.
-    enum Role { TextRole = Qt::UserRole + 1, LevelRole, PositionRole, LineRole };
+    enum Role { TextRole = Qt::UserRole + 1, LevelRole, PositionRole, LineRole, SlugRole, LabelRole };
     Q_ENUM(Role)
 
     // How long the text must rest after an edit before it is looked at again.

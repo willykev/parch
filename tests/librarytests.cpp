@@ -5,10 +5,12 @@
 #include "backend.h"
 #include "documentstore.h"
 #include "encodings.h"
+#include "filepicker.h"
 #include "foldersearch.h"
 #include "history.h"
 #include "librarymodel.h"
 #include "recentfiles.h"
+#include "rendertesting.h"
 #include "session.h"
 #include "settings.h"
 #include "tabmodel.h"
@@ -27,6 +29,7 @@
 #include <QQuickWindow>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QThreadPool>
 #include <QTimeZone>
 #include <QUuid>
 #include <QSemaphore>
@@ -314,7 +317,9 @@ void historyRetentionIsAPreference()
     QCOMPARE(history->limits().bytes, qint64(1) << 29);
     QCOMPARE(history->versions(id).size(), 2);
 
-    // Preferences change them at once, for history too, and keep them.
+    // Preferences change them, for history too, and keep them. A higher
+    // limit applies at once; a lower one waits until the limits stop
+    // changing, and removes versions only once the writer agrees.
     QQuickWindow *window = shell.window.get();
     activate(window);
     resizeWindow(window, 1000);
@@ -324,31 +329,89 @@ void historyRetentionIsAPreference()
     const auto control = [&](const char *name) {
         return qobject_cast<QQuickItem *>(findObject(window, QString::fromLatin1(name)));
     };
+    QQuickItem *section = control("historyPreferences");
+    QVERIFY(section);
+    const int settleMs = section->property("settleMs").toInt();
+    QVERIFY(settleMs >= 500);
+    QQuickItem *confirmation = control("historyRemovals");
+    QVERIFY(confirmation);
     QQuickItem *days = control("historyDaysChoice");
     QVERIFY(days);
     QCOMPARE(days->property("value").toInt(), 400);
     days->forceActiveFocus(Qt::TabFocusReason);
     QTest::keyClick(window, Qt::Key_Down);
-    QCOMPARE(shell.settings()->historyDays(), 399);
+    QCOMPARE(days->property("value").toInt(), 399);
+    QCOMPARE(shell.settings()->historyDays(), 400);
+    // Nothing is past 399 days, so nothing is asked.
+    QTRY_COMPARE(shell.settings()->historyDays(), 399);
     QTRY_COMPARE(history->limits().days, 399);
+    QVERIFY(!confirmation->isVisible());
     QQuickItem *space = control("historySpaceChoice");
     QVERIFY(space);
     space->forceActiveFocus(Qt::TabFocusReason);
     QTest::keyClick(window, Qt::Key_Up);
     QCOMPARE(shell.settings()->historyGigabytes(), 0.6);
+    for (int i = 0; i < 3; ++i) QVERIFY(!history->capture(id, QByteArray::number(i)).isEmpty());
+    QTRY_COMPARE(history->versions(id).size(), 4);
+
+    // Stepped down past what was meant and back again, it removes nothing.
     QQuickItem *versions = control("historyVersionsChoice");
     QVERIFY(versions);
     versions->forceActiveFocus(Qt::TabFocusReason);
     QTest::keyClick(window, Qt::Key_Down);
-    QCOMPARE(shell.settings()->historyVersions(), 2);
-    QTRY_COMPARE(history->limits().versions, 2);
-    // Lowered, the limit prunes, but only the unnamed version.
-    for (int i = 0; i < 3; ++i) QVERIFY(!history->capture(id, QByteArray::number(i)).isEmpty());
-    QTRY_COMPARE(history->versions(id).size(), 3);
     QTest::keyClick(window, Qt::Key_Down);
+    QCOMPARE(versions->property("value").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Up);
+    QTest::keyClick(window, Qt::Key_Up);
+    QCOMPARE(versions->property("value").toInt(), 3);
+    QTest::qWait(settleMs + 500);
+    QCOMPARE(shell.settings()->historyVersions(), 3);
+    QCOMPARE(history->limits().versions, 3);
+    QCOMPARE(history->versions(id).size(), 4);
+    QVERIFY(!confirmation->isVisible());
+
+    // Lowered and left, it says how many versions go, and Keep them leaves them.
+    QTest::keyClick(window, Qt::Key_Down);
+    QTRY_VERIFY(confirmation->isVisible());
+    QCOMPARE(section->property("removals").toInt(), 1);
+    QCOMPARE(control("historyRemovalsText")->property("text").toString(),
+             QStringLiteral("The lower limit removes 1 older version for good."));
+    QCOMPARE(shell.settings()->historyVersions(), 3);
+    QCOMPARE(history->versions(id).size(), 4);
+    QMetaObject::invokeMethod(control("historyRemovalsKeep"), "clicked");
+    QTRY_VERIFY(!confirmation->isVisible());
+    QCOMPARE(versions->property("value").toInt(), 3);
+    QCOMPARE(shell.settings()->historyVersions(), 3);
+    QTest::qWait(settleMs + 500);
+    QCOMPARE(history->versions(id).size(), 4);
+
+    // Remove them lowers it, which prunes, but only the unnamed versions.
+    versions->forceActiveFocus(Qt::TabFocusReason);
+    QTest::keyClick(window, Qt::Key_Down);
+    QTest::keyClick(window, Qt::Key_Down);
+    QTRY_COMPARE(section->property("removals").toInt(), 2);
+    QTRY_VERIFY(confirmation->isVisible());
+    QCOMPARE(control("historyRemovalsText")->property("text").toString(),
+             QStringLiteral("The lower limit removes 2 older versions for good."));
+    QMetaObject::invokeMethod(control("historyRemovalsApply"), "clicked");
     QCOMPARE(shell.settings()->historyVersions(), 1);
+    QTRY_COMPARE(history->limits().versions, 1);
     QTRY_COMPARE(history->versions(id).size(), 2);
     QCOMPARE(namesOf(history->versions(id)), (QStringList{{}, QStringLiteral("named")}));
+    QVERIFY(!confirmation->isVisible());
+
+    // A lower limit not yet agreed to is dropped as Preferences close.
+    days->forceActiveFocus(Qt::TabFocusReason);
+    QTest::keyClick(window, Qt::Key_Down);
+    QCOMPARE(days->property("value").toInt(), 398);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!isOpen(dialog));
+    QTest::qWait(settleMs + 500);
+    QCOMPARE(shell.settings()->historyDays(), 399);
+    QCOMPARE(history->limits().days, 399);
+    runIn(window, "preferences");
+    QTRY_VERIFY(isOpen(dialog));
+    QCOMPARE(days->property("value").toInt(), 399);
     QTest::keyClick(window, Qt::Key_Escape);
     QTRY_VERIFY(!isOpen(dialog));
 
@@ -356,6 +419,27 @@ void historyRetentionIsAPreference()
     QCOMPARE(kept.value(QStringLiteral("historyVersions")).toInt(), 1);
     QCOMPARE(kept.value(QStringLiteral("historyDays")).toInt(), 399);
     QCOMPARE(kept.value(QStringLiteral("historyGigabytes")).toDouble(), 0.6);
+
+    // What a lower limit would remove is counted without removing it, the
+    // space limit's oldest versions of every document too.
+    History counted(AppPaths::under(root.path() + QStringLiteral("/counted")), HistoryLimits{10, 30, qint64(1) << 30});
+    const QString a = newDocumentId(), b = newDocumentId();
+    for (int i = 0; i < 4; ++i) QVERIFY(!counted.capture(a, QByteArray(100, char('a' + i))).isEmpty());
+    for (int i = 0; i < 2; ++i) QVERIFY(!counted.capture(b, QByteArray(100, char('k' + i))).isEmpty());
+    QVERIFY(!counted.capture(b, QByteArray(100, 'n'), QStringLiteral("named")).isEmpty());
+    // Said from the pruner's thread, and taken here.
+    QList<std::pair<int, int>> said;
+    QObject::connect(
+        &counted, &History::removalsCounted, &counted,
+        [&said](int versions, int, qint64, int count) { said.append({versions, count}); }, Qt::QueuedConnection);
+    counted.countRemovals(HistoryLimits{2, 30, qint64(1) << 30});
+    QTRY_COMPARE(said.size(), 1);
+    QCOMPARE(said.last(), (std::pair<int, int>{2, 2}));
+    counted.countRemovals(HistoryLimits{10, 30, 450});
+    QTRY_COMPARE(said.size(), 2);
+    QCOMPARE(said.last(), (std::pair<int, int>{10, 3}));
+    QCOMPARE(counted.versions(a).size(), 4);
+    QCOMPARE(counted.versions(b).size(), 3);
 }
 
 void recentFilesCanBeClearedOrForgotten()
@@ -1022,6 +1106,309 @@ void historyRestoresBytesThatAreNotUtf8()
     shell.backend->store()->restoreBytes(draft, bytesId, [&refused](const QString &error) { refused = error; });
     QTRY_VERIFY(!refused.isEmpty());
     QVERIFY(draft->buffer()->text().isEmpty());
+}
+
+void restoringBytesEndsAsASaveDoes()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString folder = canonical(root.path());
+    const QByteArray original("Dear \x93" "friend\x94,\ncaf\xe9.\n");
+    // The first capture after this is held until let go, as a slow disk would.
+    QSemaphore entered, leave;
+    std::atomic<bool> holding{false};
+    const auto hold = [&] {
+        holding.store(true);
+        History::setBeforeCapture([&] {
+            if (!holding.exchange(false)) return;
+            entered.release();
+            leave.acquire();
+        });
+    };
+    const auto unhook = qScopeGuard([&] {
+        leave.release(4);
+        History::setBeforeCapture({});
+    });
+    {
+        DocumentStore store(AppPaths::under(folder + QStringLiteral("/app")));
+        const QString path = folder + QStringLiteral("/letter.md");
+        writeFile(path, "Edited.\n");
+        Document *document = store.open(path);
+        QVERIFY(document);
+        const QString versionId = store.history()->capture(document->id(), original);
+        QVERIFY(!versionId.isEmpty());
+        QVERIFY(store.waitForSaves(10000));
+        QList<std::pair<Document *, SaveStatus>> finished;
+        QObject::connect(&store, &DocumentStore::saveFinished, &store,
+                         [&finished](Document *saved, const QString &, SaveStatus status) { finished.append({saved, status}); });
+        hold();
+        QString error = QStringLiteral("<not done>");
+        store.restoreBytes(document, versionId, [&error](const QString &said) { error = said; });
+        QVERIFY(entered.tryAcquire(1, 5000));
+        QCOMPARE(document->state(), Document::State::Saving);
+        // Typed while the version goes into the file: kept, never lost.
+        document->buffer()->replace({0, 0}, QStringLiteral("Typed. "));
+        leave.release();
+        QTRY_VERIFY(error != u"<not done>");
+        QCOMPARE(error, QString());
+        QCOMPARE(readFile(path), original);
+        QTRY_COMPARE(document->state(), Document::State::ReadOnly);
+        // It ends as a save does, with a word to whatever waits for one.
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(finished.first() == (std::pair<Document *, SaveStatus>{document, SaveStatus::Saved}));
+        QVERIFY(store.waitForSaves(10000));
+        bool kept = false;
+        for (const History::Version &version : store.history()->versions(document->id()))
+            kept = kept || store.history()->read(document->id(), version.id) == QByteArray("Typed. Edited.\n");
+        QVERIFY(kept);
+
+        // Given up while it runs, the document goes once it has ended.
+        const QString other = folder + QStringLiteral("/other.md");
+        writeFile(other, "Other.\n");
+        Document *given = store.open(other);
+        QVERIFY(given);
+        const QString givenId = given->id();
+        const QString otherVersion = store.history()->capture(givenId, original);
+        QVERIFY(store.waitForSaves(10000));
+        QSignalSpy closed(&store, &DocumentStore::documentClosed);
+        hold();
+        bool done = false;
+        store.restoreBytes(given, otherVersion, [&done](const QString &) { done = true; });
+        QVERIFY(entered.tryAcquire(1, 5000));
+        QVERIFY(store.drop(given));
+        QVERIFY(store.documents().contains(given));
+        leave.release();
+        QTRY_VERIFY(done);
+        QTRY_COMPARE(closed.size(), 1);
+        QCOMPARE(closed.first().at(0).toString(), givenId);
+        QVERIFY(!store.documents().contains(given));
+        QCOMPARE(readFile(other), original);
+    }
+
+    // In the window: a tab closed while it runs closes once it has ended.
+    const QString first = folder + QStringLiteral("/first.md"), second = folder + QStringLiteral("/second.md");
+    writeFile(first, "First.\n");
+    writeFile(second, "Second.\n");
+    ShellFixture shell({.root = folder + QStringLiteral("/shell"), .files = {first, second}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    TabModel *tabs = shell.context()->tabs();
+    QTRY_COMPARE(tabs->rowCount(), 2);
+    Document *document = shell.document();
+    QCOMPARE(document->path(), second);
+    const QString versionId = shell.backend->history()->capture(document->id(), original);
+    QVERIFY(!versionId.isEmpty());
+    QVERIFY(shell.backend->store()->waitForSaves(10000));
+    hold();
+    shell.backend->restoreVersion(versionId);
+    QVERIFY(QTest::qWaitFor([&] { return entered.tryAcquire(); }, 5000));
+    shell.backend->requestCloseTab(tabs->activeIndex());
+    QCOMPARE(tabs->rowCount(), 2);
+    leave.release();
+    QTRY_COMPARE(tabs->rowCount(), 1);
+    QCOMPARE(readFile(second), original);
+}
+
+void quitLeavesAtOnceOnlyForAStuckSave()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString folder = canonical(root.path());
+    const QString path = folder + QStringLiteral("/letter.md");
+    writeFile(path, "Slow $slow a$ and $slow b$ and $slow c$ and $slow d$.\n");
+    ShellFixture shell({.root = folder + QStringLiteral("/app"), .files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    DocumentStore *store = shell.backend->store();
+    Document *document = shell.document();
+    QVERIFY(document);
+    History *history = shell.backend->history();
+    const QString older = history->capture(document->id(), "Older.\n");
+    const QString bytes = history->capture(document->id(), "caf\xe9\n");
+    QVERIFY(!older.isEmpty() && !bytes.isEmpty());
+    QVERIFY(store->waitForSaves(10000));
+    QSemaphore entered, leave;
+    std::atomic<bool> holding{false};
+    const auto hold = [&] {
+        holding.store(true);
+        History::setBeforeCapture([&] {
+            if (!holding.exchange(false)) return;
+            entered.release();
+            leave.acquire();
+        });
+    };
+    const auto unhook = qScopeGuard([&] {
+        leave.release(4);
+        History::setBeforeCapture({});
+    });
+
+    // History that does not answer holds up a restore, which is refused,
+    // but no save runs, so quitting waits for it as it ends.
+    hold();
+    QString refusal;
+    QCOMPARE(store->restoreVersion(document, older, &refusal), DocumentStore::Restore::Refused);
+    QVERIFY(entered.tryAcquire(1, 5000));
+    QVERIFY(!store->savesRunning());
+    leave.release();
+    QVERIFY(store->waitForSaves(10000));
+
+    // A restore of bytes that does not end is a save that does not end.
+    // Quitting leaves it, but first the export that runs is cancelled,
+    // leaving no file of its own, and every file's id is written.
+    Exports *exports = shell.backend->exports();
+    const QString work = folder + QStringLiteral("/work");
+    QDir().mkpath(work + QStringLiteral("/helpers"));
+    writeFakeHelpers(work + QStringLiteral("/helpers"), work + QStringLiteral("/helpers.log"));
+    exports->setRenderOptions(renderOptions(HelperSet::in(work + QStringLiteral("/helpers")), work));
+    const QString never = folder + QStringLiteral("/never.pdf");
+    exports->exportTo(document, QStringLiteral("pdf"), {}, never);
+    QVERIFY(exports->busy());
+    hold();
+    store->restoreBytes(document, bytes, [](const QString &) {});
+    QVERIFY(entered.tryAcquire(1, 5000));
+    QVERIFY(store->savesRunning());
+    const QString other = folder + QStringLiteral("/other.md");
+    writeFile(other, "Other.\n");
+    shell.backend->openFiles({other});
+    QTRY_COMPARE(shell.document()->path(), other);
+    const QString otherId = shell.document()->id();
+    QElapsedTimer waited;
+    waited.start();
+    shell.backend->endJobsBeforeLeaving(Backend::EndWaitMs);
+    QVERIFY(waited.elapsed() < 2 * Backend::EndWaitMs);
+    const QJsonObject registry = QJsonDocument::fromJson(readFile(shell.paths().registryFile())).object();
+    QVERIFY2(QJsonDocument(registry).toJson().contains(otherId.toUtf8()), qPrintable(QJsonDocument(registry).toJson()));
+    QTest::qWait(2000);
+    const QStringList left = QDir(folder).entryList(QDir::Files | QDir::Hidden);
+    QVERIFY2(!left.contains(QStringLiteral("never.pdf")), qPrintable(left.join(u',')));
+    for (const QString &name : left) QVERIFY2(!name.startsWith(QStringLiteral("never.pdf")), qPrintable(name));
+    leave.release();
+    QVERIFY(store->waitForSaves(10000));
+}
+
+void restoringReadsHistoryOffTheUiThread()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString folder = canonical(root.path());
+    const QString path = folder + QStringLiteral("/notes.md");
+    writeFile(path, "Newer.\n");
+    ShellFixture shell({.root = folder + QStringLiteral("/app"), .files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    Document *document = shell.document();
+    QVERIFY(document);
+    History *history = shell.backend->history();
+    const QString older = history->capture(document->id(), "Older.\n");
+    QVERIFY(!older.isEmpty());
+    QVERIFY(shell.backend->store()->waitForSaves(10000));
+
+    // Restore reads the version on a worker: the text is as it was until then.
+    QVERIFY(shell.backend->review()->restoreVersion(document, older));
+    QCOMPARE(document->buffer()->text(), QStringLiteral("Newer.\n"));
+    QTRY_COMPARE(document->buffer()->text(), QStringLiteral("Older.\n"));
+    QVERIFY(shell.backend->problem().isEmpty());
+    document->buffer()->undo();
+    QCOMPARE(document->buffer()->text(), QStringLiteral("Newer.\n"));
+    // A version that is gone is said to be, once it has been looked for.
+    QVERIFY(shell.backend->review()->restoreVersion(document, QStringLiteral("20200101T000000000-000000000000")));
+    QTRY_COMPARE(shell.backend->problem(), QStringLiteral("Not restored"));
+    QCOMPARE(shell.backend->problemDetail(), QStringLiteral("That version is no longer in history"));
+    QCOMPARE(document->buffer()->text(), QStringLiteral("Newer.\n"));
+
+    // Keeping the text it replaces waits on history alone, not on every
+    // other job: with the shared pool busy, as with saves and looks at
+    // files on a slow disk, the restore still goes ahead at once.
+    const int threads = QThreadPool::globalInstance()->maxThreadCount();
+    const auto gate = std::make_shared<QSemaphore>();
+    for (int i = 0; i < threads; ++i) QThreadPool::globalInstance()->start([gate] { gate->acquire(); });
+    const auto released = qScopeGuard([&] { gate->release(threads); });
+    QElapsedTimer clock;
+    clock.start();
+    QString refusal;
+    QCOMPARE(shell.backend->store()->restoreVersion(document, older, &refusal), DocumentStore::Restore::Restored);
+    QVERIFY2(clock.elapsed() < DocumentStore::HistoryWaitMs, qPrintable(QString::number(clock.elapsed())));
+    QCOMPARE(document->buffer()->text(), QStringLiteral("Older.\n"));
+}
+
+namespace {
+
+// A file dialog that answers Save as… only when told.
+class NamePicker : public FilePicker {
+public:
+    int saves = 0;
+    void openDocuments() override {}
+    void openFolder() override {}
+    void saveDocument(const QUrl &) override { ++saves; }
+};
+
+} // namespace
+
+void savingAsOverAReencodedFileAsksFirst()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString folder = canonical(root.path());
+    const QString path = folder + QStringLiteral("/letter.md");
+    const QByteArray original("Dear \x93" "friend\x94,\ncaf\xe9.\n");
+    const QByteArray edited = QStringLiteral("Edited. Dear “friend”,\ncafé.\n").toUtf8();
+    writeFile(path, original);
+    {
+        // The store says it did not save, rather than that it did.
+        DocumentStore store(AppPaths::under(folder + QStringLiteral("/store")));
+        Document *document = store.open(path);
+        QVERIFY(document);
+        EncodingChoice choice;
+        choice.setDocument(document);
+        QTRY_VERIFY(choice.ready());
+        const Encodings::Decoded decoded = choice.decoded();
+        QVERIFY(store.reopenAs(document, decoded.text, decoded.convention, choice.name(), choice.version()));
+        document->buffer()->replace({0, 0}, QStringLiteral("Edited. "));
+        QList<std::pair<QString, SaveStatus>> finished;
+        QObject::connect(&store, &DocumentStore::saveFinished, &store,
+                         [&finished](Document *, const QString &name, SaveStatus status) { finished.append({name, status}); });
+        store.saveAs(document, path);
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(finished.first() == (std::pair<QString, SaveStatus>{path, SaveStatus::Failed}));
+        QVERIFY(store.waitForSaves(10000));
+        QCOMPARE(readFile(path), original);
+    }
+
+    ShellFixture shell({.root = folder + QStringLiteral("/app"), .files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    Document *document = shell.document();
+    QVERIFY(document);
+    EncodingChoice choice;
+    choice.setDocument(document);
+    QTRY_VERIFY(choice.ready());
+    QVERIFY(shell.backend->reopenAs(document, &choice));
+    document->buffer()->replace({0, 0}, QStringLiteral("Edited. "));
+    QCOMPARE(document->state(), Document::State::Modified);
+    NamePicker picker;
+    shell.backend->setFilePicker(&picker);
+    QObject *dialog = shell.object(QStringLiteral("encodingDialog"));
+    QVERIFY(dialog);
+
+    // Save as… onto its own file asks what Save asks, and writes nothing yet.
+    shell.backend->saveAs();
+    QCOMPARE(picker.saves, 1);
+    emit picker.saveSelected(QUrl::fromLocalFile(path));
+    QTRY_VERIFY(isOpen(dialog));
+    QVERIFY(dialog->property("confirming").toBool());
+    QCOMPARE(readFile(path), original);
+    QCOMPARE(document->state(), Document::State::Modified);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!isOpen(dialog));
+    // So does trying a save again.
+    shell.backend->retrySave();
+    QTRY_VERIFY(isOpen(dialog));
+    QVERIFY(dialog->property("confirming").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!isOpen(dialog));
+    QCOMPARE(readFile(path), original);
+    // Confirmed, it is written as UTF-8.
+    shell.backend->confirmEncoding(document);
+    QTRY_COMPARE(document->state(), Document::State::Clean);
+    QCOMPARE(readFile(path), edited);
 }
 
 void reopeningRefusesAFileThatChanged()

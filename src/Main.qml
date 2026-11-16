@@ -33,6 +33,7 @@ ApplicationWindow {
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
                                        || encodingDialog.visible
                                        || documentSettingsDialog.visible || exportDialog.visible
+                                       || exportReplacePrompt.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -534,11 +535,18 @@ ApplicationWindow {
     // The heading with this slug in the document in front, as a link to
     // another document names one; nothing when it has none.
     function showAnchor(slug) {
-        if (!document)
-            return
-        const position = previewPane.preview.headingSource(slug)
-        if (position >= 0)
-            showHeading(position)
+        if (document)
+            anchorRequest = previewPane.preview.findHeading(slug)
+    }
+    // The heading showAnchor() asked for last, which is shown once found.
+    property int anchorRequest: 0
+
+    Connections {
+        target: previewPane.preview
+        function onHeadingFound(request, slug, position) {
+            if (request === window.anchorRequest && position >= 0)
+                window.showHeading(position)
+        }
     }
 
     // Search across the library, starting from the selection when it is one line.
@@ -671,9 +679,10 @@ ApplicationWindow {
     }
 
     // The commands about a note reference that nothing defines are there
-    // while the caret is on one.
+    // while the caret is on one, and superscript and subscript where the
+    // dialect reads what they write: after a letter or a digit.
     function fitsCaret(command) {
-        if (command !== "inlineNote" && command !== "defineNote")
+        if (command !== "inlineNote" && command !== "defineNote" && command !== "superscript" && command !== "subscript")
             return true
         return editorPane.cursorSource >= 0 && editorPane.binding.acts(command)
     }
@@ -1402,7 +1411,76 @@ ApplicationWindow {
     ExportDialog {
         id: exportDialog
         objectName: "exportDialog"
+        context: window.context
         onClosed: window.dialogClosed()
+    }
+
+    // An export the file dialog was given a name for without its suffix
+    // would write over the file of that name with it, which the file dialog
+    // never asked about; this asks, with Cancel in front.
+    ThemedDialog {
+        id: exportReplacePrompt
+        objectName: "exportReplacePrompt"
+
+        property string path
+        property bool answered: false
+        readonly property string name: path.substring(path.lastIndexOf("/") + 1)
+
+        function ask(path) {
+            exportReplacePrompt.path = path
+            exportReplacePrompt.answered = false
+            open()
+        }
+
+        function answer(replace) {
+            exportReplacePrompt.answered = true
+            backend.exports.answerReplace(replace)
+            close()
+        }
+
+        title: qsTr("Replace “%1”?").arg(exportReplacePrompt.name)
+        preferredCharacters: 52
+        initialFocus: exportReplaceCancel
+        onClosed: {
+            if (!exportReplacePrompt.answered)
+                backend.exports.answerReplace(false)
+            window.dialogClosed()
+        }
+
+        contentItem: Text {
+            text: qsTr("“%1” is already in %2. Exporting writes over it.")
+                      .arg(exportReplacePrompt.name).arg(backend.folderLabel(exportReplacePrompt.path))
+            textFormat: Text.PlainText
+            font.family: theme.fontFamily
+            font.pixelSize: theme.fontSize
+            color: theme.foreground
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+
+        footer: ThemedDialog.Choices {
+            ThemedDialog.Choice {
+                objectName: "exportReplace"
+                text: qsTr("Replace")
+                textColor: theme.danger
+                onClicked: exportReplacePrompt.answer(true)
+            }
+            ThemedDialog.Choice {
+                id: exportReplaceCancel
+                objectName: "exportReplaceCancel"
+                text: qsTr("Cancel")
+                onClicked: exportReplacePrompt.answer(false)
+            }
+        }
+    }
+
+    Connections {
+        target: backend.exports
+        function onReplaceAsked(asker, path) {
+            if (asker === window.context)
+                exportReplacePrompt.ask(path)
+        }
     }
 
     ShortcutsDialog {

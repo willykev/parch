@@ -7,6 +7,7 @@ namespace EditingTests {
 
 void sourceEditsGroupIntoOneUndoStep();
 void inlineFormattingWrapsAndToggles();
+void scriptsWriteWhatTheDialectReads();
 void linksAndImagesSelectWhatComesNext();
 void headingsFollowTheChosenSyntax();
 void blockFormattingTogglesEveryLine();
@@ -24,6 +25,7 @@ void preferencesApplyLiveToEveryWindow();
 void toolbarShowsHidesAndRunsCommands();
 void formattingCommandsRunFromEveryEntryPoint();
 void undefinedNotesBecomeInlineOrDefined();
+void noteMenuFindsItsReferenceAgain();
 void assistiveTechnologyEditsTheSource();
 void wordCountsFollowTextAndSelection();
 

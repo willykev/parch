@@ -19,6 +19,10 @@ void encodingsDecodeWhatUtf8CannotRead();
 void reopeningInAnotherEncodingSavesOnlyOnceConfirmed();
 void reopeningRefusesAFileThatChanged();
 void historyRestoresBytesThatAreNotUtf8();
+void restoringBytesEndsAsASaveDoes();
+void quitLeavesAtOnceOnlyForAStuckSave();
+void savingAsOverAReencodedFileAsksFirst();
+void restoringReadsHistoryOffTheUiThread();
 void repeatedLibrarySearchesReadLittleAgain();
 
 } // namespace LibraryTests

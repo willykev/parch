@@ -399,6 +399,8 @@ private slots:
     {
         ExportTests::exportDialogListsLimitationsAndExportsInTheBackground();
     }
+    void exportsAskBeforeReplacingWhatTheSuffixNames() { ExportTests::exportsAskBeforeReplacingWhatTheSuffixNames(); }
+    void exportCodeIsColouredWithoutAPreviewShownFirst() { ExportTests::codeIsColouredWithoutAPreviewShownFirst(); }
     void exportAgainRepeatsTheRecipe() { ExportTests::exportAgainRepeatsTheRecipe(); }
     void printingGoesThroughThePortal() { ExportTests::printingGoesThroughThePortal(); }
     void printPreviewShowsThePagesThePdfHas() { ExportTests::printPreviewShowsThePagesThePdfHas(); }
@@ -692,6 +694,7 @@ private slots:
     // counts and the writing surface's settings, written in editingtests.cpp.
     void sourceEditsGroupIntoOneUndoStep() { EditingTests::sourceEditsGroupIntoOneUndoStep(); }
     void inlineFormattingWrapsAndToggles() { EditingTests::inlineFormattingWrapsAndToggles(); }
+    void scriptsWriteWhatTheDialectReads() { EditingTests::scriptsWriteWhatTheDialectReads(); }
     void linksAndImagesSelectWhatComesNext() { EditingTests::linksAndImagesSelectWhatComesNext(); }
     void headingsFollowTheChosenSyntax() { EditingTests::headingsFollowTheChosenSyntax(); }
     void blockFormattingTogglesEveryLine() { EditingTests::blockFormattingTogglesEveryLine(); }
@@ -709,6 +712,7 @@ private slots:
     void toolbarShowsHidesAndRunsCommands() { EditingTests::toolbarShowsHidesAndRunsCommands(); }
     void formattingCommandsRunFromEveryEntryPoint() { EditingTests::formattingCommandsRunFromEveryEntryPoint(); }
     void undefinedNotesBecomeInlineOrDefined() { EditingTests::undefinedNotesBecomeInlineOrDefined(); }
+    void noteMenuFindsItsReferenceAgain() { EditingTests::noteMenuFindsItsReferenceAgain(); }
     void assistiveTechnologyEditsTheSource() { EditingTests::assistiveTechnologyEditsTheSource(); }
     void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
     // How much history keeps, other encodings, the library's width, files
@@ -727,6 +731,10 @@ private slots:
     void reopeningInAnotherEncodingSavesOnlyOnceConfirmed() { LibraryTests::reopeningInAnotherEncodingSavesOnlyOnceConfirmed(); }
     void reopeningRefusesAFileThatChanged() { LibraryTests::reopeningRefusesAFileThatChanged(); }
     void historyRestoresBytesThatAreNotUtf8() { LibraryTests::historyRestoresBytesThatAreNotUtf8(); }
+    void restoringBytesEndsAsASaveDoes() { LibraryTests::restoringBytesEndsAsASaveDoes(); }
+    void quitLeavesAtOnceOnlyForAStuckSave() { LibraryTests::quitLeavesAtOnceOnlyForAStuckSave(); }
+    void savingAsOverAReencodedFileAsksFirst() { LibraryTests::savingAsOverAReencodedFileAsksFirst(); }
+    void restoringReadsHistoryOffTheUiThread() { LibraryTests::restoringReadsHistoryOffTheUiThread(); }
     void repeatedLibrarySearchesReadLittleAgain() { LibraryTests::repeatedLibrarySearchesReadLittleAgain(); }
     // The preview and the three views, written in previewtests.cpp.
     void viewModesAreKeptByEachView() { PreviewTests::viewModesAreKeptByEachView(); }
@@ -766,6 +774,11 @@ private slots:
     void citationsReadAsTheirStyleWordsThem() { PreviewTests::citationsReadAsTheirStyleWordsThem(); }
     void documentSettingsReachThePreview() { PreviewTests::documentSettingsReachThePreview(); }
     void previewFollowsFilesOnDisk() { PreviewTests::previewFollowsFilesOnDisk(); }
+    void drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize()
+    {
+        PreviewTests::drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize();
+    }
+    void headingLinksAreFoundInTheSharedParse() { PreviewTests::headingLinksAreFoundInTheSharedParse(); }
     // The Markdown guide, written in guidetests.cpp.
     void markdownGuideOpensBesideItsPreview() { GuideTests::markdownGuideOpensBesideItsPreview(); }
     void markdownGuideRendersEveryPart() { GuideTests::markdownGuideRendersEveryPart(); }
@@ -18480,13 +18493,13 @@ void ParchTests::historyDialogRestoresAsUndoableEdit()
     typeText(window, QStringLiteral("newer"));
     QCOMPARE(document->buffer()->text(), QStringLiteral("newer"));
     shell.backend->restoreVersion(olderId);
-    QCOMPARE(document->buffer()->text(), QStringLiteral("older"));
+    QTRY_COMPARE(document->buffer()->text(), QStringLiteral("older"));
     shell.binding()->undo();
     QCOMPARE(document->buffer()->text(), QStringLiteral("newer"));
     // A version that cannot be restored says why, and changes nothing.
     shell.backend->restoreVersion(QStringLiteral("20200101T000000000-000000000000"));
+    QTRY_COMPARE(shell.backend->problem(), QStringLiteral("Not restored"));
     QCOMPARE(document->buffer()->text(), QStringLiteral("newer"));
-    QCOMPARE(shell.backend->problem(), QStringLiteral("Not restored"));
     QCOMPARE(shell.backend->problemDetail(), QStringLiteral("That version is no longer in history"));
 }
 
@@ -19283,7 +19296,7 @@ void ParchTests::historyDialogNamesDeletesAndGuardsRestore()
     QTRY_VERIFY(footButton(dialog, QStringLiteral("Restore"))->isEnabled());
     document->buffer()->replace({0, 3}, QStringLiteral("later"));
     click(window, footButton(dialog, QStringLiteral("Restore")));
-    QCOMPARE(document->buffer()->text(), QStringLiteral("now"));
+    QTRY_COMPARE(document->buffer()->text(), QStringLiteral("now"));
     QTRY_VERIFY(!isOpen(dialog));
     QTRY_COMPARE(window->activeFocusItem(), shell.item(QStringLiteral("editor")));
     shell.binding()->undo();
@@ -21235,8 +21248,8 @@ void ParchTests::restoreRefusalsAlwaysSayWhy()
     QCOMPARE(draft->lastError(), saveError);
     // Every refusal is said, the same one again too.
     for (int time = 0; time < 2; ++time) {
-        QVERIFY(!shell.backend->review()->restoreVersion(draft, missing));
-        QCOMPARE(shell.backend->problem(), QStringLiteral("Not restored"));
+        QVERIFY(shell.backend->review()->restoreVersion(draft, missing));
+        QTRY_COMPARE(shell.backend->problem(), QStringLiteral("Not restored"));
         QCOMPARE(shell.backend->problemDetail(), why);
         shell.backend->dismissNotice();
         QVERIFY(shell.backend->problem().isEmpty());
@@ -21574,7 +21587,7 @@ void ParchTests::historyActionsActOnTheirDocument()
     QTRY_COMPARE(history->versions(first->id()).first().name, QStringLiteral("Renamed"));
     first->buffer()->replace({0, 5}, QStringLiteral("later"));
     QVERIFY(review->restoreVersion(first, version));
-    QCOMPARE(first->buffer()->text(), QStringLiteral("alpha"));
+    QTRY_COMPARE(first->buffer()->text(), QStringLiteral("alpha"));
     QCOMPARE(second->buffer()->text(), QStringLiteral("beta"));
     review->removeVersion(first, version);
     const auto gone = [&] {

@@ -69,7 +69,11 @@ bool end(Backend &backend, AppService &service, int waitMs, Exit exit)
     service.refuse(QCoreApplication::translate("QuitSignals", "parch is closing. Open the files again once it has."));
     const bool settled = backend.end(waitMs);
     service.close();
-    if (!settled) exit(0);
+    if (!settled) {
+        // Leaving at once: an export stops first, and the files' ids are written.
+        backend.endJobsBeforeLeaving(waitMs);
+        exit(0);
+    }
     return settled;
 }
 } // namespace QuitSignals

@@ -35,5 +35,8 @@ QString languageOf(const QString &info);
 // object lives on: called there, before code is read on any other thread.
 // Code read on another thread before then is left plain.
 void prepare();
+// Lets go of the list of languages, as the application's end does, so that
+// a test starts as a launch does.
+void unload();
 
 } // namespace CodeHighlight

@@ -22,6 +22,7 @@
 #include "windowcontext.h"
 
 #include <QCoreApplication>
+#include <QDeadlineTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -259,6 +260,9 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     // The limits history keeps change with the settings, and apply at once.
     m_historyLimits = historyLimitsOf(m_settings);
     connect(m_settings, &Settings::changed, this, &Backend::followHistoryLimits);
+    connect(history(), &History::removalsCounted, this, [this](int versions, int days, qint64 bytes, int count) {
+        emit historyRemovalsCounted(versions, days, double(qRound64(double(bytes) * 10 / (qint64(1) << 30))) / 10, count);
+    }, Qt::QueuedConnection);
     // The file dialogs' answers, and the dialogs' actions, are actions too:
     // each clears a notice, and what goes wrong is one.
     connect(m_files.get(), &FileRequests::answered, this, &Backend::clearNotice);
@@ -684,7 +688,11 @@ void Backend::retrySave()
     WindowContext *window = activeWindow();
     Document *document = this->document();
     if (!window || !document) return;
-    if (!m_files->retryNaming(window, document, false)) m_store->save(document);
+    // A file read in another encoding is written as UTF-8 only once the writer says so.
+    if (!m_files->retryNaming(window, document, false)) {
+        if (!document->convertedFrom().isEmpty()) window->askToConfirmEncoding(document);
+        else m_store->save(document);
+    }
     if (m_recoveryFailures.contains(document->id())) retryRecovery();
 }
 
@@ -740,6 +748,13 @@ void Backend::quit()
     setProblem(tr("Quit refused: not saved"),
                tr("Some text is in neither its file nor recovery, so parch stays open until it is in one of them.\n%1")
                    .arg(problems));
+}
+
+void Backend::endJobsBeforeLeaving(int waitMs)
+{
+    const QDeadlineTimer deadline(waitMs);
+    m_exports->stop(int(deadline.remainingTime()));
+    m_store->waitForRegistry(int(std::max<qint64>(0, deadline.remainingTime())));
 }
 
 bool Backend::end(int waitMs)
@@ -1014,6 +1029,15 @@ QString Backend::shownText(const QString &text) const
 void Backend::forgetRecoveryFailure(const QString &documentId)
 {
     if (m_recoveryFailures.remove(documentId) > 0) emit recoveryFailuresChanged();
+}
+
+void Backend::countHistoryRemovals(int versions, int days, double gigabytes)
+{
+    HistoryLimits limits;
+    limits.versions = versions;
+    limits.days = days;
+    limits.bytes = qRound64(gigabytes * 10) * (qint64(1) << 30) / 10;
+    history()->countRemovals(limits);
 }
 
 void Backend::followHistoryLimits()

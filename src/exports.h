@@ -89,13 +89,22 @@ public:
     // What the format, with these options, leaves out of the document
     // read() read; empty until it has been read.
     Q_INVOKABLE QStringList limitations(const QString &format, const QVariantMap &options) const;
-    // Asks where to write the document in the format, then exports it there.
-    Q_INVOKABLE void exportDocument(Document *document, const QString &format, const QVariantMap &options);
+    // Asks where to write the document in the format, for the window, then
+    // exports it there.
+    Q_INVOKABLE void exportDocument(Document *document, const QString &format, const QVariantMap &options,
+                                    WindowContext *window = nullptr);
+    // The window's answer to replaceAsked(): writes over the file, or leaves
+    // it as it is and exports nothing.
+    Q_INVOKABLE void answerReplace(bool replace);
     // Exports it to a path the writer chose.
     Q_INVOKABLE void exportTo(Document *document, const QString &format, const QVariantMap &options, const QString &path);
     // Asks the desktop how to print, then prints the document's PDF.
     Q_INVOKABLE void print(Document *document, const QVariantMap &options);
     Q_INVOKABLE void cancel();
+    // Cancels the export or print that runs and waits, for at most waitMs,
+    // until it has stopped and taken away what it had begun to write; false
+    // when it is still running then.
+    bool stop(int waitMs);
     // The format and options the document was last exported with, for the
     // dialog to start from; empty when it never was.
     Q_INVOKABLE QString lastFormat(Document *document) const;
@@ -116,6 +125,11 @@ signals:
     void readChanged();
     // An export or a print ended.
     void finished(bool ok);
+    // The file dialog was given a name without the format's suffix, and the
+    // name with it, `path`, is a file that is there already, which the
+    // dialog never asked about. The window that asked asks whether to write
+    // over it; answerReplace() is its answer.
+    void replaceAsked(WindowContext *window, const QString &path);
     // For the notice bar: news, or a problem.
     void news(const QString &news, const QString &detail);
     void problem(const QString &problem, const QString &detail);
@@ -156,14 +170,17 @@ private:
     int m_revision = 0;
     quint64 m_readGeneration = 0;
 
-    // What is waiting for the file dialog's or the print dialog's answer.
+    // What is waiting for the file dialog's or the print dialog's answer,
+    // or for the window's about replacing a file.
     struct Asked {
         QPointer<Document> document;
         QString format;
         QHash<QString, QString> options;
+        QString output = {};
     };
     Asked m_asked;
     Asked m_printing;
+    Asked m_replacing;
 
     // Each document's last recipe, by document id.
     QHash<QString, QJsonObject> m_recipes;

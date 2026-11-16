@@ -493,8 +493,14 @@ Rectangle {
         // The dialect has inline notes.
         property bool inline: false
 
+        // The text may have changed while the menu was open, as through
+        // another view of the document: the reference is found again by its
+        // label, and one that has gone is acted on nowhere else.
         function run(command) {
-            binding.select(noteMenu.position, noteMenu.position)
+            const at = binding.undefinedNoteNear(noteMenu.label, noteMenu.position)
+            if (at < 0)
+                return
+            binding.select(at, at)
             binding.format(command)
         }
 

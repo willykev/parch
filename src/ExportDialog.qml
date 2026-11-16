@@ -13,6 +13,8 @@ ThemedDialog {
     id: dialog
 
     property Document document: null
+    // The window the dialog is in, which asks whether to replace a file.
+    property WindowContext context: null
     // "export" or "print".
     property string mode: "export"
     property string format: "pdf"
@@ -85,7 +87,7 @@ ThemedDialog {
         if (dialog.mode === "print")
             backend.exports.print(dialog.document, dialog.values)
         else
-            backend.exports.exportDocument(dialog.document, dialog.format, dialog.values)
+            backend.exports.exportDocument(dialog.document, dialog.format, dialog.values, dialog.context)
         dialog.close()
     }
 

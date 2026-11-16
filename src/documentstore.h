@@ -149,12 +149,20 @@ public:
     // left as it is, with the reason for that in refusal.
     enum class Restore { Restored, Unchanged, Refused };
     Restore restoreVersion(Document *document, const QString &versionId, QString *refusal = nullptr);
+    // The same with the version's bytes read already, off the UI thread;
+    // none when history no longer has it.
+    Restore restoreRead(Document *document, const std::optional<QByteArray> &bytes, QString *refusal = nullptr);
     // Returns once no save is running, with each save's outcome applied.
     void waitForSaves();
     // The same, but for at most timeoutMs: false when a save is still running then.
     bool waitForSaves(int timeoutMs);
-    // Whether a save, or other work on a document's file, is still running.
+    // Whether a save of a document is still running: one of its text, a
+    // naming, or a restore of bytes. Other work, such as a version kept in
+    // history, is not a save.
     bool savesRunning() const;
+    // Waits, for at most timeoutMs, until the record of which file is which
+    // document is written; false when it is still being written then.
+    bool waitForRegistry(int timeoutMs);
     QList<Document *> documents() const;
     // Whether the id is an unnamed draft's: one of the ids parch gives
     // drafts, and not a document's that has been named since. A draft
@@ -219,7 +227,9 @@ public:
     // the UI thread; `done` is called here with why not, should that be so:
     // a draft keeps UTF-8 text only, and a file changed meanwhile, or one
     // history could not keep the text of, is left as it is. A save of the
-    // document that runs is waited for first.
+    // document that runs is waited for first. It runs as a save does, and
+    // ends as one, with saveFinished(); text typed meanwhile is kept in
+    // history before the file's bytes replace it.
     void restoreBytes(Document *document, const QString &versionId, std::function<void(const QString &error)> done);
 
     // A draft deleted from the library is set aside, in a hidden folder
@@ -496,6 +506,10 @@ private:
     void putHere(Document *document, const QString &name);
     void run(Document *document, const SaveJob &job);
     void finish(Document *document, const SaveJob &job, SaveOutcome outcome);
+    // A restore of bytes ended, as a save ends: the file is taken when it
+    // was restored, saveFinished() said, and a document given up meanwhile closed.
+    void restoredBytes(Document *document, const LoadedFile &loaded, bool restored, const QString &error,
+                       const std::function<void(const QString &error)> &done);
     void refuse(Document *document, const QString &error);
     void closeIfUnused(Document *document);
     // Asks for a view for a document that has none and needs the writer.
@@ -555,6 +569,11 @@ private:
     std::atomic<bool> m_registryDamaged{false};
     // One thread, so that the registry's writes land in the order asked.
     QThreadPool m_registryWriter;
+    // The text a Reload, an Overwrite or a restore is about to replace goes
+    // to history on a thread of its own, so that the bounded wait for it is
+    // a wait for history alone, never for the saves and looks at files the
+    // shared pool runs.
+    QThreadPool m_historyKeeper;
     // Targets of names being saved, by canonical path. A document owns its new
     // name from the moment the save starts, so that no other document can
     // open or take the same file before the save finishes.

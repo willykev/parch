@@ -383,6 +383,78 @@ std::optional<Style> styleOf(const QString &command)
     return std::nullopt;
 }
 
+// Whether a position on a line is inside a code span: between a run of
+// backticks and the next run as long.
+bool inCodeSpan(QStringView text, int position)
+{
+    const Line line = lineAt(text, position);
+    for (int i = line.start; i < line.end;) {
+        if (text[i] == u'\\') {
+            i += 2;
+            continue;
+        }
+        if (text[i] != u'`') {
+            ++i;
+            continue;
+        }
+        const int open = runAfter(text, i, u'`');
+        int close = i + open;
+        while (close < line.end) {
+            if (text[close] != u'`') {
+                ++close;
+                continue;
+            }
+            const int run = runAfter(text, close, u'`');
+            if (run == open) break;
+            close += run;
+        }
+        if (close >= line.end) {
+            i += open;
+            continue;
+        }
+        if (position >= i + open && position <= close) return true;
+        i = close + open;
+    }
+    return false;
+}
+
+// Whether the dialect reads [start, end) as a superscript or subscript once
+// it has the marker either side, as the inline parser reads one: after a
+// letter, a digit, a mark or what closes a group; holding no white space,
+// code, brackets or marker of its own, and not ending in a backslash, which
+// would escape the closing marker; with no marker beside it, which would
+// make a tilde's a strikethrough or leave a caret after it with nothing to
+// raise; not right after a run that is raised or lowered already; and not
+// inside code. An empty span is where a pair is inserted.
+bool scriptFits(QStringView text, int start, int end, QChar marker)
+{
+    if (start <= 0) return false;
+    char32_t base = text[start - 1].unicode();
+    if (QChar::isLowSurrogate(base) && start >= 2 && text[start - 2].isHighSurrogate())
+        base = QChar::surrogateToUcs4(text[start - 2], text[start - 1]);
+    const QChar::Category category = QChar::category(base);
+    if (!QChar::isLetterOrNumber(base) && !QChar::isMark(base) && category != QChar::Punctuation_Close
+        && category != QChar::Punctuation_FinalQuote)
+        return false;
+    for (int i = start; i < end; ++i) {
+        const QChar c = text[i];
+        if (c == u'\\') {
+            if (i + 1 >= end) return false;
+            ++i;
+            continue;
+        }
+        if (c.isSpace() || c == u'`' || c == u'[' || c == u']' || c == marker) return false;
+    }
+    if (end < text.size() && text[end] == marker) return false;
+    // A base that is itself raised or lowered, as the 2 of x^2, would have
+    // the marker written after it close that one instead.
+    int back = start;
+    while (back > 0 && (text[back - 1].isLetterOrNumber() || text[back - 1].isMark() || text[back - 1].isSurrogate()))
+        --back;
+    if (back > 0 && text[back - 1] == marker && !(back > 1 && text[back - 2] == u'\\')) return false;
+    return !inCodeSpan(text, start);
+}
+
 // How one inline command wraps and unwraps a span of a line.
 struct InlineKind {
     // The edits that take the markers around or at the edges of [start, end)
@@ -396,6 +468,10 @@ struct InlineKind {
     std::function<std::pair<QString, int>()> insert;
     // Wraps a selection over several lines as one span rather than line by line.
     bool spansLines = false;
+    // Whether markers wrapped around [start, end), or inserted at a caret
+    // when they are the same, make what the command is for; every span
+    // when not given.
+    std::function<bool(QStringView, int, int)> fits;
 };
 
 // Runs of one character on a line, outside code spans, as [start, end).
@@ -567,7 +643,15 @@ InlineKind commentKind()
 
 std::optional<InlineKind> inlineKindOf(const QString &command)
 {
-    if (const auto style = styleOf(command)) return styleKind(*style);
+    if (const auto style = styleOf(command)) {
+        InlineKind kind = styleKind(*style);
+        // Superscript and subscript are written only where the dialect reads them.
+        if (command == u"superscript" || command == u"subscript") {
+            const QChar marker = style->marker.front();
+            kind.fits = [marker](QStringView text, int start, int end) { return scriptFits(text, start, end, marker); };
+        }
+        return kind;
+    }
     if (command == u"code") return codeKind();
     if (command == u"comment") return commentKind();
     return std::nullopt;
@@ -599,6 +683,7 @@ std::optional<TextChange> toggleInline(const InlineKind &kind, QStringView text,
     const int start = qMin(anchor, cursor), end = qMax(anchor, cursor);
     if (start == end) {
         if (auto removed = kind.remove(text, start)) return removed;
+        if (kind.fits && !kind.fits(text, start, start)) return std::nullopt;
         const auto [inserted, caret] = kind.insert();
         return TextChange{{{{start, 0}, inserted}}, start + caret, start + caret};
     }
@@ -613,8 +698,13 @@ std::optional<TextChange> toggleInline(const InlineKind &kind, QStringView text,
     }
     QList<SourceEdit> edits;
     for (int i = 0; i < segments.size(); ++i) {
-        if (allWrapped) edits += *unwraps[i];
-        else if (!unwraps[i]) edits += kind.wrap(text, segments[i].first, segments[i].second);
+        if (allWrapped) {
+            edits += *unwraps[i];
+        } else if (!unwraps[i]) {
+            // A span that cannot take it leaves the whole selection as it is.
+            if (kind.fits && !kind.fits(text, segments[i].first, segments[i].second)) return std::nullopt;
+            edits += kind.wrap(text, segments[i].first, segments[i].second);
+        }
     }
     sortEdits(edits);
     // The text of the segments stays selected, without the markers.
@@ -893,6 +983,17 @@ SourceEdit removeLine(QStringView text, const Line &line, bool closing = false)
     return {{line.start, line.length()}, {}};
 }
 
+// The edits that take away a block's opening and closing fence lines. The
+// fences of an empty block share a line break, so they go together, with
+// one line break, rather than each with a break of its own.
+QList<SourceEdit> removeFences(QStringView text, const Line &open, const Line &close)
+{
+    if (close.start != open.next) return {removeLine(text, open), removeLine(text, close, true)};
+    if (close.hasBreak()) return {{{open.start, close.next - open.start}, {}}};
+    if (const auto before = lineBefore(text, open)) return {{{before->end, close.end - before->end}, {}}};
+    return {{{open.start, close.end - open.start}, {}}};
+}
+
 // Wraps the lines a selection touches between fence lines, or takes the
 // fences away from lines that have them; a caret on a blank line gets an
 // empty block to write in.
@@ -909,11 +1010,11 @@ std::optional<TextChange> toggleFencedBlock(QStringView text, int anchor, int cu
     };
     // The selection holds the fences, or the lines around it are fences.
     if (lines.size() >= 2 && opensAndCloses(lines.first(), lines.last()))
-        return mapped({removeLine(text, lines.first()), removeLine(text, lines.last(), true)}, anchor, cursor);
+        return mapped(removeFences(text, lines.first(), lines.last()), anchor, cursor);
     const auto above = lineBefore(text, lines.first());
     const auto below = lineAfter(text, lines.last());
     if (above && below && opensAndCloses(*above, *below))
-        return mapped({removeLine(text, *above), removeLine(text, *below, true)}, anchor, cursor);
+        return mapped(removeFences(text, *above, *below), anchor, cursor);
 
     QString fence = math ? QStringLiteral("$$") : QStringLiteral("```");
     if (lines.size() == 1 && isBlank(textOf(text, lines.first()))) {
@@ -983,7 +1084,10 @@ TextChange insertBlock(QStringView text, int position, const QString &block, int
         change.anchor = blockStart + select;
         change.cursor = change.anchor + length;
     } else {
-        change.anchor = change.cursor = blockStart + int(block.size() + nl.size());
+        // Past the line break after the block: the one written, or else the
+        // line's own, which may be another than the document's.
+        const int lineBreak = after.isEmpty() ? line.next - line.end : int(after.size());
+        change.anchor = change.cursor = blockStart + int(block.size()) + lineBreak;
     }
     return change;
 }

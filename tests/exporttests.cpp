@@ -3,6 +3,7 @@
 #include "backend.h"
 #include "cli.h"
 #include "clicommands.h"
+#include "codehighlight.h"
 #include "commandregistry.h"
 #include "document.h"
 #include "documentcheck.h"
@@ -13,11 +14,13 @@
 #include "paperdocument.h"
 #include "pdfexport.h"
 #include "pdfoutline.h"
+#include "previewstyle.h"
 #include "printportal.h"
 #include "printpreview.h"
 #include "rendertesting.h"
 #include "svgpaper.h"
 #include "testfiles.h"
+#include "windowcontext.h"
 #include "windowtesting.h"
 #include "zippackage.h"
 
@@ -42,6 +45,8 @@
 #include <QTextBlock>
 #include <QTimer>
 #include <QXmlStreamReader>
+
+#include <thread>
 
 namespace ExportTests {
 namespace {
@@ -249,6 +254,30 @@ Ran runCli(const QString &folder, const QStringList &arguments)
     ran.out = QString::fromUtf8(out.data());
     ran.err = QString::fromUtf8(err.data());
     return ran;
+}
+
+// The colours a PDF fills with, as its page streams set them, each once.
+QStringList fillColours(const QByteArray &pdf)
+{
+    static const QRegularExpression colour(QStringLiteral("(?:^|\\s)((?:[\\d.]+\\s+){3})scn\\b"));
+    QStringList colours;
+    qsizetype at = 0;
+    while ((at = pdf.indexOf("/FlateDecode", at)) >= 0) {
+        const qsizetype start = pdf.indexOf("stream\n", at);
+        const qsizetype end = start < 0 ? -1 : pdf.indexOf("endstream", start);
+        if (end < 0) break;
+        QByteArray packed = pdf.mid(start + 7, end - start - 7);
+        // qUncompress takes the size it unpacks to first; enough for any page here.
+        packed.prepend(QByteArray::fromHex("01000000"));
+        const QString stream = QString::fromLatin1(qUncompress(packed));
+        for (auto it = colour.globalMatch(stream); it.hasNext();) {
+            const QString found = it.next().captured(1).simplified();
+            if (!colours.contains(found)) colours.append(found);
+        }
+        at = end;
+    }
+    colours.sort();
+    return colours;
 }
 
 } // namespace
@@ -1201,6 +1230,122 @@ void exportDialogListsLimitationsAndExportsInTheBackground()
     QCOMPARE(shell.backend->problem(), QStringLiteral("Not exported"));
     QVERIFY(shell.backend->problemDetail().contains(QStringLiteral("an export never writes over")));
     QCOMPARE(readFile(slow), QByteArray("Slow $slow a$ and $slow b$ and $slow c$ and $slow d$.\n"));
+}
+
+void exportsAskBeforeReplacingWhatTheSuffixNames()
+{
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    const QString root = canonical(files.path());
+    const QString path = root + QStringLiteral("/essay.md");
+    writeFile(path, "# Essay\n\nFirst words.\n");
+    // Another of the writer's documents, by the name the dialog will be given without its suffix.
+    const QString other = root + QStringLiteral("/other.md");
+    writeFile(other, "Another document.\n");
+    ShellFixture shell({.files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    ExportPicker picker;
+    shell.backend->setFilePicker(&picker);
+    Exports *exports = shell.backend->exports();
+    exports->setRenderOptions(fakeHelpers(root + QStringLiteral("/work")));
+    QObject *prompt = shell.object(QStringLiteral("exportReplacePrompt"));
+    QVERIFY(prompt);
+    const auto chooseInDialog = [&](const QString &chosen) {
+        const int asked = picker.saves;
+        exports->exportDocument(shell.document(), QStringLiteral("md"), {}, shell.context());
+        QCOMPARE(picker.saves, asked + 1);
+        emit picker.saveSelected(QUrl::fromLocalFile(chosen));
+    };
+
+    // The dialog was asked about "other", which is not there; "other.md" is, so the window asks.
+    chooseInDialog(root + QStringLiteral("/other"));
+    QTRY_VERIFY(prompt->property("opened").toBool());
+    QVERIFY(!exports->busy());
+    QCOMPARE(prompt->property("title").toString(), QStringLiteral("Replace “other.md”?"));
+    QCOMPARE(readFile(other), QByteArray("Another document.\n"));
+    // Cancel, the safe choice, has the keys, and leaves the file as it was.
+    QQuickItem *keep = shell.item(QStringLiteral("exportReplaceCancel"));
+    QVERIFY(keep);
+    QTRY_COMPARE(window->activeFocusItem(), keep);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!prompt->property("visible").toBool());
+    QTest::qWait(100);
+    QVERIFY(!exports->busy());
+    QCOMPARE(readFile(other), QByteArray("Another document.\n"));
+    QVERIFY(!QFileInfo::exists(root + QStringLiteral("/other")));
+
+    // Replace writes over it.
+    chooseInDialog(root + QStringLiteral("/other"));
+    QTRY_VERIFY(prompt->property("opened").toBool());
+    QMetaObject::invokeMethod(shell.object(QStringLiteral("exportReplace")), "clicked");
+    QTRY_VERIFY_WITH_TIMEOUT(!exports->busy() && readFile(other).startsWith("# Essay"), 30000);
+    QCOMPARE(shell.backend->problem(), QStringLiteral("Exported “other.md”"));
+
+    // A name with no file behind it, with or without its suffix, is written without asking.
+    chooseInDialog(root + QStringLiteral("/fresh"));
+    QTRY_VERIFY_WITH_TIMEOUT(!exports->busy() && QFileInfo::exists(root + QStringLiteral("/fresh.md")), 30000);
+    QVERIFY(!prompt->property("visible").toBool());
+    // A name the dialog was given whole was asked about there.
+    chooseInDialog(root + QStringLiteral("/fresh.md"));
+    QTRY_VERIFY_WITH_TIMEOUT(!exports->busy(), 30000);
+    QCOMPARE(shell.backend->problem(), QStringLiteral("Exported “fresh.md”"));
+    QVERIFY(!prompt->property("visible").toBool());
+    QCOMPARE(readFile(path), QByteArray("# Essay\n\nFirst words.\n"));
+}
+
+void codeIsColouredWithoutAPreviewShownFirst()
+{
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    const QString root = canonical(files.path());
+    const QString path = root + QStringLiteral("/code.md");
+    QByteArray text = "# Code\n\n```python\n";
+    for (int i = 0; i < 12; ++i) text += "def f(x):\n    return \"text\"  # note\n";
+    text += "```\n";
+    writeFile(path, text);
+    // What `parch export` makes, on the main thread.
+    const Ran cli = runCli(root, {QStringLiteral("export"), QStringLiteral("code.md"), QStringLiteral("-o"), QStringLiteral("cli.pdf")});
+    QVERIFY2(cli.code == 0, qPrintable(cli.err));
+    const QStringList coloured = fillColours(readFile(root + QStringLiteral("/cli.pdf")));
+    // The code's ink, the keywords', the strings' and the comments' at least.
+    QVERIFY2(coloured.size() >= 4, qPrintable(coloured.join(u'|')));
+
+    // The window, with its tab showing the source and no preview shown yet.
+    ShellFixture shell({.files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    Exports *exports = shell.backend->exports();
+    exports->setRenderOptions(fakeHelpers(root + QStringLiteral("/work")));
+    Document *document = shell.document();
+    const auto asLaunched = [] {
+        CodeHighlight::unload();
+        // Off the UI thread, code is plain until the languages are loaded.
+        bool plain = false;
+        std::thread([&plain] { plain = CodeHighlight::spans(QStringLiteral("python"), QStringLiteral("def f(): pass\n")).isEmpty(); })
+            .join();
+        return plain;
+    };
+    QVERIFY(asLaunched());
+    const QString output = root + QStringLiteral("/window.pdf");
+    exports->exportTo(document, QStringLiteral("pdf"), {}, output);
+    QTRY_VERIFY_WITH_TIMEOUT(!exports->busy() && QFileInfo::exists(output), 30000);
+    QCOMPARE(fillColours(readFile(output)), coloured);
+
+    // The pages the Export dialog and printing show, laid out on a worker too.
+    QVERIFY(asLaunched());
+    PrintPreview *preview = exports->preview();
+    const int before = preview->revision();
+    preview->show(document, QStringLiteral("pdf"), {});
+    QVERIFY(QTest::qWaitFor([&] { return preview->revision() > before && !preview->busy(); }, 30000));
+    QSignalSpy ready(preview, &PrintPreview::pageReady);
+    preview->requestPage(0, 1200);
+    QVERIFY(ready.wait(30000));
+    const QImage page = preview->page(0);
+    QVERIFY(!page.isNull());
+    QVERIFY(pixelsNear(page, PreviewStyle::paper().ink(PreviewStyle::Keyword), 24) > 20);
+    preview->stop();
+    CodeHighlight::prepare();
 }
 
 void exportAgainRepeatsTheRecipe()

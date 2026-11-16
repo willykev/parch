@@ -5,6 +5,7 @@
 #include "documentreading.h"
 #include "mdinclude.h"
 #include "mdparser_p.h"
+#include "documentparse.h"
 #include "outline.h"
 #include "previewresources.h"
 #include "previewwatch.h"
@@ -27,6 +28,7 @@
 #include <QTextTable>
 #include <QUrl>
 #include <QThread>
+#include <QPointer>
 #include <QtConcurrent>
 #include <algorithm>
 #include <atomic>
@@ -1620,15 +1622,27 @@ bool Preview::activate(const QString &link, int position, quint64 island)
     return m_backend && m_backend->openLink(url);
 }
 
-int Preview::headingSource(const QString &slug) const
+int Preview::findHeading(const QString &slug)
 {
-    if (!m_document || slug.isEmpty()) return -1;
-    // The outline of the text as it is now, read here: a document just
-    // opened has not been read by a worker yet, and one shown as source
-    // alone never is.
-    for (const Heading &heading : Outline::headings(m_document->buffer()->snapshot()->text, m_document->markdownOptions()))
-        if (heading.slug == slug) return heading.position;
-    return -1;
+    const int request = ++m_headingRequests;
+    if (!m_document || slug.isEmpty()) {
+        QMetaObject::invokeMethod(this, [this, request, slug] { emit headingFound(request, slug, -1); }, Qt::QueuedConnection);
+        return request;
+    }
+    // The document's own parse of the text as it is now, which a document
+    // just opened, or shown as source alone, has once a worker has read it.
+    const QPointer<Document> asked = m_document;
+    m_document->parse()->whenParsed(this, [this, asked, request, slug](const ParsedTextPtr &parse) {
+        if (!asked || asked != m_document) return;
+        QtConcurrent::run([parse, slug] {
+            for (const Heading &heading : Outline::headings(parse->document(), parse->text))
+                if (heading.slug == slug) return heading.position;
+            return -1;
+        }).then(this, [this, asked, request, slug](int position) {
+            if (asked && asked == m_document) emit headingFound(request, slug, position);
+        });
+    });
+    return request;
 }
 
 QString Preview::hintAt(qreal x, qreal y, quint64 island) const

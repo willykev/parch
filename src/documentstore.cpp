@@ -300,6 +300,7 @@ DocumentStore::DocumentStore(const AppPaths &paths, HistoryLimits limits, QObjec
     : QObject(parent), m_paths(paths), m_history(std::make_unique<History>(paths, limits))
 {
     m_registryWriter.setMaxThreadCount(1);
+    m_historyKeeper.setMaxThreadCount(1);
     loadRegistry();
     pruneRegistry();
     const auto touched = [this](const QString &path) {
@@ -420,7 +421,7 @@ History::CaptureStatus DocumentStore::keepInHistoryNow(const QString &documentId
         m_running.removeOne(watcher);
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([history = m_history.get(), documentId, bytes, reason, kept] {
+    watcher->setFuture(QtConcurrent::run(&m_historyKeeper, [history = m_history.get(), documentId, bytes, reason, kept] {
         History::CaptureStatus status = History::CaptureStatus::Failed;
         history->captureUnlessNewest(documentId, bytes, reason, &status);
         kept->status = status;
@@ -1077,6 +1078,15 @@ History *DocumentStore::history() const
 DocumentStore::Restore DocumentStore::restoreVersion(Document *document, const QString &versionId, QString *refusal)
 {
     if (!m_documents.contains(document)) return Restore::Refused;
+    bool found = false;
+    const QByteArray bytes = document->m_readOnly ? QByteArray() : m_history->read(document->m_id, versionId, &found);
+    return restoreRead(document, found ? std::optional<QByteArray>(bytes) : std::nullopt, refusal);
+}
+
+DocumentStore::Restore DocumentStore::restoreRead(Document *document, const std::optional<QByteArray> &read,
+                                                  QString *refusal)
+{
+    if (!m_documents.contains(document)) return Restore::Refused;
     // Every refusal gives its reason, and leaves it on the document for a
     // view to show, unless a failed save or a conflict is what the document
     // shows: that stays in view.
@@ -1089,9 +1099,8 @@ DocumentStore::Restore DocumentStore::restoreVersion(Document *document, const Q
         return Restore::Refused;
     };
     if (document->m_readOnly) return refused(tr("This document is read-only"));
-    bool found = false;
-    const QByteArray bytes = m_history->read(document->m_id, versionId, &found);
-    if (!found) return refused(tr("That version is no longer in history"));
+    if (!read) return refused(tr("That version is no longer in history"));
+    const QByteArray &bytes = *read;
     // The version's bytes are what a save wrote, read as the file's are. The
     // document keeps its own line-ending convention and BOM.
     const DecodedText version = DiskFile::decode(bytes);
@@ -1154,7 +1163,12 @@ bool DocumentStore::waitForSaves(int timeoutMs)
 
 bool DocumentStore::savesRunning() const
 {
-    return !m_running.isEmpty();
+    return std::any_of(m_documents.cbegin(), m_documents.cend(), [](const Document *document) { return document->m_saving; });
+}
+
+bool DocumentStore::waitForRegistry(int timeoutMs)
+{
+    return m_registryWriter.waitForDone(timeoutMs);
 }
 
 void DocumentStore::retain(Document *document)
@@ -1263,12 +1277,15 @@ void DocumentStore::nameAs(Document *document, const QString &path, const std::o
         if (document->m_problem == Document::Problem::Conflict) resolveConflict(document, ConflictChoice::Overwrite);
         else save(document);
         // A save that started took the name; with none, the naming ends here.
+        // A file read in another encoding is not saved over until the writer
+        // confirms writing UTF-8, so nothing was saved.
         document->m_askedName.clear();
         if (!document->m_saving)
             emit saveFinished(document, path,
-                              document->m_problem == Document::Problem::None       ? SaveStatus::Saved
-                              : document->m_problem == Document::Problem::Conflict ? SaveStatus::Conflict
-                                                                                   : SaveStatus::Failed);
+                              document->m_problem == Document::Problem::Conflict ? SaveStatus::Conflict
+                              : document->m_problem == Document::Problem::None && document->m_convertedFrom.isEmpty()
+                                  ? SaveStatus::Saved
+                                  : SaveStatus::Failed);
         return;
     }
     // Another document open at the target, or already saving to it, keeps it.
@@ -2317,6 +2334,7 @@ void DocumentStore::restoreBytes(Document *document, const QString &versionId,
     // the file's own bytes, which the text does not hold.
     const std::optional<QByteArray> current =
         document->m_readOnly ? std::nullopt : std::optional<QByteArray>(document->bytes());
+    const Revision revision = document->m_buffer->revision();
     runFiled<Outcome>([history = m_history.get(), id = document->m_id, versionId, path = document->m_path,
                        expected = document->m_diskVersion, current]() -> Outcome {
         bool found = false;
@@ -2335,17 +2353,51 @@ void DocumentStore::restoreBytes(Document *document, const QString &versionId,
         if (saved.status == SaveStatus::Conflict) return {tr("The file changed on disk, so nothing was restored"), {}};
         if (saved.status != SaveStatus::Saved) return {tr("The file could not be written: %1").arg(saved.error), {}};
         return {{}, DiskFile::load(path)};
-    }, [this, target = QPointer(document), done = std::move(done)](const Outcome &outcome) {
+    }, [this, target = QPointer(document), done = std::move(done), revision](const Outcome &outcome) {
         if (!target || !m_documents.contains(target)) return;
-        target->m_saving = false;
-        // The file holds the version's bytes now, which the document reads
-        // as it reads any file, read-only when they are not UTF-8.
-        if (outcome.error.isEmpty() && outcome.loaded.ok) takeFile(target, outcome.loaded);
-        else target->refresh();
-        if (std::exchange(target->m_checkAgain, false)) checkDisk(target);
-        if (std::exchange(target->m_saveAgain, false)) save(target);
-        done(outcome.error.isEmpty() && !outcome.loaded.ok ? outcome.loaded.error : outcome.error);
+        const bool restored = outcome.error.isEmpty() && outcome.loaded.ok;
+        const auto end = [this, target, done, outcome, restored] {
+            if (!target || !m_documents.contains(target)) return;
+            restoredBytes(target, outcome.loaded, restored,
+                          outcome.error.isEmpty() && !outcome.loaded.ok ? outcome.loaded.error : outcome.error, done);
+        };
+        // Text typed while the version went into the file is in neither the
+        // file nor history, and the file's bytes are about to replace it: it
+        // is kept in history first.
+        if (restored && !target->m_readOnly && target->m_buffer->revision() != revision) {
+            keepInHistory(target->m_id, target->bytes(), History::Reason::Restore, end);
+            return;
+        }
+        end();
     });
+}
+
+void DocumentStore::restoredBytes(Document *document, const LoadedFile &loaded, bool restored, const QString &error,
+                                  const std::function<void(const QString &error)> &done)
+{
+    // It ends as a save does, which is how it ran.
+    document->m_saving = false;
+    // The file holds the version's bytes now, which the document reads as
+    // it reads any file, read-only when they are not UTF-8.
+    if (restored) takeFile(document, loaded);
+    else document->refresh();
+    const QString pendingName = std::exchange(document->m_pendingSaveAs, {});
+    const std::optional<DiskVersion> pendingExpected = std::exchange(document->m_pendingExpected, std::nullopt);
+    const bool again = std::exchange(document->m_saveAgain, false);
+    // Text given up while it ran goes now, with nothing more saved.
+    const bool dropping = m_dropping.remove(document) > 0;
+    done(error);
+    emit saveFinished(document, {}, error.isEmpty() ? SaveStatus::Saved : SaveStatus::Failed);
+    if (dropping) {
+        close(document);
+        return;
+    }
+    // A naming asked for meanwhile: a document read-only now cannot take it.
+    if (!pendingName.isEmpty() && document->m_readOnly) emit saveFinished(document, pendingName, SaveStatus::Failed);
+    else if (!pendingName.isEmpty()) nameAs(document, pendingName, pendingExpected);
+    else if (again) save(document);
+    if (std::exchange(document->m_checkAgain, false)) checkDisk(document);
+    closeIfUnused(document);
 }
 
 QString DocumentStore::asideFolder(const AppPaths &paths, const QString &documentId)

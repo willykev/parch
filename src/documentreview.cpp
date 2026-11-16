@@ -8,6 +8,7 @@
 
 #include <QFutureWatcher>
 #include <QLocale>
+#include <QPointer>
 #include <QVariantMap>
 #include <QtConcurrent>
 #include <algorithm>
@@ -100,24 +101,31 @@ bool DocumentReview::restoreVersion(Document *document, const QString &versionId
 {
     emit acting();
     if (!document) return false;
-    // A version that is not UTF-8 text goes back into the file as its own
-    // bytes, which the document then reads as it reads such a file.
-    bool found = false;
-    const QByteArray bytes = m_store->history()->read(document->id(), versionId, &found);
-    if (found && !DiskFile::decode(bytes).valid) {
-        m_store->restoreBytes(document, versionId, [this, id = document->id()](const QString &error) {
-            if (!error.isEmpty()) emit problem(tr("Not restored"), error);
-            emit versionsChanged(id);
-        });
-        return true;
-    }
-    QString refusal;
-    if (m_store->restoreVersion(document, versionId, &refusal) == DocumentStore::Restore::Refused) {
-        emit problem(tr("Not restored"), refusal);
-        return false;
-    }
-    // The text it replaced is a version now.
-    emit versionsChanged(document->id());
+    // The version is read off the UI thread, and once: one that is not
+    // UTF-8 text goes back into the file as its own bytes, which the
+    // document then reads as it reads such a file.
+    const QString id = document->id();
+    runJob([history = m_store->history(), id, versionId]() -> std::optional<QByteArray> {
+        bool found = false;
+        const QByteArray bytes = history->read(id, versionId, &found);
+        return found ? std::optional<QByteArray>(bytes) : std::nullopt;
+    }, [this, target = QPointer(document), id, versionId](const std::optional<QByteArray> &bytes) {
+        if (!target) return;
+        if (bytes && !DiskFile::decode(*bytes).valid) {
+            m_store->restoreBytes(target, versionId, [this, id](const QString &error) {
+                if (!error.isEmpty()) emit problem(tr("Not restored"), error);
+                emit versionsChanged(id);
+            });
+            return;
+        }
+        QString refusal;
+        if (m_store->restoreRead(target, bytes, &refusal) == DocumentStore::Restore::Refused) {
+            emit problem(tr("Not restored"), refusal);
+            return;
+        }
+        // The text it replaced is a version now.
+        emit versionsChanged(id);
+    });
     return true;
 }
 

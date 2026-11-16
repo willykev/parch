@@ -459,6 +459,51 @@ void History::setLimits(const HistoryLimits &limits)
     });
 }
 
+void History::countRemovals(const HistoryLimits &limits)
+{
+    m_pruner.start([this, limits] {
+        QMutexLocker lock(&m_mutex);
+        const int count = removalsLocked(limits);
+        lock.unlock();
+        emit removalsCounted(limits.versions, limits.days, limits.bytes, count);
+    });
+}
+
+int History::removalsLocked(const HistoryLimits &limits) const
+{
+    const int most = std::max(1, limits.versions);
+    const qint64 budget = std::max<qint64>(0, limits.bytes);
+    const QDateTime limit = utc(m_now()).addDays(-std::max(1, limits.days));
+    int removed = 0;
+    qint64 freed = 0;
+    QList<Version> left;
+    // As pruneAll() goes: each document's unnamed versions past the count
+    // or the age, and then the oldest of the rest while all of them take
+    // more than the space, unless the named ones alone do.
+    for (const QString &documentId : documentIds()) {
+        int unnamed = 0;
+        for (const Version &version : load(documentId)) {
+            if (!version.name.isEmpty()) continue;
+            if (++unnamed > most || utc(version.taken) < limit) {
+                ++removed;
+                freed += version.bytes;
+                continue;
+            }
+            left.append(version);
+        }
+    }
+    const Usage totals = totalsLocked();
+    qint64 total = totals.bytes - freed;
+    if (total <= budget || totals.named > budget) return removed;
+    std::stable_sort(left.begin(), left.end(), [](const Version &a, const Version &b) { return a.taken < b.taken; });
+    for (const Version &version : std::as_const(left)) {
+        if (total <= budget) break;
+        ++removed;
+        total -= version.bytes;
+    }
+    return removed;
+}
+
 void History::announceLocked()
 {
     // Said under the lock, so that the changes of two threads reach a

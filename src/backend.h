@@ -238,6 +238,11 @@ public:
     // until that text is safe. A save still running then has its text in
     // recovery, and the application ends without waiting for it.
     Q_INVOKABLE void quit();
+    // Before parch leaves at once, without the store and the exports ending
+    // as they are deleted: the export that runs is cancelled, removing what
+    // it had begun to write, and the record of which file is which document
+    // is written, all within waitMs.
+    void endJobsBeforeLeaving(int waitMs);
     // Ends at once, as when the session ends and nothing can be refused:
     // the session is written, every text not in its file goes to recovery,
     // and saves get at most waitMs to land. Returns false when a save is
@@ -299,6 +304,9 @@ public:
     Q_INVOKABLE void restoreVersion(const QString &versionId);
     Q_INVOKABLE void nameVersion(const QString &versionId, const QString &name);
     Q_INVOKABLE void removeVersion(const QString &versionId);
+    // Counts, off the UI thread, how many versions history would remove
+    // under these limits; historyRemovalsCounted() says.
+    Q_INVOKABLE void countHistoryRemovals(int versions, int days, double gigabytes);
 
     // Turns spelling on or off, as the writer's choice from now on. Turned
     // on without a dictionary, it says so.
@@ -354,8 +362,11 @@ signals:
     void problemChanged();
     void historyPausedChanged();
     void recoveryFailuresChanged();
+    // What countHistoryRemovals() counted, with the limits it was asked about.
+    void historyRemovalsCounted(int versions, int days, double gigabytes, int count);
     // Every text is safe and the application may end; main() quits on it,
-    // at once if store()->savesRunning(), since such a save may never end.
+    // at once if store()->savesRunning(), since such a save may never end,
+    // after endJobsBeforeLeaving().
     void quitRequested();
     // A window's context, with its tabs, before anything shows it.
     void windowAdded(WindowContext *window);

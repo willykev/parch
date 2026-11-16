@@ -232,6 +232,16 @@ void FileRequests::pickerFailed(const QString &message)
 
 void FileRequests::saveTo(WindowContext *window, Document *document, const QString &path, bool closeAfter)
 {
+    // A file read in another encoding is written over as UTF-8 only once the
+    // writer confirms it, which its window asks, as Save does.
+    if (!document->convertedFrom().isEmpty() && !document->isDraft()
+        && DiskFile::canonicalPath(path) == document->path()) {
+        m_failedNames.remove(document->id());
+        if (window) window->askToConfirmEncoding(document);
+        else emit problem(tr("Not saved"), tr("“%1” was read as %2, and is written as UTF-8 only once you confirm it.")
+                                               .arg(document->title(), document->convertedFrom()));
+        return;
+    }
     m_failedNames.remove(document->id());
     // The naming's end is the store's to say: a document in conflict shows
     // the conflict, not the save, while a naming runs.

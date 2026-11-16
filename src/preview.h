@@ -261,10 +261,12 @@ public:
     Q_INVOKABLE void copy(QQuickItem *textEdit);
     // The same as text, for tests: {plain, html}.
     QStringList copied(QQuickItem *textEdit) const;
-    // Where the line of the heading with a slug starts in the document's
-    // text as it is now, by the document's outline; -1 when it has no such
-    // heading.
-    Q_INVOKABLE int headingSource(const QString &slug) const;
+    // Finds where the line of the heading with a slug starts in the
+    // document's text as it is now, by the outline of the document's shared
+    // parse, off the UI thread, and says headingFound() with the number this
+    // returns: -1 when it has no such heading. Nothing is said when the
+    // preview shows another document by then.
+    Q_INVOKABLE int findHeading(const QString &slug);
     // What the text at a point of the surface, or of an island, says when
     // pointed at: where a link leads, what a picture shows, why a formula
     // could not be drawn. Empty where there is nothing to say.
@@ -303,6 +305,8 @@ signals:
     // A document named by a link is to be shown, at the heading with this
     // slug when the link names one.
     void openRequested(const QString &path, const QString &heading);
+    // What findHeading() found, for the request it numbered.
+    void headingFound(int request, const QString &slug, int position);
 
 private slots:
     void viewMoved();
@@ -379,6 +383,8 @@ private:
     // A read waits for the document's parse of the text as it is now.
     bool m_awaiting = false;
     bool m_active = false;
+    // The last findHeading() request's number.
+    int m_headingRequests = 0;
     QString m_family;
     qreal m_fontSize = 18;
     qreal m_lineHeight = 1.6;

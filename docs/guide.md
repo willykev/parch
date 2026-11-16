@@ -171,9 +171,11 @@ keys.
   of each line in a selection over several lines. Superscript and subscript
   write the delimited form, as in `y^(a+b)^` and `H~2~O`, which holds
   punctuation but no spaces, right after the letter or digit it belongs to.
-  Used again on text that has them, they take the markers away. Without a
-  selection they take away the markers around the caret, or put a pair
-  there with the caret between them.
+  Where the preview would not read it so, after a space or another mark of
+  Markdown, around a selection with a space in it, or inside code, they
+  change nothing and are greyed out. Used again on text that has them, they
+  take the markers away. Without a selection they take away the markers
+  around the caret, or put a pair there with the caret between them.
 - **Heading 1** to **Heading 6** and **Paragraph** change every line the
   selection touches; a heading at the level chosen becomes a paragraph again.
   Headings are marked with `#`, or, if you choose so in **Preferences**,
@@ -530,7 +532,9 @@ PDF, DOCX (Word) or EPUB (an e-book). The dialog shows the format's options
 and, before anything is written, what that format leaves out of this
 document: that formulas and diagrams become pictures in a Word document, for
 example, or that pictures from the web are not fetched for a PDF. **Export…**
-then asks your desktop's file dialog where to write it.
+then asks your desktop's file dialog where to write it. A name given without
+the format's extension gets it, and if a file of that name with the
+extension is there already, parch asks before replacing it.
 
 For a PDF, and for printing, the dialog also shows the pages as they will
 come out, laid out again as you change the paper, the margins, the type or
@@ -873,8 +877,11 @@ parch keeps earlier versions of each document. Open them with
   text it replaced is kept as a version too.
 - **Name this version** keeps a version until you delete it. Unnamed versions
   are kept for 30 days, at most 100 per document, within 1 GB in all. Under
-  **History** in **Preferences…** you can change all three. A lower limit
-  removes the older versions past it at once, but never a version you named.
+  **History** in **Preferences…** you can change all three. A higher limit
+  applies at once. A lower one waits until you stop changing it; if it would
+  remove older versions, Preferences say how many, and they go only when you
+  choose **Remove them**. **Keep them**, or closing Preferences, leaves the
+  limits as they were. A version you named is never removed.
 - If named versions alone fill that space, history pauses and the notice bar
   says so. Saving carries on.
 

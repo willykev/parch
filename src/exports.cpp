@@ -1,5 +1,6 @@
 #include "exports.h"
 
+#include "codehighlight.h"
 #include "document.h"
 #include "documentreading.h"
 #include "exporter.h"
@@ -71,15 +72,31 @@ Exports::Exports(const AppPaths &paths, FileRequests *files, QObject *parent)
     m_poll.setInterval(100);
     connect(&m_poll, &QTimer::timeout, this, &Exports::poll);
     if (m_files) {
-        connect(m_files, &FileRequests::saveFileChosen, this, [this](WindowContext *, const QString &purpose, const QString &path) {
+        connect(m_files, &FileRequests::saveFileChosen, this, [this](WindowContext *window, const QString &purpose, const QString &path) {
             if (purpose != u"export") return;
-            const Asked asked = std::exchange(m_asked, {});
+            Asked asked = std::exchange(m_asked, {});
             if (!asked.document) return;
             const Exporter *exporter = Exporters::find(asked.format);
             QString output = path;
             // The dialog may leave the suffix off; the format puts its own on.
-            if (exporter && !exporter->suffixes().contains(QFileInfo(path).suffix().toLower()))
+            if (exporter && !exporter->suffixes().contains(QFileInfo(path).suffix().toLower())) {
                 output += u'.' + exporter->suffixes().first();
+                // The dialog asked about the name as it was typed, not this
+                // one: a file of this name is asked about here, before it is
+                // written over.
+                const QFileInfo there(output);
+                if (there.exists() || there.isSymLink()) {
+                    if (!window) {
+                        emit problem(tr("Not exported"), tr("“%1” is already there; choose it in the file dialog to replace it.")
+                                                             .arg(there.fileName()));
+                        return;
+                    }
+                    asked.output = output;
+                    m_replacing = asked;
+                    emit replaceAsked(window, output);
+                    return;
+                }
+            }
             start(asked.document, asked.format, asked.options, output, false);
         });
     }
@@ -229,7 +246,7 @@ QStringList Exports::limitations(const QString &format, const QVariantMap &optio
     return limitations;
 }
 
-void Exports::exportDocument(Document *document, const QString &format, const QVariantMap &options)
+void Exports::exportDocument(Document *document, const QString &format, const QVariantMap &options, WindowContext *window)
 {
     const Exporter *exporter = Exporters::find(format);
     if (!document || !exporter) return;
@@ -237,6 +254,7 @@ void Exports::exportDocument(Document *document, const QString &format, const QV
         emit problem(tr("An export is running"), tr("Wait for it to end, or cancel it, and then export again."));
         return;
     }
+    m_replacing = {};
     m_asked = {document, format, recipeOptions(format, options)};
     QString folder = document->path().isEmpty() ? QString() : QFileInfo(document->path()).absolutePath();
     if (folder.isEmpty() && m_files) folder = m_files->startFolder();
@@ -247,9 +265,16 @@ void Exports::exportDocument(Document *document, const QString &format, const QV
     const QString suggested = QDir(folder.isEmpty() ? QDir::homePath() : folder).filePath(base + u'.' + suffix);
     QStringList patterns;
     for (const QString &each : exporter->suffixes()) patterns.append(QStringLiteral("*.") + each);
-    if (!m_files || !m_files->askForSaveFile(nullptr, QStringLiteral("export"), tr("Export as %1").arg(exporter->title()),
+    if (!m_files || !m_files->askForSaveFile(window, QStringLiteral("export"), tr("Export as %1").arg(exporter->title()),
                                              suggested, tr("%1 files").arg(exporter->title()), patterns))
         m_asked = {};
+}
+
+void Exports::answerReplace(bool replace)
+{
+    const Asked asked = std::exchange(m_replacing, {});
+    if (!replace || !asked.document || asked.output.isEmpty()) return;
+    start(asked.document, asked.format, asked.options, asked.output, false);
 }
 
 void Exports::exportTo(Document *document, const QString &format, const QVariantMap &options, const QString &path)
@@ -280,6 +305,12 @@ void Exports::cancel()
     if (m_job) m_job->cancelled = true;
 }
 
+bool Exports::stop(int waitMs)
+{
+    cancel();
+    return m_pool.waitForDone(waitMs);
+}
+
 void Exports::start(Document *document, const QString &format, const QHash<QString, QString> &options,
                     const QString &output, bool printing, quint32 token)
 {
@@ -300,6 +331,9 @@ void Exports::start(Document *document, const QString &format, const QHash<QStri
     emit progressChanged();
     m_poll.start();
 
+    // Code is coloured on the worker only once the languages are loaded,
+    // which is done here, on the UI thread, as `parch export` does on its own.
+    CodeHighlight::prepare();
     // The document's parse of its text, which every view of it shares: of
     // the text as it is now, or, when that is not parsed yet, as it is once
     // it is, a moment later. That is what the export reads, whatever is

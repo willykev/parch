@@ -162,7 +162,8 @@ The first version: a native Markdown writing app for Omarchy.
   profile, options and renderers it was made with.
 - Exports are written in one step, never over the document or a file it
   includes, and leave a file that was there as it was when they fail or are
-  cancelled.
+  cancelled. A name given without its extension that leads to a file already
+  there is asked about before that file is replaced.
 
 ### Keeping text safe
 
@@ -171,7 +172,8 @@ The first version: a native Markdown writing app for Omarchy.
 - Crash recovery for text that has not reached its file yet.
 - Version history with the reason each version was kept, named versions, and
   restore with undo. How many versions it keeps, for how many days and in
-  how much space are preferences; named versions are never removed.
+  how much space are preferences; a lower limit says how many versions it
+  removes and asks first, and named versions are never removed.
 - Conflicts when a file changes on disk under unsaved text, with a side by
   side review and Reload, Keep both, Overwrite or Save as.
 - A file replaced by a link to another file is never read or written through

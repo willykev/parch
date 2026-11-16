@@ -5,6 +5,7 @@
 #include "documentstore.h"
 #include "backend.h"
 #include "dialectchoice.h"
+#include "documentparse.h"
 #include "documentreading.h"
 #include "documentsettingsstore.h"
 #include "editorbinding.h"
@@ -305,6 +306,16 @@ struct PreviewWindow {
         window->grabWindow().save(folder + u'/' + QLatin1String(name) + QStringLiteral(".png"));
     }
 };
+
+// Where the preview finds the heading a link names, once it has: -2 when
+// it says nothing.
+int headingFound(Preview *preview, const QString &slug)
+{
+    QSignalSpy found(preview, &Preview::headingFound);
+    const int request = preview->findHeading(slug);
+    if (!QTest::qWaitFor([&] { return !found.isEmpty(); }, 10000)) return -2;
+    return found.last().at(0).toInt() == request && found.last().at(1).toString() == slug ? found.last().at(2).toInt() : -2;
+}
 
 } // namespace
 
@@ -1895,12 +1906,12 @@ void linksGoWhereTheyLead()
     QTRY_COMPARE(w.shell.binding()->cursorSource(), int(otherText.indexOf(QStringLiteral("## Second part"))));
     QCOMPARE(w.shell.binding()->topSourcePosition(), int(otherText.indexOf(QStringLiteral("## Second part"))));
     // A heading the other document does not have leaves it where it was.
-    QCOMPARE(w.preview->headingSource(QStringLiteral("no-such-part")), -1);
+    QCOMPARE(headingFound(w.preview, QStringLiteral("no-such-part")), -1);
     w.tabs()->setActiveIndex(0);
     QVERIFY(w.settled());
     // A document that cannot be opened leaves this one where it is, though
     // this one has a heading by the name the link gives.
-    QVERIFY(w.preview->headingSource(QStringLiteral("the-end")) > 0);
+    QVERIFY(headingFound(w.preview, QStringLiteral("the-end")) > 0);
     if (::geteuid() != 0) {
         const QString locked = folder.filePath(QStringLiteral("locked.md"));
         writeFile(locked, "# Locked\n\n## The end\n");
@@ -3886,6 +3897,78 @@ void previewFollowsFilesOnDisk()
     for (int i = 0; i < PreviewWatch::MaxFiles + 40; ++i) many += QStringLiteral("![](many-%1.png)\n\n").arg(i);
     w.document->buffer()->replace({int(text.size()), 0}, many);
     QTRY_COMPARE(w.preview->watchedFiles().size(), PreviewWatch::MaxFiles);
+}
+
+void drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize()
+{
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString helpers = folder.path() + QStringLiteral("/helpers");
+    QDir().mkpath(helpers);
+    writeFakeHelpers(helpers, folder.path() + QStringLiteral("/helpers.log"));
+    // A diagram drawn far wider than any screen.
+    QImage wide(9000, 60, QImage::Format_ARGB32);
+    wide.fill(Qt::darkCyan);
+    QVERIFY(wide.save(helpers + QStringLiteral("/picture.png")));
+    RenderService service(renderOptions(HelperSet::in(helpers), folder.path()));
+    PreviewResources resources;
+    resources.setRenderService(&service);
+    resources.setScale(4);
+    // Heard after the resources hear it: the picture is still being made
+    // then, off this thread.
+    QList<int> pendingWhenDrawn;
+    QObject::connect(&service, &RenderService::finished, &resources,
+                     [&] { pendingWhenDrawn.append(resources.pending()); });
+    QSignalSpy changed(&resources, &PreviewResources::changed);
+
+    const QString source = QStringLiteral("graph TD\n  A --> B\n");
+    QCOMPARE(resources.diagram(source).state, preview::Picture::Pending);
+    QVERIFY(changed.wait(30000));
+    QCOMPARE(pendingWhenDrawn, QList<int>{1});
+    const preview::Picture diagram = resources.diagram(source);
+    QCOMPARE(diagram.state, preview::Picture::Ready);
+    QCOMPARE(diagram.image.width(), PreviewResources::MaxSide);
+    QCOMPARE(diagram.image.height(), qRound(60.0 * PreviewResources::MaxSide / 9000));
+    QCOMPARE(resources.pending(), 0);
+
+    // A formula drawn as SVG, which at this scale would be wider than Qt can
+    // paint, is kept to the same size.
+    const QString formula(5000, u'x');
+    QCOMPARE(resources.math(formula, false, 16).state, preview::Picture::Pending);
+    QVERIFY(changed.wait(30000));
+    const preview::Picture math = resources.math(formula, false, 16);
+    QCOMPARE(math.state, preview::Picture::Ready);
+    QCOMPARE(math.image.width(), PreviewResources::MaxSide);
+    QVERIFY(math.image.height() >= 1);
+    QVERIFY(math.size.width() * 4 > PreviewResources::MaxSide);
+}
+
+void headingLinksAreFoundInTheSharedParse()
+{
+    // The heading a link names is looked for in the document's own parse,
+    // which a worker makes, never by reading the text on the UI thread.
+    QString text = QStringLiteral("# Start\n\n");
+    for (int i = 0; i < 200; ++i) text += QStringLiteral("Paragraph %1 with some words in it.\n\n").arg(i);
+    text += QStringLiteral("## The end\n\nLast words.\n");
+    PreviewWindow w(text);
+    QVERIFY(w.ok());
+    DocumentParse::setWorkerDelay(300);
+    const auto undelay = qScopeGuard([] { DocumentParse::setWorkerDelay(0); });
+    w.document->buffer()->replace({int(w.document->buffer()->length()), 0}, QStringLiteral("\nMore.\n"));
+    const int parses = w.document->parse()->parses();
+    QSignalSpy found(w.preview, &Preview::headingFound);
+    QElapsedTimer asking;
+    asking.start();
+    const int request = w.preview->findHeading(QStringLiteral("the-end"));
+    QVERIFY(asking.elapsed() < 200);
+    QVERIFY(found.isEmpty());
+    QVERIFY(found.wait(10000));
+    QCOMPARE(found.last().at(0).toInt(), request);
+    QCOMPARE(found.last().at(1).toString(), QStringLiteral("the-end"));
+    QCOMPARE(found.last().at(2).toInt(), int(w.document->buffer()->text().indexOf(QStringLiteral("## The end"))));
+    QVERIFY(w.document->parse()->parses() <= parses + 1);
+    QCOMPARE(headingFound(w.preview, QStringLiteral("start")), 0);
+    QCOMPARE(headingFound(w.preview, QStringLiteral("nowhere")), -1);
 }
 
 } // namespace PreviewTests

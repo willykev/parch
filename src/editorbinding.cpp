@@ -601,6 +601,22 @@ QString EditorBinding::undefinedNoteAt(int position) const
     return MarkdownEditing::undefinedNoteAt(m_buffer->text(), position);
 }
 
+int EditorBinding::undefinedNoteNear(const QString &label, int position) const
+{
+    if (label.isEmpty() || !m_document || !m_document->markdownOptions().footnotes) return -1;
+    const QString text = m_buffer->text();
+    if (position >= 0 && position <= text.size() && MarkdownEditing::undefinedNoteAt(text, position) == label)
+        return position;
+    const QString reference = QStringLiteral("[^") + label + u']';
+    int nearest = -1;
+    for (qsizetype at = text.indexOf(reference); at >= 0; at = text.indexOf(reference, at + 1)) {
+        const int inside = int(at) + 2;
+        if (MarkdownEditing::undefinedNoteAt(text, inside) != label) continue;
+        if (nearest < 0 || std::abs(inside - position) < std::abs(nearest - position)) nearest = inside;
+    }
+    return nearest;
+}
+
 bool EditorBinding::format(const QString &command)
 {
     if (!MarkdownEditing::isCommand(command)) return false;

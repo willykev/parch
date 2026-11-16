@@ -296,6 +296,72 @@ void inlineFormattingWrapsAndToggles()
     QCOMPARE(formatted("comment", "«a\nb»"), QStringLiteral("<!-- «a\nb» -->"));
 }
 
+void scriptsWriteWhatTheDialectReads()
+{
+    // Superscript and subscript write only what the dialect reads as one,
+    // after a letter, a digit or what closes a group, with no space inside
+    // and no tilde beside a subscript's; anywhere else they change nothing,
+    // and the window greys them out.
+    QCOMPARE(formatted("superscript", "(a+b)«2»"), QStringLiteral("(a+b)^«2»^"));
+    QCOMPARE(formatted("subscript", "CO«2» gas"), QStringLiteral("CO~«2»~ gas"));
+    QCOMPARE(formatted("subscript", "a «word» here"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "**«bold»** x"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("subscript", "a ~~«b»~~ c"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("strikethrough", "a ~«b»~ c"), QStringLiteral("a ~~~«b»~~~ c"));
+    QCOMPARE(formatted("superscript", "x«two words»"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("subscript", "x«a»~"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "x«a^b»"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "x«[a]»"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "x«a\\»"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "a ‸"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("subscript", "‸"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "x«2\ny»3"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "a«2»^b"), QStringLiteral("(nothing)"));
+    QCOMPARE(formatted("superscript", "`x«2»` y"), QStringLiteral("(nothing)"));
+
+    // Whatever they write, for every selection of these texts, the preview
+    // shows as one more superscript or subscript for each line wrapped.
+    const auto scripts = [](const QString &text, md::NodeType type) {
+        int found = 0;
+        std::function<void(const md::Node &)> walk = [&](const md::Node &node) {
+            if (node.type == type) ++found;
+            for (const md::Node &child : node.children) walk(child);
+        };
+        walk(md::parse(text, md::Options::writer()).root);
+        return found;
+    };
+    const QStringList texts{QStringLiteral("a word here"), QStringLiteral("**bold** x"), QStringLiteral("a ~~b~~ c"),
+                            QStringLiteral("H2O and CO2."), QStringLiteral("e\u0301x y\u0301"), QStringLiteral("A[^n] b"),
+                            QStringLiteral("(a+b)2 “q”3"), QStringLiteral("x\\^2 a~b"), QStringLiteral("x2\ny3"), QStringLiteral("a2^b c~d"),
+                            QStringLiteral("`x2` y2")};
+    for (const QString &text : texts) {
+        for (const char *command : {"superscript", "subscript"}) {
+            const md::NodeType type = qstrcmp(command, "superscript") == 0 ? md::NodeType::Superscript : md::NodeType::Subscript;
+            const int before = scripts(text, type);
+            for (int start = 0; start <= text.size(); ++start) {
+                for (int end = start; end <= text.size(); ++end) {
+                    const auto change = MarkdownEditing::format(QString::fromLatin1(command), text, start, end);
+                    if (!change || change->edits.isEmpty()) continue;
+                    SourceBuffer buffer(text);
+                    if (buffer.replace(change->edits) != SourceBuffer::EditOutcome::Applied) continue;
+                    // Taking markers away is not writing them.
+                    if (buffer.length() < text.size()) continue;
+                    // A pair typed into later, at the caret, is read once it holds something.
+                    QString written = buffer.text();
+                    if (start == end) written.insert(change->cursor, u'z');
+                    const int wrapped = start == end ? 1 : int(change->edits.size()) / 2;
+                    QVERIFY2(scripts(written, type) == before + wrapped,
+                             qPrintable(QStringLiteral("%1 on %2 [%3, %4) -> %5")
+                                            .arg(QString::fromLatin1(command), text)
+                                            .arg(start)
+                                            .arg(end)
+                                            .arg(written)));
+                }
+            }
+        }
+    }
+}
+
 void linksAndImagesSelectWhatComesNext()
 {
     QCOMPARE(formatted("link", "see «parch»"), QStringLiteral("see [parch](«url»)"));
@@ -378,6 +444,10 @@ void blockFormattingTogglesEveryLine()
     QCOMPARE(formatted("codeBlock", "«~~~\nx\n~~~»"), QStringLiteral("«x»"));
     QCOMPARE(formatted("codeBlock", "«a\n```b»"), QStringLiteral("````\n«a\n```b»\n````"));
     QCOMPARE(formatted("codeBlock", "«a\r\nb»", crlf()), QStringLiteral("```\r\n«a\r\nb»\r\n```"));
+    // An empty block goes with both its fences and one line break.
+    QCOMPARE(formatted("codeBlock", "a\n«~~~ python\n~~~»\nb"), QStringLiteral("a\n‸b"));
+    QCOMPARE(formatted("codeBlock", "a\n«```\n```»"), QStringLiteral("a‸"));
+    QCOMPARE(formatted("codeBlock", "«~~~ js\r\n~~~»\r\nb", crlf()), QStringLiteral("‸b"));
 
     QCOMPARE(formatted("displayMath", "‸"), QStringLiteral("$$\n‸\n$$"));
     QCOMPARE(formatted("displayMath", "«a\nb»"), QStringLiteral("$$\n«a\nb»\n$$"));
@@ -396,6 +466,11 @@ void insertionsKeepTheirBlankLines()
     QCOMPARE(formatted("thematicBreak", "a‸\nb"), QStringLiteral("a\n\n---\n‸\nb"));
     QCOMPARE(formatted("pageBreak", "a‸"), QStringLiteral("a\n\n+++\n‸"));
     QCOMPARE(formatted("thematicBreak", "a‸", crlf()), QStringLiteral("a\r\n\r\n---\r\n‸"));
+    // The caret goes past the line break after the block, whichever the line had.
+    QCOMPARE(formatted("thematicBreak", "‸abc\n", crlf()), QStringLiteral("abc\r\n\r\n---\n‸"));
+    QCOMPARE(formatted("pageBreak", "‸abc\n", crlf()), QStringLiteral("abc\r\n\r\n+++\n‸"));
+    QCOMPARE(formatted("thematicBreak", "‸abc\r\n"), QStringLiteral("abc\n\n---\r\n‸"));
+    QCOMPARE(formatted("thematicBreak", "a\r\n‸\r\nb"), QStringLiteral("a\r\n\n---\n‸\r\nb"));
 
     QCOMPARE(formatted("table", "‸"), QStringLiteral("| «Column 1» | Column 2 |\n| -------- | -------- |\n|          |          |\n"));
     QCOMPARE(formatted("table", "Intro‸"),
@@ -1337,6 +1412,51 @@ void undefinedNotesBecomeInlineOrDefined()
     QTest::keyClick(window, Qt::Key_Escape);
     QTRY_VERIFY(!menu->property("visible").toBool());
     QCOMPARE(buffer->text(), QStringLiteral("A claim[^source] here."));
+}
+
+void noteMenuFindsItsReferenceAgain()
+{
+    // The menu on a note reference acts on that reference when it runs,
+    // wherever the text has moved it while the menu was open, and on no
+    // other that has come to where it was.
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    EditorBinding *binding = shell.binding();
+    SourceBuffer *buffer = shell.document()->buffer();
+    typeText(window, QStringLiteral("x [^aa] y [^bb]"));
+    QObject *menu = shell.object(QStringLiteral("noteMenu"));
+    QVERIFY(menu);
+    const auto openOn = [&](int source) {
+        binding->select(0, 0);
+        QRectF place;
+        QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, place),
+                                  Q_ARG(int, binding->sourceToEditor(source)));
+        QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, editor->mapToScene(place.center()).toPoint());
+        return QTest::qWaitFor([&] { return isOpen(menu); }, 5000);
+    };
+    QVERIFY(openOn(12));
+    QCOMPARE(menu->property("label").toString(), QStringLiteral("bb"));
+    // Eight characters come in before it, as from another view of the
+    // document: [^aa] is where [^bb] was.
+    buffer->replace({0, 0}, QStringLiteral("12345678"));
+    QCOMPARE(MarkdownEditing::undefinedNoteAt(buffer->text(), 12), QStringLiteral("aa"));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(shell.item(QStringLiteral("defineNoteEntry"))));
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QCOMPARE(buffer->text(), QStringLiteral("12345678x [^aa] y [^bb]\n\n[^bb]: "));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("12345678x [^aa] y [^bb]"));
+
+    // A reference that has gone by then is looked for nowhere else.
+    QVERIFY(openOn(20));
+    QCOMPARE(menu->property("label").toString(), QStringLiteral("bb"));
+    buffer->replace({18, 5}, QString());
+    QCOMPARE(buffer->text(), QStringLiteral("12345678x [^aa] y "));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(shell.item(QStringLiteral("inlineNoteEntry"))));
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    QCOMPARE(buffer->text(), QStringLiteral("12345678x [^aa] y "));
 }
 
 void assistiveTechnologyEditsTheSource()

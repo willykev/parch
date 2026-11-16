@@ -1,5 +1,6 @@
 #include "printpreview.h"
 
+#include "codehighlight.h"
 #include "document.h"
 #include "documentreading.h"
 #include "exporter.h"
@@ -103,6 +104,8 @@ void PrintPreview::layOut()
     }
     const QString path = document->path();
     const RenderService::Options render = m_render;
+    // The worker colours code only once the languages are loaded, here.
+    CodeHighlight::prepare();
     // The document's parse of its text as it is now, which every view of it
     // shares; a document that closes first is laid out no more.
     connect(document, &QObject::destroyed, this, [this, generation] {

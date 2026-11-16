@@ -26,6 +26,8 @@ void exportsStopWhenCancelled();
 void exportsFailWithAReasonAndKeepTheOldFile();
 void exportsNeverTouchTheSource();
 void exportDialogListsLimitationsAndExportsInTheBackground();
+void exportsAskBeforeReplacingWhatTheSuffixNames();
+void codeIsColouredWithoutAPreviewShownFirst();
 void exportAgainRepeatsTheRecipe();
 void printingGoesThroughThePortal();
 void printPreviewShowsThePagesThePdfHas();

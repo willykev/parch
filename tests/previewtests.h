@@ -43,5 +43,7 @@ void distractionFreeWritingKeepsEachView();
 void citationsReadAsTheirStyleWordsThem();
 void documentSettingsReachThePreview();
 void previewFollowsFilesOnDisk();
+void drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize();
+void headingLinksAreFoundInTheSharedParse();
 
 } // namespace PreviewTests

@@ -145,6 +145,10 @@ public:
     // The label of a note reference at a source position that nothing
     // defines, in a document whose dialect has notes; empty for none.
     Q_INVOKABLE QString undefinedNoteAt(int position) const;
+    // Where the note reference with this label that nothing defines is now:
+    // at the position, or else the one nearest to it, as when the text has
+    // changed since the position was taken; -1 when there is none.
+    Q_INVOKABLE int undefinedNoteNear(const QString &label, int position) const;
 
     // UTF-16 positions; -1 for a position outside the text.
     Q_INVOKABLE int sourceToEditor(int utf16) const;

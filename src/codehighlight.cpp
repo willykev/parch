@@ -200,6 +200,15 @@ void CodeHighlight::prepare()
     load(s);
 }
 
+void CodeHighlight::unload()
+{
+    Shared &s = shared();
+    QMutexLocker lock(&s.mutex);
+    s.definitions.clear();
+    s.cache.clear();
+    s.repository.reset();
+}
+
 bool CodeHighlight::knows(const QString &language)
 {
     Shared &s = shared();

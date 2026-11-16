@@ -128,6 +128,11 @@ public:
     // which is said there too. Waits only while another call holds history,
     // as the look at every document as history starts does.
     void setLimits(const HistoryLimits &limits);
+    // Counts the unnamed versions of every document that these limits would
+    // remove, as setLimits() would prune them, and removes nothing. Counted
+    // on the pruner's thread, after any prune queued before it, and said by
+    // removalsCounted().
+    void countRemovals(const HistoryLimits &limits);
     // The bytes every document's versions take, and the named ones among them.
     struct Usage {
         qint64 bytes = 0;
@@ -149,6 +154,9 @@ signals:
     // lock, so a receiver takes it queued and never calls back into History
     // from it directly.
     void pausedChanged(History::Pause pause);
+    // What countRemovals() counted for the limits it was given. Emitted on
+    // the pruner's thread.
+    void removalsCounted(int versions, int days, qint64 bytes, int count);
 
 private:
     QString folderOf(const QString &documentId) const;
@@ -166,6 +174,8 @@ private:
     // Only the document's own versions beyond the count or the age.
     void pruneOwn(const QString &documentId, const QList<Version> &versions);
     void pruneAll();
+    // How many versions pruneAll() would remove under these limits.
+    int removalsLocked(const HistoryLimits &limits) const;
     void removeFiles(const QString &documentId, const Version &version) const;
     bool writeName(const QString &documentId, const QString &versionId, const QString &name) const;
     Pause pauseLocked() const;

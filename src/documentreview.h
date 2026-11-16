@@ -38,9 +38,10 @@ public:
     Q_INVOKABLE void resolveConflict(Document *document, int choice);
     // Records the text as it is now as a new version with a name, off the UI thread.
     Q_INVOKABLE void checkpoint(Document *document, const QString &name);
-    // As DocumentStore::restoreVersion() does; a refusal is a problem said,
-    // every time. A version that is not UTF-8 text is restored as its bytes,
-    // as DocumentStore::restoreBytes() does, off the UI thread.
+    // As DocumentStore::restoreVersion() does, once the version has been
+    // read off the UI thread; a refusal is a problem said, every time. A
+    // version that is not UTF-8 text is restored as its bytes, as
+    // DocumentStore::restoreBytes() does. False only without a document.
     Q_INVOKABLE bool restoreVersion(Document *document, const QString &versionId);
     Q_INVOKABLE void nameVersion(Document *document, const QString &versionId, const QString &name);
     Q_INVOKABLE void removeVersion(Document *document, const QString &versionId);

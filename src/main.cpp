@@ -259,9 +259,13 @@ int main(int argc, char *argv[])
     QObject::connect(&backend, &Backend::quitRequested, &service, &AppService::close);
     // A save still running then has its text in recovery, and waiting for it
     // as parch ends could take for ever, so parch leaves at once, as at the
-    // end of the session.
+    // end of the session, once an export has stopped and the files' ids are
+    // written. Other work ends as the store and the exports are deleted.
     QObject::connect(&backend, &Backend::quitRequested, &app, [&backend] {
-        if (backend.store()->savesRunning()) ::_exit(0);
+        if (backend.store()->savesRunning()) {
+            backend.endJobsBeforeLeaving(Backend::EndWaitMs);
+            ::_exit(0);
+        }
         QCoreApplication::exit(0);
     }, Qt::QueuedConnection);
     // The desktop's own open and save dialogs. A benchmark asks nothing.

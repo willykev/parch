@@ -62,6 +62,26 @@ Loaded readBytes(const QByteArray &bytes)
     return readPicture(reader);
 }
 
+// A drawing a helper made, as a picture of its size at the scale asked,
+// and never more than MaxSide pixels on a side: an SVG painted, a PNG read.
+QImage pictureOf(const RenderResult &result, qreal scale)
+{
+    if (!result.ok()) return {};
+    if (result.format != QLatin1String("svg")) return readBytes(result.data).image;
+    QSvgRenderer renderer(result.data);
+    if (!renderer.isValid()) return {};
+    QSizeF pixels = result.size * scale;
+    if (!pixels.isValid() || pixels.isEmpty()) return {};
+    if (std::max(pixels.width(), pixels.height()) > PreviewResources::MaxSide)
+        pixels = pixels.scaled(PreviewResources::MaxSide, PreviewResources::MaxSide, Qt::KeepAspectRatio);
+    QImage image(pixels.toSize().expandedTo(QSize(1, 1)), QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull()) return {};
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    renderer.render(&painter);
+    return image;
+}
+
 // The bytes a data: URL carries.
 QByteArray inlineBytes(const QString &url)
 {
@@ -124,6 +144,7 @@ preview::Picture PreviewResources::drawn(const QString &key, const RenderRequest
         }
         entry.askedWith = identity;
         entry.waiting = true;
+        entry.decoding = 0;
         entry.ticket = m_service->render(request, key);
         m_tickets.insert(entry.ticket, key);
     }
@@ -167,26 +188,28 @@ void PreviewResources::rendered(quint64 ticket, const RenderResult &result)
     if (at == m_entries.end() || at->ticket != ticket) return;
     Entry &entry = *at;
     entry.ticket = 0;
+    // Made into a picture off the UI thread, the entry waiting meanwhile; a
+    // newer request, or clear(), leaves what comes back untaken.
+    const quint64 decoding = ++m_decodes;
+    entry.decoding = decoding;
+    const quint64 generation = m_generation;
+    QtConcurrent::run(&m_pool, pictureOf, result, m_scale).then(this, [this, key, decoding, generation, result](const QImage &image) {
+        if (generation != m_generation) return;
+        const auto at = m_entries.find(key);
+        if (at == m_entries.end() || at->decoding != decoding) return;
+        decoded(*at, result, image);
+        emit changed(key);
+    });
+}
+
+void PreviewResources::decoded(Entry &entry, const RenderResult &result, const QImage &image)
+{
+    entry.decoding = 0;
     entry.waiting = false;
     entry.drawnWith = entry.askedWith;
     preview::Picture &picture = entry.picture;
     picture.description = result.description;
     picture.diagnostic.clear();
-    QImage image;
-    if (result.ok()) {
-        if (result.format == QLatin1String("svg")) {
-            QSvgRenderer renderer(result.data);
-            const QSize pixels = (result.size * m_scale).toSize().expandedTo(QSize(1, 1));
-            if (renderer.isValid() && pixels.width() <= 16384 && pixels.height() <= 16384) {
-                image = QImage(pixels, QImage::Format_ARGB32_Premultiplied);
-                image.fill(Qt::transparent);
-                QPainter painter(&image);
-                renderer.render(&painter);
-            }
-        } else {
-            image.loadFromData(result.data);
-        }
-    }
     if (!image.isNull()) {
         picture.state = preview::Picture::Ready;
         picture.image = image;
@@ -197,7 +220,6 @@ void PreviewResources::rendered(quint64 ticket, const RenderResult &result)
         picture.image = QImage();
         picture.diagnostic = result.ok() ? tr("The picture that was drawn cannot be shown.") : result.diagnostic;
     }
-    emit changed(key);
 }
 
 preview::Picture PreviewResources::image(const md::Destination &destination, const QString &written)

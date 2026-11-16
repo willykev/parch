@@ -208,7 +208,8 @@ Unresolved::Unresolved(const md::Document &document) : m_references(document.fil
         case C::IncludeSizeLimit:
         case C::IncludeCountLimit:
         case C::IncludeNoLibrary:
-        case C::IncludeNoBaseFolder: {
+        case C::IncludeNoBaseFolder:
+        case C::IncludeOutside: {
             const quint64 key = placeKey(diagnostic.file, diagnostic.range.start);
             if (!m_nodes.contains(key)) m_nodes.insert(key, diagnostic.message);
             break;

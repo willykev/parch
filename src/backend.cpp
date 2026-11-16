@@ -1727,6 +1727,11 @@ void Backend::inform(const QString &news, const QString &detail)
     post(news, detail, News);
 }
 
+void Backend::reportProblem(const QString &problem, const QString &detail)
+{
+    notify(problem, detail);
+}
+
 void Backend::post(const QString &problem, const QString &detail, NoticeTone tone)
 {
     // A refused quit stays in view until its text is safe; the notice joins its detail.

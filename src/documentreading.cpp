@@ -35,8 +35,11 @@ Reading parse(const QString &text, const Dialect::Layers &layers, md::Source sou
     reading.dialect = Dialect::effective(all);
     const bool linkCitations =
         reading.dialect.options.frontMatter && Dialect::linkCitations(md::parseFrontMatter(text));
-    reading.citations = DocumentCitations::prepare(reading.dialect, linkCitations);
     if (source.libraryRoot.isEmpty()) source.libraryRoot = reading.dialect.libraryRoot;
+    // The front matter names files within the library, or the document's
+    // folder, as includes are read: never anywhere else.
+    reading.citations = DocumentCitations::prepare(reading.dialect, linkCitations,
+                                                   DocumentCitations::Reach::of(source.libraryRoot, folder));
     reading.dialect.limit(source);
     source.externalCitationKeys = reading.citations.keys();
     source.citationNotes = reading.citations.noteStyle();

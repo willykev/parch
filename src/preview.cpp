@@ -11,6 +11,7 @@
 #include "previewwatch.h"
 #include "renderrequest.h"
 #include "sourcebuffer.h"
+#include "workerfailure.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QClipboard>
@@ -275,6 +276,7 @@ void Preview::setDocument(Document *document)
     disconnect(m_edits);
     disconnect(m_dialect);
     disconnect(m_parses);
+    disconnect(m_parseFailures);
     m_document = document;
     clear();
     // A parse asked of the document before never comes.
@@ -284,6 +286,9 @@ void Preview::setDocument(Document *document)
         m_dialect = connect(document, &Document::dialectChanged, this, &Preview::dialectChanged);
         m_parses = connect(document->parse(), &DocumentParse::parsed, this, [this](const ParsedTextPtr &parse) {
             if (std::exchange(m_awaiting, false)) read(parse);
+        });
+        m_parseFailures = connect(document->parse(), &DocumentParse::failed, this, [this](const QString &reason) {
+            if (std::exchange(m_awaiting, false)) failed(reason);
         });
     }
     emit documentChanged();
@@ -615,6 +620,7 @@ void Preview::setWorkerDelay(int milliseconds) { workerDelay = std::max(0, milli
 Preview::Parsed Preview::parseJob(ParsedTextPtr parse, quint64 generation)
 {
     if (const int delay = workerDelay; delay > 0) QThread::msleep(delay);
+    WorkerFailure::check(WorkerFailure::Job::Preview);
     Parsed result;
     result.revision = parse->revision;
     result.generation = generation;
@@ -651,6 +657,9 @@ void Preview::parse()
     if (const ParsedTextPtr parse = m_document->parse()->request()) {
         m_awaiting = false;
         read(parse);
+    } else if (const QString why = m_document->parse()->failure(); !why.isEmpty()) {
+        m_awaiting = false;
+        failed(why);
     }
 }
 
@@ -660,10 +669,25 @@ void Preview::read(const ParsedTextPtr &parse)
         m_parsing = false;
         return;
     }
-    QtConcurrent::run(&m_pool, &Preview::parseJob, parse, m_generation).then(this, [this](const Parsed &result) {
-        m_parsing = false;
-        take(result);
-    });
+    QtConcurrent::run(&m_pool, &Preview::parseJob, parse, m_generation)
+        .then(this, [this](const Parsed &result) {
+            m_parsing = false;
+            take(result);
+        })
+        .onFailed(this, [this](const QUnhandledException &failure) { failed(WorkerFailure::reason(failure.exception())); })
+        .onFailed(this, [this] { failed(QString()); });
+}
+
+void Preview::failed(const QString &reason)
+{
+    m_parsing = false;
+    const QString why = reason.isEmpty() ? QStringLiteral("it could not be read") : reason;
+    if (std::exchange(m_failure, why) != why) emit failureChanged();
+    if (m_backend)
+        m_backend->reportProblem(tr("Preview not updated"),
+                                 tr("The preview could not read “%1”: %2.").arg(m_document ? m_document->title() : QString(), why));
+    // What was asked meanwhile is read, from the text as it is then.
+    if (std::exchange(m_parseAgain, false) && m_active && m_document && m_text) m_timer.start(UpdateDelayMs);
 }
 
 void Preview::take(const Parsed &result)
@@ -678,6 +702,10 @@ void Preview::take(const Parsed &result)
         ++m_stale;
         m_timer.start(UpdateDelayMs);
         return;
+    }
+    if (!m_failure.isEmpty()) {
+        m_failure.clear();
+        emit failureChanged();
     }
     plan(result);
     if (again) m_timer.start(UpdateDelayMs);
@@ -1632,16 +1660,25 @@ int Preview::findHeading(const QString &slug)
     // The document's own parse of the text as it is now, which a document
     // just opened, or shown as source alone, has once a worker has read it.
     const QPointer<Document> asked = m_document;
-    m_document->parse()->whenParsed(this, [this, asked, request, slug](const ParsedTextPtr &parse) {
-        if (!asked || asked != m_document) return;
-        QtConcurrent::run([parse, slug] {
-            for (const Heading &heading : Outline::headings(parse->document(), parse->text))
-                if (heading.slug == slug) return heading.position;
-            return -1;
-        }).then(this, [this, asked, request, slug](int position) {
-            if (asked && asked == m_document) emit headingFound(request, slug, position);
+    // A text that cannot be read has no heading to find.
+    m_document->parse()->whenParsed(
+        this,
+        [this, asked, request, slug](const ParsedTextPtr &parse) {
+            if (!asked || asked != m_document) return;
+            QtConcurrent::run([parse, slug] {
+                try {
+                    for (const Heading &heading : Outline::headings(parse->document(), parse->text))
+                        if (heading.slug == slug) return heading.position;
+                } catch (...) {
+                }
+                return -1;
+            }).then(this, [this, asked, request, slug](int position) {
+                if (asked && asked == m_document) emit headingFound(request, slug, position);
+            });
+        },
+        [this, asked, request, slug](const QString &) {
+            if (asked && asked == m_document) emit headingFound(request, slug, -1);
         });
-    });
     return request;
 }
 

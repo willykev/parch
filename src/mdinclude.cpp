@@ -1,9 +1,12 @@
 #include "mdinclude.h"
 
+#include "saferead.h"
+
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QStringDecoder>
+
+#include <algorithm>
 
 namespace md {
 
@@ -17,43 +20,52 @@ QString includeTarget(const QString &written, const QString &includingDirectory,
     return QDir::cleanPath(includingDirectory + u'/' + written);
 }
 
+bool isWithin(const QString &path, const QString &folder)
+{
+    if (folder.isEmpty() || path.isEmpty()) return false;
+    if (path == folder) return true;
+    const QString base = folder.endsWith(u'/') ? folder : folder + u'/';
+    return path.startsWith(base);
+}
+
+QString IncludeResolver::canonicalPath(const QString &path)
+{
+    return QDir::cleanPath(path);
+}
+
+QString FileIncludeResolver::canonicalPath(const QString &path)
+{
+    return QFileInfo(path).canonicalFilePath();
+}
+
 IncludeResolver::File FileIncludeResolver::read(const QString &path, qint64 maxBytes)
 {
     File result;
-    const QFileInfo info(path);
-    if (!info.exists()) {
-        result.missing = true;
-        result.error = QStringLiteral("The file does not exist");
-        return result;
-    }
-    if (!info.isFile()) {
-        result.error = QStringLiteral("This is not a file");
-        return result;
-    }
-    result.canonicalPath = info.canonicalFilePath();
-    if (info.size() > maxBytes) {
-        result.tooLarge = true;
-        result.bytes = info.size();
-        return result;
-    }
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        result.error = file.errorString();
-        return result;
-    }
-    const QByteArray bytes = file.readAll();
-    if (file.error() != QFileDevice::NoError) {
-        result.error = file.errorString();
+    // No file is read larger than a document may be, whatever room the
+    // include limits leave; a smaller limit is that room, said as such.
+    const bool roomLimits = maxBytes <= SafeRead::DocumentBytes;
+    const SafeRead::Result read = SafeRead::read(path, roomLimits ? std::max<qint64>(0, maxBytes) : SafeRead::DocumentBytes);
+    result.canonicalPath = read.canonicalPath;
+    if (!read.ok) {
+        result.missing = read.missing;
+        if (read.missing) {
+            result.error = QStringLiteral("The file does not exist");
+        } else if (read.tooLarge && roomLimits) {
+            result.tooLarge = true;
+            result.bytes = read.size;
+        } else {
+            result.error = read.error;
+        }
         return result;
     }
     QStringDecoder decoder(QStringDecoder::Utf8);
-    result.text = decoder(bytes);
+    result.text = decoder(read.bytes);
     if (decoder.hasError()) {
         result.text.clear();
         result.error = QStringLiteral("The file is not UTF-8 text");
         return result;
     }
-    result.bytes = bytes.size();
+    result.bytes = read.bytes.size();
     result.ok = true;
     return result;
 }

@@ -1,5 +1,7 @@
 #include "citations.h"
 
+#include "saferead.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -107,14 +109,13 @@ std::shared_ptr<const CslStyle> CslCatalog::bundledStyle(const QString &id, QStr
 
 std::shared_ptr<const CslStyle> CslCatalog::styleFromFile(const QString &path, QString *error)
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
+    const SafeRead::Result read = SafeRead::read(path, SafeRead::ReferenceBytes);
+    if (!read.ok) {
         if (error)
-            *error = QStringLiteral("Cannot read the citation style “%1”: %2.")
-                         .arg(QFileInfo(path).fileName(), file.errorString());
+            *error = QStringLiteral("Cannot read the citation style “%1”: %2.").arg(QFileInfo(path).fileName(), read.error);
         return nullptr;
     }
-    return CslStyle::fromXml(file.readAll(), error);
+    return CslStyle::fromXml(read.bytes, error);
 }
 
 std::shared_ptr<const CslLocale> CslCatalog::defaultLocale()
@@ -138,14 +139,13 @@ QString CslCatalog::localeFor(const CslStyle &style)
 
 std::shared_ptr<const CslLocale> CslCatalog::localeFromFile(const QString &path, QString *error)
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
+    const SafeRead::Result read = SafeRead::read(path, SafeRead::ReferenceBytes);
+    if (!read.ok) {
         if (error)
-            *error = QStringLiteral("Cannot read the citation locale “%1”: %2.")
-                         .arg(QFileInfo(path).fileName(), file.errorString());
+            *error = QStringLiteral("Cannot read the citation locale “%1”: %2.").arg(QFileInfo(path).fileName(), read.error);
         return nullptr;
     }
-    return CslLocale::fromXml(file.readAll(), error);
+    return CslLocale::fromXml(read.bytes, error);
 }
 
 std::shared_ptr<const CslLocale> CslCatalog::locale(const QString &language, const QStringList &folders, QString *error)

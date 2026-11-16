@@ -145,6 +145,9 @@ class Preview : public QObject {
     // What the text as last read marks as leading nowhere (preview::Unresolved),
     // a sentence each, for assistive technology; empty when nothing does.
     Q_PROPERTY(QString unresolved READ unresolved NOTIFY unresolvedChanged)
+    // Why the text as it is now could not be read for the preview, as when
+    // memory ran out; empty when it was.
+    Q_PROPERTY(QString failure READ failure NOTIFY failureChanged)
 
 public:
     // How long the text rests after an edit before it is parsed again.
@@ -197,6 +200,7 @@ public:
     bool current() const { return m_current; }
     bool canGoBack() const { return !m_trail.isEmpty(); }
     QString unresolved() const { return m_unresolved; }
+    QString failure() const { return m_failure; }
 
     // The document as it is built, its style, and how much it has built: for tests.
     QTextDocument *textDocument() const { return m_text; }
@@ -296,6 +300,7 @@ signals:
     void currentChanged();
     void trailChanged();
     void unresolvedChanged();
+    void failureChanged();
     // The surface shows other text than before: a result was taken, or a picture arrived.
     void updated();
     // The layout of what is shown changed without its text changing.
@@ -327,6 +332,9 @@ private:
     // Reads the document's parse of the text on the worker.
     void read(const ParsedTextPtr &parse);
     void take(const Parsed &result);
+    // The text could not be read for the preview: it says why, and is
+    // ready for the next text.
+    void failed(const QString &reason);
     void plan(const Parsed &result);
     void work();
     void finishWork();
@@ -429,6 +437,8 @@ private:
     Revision m_shownRevision = 0;
     bool m_current = false;
     QString m_unresolved;
+    QString m_failure;
+    QMetaObject::Connection m_parseFailures;
     quint64 m_nextId = 1;
     // The section whose first block was given no room above it.
     quint64 m_trimmed = 0;

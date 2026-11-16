@@ -1426,10 +1426,11 @@ void BlockParser::consumeReferences(Block *block)
     }
     const QChar *c = content.constData();
     const int size = int(content.size());
+    // The piece a position is in: the last that starts at or before it,
+    // found by bisection, since a paragraph can hold a great many definitions.
     auto pieceOf = [&](int pos) {
-        size_t i = 0;
-        while (i + 1 < starts.size() && starts[i + 1] <= pos) ++i;
-        return i;
+        const auto after = std::upper_bound(starts.cbegin() + 1, starts.cend(), pos);
+        return size_t(after - starts.cbegin()) - 1;
     };
     auto toSource = [&](int pos) {
         const size_t i = pieceOf(pos);

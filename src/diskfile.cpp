@@ -1,5 +1,7 @@
 #include "diskfile.h"
 
+#include "saferead.h"
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -12,6 +14,7 @@
 #include <atomic>
 #include <fcntl.h>
 #include <climits>
+#include <limits>
 #include <cerrno>
 #include <cstdlib>
 #include <cstdio>
@@ -140,8 +143,9 @@ bool stamped(int descriptor, struct stat &state, FileStamp &stamp)
 }
 
 // The failure probe gives for something that is no regular file, which no
-// errno takes.
+// errno takes, and for a file of the system, such as one in /proc.
 constexpr int notRegularFailure = -1;
+constexpr int systemFileFailure = -2;
 
 // Reads the target's identity and bytes. A file that exists but cannot be read
 // is an error rather than a version, because a version that was never read
@@ -203,6 +207,8 @@ bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString
         return fail(number, QString::fromLocal8Bit(strerror(number)));
     }
     const QString canonical = QFile::decodeName(QByteArray(name, nameLength));
+    // A file of /proc says it is empty and is not, and none is a document.
+    if (SafeRead::isSystemPath(canonical)) return fail(systemFileFailure, SafeRead::systemPathReason(canonical));
     if (found) *found = state;
     if (!bytes && known && known->exists && known->stamp.trusted() && known->stamp == stamp
         && known->canonicalPath == canonical && known->device == quint64(state.st_dev)
@@ -210,8 +216,15 @@ bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString
         version = *known;
         return true;
     }
-    const QByteArray content = file.readAll();
-    if (file.error() != QFile::NoError) return fail(EIO, file.errorString());
+    // Read in pieces up to the limit, whatever size the file said it had.
+    QByteArray content;
+    QString why;
+    bool tooLarge = false;
+    if (!SafeRead::readDescriptor(file.handle(), limit >= 0 ? limit : std::numeric_limits<qint64>::max() - 1, content,
+                                  why, &tooLarge, qint64(state.st_size)))
+        return tooLarge ? fail(EFBIG, QCoreApplication::translate("DiskFile", "it is larger than the %1 MiB parch opens")
+                                          .arg(limit >> 20))
+                        : fail(EIO, why);
     ++readsMade;
     version = DiskVersion{canonical, quint64(state.st_dev), quint64(state.st_ino),
                           QCryptographicHash::hash(content, QCryptographicHash::Sha256), true, stamp};

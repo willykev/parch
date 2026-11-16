@@ -34,7 +34,8 @@ WordCounter::WordCounter(QObject *parent) : QObject(parent)
     connect(&m_watcher, &QFutureWatcher<int>::finished, this, [this] {
         // Only the count of the text and selection as they still are.
         if (m_running == m_generation && !m_watcher.isCanceled()) {
-            take(m_watcher.result(), m_runningSelection);
+            // A count that failed, as when memory ran out, leaves the count as it was.
+            if (const int words = m_watcher.result(); words >= 0) take(words, m_runningSelection);
             m_counted = m_running;
         }
     });
@@ -173,7 +174,13 @@ void WordCounter::countParsed(const ParsedTextPtr &parse)
     // A count still running is of older text; its result will be dropped.
     m_running = generation;
     m_runningSelection = selection;
-    m_watcher.setFuture(QtConcurrent::run(&m_pool, [parse, counted] { return counted(parse); }));
+    m_watcher.setFuture(QtConcurrent::run(&m_pool, [parse, counted] {
+        try {
+            return counted(parse);
+        } catch (...) {
+            return -1;
+        }
+    }));
 }
 
 void WordCounter::take(int words, bool ofSelection)

@@ -80,6 +80,8 @@ private:
     struct Found;
     static std::shared_ptr<Found> work(ParsedTextPtr parse);
     void read(quint64 request, const std::shared_ptr<Found> &found);
+    // The parse or the check failed: it says why, and is ready again.
+    void failed(quint64 request, const QString &reason);
     void finish();
     QVariantMap row(const DocumentCheck::Problem &problem) const;
     void setChecking(bool checking);

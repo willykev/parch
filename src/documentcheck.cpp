@@ -39,7 +39,8 @@ QString kindOf(md::DiagnosticCode code)
     case C::IncludeSizeLimit:
     case C::IncludeCountLimit:
     case C::IncludeNoLibrary:
-    case C::IncludeNoBaseFolder: return QStringLiteral("include");
+    case C::IncludeNoBaseFolder:
+    case C::IncludeOutside: return QStringLiteral("include");
     }
     return QStringLiteral("reference");
 }
@@ -176,8 +177,10 @@ bool load(const QString &path, const Dialect::Choice &dialect, Loaded *loaded, Q
     for (const QString &name : md::Options::extensionNames())
         layers.flags.extensions.append({name, dialect.options.extension(name)});
     layers.flags.libraryRoot = dialect.libraryRoot;
-    layers.flags.bibliography = dialect.bibliography;
-    layers.flags.citationStyle = dialect.citationStyle;
+    // What a front matter named is no flag: the other document's own front
+    // matter chooses, within its own reach.
+    if (dialect.bibliographyFrom != u"front-matter") layers.flags.bibliography = dialect.bibliography;
+    if (dialect.citationStyleFrom != u"front-matter") layers.flags.citationStyle = dialect.citationStyle;
     layers.flags.maxIncludeDepth = dialect.maxIncludeDepth;
     layers.flags.maxIncludeSize = dialect.maxIncludeSize;
     layers.flags.maxIncludes = dialect.maxIncludes;

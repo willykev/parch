@@ -2,6 +2,8 @@
 
 #include "remotefetcher.h"
 #include "renderservice.h"
+#include "saferead.h"
+#include "workerfailure.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
@@ -44,22 +46,32 @@ Loaded readPicture(QImageReader &reader)
     return {image, {}};
 }
 
-Loaded readFile(const QString &path)
-{
-    const QFileInfo file(path);
-    if (!file.exists()) return {{}, tr("there is no such file")};
-    if (!file.isFile()) return {{}, tr("it is not a file")};
-    QImageReader reader(path);
-    return readPicture(reader);
-}
-
 Loaded readBytes(const QByteArray &bytes)
 {
-    QBuffer buffer;
-    buffer.setData(bytes);
-    buffer.open(QIODevice::ReadOnly);
-    QImageReader reader(&buffer);
-    return readPicture(reader);
+    // A picture made to harm that runs the reader out of memory is one that
+    // cannot be shown, not the end of parch.
+    try {
+        WorkerFailure::check(WorkerFailure::Job::Picture);
+        QBuffer buffer;
+        buffer.setData(bytes);
+        buffer.open(QIODevice::ReadOnly);
+        QImageReader reader(&buffer);
+        return readPicture(reader);
+    } catch (...) {
+        return {{}, WorkerFailure::reason(std::current_exception())};
+    }
+}
+
+Loaded readFile(const QString &path)
+{
+    try {
+        const SafeRead::Result read = SafeRead::read(path, SafeRead::PictureBytes);
+        if (read.missing) return {{}, tr("there is no such file")};
+        if (!read.ok) return {{}, read.error};
+        return readBytes(read.bytes);
+    } catch (...) {
+        return {{}, WorkerFailure::reason(std::current_exception())};
+    }
 }
 
 // A drawing a helper made, as a picture of its size at the scale asked,
@@ -193,7 +205,15 @@ void PreviewResources::rendered(quint64 ticket, const RenderResult &result)
     const quint64 decoding = ++m_decodes;
     entry.decoding = decoding;
     const quint64 generation = m_generation;
-    QtConcurrent::run(&m_pool, pictureOf, result, m_scale).then(this, [this, key, decoding, generation, result](const QImage &image) {
+    // A picture that cannot be made, as when memory runs out, is one that
+    // cannot be shown.
+    QtConcurrent::run(&m_pool, [result, scale = m_scale] {
+        try {
+            return pictureOf(result, scale);
+        } catch (...) {
+            return QImage();
+        }
+    }).then(this, [this, key, decoding, generation, result](const QImage &image) {
         if (generation != m_generation) return;
         const auto at = m_entries.find(key);
         if (at == m_entries.end() || at->decoding != decoding) return;

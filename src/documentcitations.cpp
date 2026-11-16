@@ -1,6 +1,9 @@
 #include "documentcitations.h"
 
+#include "mdinclude.h"
+
 #include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 #include <QMutex>
 
@@ -83,10 +86,33 @@ void report(const Database &db, QSet<QString> &reported, QList<Problem> &problem
     }
 }
 
-QList<Database> databasesOf(const QStringList &files, Setup &setup, QSet<QString> &reported)
+// The problem a front matter's file outside its reach is.
+Problem outsideProblem(const Reach &reach, const QString &file, const QString &what, const QString &code)
+{
+    Problem problem;
+    problem.code = code;
+    problem.severity = md::Severity::Error;
+    problem.message = QStringLiteral("The %1 “%2” is not read: %3, and front matter names files only within it. Choose it "
+                                     "in Document settings to read it.")
+                          .arg(what, QFileInfo(file).fileName(), reach.outside());
+    problem.source = file;
+    return problem;
+}
+
+// The bibliography files, but for those a front matter names outside its
+// reach, which are problems instead.
+QList<Database> databasesOf(const QStringList &files, Setup &setup, QSet<QString> &reported,
+                            const std::optional<Reach> &reach = std::nullopt)
 {
     QList<Database> list;
     for (const QString &file : files) {
+        if (reach && !reach->allows(file)) {
+            if (!reported.contains(file))
+                setup.problems.append(outsideProblem(*reach, file, QStringLiteral("bibliography"),
+                                                     QStringLiteral("unreadable-bibliography")));
+            reported.insert(file);
+            continue;
+        }
         Database db = database(file);
         report(db, reported, setup.problems);
         list.append(db);
@@ -199,6 +225,35 @@ QString attribute(const QString &value)
 
 } // namespace
 
+Reach Reach::of(const QString &library, const QString &folder)
+{
+    Reach reach;
+    reach.library = !library.isEmpty();
+    for (const QString &path : {library, folder}) {
+        if (path.isEmpty()) continue;
+        const QString canonical = QFileInfo(path).canonicalFilePath();
+        reach.folders.append(canonical.isEmpty() ? QDir::cleanPath(path) : canonical);
+    }
+    return reach;
+}
+
+bool Reach::allows(const QString &path) const
+{
+    // A front matter's path stays relative only when its document has no
+    // folder, and then it has nowhere to be found from.
+    if (!QDir::isAbsolutePath(path)) return false;
+    QString canonical = QFileInfo(path).canonicalFilePath();
+    if (canonical.isEmpty()) canonical = QDir::cleanPath(path);
+    for (const QString &folder : folders)
+        if (md::isWithin(canonical, folder)) return true;
+    return false;
+}
+
+QString Reach::outside() const
+{
+    return library ? QStringLiteral("it is outside the library") : QStringLiteral("it is outside the document's folder");
+}
+
 QSet<QString> Setup::keys() const
 {
     QSet<QString> all;
@@ -212,14 +267,19 @@ QSet<QString> Setup::keys() const
     return all;
 }
 
-Setup prepare(const Dialect::Choice &dialect, bool linkCitations)
+Setup prepare(const Dialect::Choice &dialect, bool linkCitations, const std::optional<Reach> &reach)
 {
     Setup setup;
+    setup.reach = reach;
     if (!dialect.options.citations) return setup;
     setup.linkCitations = linkCitations;
     setup.chosen = !dialect.citationStyle.isEmpty() || !dialect.bibliography.isEmpty();
     setup.styleName = dialect.citationStyle;
-    if (!dialect.citationStyle.isEmpty()) {
+    const bool frontMatter = dialect.citationStyleFrom == u"front-matter";
+    if (reach && frontMatter && Dialect::isStyleFile(dialect.citationStyle) && !reach->allows(dialect.citationStyle)) {
+        setup.problems.append(
+            outsideProblem(*reach, dialect.citationStyle, QStringLiteral("citation style"), QStringLiteral("citation-style")));
+    } else if (!dialect.citationStyle.isEmpty()) {
         QString error;
         if (Dialect::isStyleFile(dialect.citationStyle)) {
             setup.style = styleFile(dialect.citationStyle, &error);
@@ -238,7 +298,8 @@ Setup prepare(const Dialect::Choice &dialect, bool linkCitations)
         }
     }
     QSet<QString> reported;
-    setup.databases = databasesOf(dialect.bibliography, setup, reported);
+    setup.databases = databasesOf(dialect.bibliography, setup, reported,
+                                  dialect.bibliographyFrom == u"front-matter" ? reach : std::nullopt);
     return setup;
 }
 
@@ -251,7 +312,7 @@ bool addIncludedBibliographies(Setup &setup, const md::Document &document)
         if (!file.frontMatter.present || file.path.isEmpty() || setup.fileDatabases.contains(file.path)) continue;
         const Dialect::Layer layer = Dialect::frontMatterLayer(file.frontMatter, file.directory);
         if (!layer.bibliography) continue;
-        setup.fileDatabases.insert(file.path, databasesOf(*layer.bibliography, setup, reported));
+        setup.fileDatabases.insert(file.path, databasesOf(*layer.bibliography, setup, reported, setup.reach));
         setup.chosen = true;
     }
     for (const QString &key : setup.keys())

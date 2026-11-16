@@ -256,6 +256,7 @@ enum class DiagnosticCode : quint8 {
     IncludeCountLimit,
     IncludeNoLibrary,         // a `/rooted` include without a library root
     IncludeNoBaseFolder,      // a relative include from a document with no folder
+    IncludeOutside,           // an include that leads out of the library, or of the document's folder
 };
 
 struct Diagnostic {

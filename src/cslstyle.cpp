@@ -7,6 +7,13 @@
 
 namespace {
 
+// No style or locale nests its elements more than a few levels deep, nor
+// through its macros more than a few dozen. Reading a style, walking it and
+// formatting with it recurse once per level, on a worker's stack, so a file
+// that nests deeper than these is refused with the reason.
+constexpr int MaxNesting = 128;
+constexpr int MaxMacroDepth = 256;
+
 // A plain element tree, read first so that the CSL reading below can look
 // at an element's children in any order.
 struct XmlElement {
@@ -25,6 +32,13 @@ bool readXml(const QByteArray &xml, XmlElement &root, QString *error)
     while (!reader.atEnd()) {
         const QXmlStreamReader::TokenType token = reader.readNext();
         if (token == QXmlStreamReader::StartElement) {
+            if (int(stack.size()) >= MaxNesting) {
+                if (error)
+                    *error = QStringLiteral("Its elements are nested more than %1 deep, which no style needs (line %2)")
+                                 .arg(MaxNesting)
+                                 .arg(reader.lineNumber());
+                return false;
+            }
             XmlElement element;
             element.name = reader.name().toString();
             element.line = int(reader.lineNumber());
@@ -123,8 +137,11 @@ public:
     }
 
     // Reads a rendering element and its children.
-    bool node(const XmlElement &x, CslNode &out, bool inNames = false)
+    bool node(const XmlElement &x, CslNode &out, bool inNames = false, int depth = 0)
     {
+        if (depth >= MaxNesting)
+            return fail(QStringLiteral("Its elements are nested more than %1 deep, which no style needs").arg(MaxNesting),
+                        x.line);
         static const QHash<QString, CslElement> elements{
             {QStringLiteral("layout"), CslElement::Layout},       {QStringLiteral("text"), CslElement::Text},
             {QStringLiteral("number"), CslElement::Number},       {QStringLiteral("date"), CslElement::Date},
@@ -195,7 +212,7 @@ public:
         const bool names = out.element == CslElement::Names || (inNames && out.element == CslElement::Substitute);
         for (const XmlElement &c : x.children) {
             CslNode n;
-            if (!node(c, n, names || inNames)) return false;
+            if (!node(c, n, names || inNames, depth + 1)) return false;
             out.children.push_back(std::move(n));
         }
         return true;
@@ -283,33 +300,63 @@ public:
         return error.isEmpty();
     }
 
-    // Finds a macro that calls itself, directly or through others.
+    // Finds a macro that calls itself, directly or through others, or
+    // macros that, with what they hold, go deeper than MaxMacroDepth.
     bool macroCycle(const CslStyle &style)
     {
         QHash<QString, int> state;
-        std::function<bool(const QString &)> visit;
-        std::function<bool(const CslNode &)> walk = [&](const CslNode &n) {
-            if (n.element == CslElement::Text && n.has(QStringLiteral("macro")))
-                if (!visit(n.attribute(QStringLiteral("macro")))) return false;
-            for (const CslNode &c : n.children)
-                if (!walk(c)) return false;
-            return true;
+        // How deep each macro read through goes, below itself.
+        QHash<QString, int> height;
+        const auto tooDeep = [&](const QString &name) {
+            return fail(QStringLiteral("The macro “%1” calls other macros more than %2 deep, which no style needs")
+                            .arg(name)
+                            .arg(MaxMacroDepth));
         };
-        visit = [&](const QString &name) {
+        // Each returns the deepest level reached, or -1 when the style is refused.
+        std::function<int(const QString &, int)> visit;
+        std::function<int(const CslNode &, int, const QString &)> walk = [&](const CslNode &n, int depth,
+                                                                               const QString &macro) {
+            if (depth > MaxMacroDepth) {
+                tooDeep(macro);
+                return -1;
+            }
+            int deepest = depth;
+            if (n.element == CslElement::Text && n.has(QStringLiteral("macro"))) {
+                const int reached = visit(n.attribute(QStringLiteral("macro")), depth + 1);
+                if (reached < 0) return -1;
+                deepest = std::max(deepest, reached);
+            }
+            for (const CslNode &c : n.children) {
+                const int reached = walk(c, depth + 1, macro);
+                if (reached < 0) return -1;
+                deepest = std::max(deepest, reached);
+            }
+            return deepest;
+        };
+        visit = [&](const QString &name, int depth) {
             const int s = state.value(name);
-            if (s == 1) return fail(QStringLiteral("The macro “%1” calls itself").arg(name));
-            if (s == 2) return true;
+            if (s == 1) {
+                fail(QStringLiteral("The macro “%1” calls itself").arg(name));
+                return -1;
+            }
+            if (s == 2) {
+                if (depth + height.value(name) <= MaxMacroDepth) return depth + height.value(name);
+                tooDeep(name);
+                return -1;
+            }
             state.insert(name, 1);
-            if (const CslNode *m = style.macro(name))
-                if (!walk(*m)) return false;
+            int reached = depth;
+            if (const CslNode *m = style.macro(name)) reached = walk(*m, depth, name);
+            if (reached < 0) return -1;
+            height.insert(name, reached - depth);
             state.insert(name, 2);
-            return true;
+            return reached;
         };
         // In name order, so that a cycle is always reported the same way.
         QStringList names = style.m_macros.keys();
         names.sort();
         for (const QString &name : std::as_const(names))
-            if (!visit(name)) return true;
+            if (visit(name, 0) < 0) return true;
         return false;
     }
 

@@ -4,6 +4,7 @@
 #include "mdinclude.h"
 #include "pathtext.h"
 #include "sourcebuffer.h"
+#include "workerfailure.h"
 
 #include <QCoreApplication>
 #include <QPointer>
@@ -43,6 +44,7 @@ struct Job {
 ParsedTextPtr parseJob(Job job)
 {
     if (const int delay = workerDelay; delay > 0) QThread::msleep(delay);
+    WorkerFailure::check(WorkerFailure::Job::Parse);
     md::FileIncludeResolver resolver;
     md::Source source;
     source.path = job.path;
@@ -95,18 +97,46 @@ ParsedTextPtr DocumentParse::current() const
 ParsedTextPtr DocumentParse::request()
 {
     if (ParsedTextPtr parse = current()) return parse;
-    if (!m_running) start();
+    // A parse that failed is not made again, over and over, for the same text.
+    if (!m_running && failure().isEmpty()) start();
     return nullptr;
 }
 
-void DocumentParse::whenParsed(QObject *context, std::function<void(const ParsedTextPtr &)> then)
+QString DocumentParse::failure() const
+{
+    return !m_failure.isEmpty() && m_failedKey == keyNow() ? m_failure : QString();
+}
+
+void DocumentParse::whenParsed(QObject *context, std::function<void(const ParsedTextPtr &)> then,
+                               std::function<void(const QString &reason)> failed)
 {
     if (const ParsedTextPtr parse = request()) {
         then(parse);
         return;
     }
-    connect(this, &DocumentParse::parsed, context, [then = std::move(then)](const ParsedTextPtr &parse) { then(parse); },
-            Qt::SingleShotConnection);
+    if (const QString why = failure(); !why.isEmpty() && failed) {
+        failed(why);
+        return;
+    }
+    // Whichever comes first is said, and the other no more.
+    struct Waiting {
+        QMetaObject::Connection parsed;
+        QMetaObject::Connection failed;
+    };
+    const auto waiting = std::make_shared<Waiting>();
+    waiting->parsed = connect(this, &DocumentParse::parsed, context, [waiting, then](const ParsedTextPtr &parse) {
+        const auto call = then;
+        disconnect(waiting->parsed);
+        disconnect(waiting->failed);
+        call(parse);
+    });
+    if (failed)
+        waiting->failed = connect(this, &DocumentParse::failed, context, [waiting, failed](const QString &why) {
+            const auto call = failed;
+            disconnect(waiting->parsed);
+            disconnect(waiting->failed);
+            call(why);
+        });
 }
 
 void DocumentParse::invalidate()
@@ -132,11 +162,19 @@ void DocumentParse::start()
     }
     const QPointer<DocumentParse> self(this);
     parsePool()->start([self, key, job = std::move(job)]() mutable {
-        ParsedTextPtr parse = parseJob(std::move(job));
+        // A parse that throws, as when a document made to harm runs it out
+        // of memory, ends with the reason rather than ending the process.
+        ParsedTextPtr parse;
+        QString failure;
+        try {
+            parse = parseJob(std::move(job));
+        } catch (...) {
+            failure = WorkerFailure::reason(std::current_exception());
+        }
         QMetaObject::invokeMethod(
             QCoreApplication::instance(),
-            [self, key, parse = std::move(parse)]() mutable {
-                if (self) self->finished(std::move(parse), key);
+            [self, key, parse = std::move(parse), failure]() mutable {
+                if (self) self->finished(std::move(parse), key, failure);
                 else letGo(std::move(parse));
             },
             Qt::QueuedConnection);
@@ -150,7 +188,7 @@ void DocumentParse::letGo(ParsedTextPtr parse)
     if (parse) parsePool()->start([parse = std::move(parse)] {});
 }
 
-void DocumentParse::finished(ParsedTextPtr parse, const Key &key)
+void DocumentParse::finished(ParsedTextPtr parse, const Key &key, const QString &failure)
 {
     m_running = false;
     ++m_parses;
@@ -163,6 +201,13 @@ void DocumentParse::finished(ParsedTextPtr parse, const Key &key)
         start();
         return;
     }
+    if (!failure.isEmpty() || !parse) {
+        m_failedKey = key;
+        m_failure = failure.isEmpty() ? QStringLiteral("it could not be read") : failure;
+        emit failed(m_failure);
+        return;
+    }
+    m_failure.clear();
     letGo(std::exchange(m_current, std::move(parse)));
     m_currentKey = key;
     emit parsed(m_current);

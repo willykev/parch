@@ -95,14 +95,24 @@ public:
     {
         int textStart = qBound(0, skip, len);
         int i = textStart;
+        // A comment, instruction, declaration or CDATA section once found
+        // unclosed stays unclosed for every later start, since its search
+        // ran to the end: it is made once per kind, not once per start.
+        int unclosedFrom[4] = {-1, -1, -1, -1};
         while (i < len) {
             if (s[i] != u'<') {
+                ++i;
+                continue;
+            }
+            const int construct = unclosedKind(i);
+            if (construct >= 0 && unclosedFrom[construct] >= 0 && i >= unclosedFrom[construct]) {
                 ++i;
                 continue;
             }
             HtmlKind kind = HtmlKind::None;
             const int n = scanHtml(s, len, i, &kind);
             if (!n) {
+                if (construct >= 0) unclosedFrom[construct] = i;
                 ++i;
                 continue;
             }
@@ -116,6 +126,21 @@ public:
     }
 
 private:
+    // Which of the constructs that run to an end marker starts at `<` here:
+    // 0 a comment, 1 an instruction, 2 a declaration, 3 a CDATA section; -1
+    // for anything else.
+    int unclosedKind(int at) const
+    {
+        const auto has = [&](QLatin1StringView text) {
+            return at + text.size() <= len && QStringView(s + at, text.size()) == text;
+        };
+        if (has(QLatin1StringView("<!--"))) return 0;
+        if (has(QLatin1StringView("<?"))) return 1;
+        if (has(QLatin1StringView("<![CDATA["))) return 3;
+        if (at + 2 < len && s[at + 1] == u'!' && isAsciiAlpha(s[at + 2].unicode())) return 2;
+        return -1;
+    }
+
     Range range(int start, int end) const
     { return offset >= 0 ? Range{offset + start, offset + end} : blockRange; }
 

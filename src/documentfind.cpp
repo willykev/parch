@@ -1,6 +1,7 @@
 #include "documentfind.h"
 
 #include "sourcebuffer.h"
+#include "workerfailure.h"
 
 #include <QtConcurrent>
 #include <algorithm>
@@ -148,16 +149,30 @@ void DocumentFind::search()
             }
             // An edit since then asks for its own search once the text rests.
             if (again || generation != m_generation) search();
-        });
+        })
+        .onFailed(this, [this](const QUnhandledException &failure) { failed(WorkerFailure::reason(failure.exception())); })
+        .onFailed(this, [this] { failed(QString()); });
 }
 
 DocumentFind::Found DocumentFind::findJob(QSharedPointer<const SourceSnapshot> snapshot, QRegularExpression expression,
                                           std::shared_ptr<std::atomic<bool>> cancel)
 {
+    WorkerFailure::check(WorkerFailure::Job::Search);
     Found found;
     found.revision = snapshot->revision;
     found.matches = TextSearch::findAll(snapshot->text, expression, TextSearch::MaxMatches, &found.truncated, cancel.get());
     return found;
+}
+
+// A search that failed, as when the text ran it out of memory: it says
+// why, as an error of the query does, and the next query searches again.
+void DocumentFind::failed(const QString &reason)
+{
+    m_running = false;
+    m_searchAgain = false;
+    m_error = tr("The search stopped: %1").arg(reason.isEmpty() ? QStringLiteral("it could not be made") : reason);
+    m_forQuery = true;
+    emit resultsChanged();
 }
 
 void DocumentFind::take(const Found &found)
@@ -353,12 +368,21 @@ void DocumentFind::startReplaceAll(const QString &replacement)
             }
             if (replaced.count > 0) buffer->replace(replaced.edit.range, replaced.edit.text, EditKind::Other);
             emit replacedAll(replaced.count);
+        })
+        .onFailed(this, [this](const QUnhandledException &failure) {
+            m_replacing = false;
+            failed(WorkerFailure::reason(failure.exception()));
+        })
+        .onFailed(this, [this] {
+            m_replacing = false;
+            failed(QString());
         });
 }
 
 DocumentFind::Replaced DocumentFind::replaceJob(QSharedPointer<const SourceSnapshot> snapshot,
                                                 QRegularExpression expression, QString replacement, bool regex)
 {
+    WorkerFailure::check(WorkerFailure::Job::Search);
     Replaced replaced;
     replaced.revision = snapshot->revision;
     const QString &text = snapshot->text;

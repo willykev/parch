@@ -312,6 +312,9 @@ guide-include.md "An included file"
 
 A path that starts with `/` is found in the library root, as in
 `/chapters/one.md`; any other is found beside the document that names it.
+Either way the file must be in the library, or, for a document in no
+library, in its folder or a folder in it: one outside, such as
+`../../elsewhere.md`, is not read, and says so.
 
 *Watch out:* a file that is not there leaves the line as it is:
 

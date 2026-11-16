@@ -106,6 +106,8 @@ HEADERS += \
     src/renderhelpers.h \
     src/renderrequest.h \
     src/renderservice.h \
+    src/saferead.h \
+    src/workerfailure.h \
     src/scrollsync.h \
     src/screenshot.h \
     src/session.h \
@@ -221,6 +223,7 @@ SOURCES += \
     src/renderhelpers.cpp \
     src/renderrequest.cpp \
     src/renderservice.cpp \
+    src/saferead.cpp \
     src/scrollsync.cpp \
     src/screenshot.cpp \
     src/session.cpp \

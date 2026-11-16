@@ -160,6 +160,9 @@ public:
     // What fetches the pictures a preview shows from the network. Without
     // one, such pictures are not shown.
     void setRemoteFetcher(RemoteFetcher *fetcher);
+    // A problem a view met, such as a preview that could not read its
+    // document, shown as a notice that the next action clears.
+    void reportProblem(const QString &problem, const QString &detail);
     RemoteFetcher *remoteFetcher() const;
     // As FileRequests::firstFolder().
     static QString firstFolder(const QStringList &candidates, const QString &fallback);

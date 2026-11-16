@@ -1,6 +1,7 @@
 #include "paperdocument.h"
 
 #include "exporter.h"
+#include "saferead.h"
 #include "svgpaper.h"
 
 #include <QAbstractTextDocumentLayout>
@@ -255,19 +256,15 @@ private:
 
     void readFile(const QString &path, preview::Picture &picture)
     {
-        QFile file(path);
-        if (!file.exists()) {
-            picture.diagnostic = QStringLiteral("there is no such file");
+        const SafeRead::Result read = SafeRead::read(path, SafeRead::PictureBytes);
+        if (!read.ok) {
+            picture.diagnostic = read.missing ? QStringLiteral("there is no such file") : read.error;
             return;
         }
         // An SVG picture is printed as vectors.
         if (QFileInfo(path).suffix().compare(QLatin1String("svg"), Qt::CaseInsensitive) == 0) {
-            if (!file.open(QIODevice::ReadOnly)) {
-                picture.diagnostic = file.errorString();
-                return;
-            }
             QString error;
-            const QByteArray plain = SvgPaper::plain(file.readAll(), &error);
+            const QByteArray plain = SvgPaper::plain(read.bytes, &error);
             if (plain.isEmpty()) {
                 picture.diagnostic = error;
                 return;
@@ -278,7 +275,10 @@ private:
             m_objects->vectors.insert(picture.key, plain);
             return;
         }
-        QImageReader reader(path);
+        QBuffer buffer;
+        buffer.setData(read.bytes);
+        buffer.open(QIODevice::ReadOnly);
+        QImageReader reader(&buffer);
         reader.setAutoTransform(true);
         const QSize size = reader.size();
         if (size.width() > kMaxSide || size.height() > kMaxSide)

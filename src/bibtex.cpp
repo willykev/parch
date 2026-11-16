@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSet>
 
 #include <algorithm>
@@ -191,9 +192,21 @@ QString declarationTag(const QString &command, bool closing)
     return closing ? it->second : it->first;
 }
 
+// No value of a bibliography nests braces, commands and declarations more
+// than a few levels deep. Converting one recurses once per level, on a
+// worker's stack, so a value that nests deeper stops there, and parse()
+// refuses its file.
+constexpr int MaxLatexNesting = 256;
+// Set on the thread that converts a value nested deeper.
+thread_local bool latexTooDeep = false;
+
 class LatexConverter {
 public:
-    LatexConverter(const QString &text, bool protectCase) : m_text(text), m_protect(protectCase) {}
+    // `level` is how deep the value this one converts an argument of was.
+    LatexConverter(const QString &text, bool protectCase, int level = 0)
+        : m_text(text), m_protect(protectCase), m_level(level)
+    {
+    }
 
     QString run()
     {
@@ -217,6 +230,13 @@ private:
     // true if it found that brace rather than the end of the text.
     bool convert(int depth)
     {
+        if (m_level >= MaxLatexNesting) {
+            latexTooDeep = true;
+            m_pos = m_text.size();
+            return false;
+        }
+        ++m_level;
+        const auto leave = qScopeGuard([this] { --m_level; });
         while (!atEnd()) {
             const QChar c = m_text[m_pos];
             if (c == u'}') {
@@ -350,7 +370,7 @@ private:
         // space or a brace.
         if (name.size() == 1 && !combiningAccent(name[0]).isNull()
             && (!letters || atEnd() || m_text[m_pos].isSpace() || m_text[m_pos] == u'{')) {
-            const QString argument = LatexConverter(rawArgument(), false).run();
+            const QString argument = LatexConverter(rawArgument(), false, m_level).run();
             QString plain = CslText::fromHtml(argument).toPlainText();
             if (plain.isEmpty()) plain = QStringLiteral(" ");
             // The dotless i and j of \"{\i} take the accent as i and j do.
@@ -395,11 +415,11 @@ private:
         }
         if (name == u"href") {
             rawArgument();
-            put(CslText::fromHtml(LatexConverter(rawArgument(), false).run()).toPlainText());
+            put(CslText::fromHtml(LatexConverter(rawArgument(), false, m_level).run()).toPlainText());
             return;
         }
         if (const QString open = formatTag(name, false); !open.isEmpty()) {
-            const QString argument = LatexConverter(rawArgument(), false).run();
+            const QString argument = LatexConverter(rawArgument(), false, m_level).run();
             const bool nocase = open.contains(u"nocase");
             if (nocase && m_inNocase) {
                 m_out += argument;
@@ -461,6 +481,7 @@ private:
 
     const QString m_text;
     const bool m_protect;
+    int m_level = 0;
     qsizetype m_pos = 0;
     bool m_inNocase = false;
     QString m_out;
@@ -474,8 +495,57 @@ QString plain(const QString &latex)
 // ---------------------------------------------------------------------------
 // Names
 
-// Splits at a separator found at brace depth 0.
-QStringList splitTopLevel(const QString &text, const QRegularExpression &separator)
+// White space as a regular expression's \s has it: ASCII alone.
+bool isAsciiSpace(QChar c)
+{
+    return c == u' ' || (c >= u'\t' && c <= u'\r');
+}
+
+qsizetype spacesAt(const QString &text, qsizetype i)
+{
+    qsizetype end = i;
+    while (end < text.size() && isAsciiSpace(text[end])) ++end;
+    return end - i;
+}
+
+// The separators names and their parts are split at: the length of one
+// that starts at `i`, or 0.
+//   " and " between names: \s+and\s+, in any case
+qsizetype andAt(const QString &text, qsizetype i)
+{
+    const qsizetype before = spacesAt(text, i);
+    const qsizetype word = i + before;
+    if (before == 0 || word + 3 > text.size()
+        || QStringView(text).sliced(word, 3).compare(QLatin1StringView("and"), Qt::CaseInsensitive) != 0)
+        return 0;
+    const qsizetype after = spacesAt(text, word + 3);
+    return after == 0 ? 0 : before + 3 + after;
+}
+
+//   a comma, alone
+qsizetype commaAt(const QString &text, qsizetype i)
+{
+    return text[i] == u',' ? 1 : 0;
+}
+
+//   a comma with the spaces around it: \s*,\s*
+qsizetype spacedCommaAt(const QString &text, qsizetype i)
+{
+    const qsizetype before = spacesAt(text, i);
+    if (i + before >= text.size() || text[i + before] != u',') return 0;
+    return before + 1 + spacesAt(text, i + before + 1);
+}
+
+//   the spaces and ties between the words of a name: [\s~]+
+qsizetype tieAt(const QString &text, qsizetype i)
+{
+    qsizetype end = i;
+    while (end < text.size() && (isAsciiSpace(text[end]) || text[end] == u'~')) ++end;
+    return end - i;
+}
+
+// Splits at a separator found at brace depth 0, in one pass.
+QStringList splitTopLevel(const QString &text, qsizetype (*separator)(const QString &, qsizetype))
 {
     QStringList parts;
     int depth = 0;
@@ -489,12 +559,10 @@ QStringList splitTopLevel(const QString &text, const QRegularExpression &separat
         if (c == u'{') ++depth;
         if (c == u'}') --depth;
         if (depth != 0) continue;
-        const QRegularExpressionMatch match =
-            separator.match(text, i, QRegularExpression::NormalMatch, QRegularExpression::AnchorAtOffsetMatchOption);
-        if (match.hasMatch() && match.capturedLength() > 0) {
+        if (const qsizetype length = separator(text, i); length > 0) {
             parts.append(text.mid(start, i - start));
-            i = match.capturedEnd() - 1;
-            start = match.capturedEnd();
+            start = i + length;
+            i = start - 1;
         }
     }
     parts.append(text.mid(start));
@@ -553,9 +621,8 @@ TokenCase tokenCase(const QString &token)
 
 QStringList nameTokens(const QString &part)
 {
-    static const QRegularExpression space(QStringLiteral("[\\s~]+"));
     QStringList tokens;
-    for (const QString &token : splitTopLevel(part.trimmed(), space)) {
+    for (const QString &token : splitTopLevel(part.trimmed(), tieAt)) {
         if (!token.isEmpty()) tokens.append(token);
     }
     return tokens;
@@ -579,8 +646,7 @@ CslName nameFromParts(const QStringList &first, const QStringList &von, const QS
 // BibLaTeX's extended name format: "family=Doe, given=John, prefix=van".
 bool extendedName(const QString &text, bool usePrefix, CslName &name)
 {
-    static const QRegularExpression comma(QStringLiteral("\\s*,\\s*"));
-    const QStringList parts = splitTopLevel(text, comma);
+    const QStringList parts = splitTopLevel(text, spacedCommaAt);
     QHash<QString, QString> values;
     for (const QString &part : parts) {
         const qsizetype equals = part.indexOf(u'=');
@@ -632,8 +698,7 @@ CslName parseName(const QString &text, bool usePrefix)
         }
     }
     if (trimmed.contains(u'=') && extendedName(trimmed, usePrefix, name)) return name;
-    static const QRegularExpression comma(QStringLiteral(","));
-    QStringList parts = splitTopLevel(trimmed, comma);
+    QStringList parts = splitTopLevel(trimmed, commaAt);
     for (QString &part : parts) part = part.trimmed();
     if (parts.size() == 1) {
         const QStringList tokens = nameTokens(parts[0]);
@@ -697,9 +762,19 @@ struct RawEntry {
     }
 };
 
+// No value of a bibliography is longer than this many characters: a longer
+// one, written out, joined with '#' or made from @string definitions, is
+// cut short with a warning. Nor does a database expand to more than four
+// times its own size, or MaxExpansion, whichever is less: @string
+// definitions that double one another would otherwise make 2^n characters
+// out of a few hundred bytes. Past that, the file is refused.
+constexpr qsizetype MaxValueChars = qsizetype(64) << 10;
+constexpr qsizetype MaxExpansion = qsizetype(64) << 20;
+
 class Reader {
 public:
-    explicit Reader(const QString &text) : m_text(text)
+    explicit Reader(const QString &text)
+        : m_text(text), m_budget(std::min<qsizetype>(MaxExpansion, std::max<qsizetype>(text.size(), 1) * 4))
     {
         static const char *const months[] = {"jan", "feb", "mar", "apr", "may", "jun",
                                              "jul", "aug", "sep", "oct", "nov", "dec"};
@@ -712,12 +787,13 @@ public:
     QList<RawEntry> read(QList<BibliographyDiagnostic> &diagnostics)
     {
         m_diagnostics = &diagnostics;
-        while (true) {
+        while (!m_refused) {
             const qsizetype at = m_text.indexOf(u'@', m_pos);
             if (at < 0) break;
             m_pos = at + 1;
             entry(at);
         }
+        if (m_refused) return {};
         return m_entries;
     }
 
@@ -801,10 +877,40 @@ private:
         return false;
     }
 
-    // A field value: pieces joined by '#'.
-    bool value(QString &out, const QString &key)
+    // A field value: pieces joined by '#', each appended only as far as the
+    // value has room, so that the work is never more than the text made.
+    bool value(QString &out, const QString &key, const QString &field = {})
     {
         out.clear();
+        const qsizetype at = m_pos;
+        bool cut = false;
+        const auto append = [&](const QString &piece) {
+            const qsizetype room = MaxValueChars - out.size();
+            if (piece.size() <= room) {
+                out += piece;
+                return;
+            }
+            out += QStringView(piece).first(room);
+            cut = true;
+        };
+        const auto finish = [&] {
+            if (cut)
+                warn(at,
+                     (key.isEmpty() ? QStringLiteral("The string “%1” is longer than %2 characters, so it is cut short.")
+                                    : QStringLiteral("The field “%1” of “%3” is longer than %2 characters, so it is cut short."))
+                         .arg(field)
+                         .arg(MaxValueChars)
+                         .arg(key),
+                     key);
+            m_expanded += out.size();
+            if (m_expanded <= m_budget) return true;
+            m_refused = true;
+            m_pos = m_text.size();
+            error(at, QStringLiteral("The bibliography expands to more than %1 characters, four times its size or 64 MiB, "
+                                     "through @string definitions that repeat one another, so it is not read.")
+                          .arg(m_budget));
+            return false;
+        };
         for (;;) {
             skipSpace();
             if (atEnd()) return false;
@@ -837,13 +943,13 @@ private:
                     warn(start, QStringLiteral("The string “%1” is not defined.").arg(name), key);
                 }
             }
-            out += piece;
+            append(piece);
             skipSpace();
             if (!atEnd() && m_text[m_pos] == u'#') {
                 ++m_pos;
                 continue;
             }
-            return true;
+            return finish();
         }
     }
 
@@ -870,7 +976,7 @@ private:
             }
             ++m_pos;
             QString text;
-            if (!value(text, key)) return false;
+            if (!value(text, key, name)) return false;
             out.append({name, text});
         }
     }
@@ -901,7 +1007,7 @@ private:
         if (type == u"string") {
             QList<QPair<QString, QString>> definitions;
             if (!fields(close, definitions, {})) {
-                error(at, QStringLiteral("An @string definition is not complete."));
+                if (!m_refused) error(at, QStringLiteral("An @string definition is not complete."));
                 return;
             }
             for (const auto &definition : definitions) m_macros.insert(definition.first, definition.second);
@@ -920,6 +1026,7 @@ private:
             return;
         }
         if (!fields(close, raw.fields, raw.key)) {
+            if (m_refused) return;
             error(at, QStringLiteral("The entry “%1” is not complete.").arg(raw.key), raw.key);
             // Whatever follows is read as new entries.
             m_pos = qMin(m_text.size(), keyStart);
@@ -930,6 +1037,10 @@ private:
 
     const QString &m_text;
     qsizetype m_pos = 0;
+    // How many characters the values read so far hold, and the most they may.
+    qsizetype m_expanded = 0;
+    const qsizetype m_budget;
+    bool m_refused = false;
     QList<qsizetype> m_lineStarts{0};
     QHash<QString, QString> m_macros;
     QList<RawEntry> m_entries;
@@ -1398,9 +1509,8 @@ QString BibTeX::toMarkup(const QString &latex, bool protectCase)
 
 QList<CslName> BibTeX::parseNames(const QString &value, bool usePrefix)
 {
-    static const QRegularExpression separator(QStringLiteral("\\s+and\\s+"), QRegularExpression::CaseInsensitiveOption);
     QList<CslName> names;
-    for (const QString &part : splitTopLevel(value.simplified(), separator)) {
+    for (const QString &part : splitTopLevel(value.simplified(), andAt)) {
         const QString trimmed = part.trimmed();
         if (trimmed.isEmpty() || trimmed.compare(u"others", Qt::CaseInsensitive) == 0) continue;
         const CslName name = parseName(trimmed, usePrefix);
@@ -1473,6 +1583,18 @@ BibTeX::Result BibTeX::parse(const QString &text)
     Reader reader(text);
     const QList<RawEntry> entries = reader.read(result.diagnostics);
     Converter converter(entries, result.diagnostics);
-    for (const RawEntry &entry : entries) result.entries.append({converter.convert(entry), entry.line});
+    latexTooDeep = false;
+    for (const RawEntry &entry : entries) {
+        result.entries.append({converter.convert(entry), entry.line});
+        if (!latexTooDeep) continue;
+        result.entries.clear();
+        result.diagnostics.append({Severity::Error,
+                                   QStringLiteral("The entry “%1” nests braces or commands more than %2 deep, which no "
+                                                  "bibliography needs, so the file is not read.")
+                                       .arg(entry.key)
+                                       .arg(MaxLatexNesting),
+                                   entry.key, entry.line, BibliographyDiagnostic::Kind::Unreadable});
+        break;
+    }
     return result;
 }

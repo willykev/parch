@@ -168,6 +168,7 @@ private:
     };
 
     static void walkJob(const std::shared_ptr<Run> &run, QThreadPool *pool);
+    static void walk(const std::shared_ptr<Run> &run, QThreadPool *pool);
     static void searchJob(const std::shared_ptr<Run> &run, int sequence, const QList<Item> &items);
     static FileResult searchItem(const Run &run, const Item &item, bool *read);
     void take();

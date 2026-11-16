@@ -1,6 +1,7 @@
 #include "cslreference.h"
 
 #include "bibtex.h"
+#include "saferead.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -406,6 +407,11 @@ CslReference CslJson::reference(const QJsonObject &item, QString *error)
 namespace {
 
 // Builds JSON from libyaml's events.
+// No bibliography nests its lists and maps more than a few levels deep.
+// Reading one recurses once per level, on a worker's stack, and so does
+// every walk over the values read, so deeper nesting refuses the file.
+constexpr int MaxNesting = 256;
+
 class YamlReader {
 public:
     explicit YamlReader(const QByteArray &data)
@@ -468,11 +474,17 @@ private:
 
     // Reads the value starting at the next event, up to its end; a
     // document's end gives null.
-    bool value(QJsonValue &out, QString *error, int *errorLine)
+    bool value(QJsonValue &out, QString *error, int *errorLine, int depth = 0)
     {
         yaml_event_t event;
         if (!next(event, error, errorLine)) return false;
         bool ok = true;
+        if ((event.type == YAML_SEQUENCE_START_EVENT || event.type == YAML_MAPPING_START_EVENT) && depth >= MaxNesting) {
+            if (error) *error = QStringLiteral("its lists and maps are nested more than %1 deep").arg(MaxNesting);
+            if (errorLine) *errorLine = int(event.start_mark.line) + 1;
+            yaml_event_delete(&event);
+            return false;
+        }
         switch (event.type) {
         case YAML_DOCUMENT_END_EVENT:
             out = QJsonValue();
@@ -495,7 +507,7 @@ private:
                 if (peekEnd(YAML_SEQUENCE_END_EVENT, ok, error, errorLine)) break;
                 if (!ok) break;
                 QJsonValue item;
-                if (!value(item, error, errorLine)) {
+                if (!value(item, error, errorLine, depth + 1)) {
                     ok = false;
                     break;
                 }
@@ -513,7 +525,7 @@ private:
                 if (!ok) break;
                 QJsonValue key;
                 QJsonValue item;
-                if (!value(key, error, errorLine) || !value(item, error, errorLine)) {
+                if (!value(key, error, errorLine, depth + 1) || !value(item, error, errorLine, depth + 1)) {
                     ok = false;
                     break;
                 }
@@ -586,17 +598,17 @@ BibliographyDatabase::Format BibliographyDatabase::formatForPath(const QString &
 
 BibliographyDatabase BibliographyDatabase::fromFile(const QString &path, Format format)
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
+    const SafeRead::Result read = SafeRead::read(path, SafeRead::ReferenceBytes);
+    if (!read.ok) {
         BibliographyDatabase database;
         database.m_identity = path;
         database.m_diagnostics.append({BibliographyDiagnostic::Severity::Error,
                                        QStringLiteral("Cannot read the bibliography “%1”: %2.")
-                                           .arg(QFileInfo(path).fileName(), file.errorString()),
+                                           .arg(QFileInfo(path).fileName(), read.error),
                                        {}, 0, BibliographyDiagnostic::Kind::Unreadable});
         return database;
     }
-    return fromData(file.readAll(), format == Format::Auto ? formatForPath(path) : format, path);
+    return fromData(read.bytes, format == Format::Auto ? formatForPath(path) : format, path);
 }
 
 namespace {
@@ -604,6 +616,26 @@ namespace {
 int lineAtOffset(const QByteArray &data, qsizetype offset)
 {
     return int(data.left(offset).count('\n')) + 1;
+}
+
+// How deep a JSON value's arrays and objects are nested, found without
+// recursion; QJsonDocument already refuses more than 1,024 levels.
+int nestingOf(const QJsonValue &root)
+{
+    int deepest = 0;
+    std::vector<std::pair<QJsonValue, int>> pending{{root, 0}};
+    while (!pending.empty()) {
+        const auto [value, depth] = std::move(pending.back());
+        pending.pop_back();
+        if (value.isArray()) {
+            deepest = std::max(deepest, depth + 1);
+            for (const QJsonValue &item : value.toArray()) pending.emplace_back(item, depth + 1);
+        } else if (value.isObject()) {
+            deepest = std::max(deepest, depth + 1);
+            for (const QJsonValue &item : value.toObject()) pending.emplace_back(item, depth + 1);
+        }
+    }
+    return deepest;
 }
 
 } // namespace
@@ -657,6 +689,12 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
             return database;
         }
         root = document.isArray() ? QJsonValue(document.array()) : QJsonValue(document.object());
+        if (nestingOf(root) > MaxNesting) {
+            error(QStringLiteral("The CSL JSON is not read: its arrays and objects are nested more than %1 deep.")
+                      .arg(MaxNesting),
+                  0);
+            return database;
+        }
     } else {
         QString message;
         int line = 0;

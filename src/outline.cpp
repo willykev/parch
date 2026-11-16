@@ -239,6 +239,12 @@ void OutlineModel::read(const ParsedTextPtr &parse)
             }
             // An edit since then asks for its own scan once the text rests.
             if (again || (generation != m_generation && m_active)) scan();
+        })
+        // A scan that fails, as when memory runs out, leaves the outline as
+        // it was, ready for the next edit.
+        .onFailed(this, [this] {
+            m_running = false;
+            m_scanAgain = false;
         });
 }
 

@@ -5,8 +5,10 @@
 #include "documentstore.h"
 #include "librarywalk.h"
 #include "pathtext.h"
+#include "saferead.h"
 #include "settings.h"
 #include "sourcebuffer.h"
+#include "workerfailure.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -180,8 +182,10 @@ struct FolderSearch::Run {
     QSet<QString> openDraftIds;
     QMutex mutex;
     QMap<int, Batch> done;
-    // How many batches the walk made, once it has ended.
+    // How many batches the walk made, once it has ended, and has handed out
+    // so far, which only the walk writes.
     int batches = -1;
+    int handed = 0;
     int unreadableFolders = 0;
     bool truncated = false;
 };
@@ -331,12 +335,10 @@ bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, Q
         }
     }
     if (size > MaxFileBytes) return false;
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) return false;
-    const QByteArray bytes = file.readAll();
-    if (file.error() != QFileDevice::NoError) return false;
+    const SafeRead::Result read = SafeRead::read(path, MaxFileBytes);
+    if (!read.ok) return false;
     ++reads;
-    const DecodedText decoded = DiskFile::decode(bytes);
+    const DecodedText decoded = DiskFile::decode(read.bytes);
     if (!decoded.valid) return false;
     *text = decoded.text;
     QMutexLocker lock(&cache.mutex);
@@ -419,12 +421,25 @@ void FolderSearch::stop()
 
 void FolderSearch::walkJob(const std::shared_ptr<Run> &run, QThreadPool *pool)
 {
+    // A walk that fails ends with what it found, and counts as a folder
+    // that could not be read, so that the search still ends.
+    try {
+        walk(run, pool);
+    } catch (...) {
+        QMutexLocker lock(&run->mutex);
+        if (run->batches < 0) run->batches = run->handed;
+        ++run->unreadableFolders;
+    }
+}
+
+void FolderSearch::walk(const std::shared_ptr<Run> &run, QThreadPool *pool)
+{
     int sequence = 0;
     QList<Item> batch;
     const auto hand = [&] {
         if (batch.isEmpty()) return;
         pool->start([run, at = sequence, items = std::exchange(batch, {})] { searchJob(run, at, items); });
-        ++sequence;
+        run->handed = ++sequence;
     };
     // Open drafts first, then the other drafts, then the library's folders.
     batch = run->openDrafts;
@@ -473,7 +488,14 @@ void FolderSearch::searchJob(const std::shared_ptr<Run> &run, int sequence, cons
     for (const Item &item : items) {
         if (run->cancel.load(std::memory_order_relaxed)) break;
         bool read = false;
-        FileResult result = searchItem(*run, item, &read);
+        FileResult result;
+        // A document that runs the search out of memory, or makes it fail
+        // otherwise, is one that could not be searched.
+        try {
+            result = searchItem(*run, item, &read);
+        } catch (...) {
+            read = false;
+        }
         if (!read) {
             ++batch.unreadable;
             continue;
@@ -487,6 +509,7 @@ void FolderSearch::searchJob(const std::shared_ptr<Run> &run, int sequence, cons
 
 FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &item, bool *read)
 {
+    WorkerFailure::check(WorkerFailure::Job::Search);
     FileResult result;
     QString text;
     if (item.hasText) {

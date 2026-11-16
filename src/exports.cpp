@@ -9,6 +9,7 @@
 #include "pdfexport.h"
 #include "printportal.h"
 #include "sourcebuffer.h"
+#include "workerfailure.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -219,17 +220,28 @@ void Exports::read(Document *document)
         ++m_revision;
         emit readChanged();
     }, Qt::SingleShotConnection);
-    document->parse()->whenParsed(this, [this, generation](const ParsedTextPtr &parse) {
-        if (generation != m_readGeneration) return;
-        m_read = std::shared_ptr<const DocumentReading::Reading>(parse, &parse->reading);
-        m_reading = false;
-        ++m_revision;
-        emit readChanged();
-    });
+    m_readFailure.clear();
+    document->parse()->whenParsed(
+        this,
+        [this, generation](const ParsedTextPtr &parse) {
+            if (generation != m_readGeneration) return;
+            m_read = std::shared_ptr<const DocumentReading::Reading>(parse, &parse->reading);
+            m_reading = false;
+            ++m_revision;
+            emit readChanged();
+        },
+        [this, generation](const QString &reason) {
+            if (generation != m_readGeneration) return;
+            m_readFailure = reason;
+            m_reading = false;
+            ++m_revision;
+            emit readChanged();
+        });
 }
 
 QStringList Exports::limitations(const QString &format, const QVariantMap &options) const
 {
+    if (!m_read && !m_readFailure.isEmpty()) return {tr("The document could not be read: %1.").arg(m_readFailure)};
     if (!m_read) return {};
     const QString name = format == u"print" ? QStringLiteral("pdf") : format;
     const Exporter *exporter = Exporters::find(name);
@@ -353,11 +365,25 @@ void Exports::start(Document *document, const QString &format, const QHash<QStri
         outcome.result.error = QStringLiteral("the document closed before it was read");
         done(outcome);
     }, Qt::SingleShotConnection);
-    document->parse()->whenParsed(this, [=, this](const ParsedTextPtr &parse) {
-        if (m_job != job) return;
-        job->started = true;
-        exportParsed(job, parse, exporter, options, output, printing, token, path, documentId, title, render);
-    });
+    document->parse()->whenParsed(
+        this,
+        [=, this](const ParsedTextPtr &parse) {
+            if (m_job != job) return;
+            job->started = true;
+            exportParsed(job, parse, exporter, options, output, printing, token, path, documentId, title, render);
+        },
+        [=, this](const QString &reason) {
+            if (m_job != job) return;
+            job->started = true;
+            Outcome outcome;
+            outcome.documentId = documentId;
+            outcome.output = output;
+            outcome.printing = printing;
+            outcome.token = token;
+            outcome.title = title;
+            outcome.result.error = QStringLiteral("the document could not be read: %1").arg(reason);
+            done(outcome);
+        });
 }
 
 void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr &parse, const Exporter *exporter,
@@ -365,7 +391,7 @@ void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr 
                            quint32 token, const QString &path, const QString &documentId, const QString &title,
                            const RenderService::Options &render)
 {
-    QtConcurrent::run(&m_pool, [=]() -> Outcome {
+    const auto work = [=]() -> Outcome {
         Outcome outcome;
         outcome.documentId = documentId;
         outcome.output = output;
@@ -376,6 +402,7 @@ void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr 
             QMutexLocker lock(&job->mutex);
             job->step = QStringLiteral("Reading the document");
         }
+        WorkerFailure::check(WorkerFailure::Job::Export);
         // The citations as the document's style formats them, kept with the
         // parse they point into.
         struct Read {
@@ -424,6 +451,23 @@ void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr 
         json.insert(QStringLiteral("at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
         outcome.recipe = json;
         return outcome;
+    };
+    // An export that throws, as when a document made to harm runs it out of
+    // memory, ends as one that failed, and says why.
+    QtConcurrent::run(&m_pool, [=]() -> Outcome {
+        try {
+            return work();
+        } catch (...) {
+            Outcome outcome;
+            outcome.documentId = documentId;
+            outcome.output = output;
+            outcome.printing = printing;
+            outcome.token = token;
+            outcome.title = title;
+            outcome.result.error =
+                QStringLiteral("it could not be made: %1").arg(WorkerFailure::reason(std::current_exception()));
+            return outcome;
+        }
     }).then(this, [this](const Outcome &outcome) { done(outcome); });
 }
 

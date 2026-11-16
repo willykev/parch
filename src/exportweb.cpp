@@ -1,6 +1,7 @@
 #include "exportweb.h"
 
 #include "mdhtml.h"
+#include "saferead.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -14,8 +15,6 @@
 namespace ExportWeb {
 
 namespace {
-
-constexpr qint64 kMaxAssetBytes = qint64(64) << 20;
 
 QString suffixFor(const QString &mediaType)
 {
@@ -71,16 +70,12 @@ QString Assets::file(const QString &absolutePath, QString *error)
     if (m_mode == Mode::Link)
         return QString::fromUtf8(QUrl::toPercentEncoding(Exporters::relativeTo(m_outputFolder, absolutePath), "/"));
     if (const auto known = m_byPath.constFind(absolutePath); known != m_byPath.cend()) return *known;
-    QFile file(absolutePath);
-    if (file.size() > kMaxAssetBytes) {
-        if (error) *error = QStringLiteral("larger than 64 MiB");
+    const SafeRead::Result read = SafeRead::read(absolutePath, SafeRead::PictureBytes);
+    if (!read.ok) {
+        if (error) *error = read.error;
         return {};
     }
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = file.errorString();
-        return {};
-    }
-    const QByteArray data = file.readAll();
+    const QByteArray &data = read.bytes;
     const QString type = mediaType(data, absolutePath);
     if (type.isEmpty()) {
         if (error) *error = QStringLiteral("not a picture a page can show");

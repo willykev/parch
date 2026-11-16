@@ -6,6 +6,7 @@
 #include "benchmark.h"
 #include "caretrest.h"
 #include "citationtests.h"
+#include "hostiletests.h"
 #include "screenshottests.h"
 #include "settingstests.h"
 #include "diagnosticstests.h"
@@ -435,6 +436,23 @@ private slots:
     void editNeverJoinsTheSavedStep();
     void editsMadeWhileUndoAppliesWaitForTheStep();
     void undoHistoryEdges();
+    // Files and text made to harm parch; the tests are in hostiletests.cpp.
+    void hostileReadsStopAtTheirLimit() { HostileTests::readsStopAtTheirLimit(); }
+    void hostileBibliographiesAndStylesAreReadSafely() { HostileTests::bibliographiesAndStylesAreReadSafely(); }
+    void hostileDocumentsAndIncludesAreReadSafely() { HostileTests::documentsAndIncludesAreReadSafely(); }
+    void hostilePicturesAreReadSafely() { HostileTests::picturesAreReadSafely(); }
+    void hostileFolderSearchReadsSafely() { HostileTests::folderSearchReadsSafely(); }
+    void hostileIncludesStayInTheirLibrary() { HostileTests::includesStayInTheirLibrary(); }
+    void hostileFrontMatterFilesStayInTheirLibrary() { HostileTests::frontMatterFilesStayInTheirLibrary(); }
+    void hostileDeepStylesAreRefused() { HostileTests::deepStylesAreRefused(); }
+    void hostileDeepBibliographiesAreRefused() { HostileTests::deepBibliographiesAreRefused(); }
+    void hostileDeepMarkdownStaysWithinTheStack() { HostileTests::deepMarkdownStaysWithinTheStack(); }
+    void hostileBibtexStringsCannotExplode() { HostileTests::bibtexStringsCannotExplode(); }
+    void hostileQuadraticInputsTakeLinearTime() { HostileTests::quadraticInputsTakeLinearTime(); }
+    void hostileWorkerFailuresAreReported() { HostileTests::workerFailuresAreReported(); }
+    void hostilePreviewSurvivesAFailedRead() { HostileTests::previewSurvivesAFailedRead(); }
+    void hostileSearchesSurviveAFailedJob() { HostileTests::searchesSurviveAFailedJob(); }
+    void hostileRestoredTabsAreReadWhenShown() { HostileTests::restoredTabsAreReadWhenShown(); }
     // Citations and bibliographies; the tests are in citationtests.cpp.
     void citationRichTextOutput() { CitationTests::richTextOutput(); }
     void citationBibtexSyntax() { CitationTests::bibtexSyntax(); }

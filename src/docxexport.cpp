@@ -5,6 +5,7 @@
 #include "htmlexport.h"
 #include "mdparser_p.h"
 #include "paperdocument.h"
+#include "saferead.h"
 #include "svgpaper.h"
 #include "zippackage.h"
 
@@ -446,9 +447,9 @@ private:
         QByteArray bytes;
         QString why;
         if (target.kind == md::Destination::Kind::LocalFile && target.absolute) {
-            QFile file(target.path);
-            if (!file.open(QIODevice::ReadOnly)) why = file.exists() ? file.errorString() : QStringLiteral("there is no such file");
-            else bytes = file.readAll();
+            const SafeRead::Result read = SafeRead::read(target.path, SafeRead::PictureBytes);
+            if (!read.ok) why = read.missing ? QStringLiteral("there is no such file") : read.error;
+            else bytes = read.bytes;
         } else if (target.kind == md::Destination::Kind::OtherScheme && target.scheme == u"data") {
             const qsizetype comma = node.dest.indexOf(u',');
             if (comma > 0 && node.dest.left(comma).endsWith(QLatin1String(";base64")))

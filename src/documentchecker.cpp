@@ -5,6 +5,7 @@
 #include "rendercheck.h"
 #include "renderservice.h"
 #include "sourcebuffer.h"
+#include "workerfailure.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -103,17 +104,24 @@ void DocumentChecker::check(Document *document)
         m_summary.clear();
         emit checked();
     }, Qt::SingleShotConnection);
-    document->parse()->whenParsed(this, [this, request](const ParsedTextPtr &parse) {
-        if (request != m_request) return;
-        QtConcurrent::run(&m_pool, &DocumentChecker::work, parse).then(this, [this, request](const std::shared_ptr<Found> &found) {
-            read(request, found);
-        });
-    });
+    document->parse()->whenParsed(
+        this,
+        [this, request](const ParsedTextPtr &parse) {
+            if (request != m_request) return;
+            QtConcurrent::run(&m_pool, &DocumentChecker::work, parse)
+                .then(this, [this, request](const std::shared_ptr<Found> &found) { read(request, found); })
+                .onFailed(this, [this, request](const QUnhandledException &failure) {
+                    failed(request, WorkerFailure::reason(failure.exception()));
+                })
+                .onFailed(this, [this, request] { failed(request, QString()); });
+        },
+        [this, request](const QString &reason) { failed(request, reason); });
 }
 
 std::shared_ptr<DocumentChecker::Found> DocumentChecker::work(ParsedTextPtr parse)
 {
     if (const int delay = workerDelay; delay > 0) QThread::msleep(delay);
+    WorkerFailure::check(WorkerFailure::Job::Check);
     const DocumentReading::Reading &reading = parse->reading;
     const md::Document &document = reading.document;
     const DocumentCitations::Formatted formatted = DocumentCitations::format(document, reading.citations);
@@ -129,6 +137,15 @@ std::shared_ptr<DocumentChecker::Found> DocumentChecker::work(ParsedTextPtr pars
     // What the parse is held for while the formulas and diagrams are drawn.
     found->parse = parse;
     return found;
+}
+
+void DocumentChecker::failed(quint64 request, const QString &reason)
+{
+    if (request != m_request) return;
+    cancel();
+    m_summary = tr("This document could not be checked: %1.")
+                    .arg(reason.isEmpty() ? QStringLiteral("it could not be read") : reason);
+    emit checked();
 }
 
 void DocumentChecker::read(quint64 request, const std::shared_ptr<Found> &found)

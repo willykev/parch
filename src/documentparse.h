@@ -57,8 +57,16 @@ public:
     ParsedTextPtr request();
     // Calls `then` with the parse of the text as it is now: at once when
     // there is one, and otherwise once it is parsed, on `context`'s thread.
-    // Never when `context` or the document goes first.
-    void whenParsed(QObject *context, std::function<void(const ParsedTextPtr &)> then);
+    // Never when `context` or the document goes first. When the parse
+    // fails, `failed` is called with the reason instead, when given;
+    // without it, `then` waits for the next parse.
+    void whenParsed(QObject *context, std::function<void(const ParsedTextPtr &)> then,
+                    std::function<void(const QString &reason)> failed = {});
+    // Why the text as it is now could not be parsed, as when memory ran
+    // out; empty when it was, or is being parsed. A parse that failed is
+    // not made again for the same text and settings: once either changes,
+    // the next request makes it.
+    QString failure() const;
     // The files the text was read with changed on disk, such as an included
     // chapter or a bibliography: the next request reads the text again.
     void invalidate();
@@ -85,6 +93,8 @@ public:
 signals:
     // The text as it is now is parsed: said only for the current text.
     void parsed(const ParsedTextPtr &parse);
+    // The text as it is now could not be parsed, and why.
+    void failed(const QString &reason);
 
 private:
     // What a parse was made from: whenever any of it differs, the parse is
@@ -100,7 +110,8 @@ private:
     };
     Key keyNow() const;
     void start();
-    void finished(ParsedTextPtr parse, const Key &key);
+    // A parse ended: with the parse, or with why it failed.
+    void finished(ParsedTextPtr parse, const Key &key, const QString &failure = {});
     // Lets go of a parse no longer current, on a worker.
     static void letGo(ParsedTextPtr parse);
 
@@ -109,6 +120,9 @@ private:
     Places m_places;
     ParsedTextPtr m_current;
     Key m_currentKey;
+    // The last parse that failed: what it was made from, and why.
+    Key m_failedKey;
+    QString m_failure;
     bool m_running = false;
     quint64 m_reads = 0;
     int m_parses = 0;

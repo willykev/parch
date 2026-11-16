@@ -22,6 +22,13 @@
 //     document, in the order they are first used
 //   - relative links and images of an included file resolve from its folder
 //
+// Confinement: an include is read only from within the document's library
+// (Source::libraryRoot) or, for a document in no library, its own folder
+// and the folders in it, as its resolver names files, links resolved. One
+// that leads out, through "..", a rooted "/../" or a link, is not read and
+// its diagnostic, IncludeOutside, says so. A downloaded document so never
+// shows, and never exports, the writer's other files.
+//
 // Guards: a file that includes itself, directly or through others, is not
 // expanded and the diagnostic names the chain; nesting deeper than
 // Source::maxIncludeDepth, more text than Source::maxExpandedBytes or more
@@ -46,12 +53,20 @@ public:
     virtual ~IncludeResolver() = default;
     // `path` is absolute. A file larger than `maxBytes` need not be read.
     virtual File read(const QString &path, qint64 maxBytes) = 0;
+    // The name that identifies the file or folder at a path, as `File`'s
+    // canonical path does, links resolved; empty when nothing is there.
+    // Includes are held within their folders by it. By default the path
+    // tidied, as for files held in memory.
+    virtual QString canonicalPath(const QString &path);
 };
 
-// Reads UTF-8 text files from disk, with symbolic links resolved.
+// Reads UTF-8 text files from disk, with symbolic links resolved, as
+// SafeRead reads them: only a regular file, none of /proc, /sys or /dev,
+// and none larger than a document may be (SafeRead::DocumentBytes).
 class FileIncludeResolver : public IncludeResolver {
 public:
     File read(const QString &path, qint64 maxBytes) override;
+    QString canonicalPath(const QString &path) override;
 };
 
 // Serves texts held in memory, by the path they were added under.
@@ -70,5 +85,9 @@ private:
 // folder it needs (the library root for `/rooted`, else the including
 // file's folder) is not known.
 QString includeTarget(const QString &written, const QString &includingDirectory, const QString &libraryRoot);
+
+// Whether a path is the folder or lies in it, at any depth; both spelled
+// alike, as canonical paths are.
+bool isWithin(const QString &path, const QString &folder);
 
 } // namespace md

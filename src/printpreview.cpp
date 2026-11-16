@@ -8,6 +8,7 @@
 #include "mdinclude.h"
 #include "pdfexport.h"
 #include "sourcebuffer.h"
+#include "workerfailure.h"
 
 #include <QFileInfo>
 #include <QPainter>
@@ -113,10 +114,17 @@ void PrintPreview::layOut()
         m_busy = false;
         emit changed();
     }, Qt::SingleShotConnection);
-    document->parse()->whenParsed(this, [=, this](const ParsedTextPtr &parse) {
-        if (*generations != generation) return;
-        lay(parse, generation, options, path, render);
-    });
+    document->parse()->whenParsed(
+        this,
+        [=, this](const ParsedTextPtr &parse) {
+            if (*generations != generation) return;
+            lay(parse, generation, options, path, render);
+        },
+        [this, generation](const QString &) {
+            if (generation != *m_generation || !m_busy) return;
+            m_busy = false;
+            emit changed();
+        });
 }
 
 void PrintPreview::lay(const ParsedTextPtr &parse, quint64 generation, const QHash<QString, QString> &options,
@@ -125,8 +133,9 @@ void PrintPreview::lay(const ParsedTextPtr &parse, quint64 generation, const QHa
     const auto generations = m_generation;
     // The layout comes back as a plain pointer, so that only the preview
     // owns it, and whatever lets go of it last deletes it on this thread.
-    QtConcurrent::run(&m_pool, [=]() -> State * {
+    const auto work = [=]() -> State * {
         if (*generations != generation) return nullptr;
+        WorkerFailure::check(WorkerFailure::Job::Export);
         auto state = std::make_unique<State>();
         const DocumentReading::Reading &reading = parse->reading;
         state->read = std::make_shared<const State::Read>(
@@ -144,6 +153,15 @@ void PrintPreview::lay(const ParsedTextPtr &parse, quint64 generation, const QHa
         state->pages = pdfExporter()->setPages(reading.document, recipe, run, &result);
         if (!state->pages || *generations != generation) return nullptr;
         return state.release();
+    };
+    // A layout that throws, as when a document made to harm runs it out of
+    // memory, is none: the preview stops waiting for it.
+    QtConcurrent::run(&m_pool, [work]() -> State * {
+        try {
+            return work();
+        } catch (...) {
+            return nullptr;
+        }
     }).then(this, [this, generation](State *made) {
         if (!made) {
             if (generation == *m_generation) {
@@ -182,20 +200,29 @@ void PrintPreview::requestPage(int page, int width)
     m_asked.insert(page, width);
     const quint64 generation = *m_generation;
     QtConcurrent::run(&m_pool, [state = m_state, page, width]() {
-        const QSizeF size = state->pages->paper->pageSize();
-        const int height = std::max(1, qRound(width * size.height() / size.width()));
-        QImage image(width, height, QImage::Format_ARGB32_Premultiplied);
-        // Paper is white, whatever the desktop's theme.
-        image.fill(Qt::white);
-        QPainter painter(&image);
-        painter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
-        const qreal scale = width / size.width();
-        painter.scale(scale, scale);
-        state->pages->paper->paint(painter, page);
-        painter.end();
-        return image;
+        // A page that cannot be drawn is none, asked for again when shown.
+        try {
+            const QSizeF size = state->pages->paper->pageSize();
+            const int height = std::max(1, qRound(width * size.height() / size.width()));
+            QImage image(width, height, QImage::Format_ARGB32_Premultiplied);
+            // Paper is white, whatever the desktop's theme.
+            image.fill(Qt::white);
+            QPainter painter(&image);
+            painter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+            const qreal scale = width / size.width();
+            painter.scale(scale, scale);
+            state->pages->paper->paint(painter, page);
+            painter.end();
+            return image;
+        } catch (...) {
+            return QImage();
+        }
     }).then(this, [this, page, width, generation](const QImage &image) {
         if (generation != *m_generation || m_asked.value(page) != width) return;
+        if (image.isNull()) {
+            m_asked.remove(page);
+            return;
+        }
         m_pages.insert(page, image);
         // Only the pages near the one asked for are kept.
         while (m_pages.size() > 12) {

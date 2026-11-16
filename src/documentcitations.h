@@ -11,6 +11,7 @@
 #include <QString>
 
 #include <memory>
+#include <optional>
 
 // A document's citations as its citation style formats them. The engine's
 // tree holds the citations, Writer `[p. 23][#Doe:2006]` and Pandoc
@@ -29,6 +30,27 @@
 namespace DocumentCitations {
 
 using Database = CitationFormatter::Database;
+
+// Where a document's front matter may name files: within its library, or,
+// for a document in no library, within its own folder and the folders in
+// it. A document that came from someone else so reads none of the writer's
+// other files. What the writer chooses in Document settings, in Preferences
+// or on the command line is read wherever it is.
+struct Reach {
+    // Canonical folders.
+    QStringList folders;
+    // The first of them is the document's library.
+    bool library = false;
+
+    // The folders as they are named: the library, when there is one, and
+    // the document's folder, each with its links resolved.
+    static Reach of(const QString &library, const QString &folder);
+    // Whether a front matter's file, a full path, lies within them, its
+    // links resolved.
+    bool allows(const QString &path) const;
+    // Why a file outside them is not read: "it is outside the library".
+    QString outside() const;
+};
 
 // What is wrong with a document's citations, its style or its bibliography.
 struct Problem {
@@ -66,6 +88,9 @@ struct Setup {
     bool linkCitations = false;
     // The style and the files that could not be read, and what is wrong in them.
     QList<Problem> problems;
+    // Where the front matter of the document and of the files it includes
+    // may name files; unset, anywhere.
+    std::optional<Reach> reach;
 
     bool noteStyle() const { return style && style->isNoteStyle(); }
     // Every key a bibliography defines, for md::Source::externalCitationKeys.
@@ -73,8 +98,10 @@ struct Setup {
 };
 
 // Reads the style and the bibliography the dialect names. Each file is read
-// once for as long as it is unchanged, by every thread.
-Setup prepare(const Dialect::Choice &dialect, bool linkCitations = false);
+// once for as long as it is unchanged, by every thread. A file the front
+// matter names is read only within `reach`, when it is given; one outside
+// it is a problem that says so.
+Setup prepare(const Dialect::Choice &dialect, bool linkCitations = false, const std::optional<Reach> &reach = std::nullopt);
 // Adds the bibliographies the front matter of included files names, from
 // their own folders. True when that brings keys the parse did not know, so
 // that the document is to be parsed again with them.

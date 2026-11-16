@@ -56,6 +56,7 @@ private:
     void fail(Block *block, DiagnosticCode code, const QString &message);
     void expandIncludes(Block *container, int depth);
     void include(Block *block, int depth);
+    bool inReach(const QString &canonicalPath);
     QString displayPath(const QString &path) const;
 
     void collectHeadings(Block *block);
@@ -84,6 +85,10 @@ private:
     QStringList chain;              // canonical paths of the files being read
     qint64 expandedBytes = 0;
     int includeCount = 0;
+    // The folders includes are read from, canonical: the library and the
+    // document's own folder; found once, when the first include is read.
+    QStringList reach;
+    bool reachKnown = false;
 
     QSet<QString> slugs;
     QHash<QString, int> nextSuffix;
@@ -111,6 +116,23 @@ QString Assembler::displayPath(const QString &path) const
     const QString &base = doc.files.front().directory;
     if (!base.isEmpty() && path.startsWith(base + u'/')) return path.mid(base.size() + 1);
     return path;
+}
+
+// Whether an include's file, by its canonical path, lies within the library
+// or the document's folder.
+bool Assembler::inReach(const QString &canonicalPath)
+{
+    if (!reachKnown) {
+        reachKnown = true;
+        for (const QString &folder : {source.libraryRoot, doc.files.front().directory}) {
+            if (folder.isEmpty()) continue;
+            const QString canonical = source.resolver->canonicalPath(folder);
+            reach.append(canonical.isEmpty() ? QDir::cleanPath(folder) : canonical);
+        }
+    }
+    for (const QString &folder : std::as_const(reach))
+        if (isWithin(canonicalPath, folder)) return true;
+    return false;
 }
 
 void Assembler::expandIncludes(Block *container, int depth)
@@ -147,9 +169,25 @@ void Assembler::include(Block *block, int depth)
     ++includeCount;
 
     const QString target = includeTarget(written, directory, source.libraryRoot);
+    // Only a file within the library, or the document's folder, is read: the
+    // file itself, every link resolved, and once more the file that was read.
+    const auto outside = [&] {
+        fail(block, DiagnosticCode::IncludeOutside,
+             source.libraryRoot.isEmpty()
+                 ? QStringLiteral("\"%1\" is outside the document's folder, so it is not included").arg(written)
+                 : QStringLiteral("\"%1\" is outside the library, so it is not included").arg(written));
+    };
+    if (const QString canonical = source.resolver->canonicalPath(target); !canonical.isEmpty() && !inReach(canonical)) {
+        outside();
+        return;
+    }
     auto known = loaded.constFind(target);
     if (known == loaded.constEnd()) {
         IncludeResolver::File file = source.resolver->read(target, source.maxExpandedBytes - expandedBytes);
+        if (file.ok && !inReach(file.canonicalPath)) {
+            outside();
+            return;
+        }
         if (file.tooLarge) {
             fail(block, DiagnosticCode::IncludeSizeLimit,
                  QStringLiteral("The document and its includes are larger than %1; \"%2\" is not included")

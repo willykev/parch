@@ -130,6 +130,8 @@ private:
     void schedule(int delayMs);
     void search();
     void take(const Found &found);
+    // A search that failed: it says why, and the next query searches again.
+    void failed(const QString &reason);
     void sourceChanged(Revision revision, SourceRange range, const QString &replacement);
     void refreshCurrent();
     void refreshCanReplace();

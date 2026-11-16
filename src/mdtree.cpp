@@ -368,6 +368,7 @@ const char *codeName(DiagnosticCode code)
     case DiagnosticCode::IncludeCountLimit: return "include-count-limit";
     case DiagnosticCode::IncludeNoLibrary: return "include-no-library";
     case DiagnosticCode::IncludeNoBaseFolder: return "include-no-base-folder";
+    case DiagnosticCode::IncludeOutside: return "include-outside";
     }
     return "unknown";
 }

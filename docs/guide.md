@@ -19,7 +19,7 @@ teaches the Markdown parch reads, with examples you can edit; see
 [Preview your writing](#preview-your-writing) ·
 [Write math and diagrams](#write-math-and-diagrams) ·
 [Citations and bibliographies](#citations-and-bibliographies) ·
-[Export and print](#export-and-print) · [Check a document](#check-a-document) ·
+[Includes](#includes) · [Export and print](#export-and-print) · [Check a document](#check-a-document) ·
 [Find text](#find-text) · [Keep a library](#keep-a-library) ·
 [Work in tabs and windows](#work-in-tabs-and-windows) ·
 [Check spelling and focus](#check-spelling-and-focus) ·
@@ -493,6 +493,17 @@ and bibliography (`chicago-notes-bibliography`), IEEE (`ieee`), MLA
 works as well. A chapter you include can name a bibliography of its own in
 its front matter; one that does not uses the document's.
 
+A front matter names files only within the document's library, or, for a
+document in no library, within its folder and the folders in it, as
+includes do (see [Includes](#includes)). A bibliography or style it names
+elsewhere, `~/refs.bib` or `../../other.bib` say, or through a link that
+leads out, is not read, and the preview and `parch check` say why. So a
+document from someone else cannot read your other files. A file you choose
+yourself is read wherever it is: under **Bibliography** and **Citation
+style** in **Document settings…**, or with `--bibliography` and `--csl`.
+Whatever the file, parch reads it only if it is a regular file of at most
+32 MiB, never a device, a pipe or a file of `/proc`, `/sys` or `/dev`.
+
 With a style, the preview, `parch render` and the HTML export write each
 citation as the style has it, `(Doe, 2006, p. 23)` or `[1, p. 23]`, and the
 bibliography after the text: the style's entries, then the document's own
@@ -524,6 +535,25 @@ What citations cannot do yet:
   CSL test suite's English fixtures: 746 of the 809 pass. Most of the rest
   are rare cases of telling authors and years apart, of "ibid." across
   notes and the text, and of capitalisation.
+
+## Includes
+
+A line that names another Markdown file, `chapters/one.md`, alone in its
+paragraph, puts that file's text in its place, in the preview, `parch check`,
+`parch render` and every export. A path that starts with `/` is found in the
+library root; any other beside the file that names it.
+
+parch reads an include only from within the document's library, or, for a
+document in no library, from its folder and the folders in it. An include
+that leads out of them, through `..`, a `/../` path or a link to a file
+elsewhere, is not read: the preview marks the line, and pointing at it says
+it is outside the library (or the document's folder); `parch check` reports
+it as `include-outside`, and the document is not exported until it is
+fixed. A link that stays inside, such as a chapter linked from another folder
+of the library, is read as usual. Only a regular file of at most 64 MiB is
+read, never a device, a pipe or a file of `/proc`, `/sys` or `/dev`. So a
+document from someone else shows and exports its own files and none of
+yours.
 
 ## Export and print
 
@@ -1300,8 +1330,9 @@ network connection and **Fetch pictures from the web** turned on in
 picture is read from the document's folder; **Check document** lists any
 whose file is missing.
 
-**An included file is not shown.** It cannot be found, it includes itself, or
-it passes a limit in [Choose how a document is read](#choose-how-a-document-is-read).
+**An included file is not shown.** It cannot be found, it includes itself, it
+is outside the library or the document's folder (see [Includes](#includes)),
+or it passes a limit in [Choose how a document is read](#choose-how-a-document-is-read).
 The preview marks it, and pointing at it says why.
 
 **Citations show as their keys.** No bibliography defines them, or the

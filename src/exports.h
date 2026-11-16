@@ -165,6 +165,8 @@ private:
 
     // The reading the dialog lists limitations from.
     std::shared_ptr<const DocumentReading::Reading> m_read;
+    // Why the document could not be read, when it could not.
+    QString m_readFailure;
     QPointer<Document> m_readDocument;
     bool m_reading = false;
     int m_revision = 0;

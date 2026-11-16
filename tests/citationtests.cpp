@@ -629,7 +629,7 @@ void CitationTests::styleErrors()
     QString error;
     QVERIFY(!CslCatalog::styleFromFile(folder.filePath(QStringLiteral("mine.csl")), &error));
     QVERIFY(error.startsWith(QStringLiteral("Cannot read the citation style “mine.csl”")));
-    // A user's own style from a file works like a bundled one.
+    // A writer's own style from a file works like a bundled one.
     QFile file(folder.filePath(QStringLiteral("mine.csl")));
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write(head + R"(<citation><layout prefix="[" suffix="]"><text variable="title" font-style="italic"/>

@@ -4,6 +4,7 @@
 #include "benchmark.h"
 #include "cli.h"
 #include "clicommands.h"
+#include "documentstore.h"
 #include "portalfilepicker.h"
 #include "qmltypes.h"
 #include "quitsignals.h"
@@ -191,7 +192,13 @@ int main(int argc, char *argv[])
     // and each refuses, since closing goes through the backend, which would
     // ask to quit again, for ever.
     QObject::connect(&backend, &Backend::quitRequested, &service, &AppService::close);
-    QObject::connect(&backend, &Backend::quitRequested, &app, [] { QCoreApplication::exit(0); }, Qt::QueuedConnection);
+    // A save still running then has its text in recovery, and waiting for it
+    // as parch ends could take for ever, so parch leaves at once, as at the
+    // end of the session.
+    QObject::connect(&backend, &Backend::quitRequested, &app, [&backend] {
+        if (backend.store()->savesRunning()) ::_exit(0);
+        QCoreApplication::exit(0);
+    }, Qt::QueuedConnection);
     // The desktop's own open and save dialogs. A benchmark asks nothing.
     std::optional<PortalFilePicker> picker;
     if (!benchmarking) {

@@ -19,6 +19,7 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QSaveFile>
+#include <QSemaphore>
 #include <QTimer>
 #include <QUuid>
 #include <QtConcurrent>
@@ -212,7 +213,8 @@ bool placeAsset(const QString &source, const FolderRef &folder, const QString &t
 // folder they would go in is not a folder of its own, as a link put there,
 // nothing is placed, and the assets stay in the draft. Every folder is
 // opened once and written through, never by its path.
-Placed placeAssets(const QString &source, const QString &targetFolder, Placement &placement, QString &error)
+Placed placeAssets(const QString &source, const QString &targetFolder, Placement &placement, QString &error,
+                   QStringList &placed)
 {
     QStringList names;
     const QDir sourceDir(source);
@@ -243,7 +245,28 @@ Placed placeAssets(const QString &source, const QString &targetFolder, Placement
             return Placed::Failed;
         }
     }
+    placed = names;
     return Placed::All;
+}
+
+// Takes from a named draft's folder what went with the draft: its file and
+// the assets now beside the named file, and then the folders that leaves
+// empty. Anything else there, as an image pasted while the naming ran,
+// stays where it is, and the folders that hold it with it.
+void removeNamedDraft(const QString &folder, const QStringList &assets)
+{
+    QFile::remove(folder + u'/' + draftName);
+    QStringList folders;
+    for (const QString &name : assets) {
+        QFile::remove(folder + QStringLiteral("/assets/") + name);
+        for (qsizetype slash = name.lastIndexOf(u'/'); slash > 0; slash = name.lastIndexOf(u'/', slash - 1))
+            if (!folders.contains(name.left(slash))) folders.append(name.left(slash));
+    }
+    // The deepest first, and each only while it is empty.
+    std::sort(folders.begin(), folders.end(), [](const QString &a, const QString &b) { return a.count(u'/') > b.count(u'/'); });
+    for (const QString &inner : std::as_const(folders)) QDir().rmdir(folder + QStringLiteral("/assets/") + inner);
+    QDir().rmdir(folder + QStringLiteral("/assets"));
+    QDir().rmdir(folder);
 }
 } // namespace
 
@@ -256,6 +279,7 @@ DocumentStore::DocumentStore(const AppPaths &paths, HistoryLimits limits, QObjec
 {
     m_registryWriter.setMaxThreadCount(1);
     loadRegistry();
+    pruneRegistry();
     const auto touched = [this](const QString &path) {
         Document *document = documentAt(path);
         checkDisk(document);
@@ -342,6 +366,30 @@ Document *DocumentStore::reopen(const QString &path, const QString &documentId, 
 bool DocumentStore::holdsRecovered(const QString &documentId) const
 {
     return m_held.contains(documentId);
+}
+
+History::CaptureStatus DocumentStore::keepInHistoryNow(const QString &documentId, const QByteArray &bytes,
+                                                       History::Reason reason)
+{
+    // Shared with the capture, which may end after the wait has.
+    struct Kept {
+        QSemaphore done;
+        History::CaptureStatus status = History::CaptureStatus::Failed;
+    };
+    const auto kept = std::make_shared<Kept>();
+    auto *watcher = new QFutureWatcher<void>(this);
+    m_running.append(watcher);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
+        m_running.removeOne(watcher);
+        watcher->deleteLater();
+    });
+    watcher->setFuture(QtConcurrent::run([history = m_history.get(), documentId, bytes, reason, kept] {
+        History::CaptureStatus status = History::CaptureStatus::Failed;
+        history->captureUnlessNewest(documentId, bytes, reason, &status);
+        kept->status = status;
+        kept->done.release();
+    }));
+    return kept->done.tryAcquire(1, HistoryWaitMs) ? kept->status : History::CaptureStatus::Failed;
 }
 
 QFuture<void> DocumentStore::keepInHistory(const QString &documentId, const QByteArray &bytes, History::Reason reason,
@@ -944,7 +992,7 @@ bool DocumentStore::resolveConflict(Document *document, ConflictChoice choice, Q
         // What is about to be replaced goes to history first. A failed capture
         // never blocks the choice: the writer has chosen, and history is a
         // convenience beside the file.
-        if (!gone) m_history->captureUnlessNewest(document->m_id, disk.originalBytes, History::Reason::Overwrite);
+        if (!gone) keepInHistoryNow(document->m_id, disk.originalBytes, History::Reason::Overwrite);
         document->m_problem = Document::Problem::None;
         document->m_fileMissing = false;
         document->m_fileUnreadable = false;
@@ -972,7 +1020,7 @@ bool DocumentStore::resolveConflict(Document *document, ConflictChoice choice, Q
     // Reload: the local text is recorded first, and stays in undo as well.
     // A failed capture does not block it: the text also stays in undo. A
     // document with no text of its own has none to record.
-    if (!document->m_textless) m_history->captureUnlessNewest(document->m_id, local, History::Reason::Reload);
+    if (!document->m_textless) keepInHistoryNow(document->m_id, local, History::Reason::Reload);
     takeFile(document, disk);
     return true;
 }
@@ -1030,9 +1078,9 @@ DocumentStore::Restore DocumentStore::restoreVersion(Document *document, const Q
     const QByteArray current = DiskFile::encode(before, document->m_convention);
     // The status comes from the capture itself: asking paused() afterwards
     // could meet another thread's capture and mistake a failure for a pause.
-    History::CaptureStatus status = History::CaptureStatus::Failed;
-    // Text history's newest version holds already counts as kept.
-    m_history->captureUnlessNewest(document->m_id, current, History::Reason::Restore, &status);
+    // Text history's newest version holds already counts as kept, and one
+    // that history did not take in time as not kept.
+    const History::CaptureStatus status = keepInHistoryNow(document->m_id, current, History::Reason::Restore);
     if (status == History::CaptureStatus::Failed)
         return refused(tr("The current text could not be saved to history, so nothing was restored"));
     document->m_buffer->replace({0, int(before.size())}, text, EditKind::Other);
@@ -1065,11 +1113,17 @@ bool DocumentStore::waitForSaves(int timeoutMs)
     return m_running.isEmpty() && m_registryWriter.waitForDone(int(std::max<qint64>(0, deadline.remainingTime())));
 }
 
+bool DocumentStore::savesRunning() const
+{
+    return !m_running.isEmpty();
+}
+
 void DocumentStore::retain(Document *document)
 {
     if (!m_documents.contains(document)) return;
     ++m_views[document];
     m_unviewed.remove(document);
+    m_dropping.remove(document);
 }
 
 void DocumentStore::release(Document *document)
@@ -1291,7 +1345,8 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
     Placement placement;
     if (!job.draftFolder.isEmpty()) {
         const Placed placed = placeAssets(job.draftFolder + QStringLiteral("/assets"),
-                                          PathText::folderOf(expected.canonicalPath), placement, outcome.result.error);
+                                          PathText::folderOf(expected.canonicalPath), placement, outcome.result.error,
+                                          outcome.assetsPlaced);
         if (placed == Placed::Failed) return outcome;
         if (placed == Placed::Left) outcome.assetsLeft = job.draftFolder + QStringLiteral("/assets");
     }
@@ -1487,7 +1542,7 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
             // Assets that could not be placed stay where they are, in the
             // draft's folder, which keeps them and nothing else.
             if (wasDraft && !outcome.keepDraft && outcome.assetsLeft.isEmpty())
-                QDir(draftFolder(document->m_id)).removeRecursively();
+                removeNamedDraft(draftFolder(document->m_id), outcome.assetsPlaced);
             if (wasDraft && !outcome.keepDraft && !outcome.assetsLeft.isEmpty()) {
                 QFile::remove(draftFolder(document->m_id) + u'/' + draftName);
                 emit assetsKept(document, outcome.assetsLeft);
@@ -1522,11 +1577,17 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
     const QString pendingName = std::exchange(document->m_pendingSaveAs, {});
     const std::optional<DiskVersion> pendingExpected = std::exchange(document->m_pendingExpected, std::nullopt);
     const bool again = std::exchange(document->m_saveAgain, false);
-    if (!pendingName.isEmpty()) nameAs(document, pendingName, pendingExpected);
-    else if (again && saved) save(document);
+    // Text given up while this save ran goes now, with nothing more saved.
+    const bool dropping = m_dropping.remove(document) > 0;
+    if (!dropping && !pendingName.isEmpty()) nameAs(document, pendingName, pendingExpected);
+    else if (!dropping && again && saved) save(document);
     document->refresh();
     if (saved) emit documentSaved(document);
     emit saveFinished(document, job.name, result.status);
+    if (dropping) {
+        close(document);
+        return;
+    }
     // Events during the save were not compared, since the file was changing under our own hand.
     if (std::exchange(document->m_checkAgain, false)) checkDisk(document);
     closeIfUnused(document);
@@ -1558,7 +1619,11 @@ void DocumentStore::askForView(Document *document)
 
 bool DocumentStore::drop(Document *document)
 {
-    if (!m_documents.contains(document) || m_views.contains(document) || document->m_saving) return false;
+    if (!m_documents.contains(document) || m_views.contains(document)) return false;
+    if (document->m_saving) {
+        m_dropping.insert(document);
+        return true;
+    }
     close(document);
     return true;
 }
@@ -1566,6 +1631,7 @@ bool DocumentStore::drop(Document *document)
 void DocumentStore::close(Document *document)
 {
     m_unviewed.remove(document);
+    m_dropping.remove(document);
     m_documents.removeOne(document);
     if (!document->m_path.isEmpty()) m_watch.unwatch(document->m_path);
     // Its file holds its text, or the text was given up, so its saves no
@@ -1673,6 +1739,16 @@ void DocumentStore::applyCheck(Document *document, const DiskCheck &check)
             document->m_fileMissing = true;
             document->m_nameTaken = false;
             document->m_lastError = tr("The file no longer exists");
+            document->refresh();
+        } else if (document->m_fileMissing && !missing && !unreadable && !document->differsFromFile()
+                   && sameContentIdentity(check.now, document->m_diskVersion)) {
+            // Back exactly as parch last read or wrote it, with nothing typed
+            // since: there is nothing left to choose, and the text is its file's.
+            document->m_problem = Document::Problem::None;
+            document->m_fileMissing = false;
+            document->m_nameTaken = false;
+            document->m_lastError.clear();
+            document->m_diskVersion = check.now;
             document->refresh();
         } else if (document->m_fileMissing && !missing) {
             document->m_fileMissing = false;
@@ -1861,6 +1937,37 @@ void DocumentStore::loadRegistry()
     const QJsonObject entries = read.object();
     for (auto entry = entries.begin(); entry != entries.end(); ++entry)
         if (entry.value().isString()) m_registry.insert(entry.key(), entry.value().toString());
+}
+
+void DocumentStore::pruneRegistry()
+{
+    if (m_registry.isEmpty()) return;
+    // Looked at where a file system that stopped answering holds up nothing
+    // but this look.
+    QtConcurrent::run(DiskFile::looks(), [entries = m_registry, paths = m_paths] {
+        QSet<QString> stale;
+        for (auto entry = entries.cbegin(); entry != entries.cend(); ++entry) {
+            // Only a file that is certainly not there: an error of any other
+            // kind says nothing about it.
+            struct stat found {};
+            if (::lstat(QFile::encodeName(entry.key()).constData(), &found) == 0 || errno != ENOENT) continue;
+            const QString &id = entry.value();
+            if (QFileInfo::exists(paths.history() + u'/' + id)) continue;
+            if (!QDir(paths.recovery()).entryList({id + QStringLiteral(".*")}, QDir::Files).isEmpty()) continue;
+            stale.insert(entry.key());
+        }
+        return stale;
+    }).then(this, [this, entries = m_registry](const QSet<QString> &stale) {
+        bool pruned = false;
+        for (const QString &path : stale) {
+            // Taken up again meanwhile, by a document or by text held for it.
+            const QString id = entries.value(path);
+            if (m_registry.value(path) != id || documentWithId(id) || m_held.contains(id) || heldAt(path)) continue;
+            m_registry.remove(path);
+            pruned = true;
+        }
+        if (pruned) writeRegistry();
+    });
 }
 
 void DocumentStore::writeRegistry()

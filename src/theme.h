@@ -168,6 +168,7 @@ private:
     QColor m_controlFill, m_hoverFill, m_selectedFill, m_pressedFill, m_controlBorder, m_focusBorder;
     QColor m_menuBackground, m_menuBorder, m_scrim;
     QHash<QString, int> m_sizes;
+    QVariantMap m_sizesForQml;
     int m_fontSize = 12;
     int m_controlBorderWidth = 1;
     int m_radius = 0;

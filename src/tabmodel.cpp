@@ -5,6 +5,7 @@
 #include "sourcebuffer.h"
 
 #include <QFileInfo>
+#include <QtConcurrent>
 #include <utility>
 
 TabModel::TabModel(DocumentStore *store, QObject *parent) : QAbstractListModel(parent), m_store(store) {}
@@ -234,11 +235,21 @@ void TabModel::restore(const QList<ViewState> &views, int active)
 {
     if (views.isEmpty()) return;
     QList<Tab> tabs;
+    QStringList paths;
     for (const ViewState &view : views) {
-        Tab tab{nullptr, view, {}, {}};
-        // Only whether the file is there is asked now; reading it waits until the tab is shown.
-        if (!view.path.isEmpty() && !QFileInfo::exists(view.path)) tab.problem = tr("File not found");
-        tabs.append(tab);
+        tabs.append(Tab{nullptr, view, {}, {}});
+        if (!view.path.isEmpty()) paths.append(view.path);
+    }
+    // Only whether each file is there is asked now, off the UI thread, since
+    // a file on a mount that stopped answering would hold up the start;
+    // reading it waits until the tab is shown.
+    if (!paths.isEmpty()) {
+        QtConcurrent::run(DiskFile::looks(), [paths] {
+            QSet<QString> missing;
+            for (const QString &path : paths)
+                if (!QFileInfo::exists(path)) missing.insert(path);
+            return missing;
+        }).then(this, [this](const QSet<QString> &missing) { notFound(missing); });
     }
     const int first = int(m_tabs.size());
     beginInsertRows({}, first, first + int(tabs.size()) - 1);
@@ -251,6 +262,16 @@ void TabModel::restore(const QList<ViewState> &views, int active)
     }
     emit countChanged();
     emit changed();
+}
+
+void TabModel::notFound(const QSet<QString> &paths)
+{
+    for (int i = 0; i < m_tabs.size(); ++i) {
+        Tab &tab = m_tabs[i];
+        if (tab.document || !tab.problem.isEmpty() || !paths.contains(tab.view.path)) continue;
+        tab.problem = tr("File not found");
+        emit dataChanged(index(i), index(i));
+    }
 }
 
 int TabModel::place(Document *document)

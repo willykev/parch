@@ -4,15 +4,21 @@
 #include "documentstore.h"
 #include "sourcebuffer.h"
 
+#include <QDeadlineTimer>
 #include <QMetaObject>
 #include <QPointer>
 #include <QTimer>
+#include <algorithm>
 
 // A QObject so that the connections made for it end with it.
 struct Autosave::Watch : QObject {
     QPointer<Document> document;
     QString id;
     QTimer *recoveryIdle = nullptr, *recoveryMax = nullptr, *saveIdle = nullptr, *saveMax = nullptr;
+    // Tries a failed recovery write again, without waiting for an edit, a
+    // little later each time it fails again.
+    QTimer *recoveryRetry = nullptr;
+    int retryMs = RecoveryRetryMs;
     // The revision last handed to the writer, so an unchanged text is not written again.
     std::optional<Revision> queued;
     // The version of the file that snapshot was made on.
@@ -42,12 +48,13 @@ bool Autosave::needsRecovery(const Document *document)
     case Document::State::Modified:
     case Document::State::Saving:
         return true;
-    // These keep an edit the file does not have, but only while the text differs from the file.
+    // These keep an edit the file does not have, but only while the text
+    // differs from the file, which it also does when the file is ahead.
     case Document::State::SaveFailed:
-        return document->buffer()->modified();
+        return document->differsFromFile();
     // With the file gone, the text in memory is the only copy, modified or not.
     case Document::State::Conflict:
-        return document->buffer()->modified() || document->fileMissing();
+        return document->differsFromFile() || document->fileMissing();
     case Document::State::Clean:
     case Document::State::ReadOnly:
         return false;
@@ -74,6 +81,7 @@ void Autosave::watch(Document *document)
     watch->recoveryMax = makeTimer(RecoveryMaxMs, &Autosave::snapshotNow);
     watch->saveIdle = makeTimer(SaveIdleMs, &Autosave::saveNow);
     watch->saveMax = makeTimer(SaveMaxMs, &Autosave::saveNow);
+    watch->recoveryRetry = makeTimer(RecoveryRetryMs, &Autosave::snapshotNow);
 
     connect(document->buffer(), &SourceBuffer::sourceChanged, watch, [this, watch] { edited(watch); });
     connect(document, &Document::changed, watch, [this, watch] { changed(watch); });
@@ -92,7 +100,8 @@ void Autosave::unwatch(const QString &documentId)
 
 void Autosave::stopTimers(Watch *watch)
 {
-    for (QTimer *timer : {watch->recoveryIdle, watch->recoveryMax, watch->saveIdle, watch->saveMax}) timer->stop();
+    for (QTimer *timer : {watch->recoveryIdle, watch->recoveryMax, watch->saveIdle, watch->saveMax, watch->recoveryRetry})
+        timer->stop();
 }
 
 void Autosave::edited(Watch *watch)
@@ -136,6 +145,7 @@ void Autosave::snapshotNow(Watch *watch)
 {
     watch->recoveryIdle->stop();
     watch->recoveryMax->stop();
+    watch->recoveryRetry->stop();
     Document *document = watch->document;
     if (!document || !needsRecovery(document)) return;
     const auto snapshot = document->buffer()->snapshot();
@@ -147,14 +157,22 @@ void Autosave::snapshotNow(Watch *watch)
                   convention = document->convention(), snapshot, write] {
         QString error;
         if (recovery.write(id, path, *snapshot, base, convention, &error)) {
-            QMetaObject::invokeMethod(this, [this, id, write] { emit recoveryWritten(id, write); }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(this, [this, id, write] {
+                if (Watch *watch = m_watches.value(id)) watch->retryMs = RecoveryRetryMs;
+                emit recoveryWritten(id, write);
+            }, Qt::QueuedConnection);
             return;
         }
         QMetaObject::invokeMethod(
             this,
             [this, id, error] {
-                // The next tick must try again, since nothing was written.
-                if (Watch *watch = m_watches.value(id)) watch->queued.reset();
+                // Nothing was written, so the next edit tries again, and so
+                // does the retry, should no edit come, later each time.
+                if (Watch *watch = m_watches.value(id)) {
+                    watch->queued.reset();
+                    watch->recoveryRetry->start(watch->retryMs);
+                    watch->retryMs = std::min(watch->retryMs * 2, RecoveryRetryMaxMs);
+                }
                 emit recoveryFailed(id, error);
             },
             Qt::QueuedConnection);
@@ -233,21 +251,27 @@ bool Autosave::secure(int waitMs)
     return settled;
 }
 
-bool Autosave::flush(QString *error, QStringList *unkept)
+bool Autosave::flush(QString *error, QStringList *unkept, int waitMs)
 {
     for (Watch *watch : std::as_const(m_watches)) stopTimers(watch);
     // Writes already queued finish first, so the entries written below are the newest.
     m_pool.waitForDone();
-    m_store->waitForSaves();
+    // The saves get waitMs in all, as an end that cannot be refused gives
+    // them; whatever has not landed by then is kept in recovery below.
+    const QDeadlineTimer deadline(waitMs);
+    const auto remaining = [&deadline] { return int(std::max<qint64>(0, deadline.remainingTime())); };
+    m_store->waitForSaves(remaining());
     // Waiting applies save outcomes, and a document that is closed and clean
     // is deleted meanwhile, so none is kept across a wait except as a guard.
     QList<QPointer<Document>> documents;
     for (Document *document : m_store->documents()) documents.append(document);
     for (const auto &document : std::as_const(documents)) {
         // A save can leave newer text behind, so it repeats while it makes progress.
-        for (int attempt = 0; document && attempt < 3 && document->state() == Document::State::Modified; ++attempt) {
+        for (int attempt = 0; document && attempt < 3 && document->state() == Document::State::Modified
+                              && !deadline.hasExpired();
+             ++attempt) {
             m_store->save(document);
-            m_store->waitForSaves();
+            m_store->waitForSaves(remaining());
         }
     }
     QStringList problems, notKept;
@@ -266,7 +290,9 @@ bool Autosave::flush(QString *error, QStringList *unkept)
         const bool written = m_recovery->write(document->id(), document->path(), *snapshot, document->diskVersion(),
                                                document->convention(), &reason);
         if (!written) notKept << document->id();
-        const QString why = document->lastError().isEmpty() ? tr("not saved") : document->lastError();
+        const QString why = document->isSaving()                ? tr("its save has not finished")
+                            : document->lastError().isEmpty() ? tr("not saved")
+                                                              : document->lastError();
         problems.append(written ? tr("%1: %2 (kept in recovery)").arg(document->title(), why)
                                 : tr("%1: %2 (not kept in recovery: %3)").arg(document->title(), why, reason));
     }

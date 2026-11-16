@@ -179,6 +179,11 @@ QString Document::suggestedFileName(const QString &text)
     return (name.isEmpty() ? tr("Untitled") : name) + QStringLiteral(".md");
 }
 
+bool Document::differsFromFile() const
+{
+    return m_buffer->modified() || m_diskAhead;
+}
+
 Document::State Document::state() const
 {
     // A conflict outranks a running save because only a naming runs during

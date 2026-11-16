@@ -155,6 +155,35 @@ private:
     int m_count = 0;
 };
 
+// A test that needs the local time to be another zone's runs again in a
+// process of its own, with TZ set from that process's start: setting it in
+// this one would race whatever other threads read the local time. In that
+// process this returns nothing, and the test goes on there; here it returns
+// what the run printed, or nothing more than an empty string once it passed.
+std::optional<QString> runsInZone(const QByteArray &zone)
+{
+    if (qgetenv("PARCH_TEST_ZONE") == zone) return std::nullopt;
+    QProcess run;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("TZ"), QString::fromLatin1(zone));
+    environment.insert(QStringLiteral("PARCH_TEST_ZONE"), QString::fromLatin1(zone));
+    run.setProcessEnvironment(environment);
+    run.setProcessChannelMode(QProcess::MergedChannels);
+    run.start(QCoreApplication::applicationFilePath(), {QString::fromLatin1(QTest::currentTestFunction())});
+    if (!run.waitForFinished(120000)) return QStringLiteral("The run in %1 did not finish").arg(QString::fromLatin1(zone));
+    const QString printed = QString::fromLocal8Bit(run.readAll());
+    if (run.exitStatus() == QProcess::NormalExit && run.exitCode() == 0) return QString();
+    return printed.isEmpty() ? QStringLiteral("The run in %1 failed").arg(QString::fromLatin1(zone)) : printed;
+}
+
+// Whether history holds a version with exactly these bytes.
+bool historyHas(History *history, const QString &documentId, const QByteArray &bytes)
+{
+    for (const History::Version &version : history->versions(documentId))
+        if (history->read(documentId, version.id) == bytes) return true;
+    return false;
+}
+
 // A draft never written in gives its tab to the next document opened in
 // front of it. Tests that keep the first launch's draft as a tab of its own
 // give it undo history, so that it stays, while it stays empty and clean.
@@ -333,6 +362,7 @@ private slots:
     void themeReadsLightAndDarkPalettes();
     void themeFollowsReplacementTwice();
     void themeFallsBackWithoutOmarchy();
+    void themeSizesAreBuiltOncePerChange();
     void themeLookupResolvesNamesAndPaths();
     void themeTakesGeometryFromHyprland();
     void themeFollowsHyprlandEventsAndActivation();
@@ -354,6 +384,8 @@ private slots:
     void deletingCoalescesAdjacentRanges();
     void modifiedTracksSavedPosition();
     void editNeverJoinsTheSavedStep();
+    void editsMadeWhileUndoAppliesWaitForTheStep();
+    void undoHistoryEdges();
     // Citations and bibliographies; the tests are in citationtests.cpp.
     void citationRichTextOutput() { CitationTests::richTextOutput(); }
     void citationBibtexSyntax() { CitationTests::bibtexSyntax(); }
@@ -395,6 +427,7 @@ private slots:
     void aFailedDirectWriteRemovesOnlyItsOwnFile();
     void fifoDoesNotBlockLoadOrSave();
     void savedVersionMatchesTheWrittenFile();
+    void filesTooLargeAreNotRead();
     void aChangeOfTheSameSizeAndTimeIsSeen();
     void aStampTooCloseToItsTimesIsNotTrusted();
     void aSaveReadsTheFileAtMostOnce();
@@ -410,10 +443,12 @@ private slots:
     void draftCreatesNoFileUntilEdited();
     void namingDraftKeepsTextUndoAndIdentity();
     void namingDraftCarriesAssetsAndRefusesCollisions();
+    void namingADraftTakesAwayOnlyWhatWentWithIt();
     void aLinkAtAssetsReceivesNothing();
     void assetsGoThroughTheFoldersOpened();
     void failedSaveStaysVisibleAndRetryable();
     void lastViewClosingKeepsUnsavedDocument();
+    void droppingDuringASaveLetsGoOnceItEnds();
     void draftReopensByIdentity();
     void saveFinishingAfterNewEditsStaysModified();
     void conflictAndReadOnlyNeverWrite();
@@ -430,6 +465,8 @@ private slots:
     void crashRestoresUnsavedText();
     void cleanCloseFlushesAndClearsRecovery();
     void recoveryWriteFailureIsReported();
+    void failedRecoveryWriteIsRetriedOnATimer();
+    void failedSaveKeepsRecoveryWhileTheFileIsAhead();
     void conflictKeepsRecoveryAndNeverSaves();
     void failedSaveIsNotClearedByAutosave();
     void flushKeepsRecoveryForFailedSave();
@@ -509,6 +546,9 @@ private slots:
     void saveAgainNeverFollowsALinkWhereTheFileWas();
     void conflictOverMissingFileKeepsRecovery();
     void reappearingFileRefreshesTheReason();
+    void fileBackAsItWasLeavesTheConflict();
+    void aCheckForAClosedDocumentIsDropped();
+    void anOutsideWriteAfterASaveIsSeen();
     void fileWatchRenewsWatchAfterRenameOverHeldFile();
     void typingDuringACheckKeepsTheTextInConflict();
     void changeDuringQueuedSaveIsAConflict();
@@ -516,12 +556,16 @@ private slots:
     void historyCapturesOnInterval();
     void historyPrunesByCountAgeAndSizeButKeepsNamed();
     void historyPausesWhenNamedVersionsFillBudget();
+    void historyBudgetBoundaries();
+    void historyPrunesWhilePausedAndAsTimeGoesBy();
+    void saveSucceedsWhenHistoryCannotWrite();
     void historyBudgetCoversAllDocuments();
     void aCaptureReadsOnlyItsOwnIndex();
     void historyTotalsFollowEveryChange();
     void historyPrunesOldVersionsAsItStarts();
     void removingNamedVersionsLiftsThePause();
     void historyRejectsIdsThatAreNotUuids();
+    void registryLetsGoOfIdentitiesNothingHolds();
     void idsAndTextsAreCheckedOneWay();
     void historyReadsBackAndSurvivesRestart();
     void historyFailureIsNotPause();
@@ -531,6 +575,7 @@ private slots:
     void restoreAfterASaveKeepsNoSecondCopy();
     void restoringTheSameBytesChangesNothing();
     void restoreIsUndoable();
+    void restoreAndResolveKeepHistoryOffTheUiThread();
     void restoreRefusedWhenHistoryCannotWrite();
     void restoreProceedsWhenHistoryIsPaused();
     void captureThatCannotBeKeptPauses();
@@ -548,6 +593,7 @@ private slots:
     void emptyVersionCanBeRestored();
     void nativeInputRoundTripsSource();
     void duplicateViewsKeepIndependentPositions();
+    void editsAboveAViewKeepWhatItShows();
     void plainKeysTypeText();
     void enterUsesDocumentNewline();
     void insertedBreaksFollowTheDocument();
@@ -662,6 +708,9 @@ private slots:
     void statusLineNamesEverySaveState();
     void quitKeepsEveryTextSafe();
     void endingAtOnceKeepsEveryTextWithinItsTime();
+    void quitDoesNotWaitForAStuckSave();
+    void closingDoesNotWaitForAStuckSave();
+    void closingAfterAPausedCaptureNoticesASave();
     void noColourLiteralsInQml();
     void reducedMotionRemovesAnimation();
     void libraryDrawerShowsItsEdgeAndCorners();
@@ -674,6 +723,7 @@ private slots:
     void closingOneViewKeepsDocumentOpenElsewhere();
     void sessionRestoresWindowsTabsAndAnchors();
     void missingFileOnRestoreIsReportedNotRecreated();
+    void restoreLooksForFilesOffTheUiThread();
     void firstLaunchOpensOneBlankDraft();
     void anUntouchedDraftGivesWayToTheDocumentOpened();
     void secondLaunchForwardsFilesToRunningInstance();
@@ -729,6 +779,7 @@ private slots:
     void libraryFoldersPersistAndGoneOnesStay();
     void expandedFoldersFollowTheDisk();
     void listingStaysOffTheUiThread();
+    void librariesOfOneStoreShareTheirWatch();
     void draftsFollowCreationNamingAndRemoval();
     void recentIsNotedOnOpenSaveAndName();
     void libraryRowsOpenThroughTheBackend();
@@ -823,6 +874,7 @@ private slots:
     void saveAsOverItsOwnConflictedFileOverwrites();
     void saveAsFromAConflictWaitsForItsOutcome();
     void dialogsStartInTheFolderLastUsed();
+    void dialogsDoNotWaitOnAFolderThatDoesNotAnswer();
     void pausedHistorySaysWhy();
     void messagesNameParchsFoldersPlainly();
     void versionTimesReadNaturally();
@@ -1014,6 +1066,23 @@ void ParchTests::themeFallsBackWithoutOmarchy()
     QVERIFY(missing.background().isValid());
     QCOMPARE(missing.radius(), 0);
     QCOMPARE(missing.fontFamily(), QStringLiteral("monospace"));
+}
+
+void ParchTests::themeSizesAreBuiltOncePerChange()
+{
+    // QML reads the sizes in every binding that uses one, so the table it
+    // gets is made once for each change of the theme, not at every read.
+    QTemporaryDir dir;
+    writeTheme(dir.path(), "light", "#F8F1E3", "#342B27", "#A7353A");
+    Theme theme(dir.path());
+    const QVariantMap first = theme.sizes();
+    QVERIFY(first.isSharedWith(theme.sizes()));
+    QCOMPARE(first.value(QStringLiteral("body")).toInt(), theme.size(QStringLiteral("body")));
+    // A new type scale is a new table.
+    writeFile(dir.filePath(QStringLiteral("theme/shell.toml")), "[font]\nbase-size = 20\n");
+    QTRY_COMPARE(theme.sizes().value(QStringLiteral("body")).toInt(), 20);
+    QVERIFY(!first.isSharedWith(theme.sizes()));
+    QCOMPARE(first.value(QStringLiteral("body")).toInt(), 12);
 }
 
 void ParchTests::themeLookupResolvesNamesAndPaths()
@@ -1692,6 +1761,151 @@ void ParchTests::editNeverJoinsTheSavedStep()
     QVERIFY(!buffer.modified());
 }
 
+void ParchTests::editsMadeWhileUndoAppliesWaitForTheStep()
+{
+    // A step of two edits, undone newest first: a listener that edits as
+    // the first of them lands must not move where the second one goes, nor
+    // take the step out of history while it is being applied.
+    SourceBuffer buffer(QStringLiteral("abc"));
+    buffer.replace({3, 0}, QStringLiteral("d"));
+    QCOMPARE(buffer.replace({{{0, 1}, QStringLiteral("X")}, {{2, 1}, QStringLiteral("Y")}}),
+             SourceBuffer::EditOutcome::Applied);
+    QCOMPARE(buffer.text(), QStringLiteral("XbYd"));
+    QStringList seen;
+    bool editing = true;
+    QList<SourceBuffer::EditOutcome> outcomes;
+    connect(&buffer, &SourceBuffer::sourceChanged, &buffer, [&] {
+        seen << buffer.text();
+        if (!std::exchange(editing, false)) return;
+        // At the very start, before both edits of the step, and one that
+        // overlaps text the rest of the step changes, which cannot apply.
+        outcomes << buffer.replace({0, 0}, QStringLiteral("!"));
+        outcomes << buffer.replace({1, 2}, QStringLiteral("?"));
+        // Undo and redo wait as well: they are not taken at all.
+        buffer.undo();
+        buffer.redo();
+    });
+    buffer.undo();
+    QCOMPARE(outcomes, (QList{SourceBuffer::EditOutcome::Deferred, SourceBuffer::EditOutcome::Deferred}));
+    QCOMPARE(buffer.text(), QStringLiteral("!abcd"));
+    // Every change was said with the text it left, in order.
+    QCOMPARE(seen, (QStringList{QStringLiteral("abYd"), QStringLiteral("abcd"), QStringLiteral("!abcd")}));
+    // The listener's edit is a step of its own after the undone one, which
+    // it took the place of, as any edit after an undo does.
+    QVERIFY(!buffer.canRedo());
+    buffer.undo();
+    QCOMPARE(buffer.text(), QStringLiteral("abcd"));
+    buffer.undo();
+    QCOMPARE(buffer.text(), QStringLiteral("abc"));
+    QVERIFY(!buffer.canUndo());
+
+    // The same while redo applies a step.
+    SourceBuffer again(QStringLiteral("abc"));
+    again.replace({{{0, 1}, QStringLiteral("X")}, {{2, 1}, QStringLiteral("Y")}});
+    again.undo();
+    QCOMPARE(again.text(), QStringLiteral("abc"));
+    editing = true;
+    connect(&again, &SourceBuffer::sourceChanged, &again, [&] {
+        if (std::exchange(editing, false)) again.replace({3, 0}, QStringLiteral("!"));
+    });
+    again.redo();
+    QCOMPARE(again.text(), QStringLiteral("XbY!"));
+    again.undo();
+    QCOMPARE(again.text(), QStringLiteral("XbY"));
+    again.undo();
+    QCOMPARE(again.text(), QStringLiteral("abc"));
+    QVERIFY(!again.canUndo());
+}
+
+void ParchTests::undoHistoryEdges()
+{
+    qint64 now = 0;
+    // An edit after an undo discards what redo could have brought back.
+    SourceBuffer discarded(QStringLiteral("a"));
+    discarded.setClock([&] { return now; });
+    discarded.replace({1, 0}, QStringLiteral("b"));
+    discarded.replace({2, 0}, QStringLiteral("c"));
+    discarded.undo();
+    QVERIFY(discarded.canRedo());
+    discarded.replace({2, 0}, QStringLiteral("x"));
+    QVERIFY(!discarded.canRedo());
+    discarded.redo();
+    QCOMPARE(discarded.text(), QStringLiteral("abx"));
+    discarded.undo();
+    QCOMPARE(discarded.text(), QStringLiteral("ab"));
+
+    // A saved text among the discarded redo steps can no longer be reached,
+    // so no position in history is the saved one any more.
+    SourceBuffer saved(QStringLiteral("a"));
+    saved.setClock([&] { return now; });
+    saved.replace({1, 0}, QStringLiteral("b"));
+    saved.markSaved();
+    saved.undo();
+    QVERIFY(saved.modified());
+    saved.replace({1, 0}, QStringLiteral("x"));
+    QVERIFY(saved.modified());
+    saved.undo();
+    QCOMPARE(saved.text(), QStringLiteral("a"));
+    QVERIFY(saved.modified());
+
+    // Typing straight after an undo starts a step of its own, even within
+    // the grouping window and where the undone typing ended.
+    SourceBuffer typing;
+    typing.setClock([&] { return now; });
+    typing.replace({0, 0}, QStringLiteral("a"), EditKind::Typing);
+    typing.replace({1, 0}, QStringLiteral("b"), EditKind::Typing);
+    typing.replace({2, 0}, QStringLiteral("c"), EditKind::Other);
+    typing.undo();
+    typing.replace({2, 0}, QStringLiteral("d"), EditKind::Typing);
+    typing.undo();
+    QCOMPARE(typing.text(), QStringLiteral("ab"));
+    typing.undo();
+    QCOMPARE(typing.text(), QString());
+
+    // Typing over a selection replaces text, and never joins the typing before it.
+    SourceBuffer selection(QStringLiteral("hello"));
+    selection.setClock([&] { return now; });
+    selection.replace({5, 0}, QStringLiteral("!"), EditKind::Typing);
+    selection.replace({0, 5}, QStringLiteral("H"), EditKind::Typing);
+    selection.undo();
+    QCOMPARE(selection.text(), QStringLiteral("hello!"));
+    // Nor does typing after it join the replacement.
+    SourceBuffer after(QStringLiteral("hello"));
+    after.setClock([&] { return now; });
+    after.replace({0, 5}, QStringLiteral("H"), EditKind::Typing);
+    after.replace({1, 0}, QStringLiteral("i"), EditKind::Typing);
+    after.undo();
+    QCOMPARE(after.text(), QStringLiteral("H"));
+
+    // A pause just short of the grouping window joins; one of the whole window does not.
+    SourceBuffer pauses;
+    now = 0;
+    pauses.setClock([&] { return now; });
+    pauses.replace({0, 0}, QStringLiteral("a"), EditKind::Typing);
+    now += 1999;
+    pauses.replace({1, 0}, QStringLiteral("b"), EditKind::Typing);
+    now += 2000;
+    pauses.replace({2, 0}, QStringLiteral("c"), EditKind::Typing);
+    pauses.undo();
+    QCOMPARE(pauses.text(), QStringLiteral("ab"));
+    pauses.undo();
+    QCOMPARE(pauses.text(), QString());
+
+    // Undoing a step of many edits flips modified once, however many it replays.
+    SourceBuffer joined;
+    now = 0;
+    joined.setClock([&] { return now; });
+    for (int i = 0; i < 5; ++i) joined.replace({i, 0}, QStringLiteral("x"), EditKind::Typing);
+    QSignalSpy flips(&joined, &SourceBuffer::modifiedChanged);
+    QSignalSpy changes(&joined, &SourceBuffer::sourceChanged);
+    joined.undo();
+    QCOMPARE(joined.text(), QString());
+    QCOMPARE(changes.size(), 5);
+    QCOMPARE(flips.size(), 1);
+    joined.redo();
+    QCOMPARE(flips.size(), 2);
+}
+
 void ParchTests::untouchedFilesSaveByteIdentical()
 {
     QTemporaryDir dir;
@@ -2170,6 +2384,65 @@ void ParchTests::savedVersionMatchesTheWrittenFile()
     QCOMPARE(saved.version.sha256, QCryptographicHash::hash(QByteArray("new text\n"), QCryptographicHash::Sha256));
     // The returned version lets the next save go through without a conflict.
     QCOMPARE(DiskFile::save(path, "again\n", saved.version).status, SaveStatus::Saved);
+
+    // A file the save makes, where nothing was.
+    const QString fresh = dir.filePath("fresh.md");
+    const DiskVersion absent = DiskFile::fingerprint(fresh);
+    QVERIFY(!absent.exists);
+    const SaveResult made = DiskFile::save(fresh, "made\n", absent);
+    QCOMPARE(made.status, SaveStatus::Saved);
+    QCOMPARE(made.version, DiskFile::fingerprint(fresh));
+    QVERIFY(made.version.exists);
+    QCOMPARE(DiskFile::save(fresh, "made again\n", made.version).status, SaveStatus::Saved);
+    // One made as a new file at a name nothing has.
+    const QString created = dir.filePath("created.md");
+    const SaveResult first = DiskFile::create(created, "created\n");
+    QCOMPARE(first.status, SaveStatus::Saved);
+    QCOMPARE(first.version, DiskFile::fingerprint(created));
+    QCOMPARE(DiskFile::save(created, "changed\n", first.version).status, SaveStatus::Saved);
+
+    // A file saved through a link: the version is the file it leads to, as
+    // the link's own fingerprint finds it, and the link stays a link.
+    const QString target = dir.filePath("target.md"), link = dir.filePath("link.md");
+    writeFile(target, "target\n");
+    QVERIFY(QFile::link(target, link));
+    const SaveResult through = DiskFile::save(link, "through the link\n", DiskFile::fingerprint(link));
+    QCOMPARE(through.status, SaveStatus::Saved);
+    QCOMPARE(through.version, DiskFile::fingerprint(link));
+    QCOMPARE(through.version, DiskFile::fingerprint(target));
+    QVERIFY(QFileInfo(link).isSymLink());
+    QCOMPARE(readFile(target), QByteArray("through the link\n"));
+    QCOMPARE(DiskFile::save(link, "and again\n", through.version).status, SaveStatus::Saved);
+}
+
+void ParchTests::filesTooLargeAreNotRead()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("huge.md");
+    // A sparse file, which takes no room on disk, a byte past the limit.
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QVERIFY(file.resize(DiskFile::MaxLoadBytes + 1));
+    }
+    const quint64 reads = DiskFile::contentReads();
+    const LoadedFile loaded = DiskFile::load(path);
+    QVERIFY(!loaded.ok);
+    QVERIFY(!loaded.missing);
+    QVERIFY2(loaded.unreadable.contains(QStringLiteral("larger")), qPrintable(loaded.unreadable));
+    QCOMPARE(DiskFile::contentReads(), reads);
+    // Opening it says why, and opens nothing.
+    DocumentStore store(AppPaths::under(dir.path()));
+    QString error;
+    QVERIFY(!store.open(path, &error));
+    QVERIFY2(error.contains(QStringLiteral("larger")), qPrintable(error));
+    // One at the limit is read.
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadWrite));
+    QVERIFY(file.resize(4));
+    file.close();
+    QVERIFY(DiskFile::load(path).ok);
 }
 
 void ParchTests::aChangeOfTheSameSizeAndTimeIsSeen()
@@ -2630,6 +2903,50 @@ void ParchTests::namingDraftCarriesAssetsAndRefusesCollisions()
     QVERIFY(!QDir(paths.drafts()).exists(id));
 }
 
+void ParchTests::namingADraftTakesAwayOnlyWhatWentWithIt()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    DocumentStore store(paths);
+    Document *draft = store.newDraft();
+    draft->buffer()->replace({0, 0}, QStringLiteral("![a](assets/a.png) ![c](assets/img/c.png)\n"));
+    store.save(draft);
+    QTRY_COMPARE(draft->state(), Document::State::Clean);
+    const QString folder = paths.drafts() + u'/' + draft->id();
+    writeFile(folder + "/assets/a.png", "first image");
+    writeFile(folder + "/assets/img/c.png", "nested image");
+    // An image pasted while the naming runs, after its assets were counted.
+    DocumentStore::setBeforePlacing([&](const QString &path) {
+        if (path.endsWith(QStringLiteral("/a.png"))) writeFile(folder + "/assets/img/late.png", "late image");
+    });
+    const auto restore = qScopeGuard([] { DocumentStore::setBeforePlacing({}); });
+    const QString named = root.filePath("named");
+    QVERIFY(QDir().mkpath(named));
+    store.saveAs(draft, named + "/doc.md");
+    QTRY_COMPARE(draft->state(), Document::State::Clean);
+    QVERIFY(!draft->isDraft());
+    QCOMPARE(readFile(named + "/assets/a.png"), QByteArray("first image"));
+    QCOMPARE(readFile(named + "/assets/img/c.png"), QByteArray("nested image"));
+    // What went with the draft is gone from its folder, and the folder it
+    // left empty; what came meanwhile stays, with the folders that hold it.
+    QVERIFY(!QFileInfo::exists(folder + "/draft.md"));
+    QVERIFY(!QFileInfo::exists(folder + "/assets/a.png"));
+    QVERIFY(!QFileInfo::exists(folder + "/assets/img/c.png"));
+    QCOMPARE(readFile(folder + "/assets/img/late.png"), QByteArray("late image"));
+    // With nothing left behind, nothing of the folder stays.
+    Document *second = store.newDraft();
+    second->buffer()->replace({0, 0}, QStringLiteral("![b](assets/sub/b.png)\n"));
+    store.save(second);
+    QTRY_COMPARE(second->state(), Document::State::Clean);
+    const QString secondFolder = paths.drafts() + u'/' + second->id();
+    writeFile(secondFolder + "/assets/sub/b.png", "image");
+    store.saveAs(second, named + "/second.md");
+    QTRY_COMPARE(second->state(), Document::State::Clean);
+    QVERIFY(!second->isDraft());
+    QVERIFY(!QFileInfo::exists(secondFolder));
+}
+
 void ParchTests::aLinkAtAssetsReceivesNothing()
 {
     // An "assets" beside the new name that is not a folder of its own, such
@@ -2767,6 +3084,56 @@ void ParchTests::lastViewClosingKeepsUnsavedDocument()
     QCOMPARE(closed.size(), 2);
     QCOMPARE(closed.last().first().toString(), id);
     QCOMPARE(readFile(file), QByteArray("xa\n"));
+}
+
+void ParchTests::droppingDuringASaveLetsGoOnceItEnds()
+{
+    if (::geteuid() == 0) QSKIP("A read-only directory does not stop root.");
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString folder = root.filePath("docs"), file = folder + "/a.md";
+    writeFile(file, "base\n");
+    DocumentStore store(AppPaths::under(root.path()));
+    QSignalSpy closed(&store, &DocumentStore::documentClosed);
+    QSignalSpy viewsWanted(&store, &DocumentStore::needsView);
+    Document *document = store.open(file);
+    QVERIFY(document);
+    store.retain(document);
+    document->buffer()->replace({0, 0}, "given up ");
+    const auto writable = QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner;
+    const auto restore = qScopeGuard([&] { QFile::setPermissions(folder, writable); });
+    {
+        // The save runs, and will fail, when the text is given up.
+        PoolBlock block;
+        store.save(document);
+        QVERIFY(document->isSaving());
+        QVERIFY(QFile::setPermissions(folder, QFile::ReadOwner | QFile::ExeOwner));
+        store.release(document);
+        // The document goes as soon as the save ends, whatever it ends in.
+        QVERIFY(store.drop(document));
+        QVERIFY(store.documents().contains(document));
+    }
+    QTRY_COMPARE(closed.size(), 1);
+    QVERIFY(store.documents().isEmpty());
+    // Nothing asks for a view of text that was given up.
+    QCOMPARE(viewsWanted.size(), 0);
+    QCOMPARE(readFile(file), QByteArray("base\n"));
+
+    // A view that takes the document again meanwhile keeps it.
+    QVERIFY(QFile::setPermissions(folder, writable));
+    Document *kept = store.open(file);
+    store.retain(kept);
+    kept->buffer()->replace({0, 0}, "kept ");
+    {
+        PoolBlock block;
+        store.save(kept);
+        store.release(kept);
+        QVERIFY(store.drop(kept));
+        store.retain(kept);
+    }
+    QTRY_COMPARE(kept->state(), Document::State::Clean);
+    QVERIFY(store.documents().contains(kept));
+    QCOMPARE(closed.size(), 1);
 }
 
 void ParchTests::draftReopensByIdentity()
@@ -3124,18 +3491,36 @@ void ParchTests::recoveryFollowsIdleAndMaximumIntervals()
     Autosave autosave(&store, &recovery);
     Document *document = store.newDraft();
     autosave.watch(document);
+    QElapsedTimer clock;
+    QList<qint64> writes;
+    connect(&autosave, &Autosave::recoveryWritten, this, [&] { writes << clock.elapsed(); });
+    clock.start();
     document->buffer()->replace({0, 0}, "a");
     QTest::qWait(300);
     QVERIFY(recovery.pending().isEmpty());
     QTRY_VERIFY_WITH_TIMEOUT(!recovery.pending().isEmpty(), 700);
+    QTRY_COMPARE(writes.size(), 1);
+    // A timer may fire a little early (Qt allows 5% for a coarse one), and
+    // late by however busy the machine is.
+    QVERIFY2(writes.first() >= Autosave::RecoveryIdleMs * 95 / 100, qPrintable(QString::number(writes.first())));
     const QDateTime first = recovery.pending().first().written;
 
-    // Typing never pauses for the idle delay, so only the maximum interval can write.
+    // Typing never pauses for the idle delay, so only the maximum interval
+    // writes: once for each RecoveryMaxMs of typing, counted from the first
+    // edit after a write, and never sooner.
     QElapsedTimer typing;
     typing.start();
-    while (typing.elapsed() < 2600) {
+    qint64 burst = -1;
+    while (typing.elapsed() < 2 * Autosave::RecoveryMaxMs + 1000) {
+        if (burst < 0) burst = clock.elapsed();
         document->buffer()->replace({0, 0}, "b");
         QTest::qWait(100);
+    }
+    QCOMPARE(writes.size(), 3);
+    for (int i = 1; i < 3; ++i) {
+        const qint64 since = writes.at(i) - (i == 1 ? burst : writes.at(i - 1));
+        QVERIFY2(since >= Autosave::RecoveryMaxMs * 95 / 100 && since <= Autosave::RecoveryMaxMs + 500,
+                 qPrintable(QStringLiteral("write %1 came %2 ms after its burst began").arg(i).arg(since)));
     }
     const auto entries = recovery.pending();
     QCOMPARE(entries.size(), 1);
@@ -3289,6 +3674,84 @@ void ParchTests::recoveryWriteFailureIsReported()
     QString error;
     QVERIFY(!autosave.flush(&error));
     QVERIFY(!error.isEmpty());
+}
+
+void ParchTests::failedRecoveryWriteIsRetriedOnATimer()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    writeFile(paths.recovery(), "in the way");
+    blockDrafts(paths);
+    DocumentStore store(paths);
+    Recovery recovery(paths);
+    Autosave autosave(&store, &recovery);
+    QList<qint64> failedAt;
+    QElapsedTimer clock;
+    clock.start();
+    connect(&autosave, &Autosave::recoveryFailed, this, [&] { failedAt << clock.elapsed(); });
+    QSignalSpy written(&autosave, &Autosave::recoveryWritten);
+    Document *document = store.newDraft();
+    autosave.watch(document);
+    document->buffer()->replace({0, 0}, "only here");
+    // No edit follows, yet the write is tried again, each time a little later.
+    QTRY_VERIFY_WITH_TIMEOUT(failedAt.size() >= 3, Autosave::RecoveryIdleMs + 3 * Autosave::RecoveryRetryMs + 3000);
+    const qint64 firstWait = failedAt.at(1) - failedAt.at(0), secondWait = failedAt.at(2) - failedAt.at(1);
+    QVERIFY2(firstWait >= Autosave::RecoveryRetryMs * 9 / 10, qPrintable(QString::number(firstWait)));
+    QVERIFY2(secondWait >= firstWait * 3 / 2, qPrintable(QStringLiteral("%1 then %2").arg(firstWait).arg(secondWait)));
+    QCOMPARE(written.size(), 0);
+    // Once the way is clear, a retry writes the text without any edit.
+    QVERIFY(QFile::remove(paths.recovery()));
+    QTRY_COMPARE_WITH_TIMEOUT(written.size(), 1, 4 * Autosave::RecoveryRetryMs + 2000);
+    QCOMPARE(recovery.pending().size(), 1);
+    QCOMPARE(recovery.pending().first().text, QStringLiteral("only here"));
+    // Written, nothing is retried any more.
+    const qsizetype failures = failedAt.size();
+    QTest::qWait(2 * Autosave::RecoveryRetryMs);
+    QCOMPARE(failedAt.size(), failures);
+    QCOMPARE(written.size(), 1);
+}
+
+void ParchTests::failedSaveKeepsRecoveryWhileTheFileIsAhead()
+{
+    if (::geteuid() == 0) QSKIP("A read-only directory does not stop root.");
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString folder = root.filePath("docs"), file = folder + "/a.md";
+    writeFile(file, "a\n");
+    DocumentStore store(paths);
+    Recovery recovery(paths);
+    Autosave autosave(&store, &recovery);
+    Document *document = store.open(file);
+    QVERIFY(document);
+    {
+        // A save that lands after the text moved on leaves the file ahead of
+        // the point the buffer counts as saved.
+        PoolBlock block;
+        document->buffer()->replace({0, 0}, "x");
+        store.save(document);
+        document->buffer()->replace({1, 0}, "y");
+    }
+    QTRY_VERIFY(!document->isSaving());
+    QCOMPARE(readFile(file), QByteArray("xa\n"));
+    QCOMPARE(document->state(), Document::State::Modified);
+    // The next save fails, and the edits are undone back to that point: the
+    // buffer reads as saved, but the file holds other text, so the text is
+    // still only in memory.
+    const auto writable = QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner;
+    const auto restore = qScopeGuard([&] { QFile::setPermissions(folder, writable); });
+    QVERIFY(QFile::setPermissions(folder, QFile::ReadOwner | QFile::ExeOwner));
+    store.save(document);
+    QTRY_COMPARE(document->state(), Document::State::SaveFailed);
+    document->buffer()->undo();
+    document->buffer()->undo();
+    QCOMPARE(document->buffer()->text(), QStringLiteral("a\n"));
+    QVERIFY(!document->buffer()->modified());
+    QCOMPARE(document->state(), Document::State::SaveFailed);
+    autosave.watch(document);
+    QTRY_COMPARE_WITH_TIMEOUT(recovery.pending().size(), 1, Autosave::RecoveryMaxMs + 1000);
+    QCOMPARE(recovery.pending().first().text, QStringLiteral("a\n"));
 }
 
 void ParchTests::conflictKeepsRecoveryAndNeverSaves()
@@ -3624,6 +4087,11 @@ void ParchTests::flushSurvivesDocumentsClosedWhileWaiting()
     QVERIFY(recovery.write(first->id(), first->path(), *first->buffer()->snapshot(), first->diskVersion()));
     QVERIFY(recovery.write(second->id(), second->path(), *second->buffer()->snapshot(), second->diskVersion()));
     QPointer<Document> watched(first);
+    // A document closed while flush() waits is deleted then, not later: the
+    // deletion it asks for is carried out as soon as the wait takes events,
+    // whether or not Qt would carry it out at that loop level by itself.
+    connect(&store, &DocumentStore::documentClosed, this,
+            [] { QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete); }, Qt::QueuedConnection);
     QString error;
     QVERIFY2(autosave.flush(&error), qPrintable(error));
     // The scenario happened: the released document was deleted while flush() waited.
@@ -6629,6 +7097,111 @@ void ParchTests::reappearingFileRefreshesTheReason()
     QCOMPARE(document->state(), Document::State::Clean);
 }
 
+void ParchTests::fileBackAsItWasLeavesTheConflict()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString path = root.filePath("a.md");
+    writeFile(path, "base\n");
+    DocumentStore store(paths);
+    Recovery recovery(paths);
+    Autosave autosave(&store, &recovery);
+    Document *document = store.open(path);
+    autosave.watch(document);
+    QVERIFY(QFile::remove(path));
+    QTRY_COMPARE_WITH_TIMEOUT(document->state(), Document::State::Conflict, 3000);
+    QVERIFY(document->fileMissing());
+    // Gone, the text in memory is the only copy, which recovery keeps.
+    QTRY_COMPARE_WITH_TIMEOUT(recovery.pending().size(), 1, Autosave::RecoveryMaxMs + 2000);
+    // The file comes back exactly as it was read, as when a move is undone,
+    // and nothing was typed: there is nothing left to choose.
+    writeFile(path, "base\n");
+    QTRY_COMPARE_WITH_TIMEOUT(document->state(), Document::State::Clean, 3000);
+    QVERIFY(!document->fileMissing());
+    QVERIFY(document->lastError().isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(recovery.pending().isEmpty(), 2000);
+    // Its next save goes to the file as any save does.
+    document->buffer()->replace({0, 0}, QStringLiteral("more "));
+    store.save(document);
+    QTRY_COMPARE(document->state(), Document::State::Clean);
+    QCOMPARE(readFile(path), QByteArray("more base\n"));
+
+    // With text typed meanwhile, the choice still waits.
+    QVERIFY(QFile::remove(path));
+    QTRY_COMPARE_WITH_TIMEOUT(document->state(), Document::State::Conflict, 3000);
+    document->buffer()->replace({0, 0}, QStringLiteral("typed "));
+    writeFile(path, "more base\n");
+    QTRY_VERIFY_WITH_TIMEOUT(!document->fileMissing(), 3000);
+    QCOMPARE(document->state(), Document::State::Conflict);
+}
+
+void ParchTests::aCheckForAClosedDocumentIsDropped()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString path = root.filePath("a.md");
+    writeFile(path, "base\n");
+    DocumentStore store(paths);
+    QPointer<Document> document = store.open(path);
+    QSignalSpy touched(&store, &DocumentStore::diskChanged);
+    QSignalSpy wanted(&store, &DocumentStore::needsView);
+    {
+        // The change is seen and its check started, but cannot run yet.
+        PoolBlock block;
+        writeFile(path, "theirs\n");
+        QTRY_COMPARE_WITH_TIMEOUT(touched.size(), 1, 3000);
+        // The document goes while its check waits.
+        QVERIFY(store.drop(document));
+        QVERIFY(store.documents().isEmpty());
+    }
+    QTRY_VERIFY(document.isNull());
+    QTRY_COMPARE(QThreadPool::globalInstance()->activeThreadCount(), 0);
+    QTest::qWait(100);
+    // The check's result found no document to change, and asked for nothing.
+    QVERIFY(store.documents().isEmpty());
+    QCOMPARE(wanted.size(), 0);
+    QCOMPARE(readFile(path), QByteArray("theirs\n"));
+    // Opened again, the file is read as it is now.
+    Document *again = store.open(path);
+    QVERIFY(again);
+    QCOMPARE(again->buffer()->text(), QStringLiteral("theirs\n"));
+    QCOMPARE(again->state(), Document::State::Clean);
+}
+
+void ParchTests::anOutsideWriteAfterASaveIsSeen()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString path = root.filePath("a.md");
+    writeFile(path, "base\n");
+    DocumentStore store(paths);
+    Document *document = store.open(path);
+    // Another program writes the file the moment parch's save has put its
+    // text there, before parch's own events for that save are taken.
+    connect(&store, &DocumentStore::documentSaved, this, [&] { writeFile(path, "theirs right after\n"); },
+            Qt::SingleShotConnection);
+    document->buffer()->replace({0, 0}, QStringLiteral("mine "));
+    store.save(document);
+    // The change is the other program's, not parch's own, so a clean
+    // document takes it.
+    QTRY_COMPARE_WITH_TIMEOUT(document->buffer()->text(), QStringLiteral("theirs right after\n"), 3000);
+    QCOMPARE(document->state(), Document::State::Clean);
+    QCOMPARE(readFile(path), QByteArray("theirs right after\n"));
+    // The same with an edit made since: the text waits in conflict, never saved over theirs.
+    connect(&store, &DocumentStore::documentSaved, this, [&] {
+        writeFile(path, "theirs again\n");
+        document->buffer()->replace({0, 0}, QStringLiteral("typed "));
+    }, Qt::SingleShotConnection);
+    document->buffer()->replace({0, 0}, QStringLiteral("again "));
+    store.save(document);
+    QTRY_COMPARE_WITH_TIMEOUT(document->state(), Document::State::Conflict, 3000);
+    QCOMPARE(readFile(path), QByteArray("theirs again\n"));
+    QCOMPARE(document->buffer()->text(), QStringLiteral("typed again theirs right after\n"));
+}
+
 void ParchTests::fileWatchRenewsWatchAfterRenameOverHeldFile()
 {
     QTemporaryDir root;
@@ -6794,6 +7367,122 @@ void ParchTests::historyPausesWhenNamedVersionsFillBudget()
     QVERIFY(history.capture(id, "more").isEmpty());
     // Both named versions are still there.
     QCOMPARE(history.versions(id).size(), 2);
+}
+
+void ParchTests::historyBudgetBoundaries()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QDateTime clock = QDateTime(QDate(2026, 1, 1), QTime(12, 0), QTimeZone::UTC);
+    History history(AppPaths::under(root.path()), HistoryLimits{100, 30, 200}, [&] { return clock; });
+    const QString id = newDocumentId();
+    // Named versions that fill the budget exactly do not pause history.
+    QVERIFY(!history.capture(id, QByteArray(200, 'a'), QStringLiteral("full")).isEmpty());
+    QCOMPARE(history.pause(), History::Pause::None);
+    QVERIFY(!history.paused());
+    // Text that fits beside them exactly, empty text here, is kept.
+    History::CaptureStatus status = History::CaptureStatus::Failed;
+    clock = clock.addSecs(60);
+    QVERIFY(!history.capture(id, QByteArray(), {}, &status).isEmpty());
+    QCOMPARE(status, History::CaptureStatus::Recorded);
+    QCOMPARE(history.pause(), History::Pause::None);
+    // One byte more does not fit: that capture pauses.
+    clock = clock.addSecs(60);
+    QVERIFY(history.capture(id, "x", {}, &status).isEmpty());
+    QCOMPARE(status, History::CaptureStatus::Paused);
+    QCOMPARE(history.pause(), History::Pause::VersionDidNotFit);
+
+    // Unnamed text that fits beside the named versions to the byte is kept;
+    // a byte more is not.
+    History other(AppPaths::under(root.path() + QStringLiteral("/other")), HistoryLimits{100, 30, 200}, [&] { return clock; });
+    QVERIFY(!other.capture(id, QByteArray(150, 'n'), QStringLiteral("named")).isEmpty());
+    clock = clock.addSecs(60);
+    QVERIFY(!other.capture(id, QByteArray(50, 'u'), {}, &status).isEmpty());
+    QCOMPARE(status, History::CaptureStatus::Recorded);
+    QCOMPARE(other.usage().bytes, qint64(200));
+    clock = clock.addSecs(60);
+    QVERIFY(other.capture(id, QByteArray(51, 'v'), {}, &status).isEmpty());
+    QCOMPARE(status, History::CaptureStatus::Paused);
+    // And one that fits once the older unnamed version is pruned is kept.
+    clock = clock.addSecs(60);
+    QVERIFY(!other.capture(id, QByteArray(50, 'w'), {}, &status).isEmpty());
+    QCOMPARE(status, History::CaptureStatus::Recorded);
+    QCOMPARE(other.versions(id).size(), 2);
+    QCOMPARE(other.usage().bytes, qint64(200));
+}
+
+void ParchTests::historyPrunesWhilePausedAndAsTimeGoesBy()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QDateTime clock = QDateTime(QDate(2026, 1, 1), QTime(12, 0), QTimeZone::UTC);
+    QMutex clockLock;
+    const auto now = [&] {
+        QMutexLocker lock(&clockLock);
+        return clock;
+    };
+    const auto advance = [&](int days) {
+        QMutexLocker lock(&clockLock);
+        clock = clock.addDays(days);
+    };
+    const AppPaths paths = AppPaths::under(root.path());
+    {
+        History history(paths, HistoryLimits{100, 30, 150}, now);
+        const QString id = newDocumentId();
+        QVERIFY(!history.capture(id, "old one").isEmpty());
+        advance(1);
+        QVERIFY(!history.capture(id, "old two").isEmpty());
+        QVERIFY(!history.capture(id, QByteArray(100, 'a'), QStringLiteral("one")).isEmpty());
+        QVERIFY(!history.capture(id, QByteArray(60, 'b'), QStringLiteral("two")).isEmpty());
+        QCOMPARE(history.pause(), History::Pause::NamedVersionsFill);
+        QCOMPARE(history.versions(id).size(), 4);
+        // A capture refused while paused still removes what is past the age limit.
+        advance(31);
+        History::CaptureStatus status = History::CaptureStatus::Failed;
+        QVERIFY(history.capture(id, "refused", {}, &status).isEmpty());
+        QCOMPARE(status, History::CaptureStatus::Paused);
+        QStringList names;
+        for (const History::Version &version : history.versions(id)) names << version.name;
+        QCOMPARE(names, (QStringList{QStringLiteral("two"), QStringLiteral("one")}));
+    }
+    {
+        // A document never captured again loses its old versions while
+        // history runs, not only when it starts.
+        HistoryLimits limits{100, 30, qint64(1) << 30};
+        limits.pruneEveryMs = 50;
+        History history(paths, limits, now);
+        const QString id = newDocumentId();
+        QVERIFY(!history.capture(id, "aging").isEmpty());
+        QVERIFY(!history.capture(id, "kept", QStringLiteral("named")).isEmpty());
+        QCOMPARE(history.versions(id).size(), 2);
+        advance(31);
+        QTRY_COMPARE(history.versions(id).size(), 1);
+        QCOMPARE(history.versions(id).first().name, QStringLiteral("named"));
+    }
+}
+
+void ParchTests::saveSucceedsWhenHistoryCannotWrite()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    // Nothing can be written beneath a file where history's folder belongs.
+    writeFile(paths.history(), "in the way");
+    const QString path = root.filePath("a.md");
+    writeFile(path, "base\n");
+    DocumentStore store(paths);
+    Document *document = store.open(path);
+    QVERIFY(document);
+    // The first save would keep the opened text in history first, and the
+    // second keeps its own text there: neither stops the save.
+    for (const QString &typed : {QStringLiteral("one "), QStringLiteral("two ")}) {
+        document->buffer()->replace({0, 0}, typed);
+        store.save(document);
+        QTRY_COMPARE(document->state(), Document::State::Clean);
+        QVERIFY(document->lastError().isEmpty());
+    }
+    QCOMPARE(readFile(path), QByteArray("two one base\n"));
+    QVERIFY(store.history()->versions(document->id()).isEmpty());
 }
 
 void ParchTests::historyBudgetCoversAllDocuments()
@@ -6967,6 +7656,36 @@ void ParchTests::removingNamedVersionsLiftsThePause()
     QVERIFY(history.pause() == History::Pause::NamedVersionsFill);
     History again(paths, HistoryLimits{100, 30, 150}, [&] { return clock; });
     QVERIFY(again.pause() == History::Pause::None);
+}
+
+void ParchTests::registryLetsGoOfIdentitiesNothingHolds()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString folder = QFileInfo(root.path()).canonicalFilePath();
+    const QString here = folder + QStringLiteral("/here.md"), gone = folder + QStringLiteral("/gone.md"),
+                  versioned = folder + QStringLiteral("/versioned.md"), recovered = folder + QStringLiteral("/recovered.md");
+    writeFile(here, "here\n");
+    const QString hereId = newDocumentId(), goneId = newDocumentId(), versionedId = newDocumentId(), recoveredId = newDocumentId();
+    // History keeps versions of one file that has gone, and recovery text of another.
+    writeFile(paths.history() + u'/' + versionedId + QStringLiteral("/20260101T120000000-0123456789ab.md"), "old\n");
+    QVERIFY(Recovery(paths).write(recoveredId, recovered, SourceSnapshot{1, QStringLiteral("unsaved\n")}, DiskVersion{}));
+    const QJsonObject registry{{here, hereId}, {gone, goneId}, {versioned, versionedId}, {recovered, recoveredId}};
+    writeFile(paths.registryFile(), QJsonDocument(registry).toJson());
+    const auto written = [&] { return QJsonDocument::fromJson(readFile(paths.registryFile())).object(); };
+    {
+        DocumentStore store(paths);
+        // Only the identity of the file that is gone, which nothing holds, goes.
+        QTRY_VERIFY(!written().contains(gone));
+        QCOMPARE(written().value(here).toString(), hereId);
+        QCOMPARE(written().value(versioned).toString(), versionedId);
+        QCOMPARE(written().value(recovered).toString(), recoveredId);
+        // The file that is there keeps its identity.
+        Document *document = store.open(here);
+        QVERIFY(document);
+        QCOMPARE(document->id(), hereId);
+    }
 }
 
 void ParchTests::historyRejectsIdsThatAreNotUuids()
@@ -7288,6 +8007,65 @@ void ParchTests::restoringTheSameBytesChangesNothing()
     QCOMPARE(read.first().at(4).toString(), QString());
 }
 
+void ParchTests::restoreAndResolveKeepHistoryOffTheUiThread()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString file = root.filePath(QStringLiteral("a.md"));
+    writeFile(file, "base\n");
+    DocumentStore store(paths);
+    Document *document = store.open(file);
+    QVERIFY(document);
+    document->buffer()->replace({0, 0}, QStringLiteral("one "));
+    store.save(document);
+    QTRY_COMPARE(document->state(), Document::State::Clean);
+    // The text the file was opened with is the oldest version.
+    const QString opened = store.history()->versions(document->id()).last().id;
+    document->buffer()->replace({0, 0}, QStringLiteral("two "));
+    std::atomic<int> here{0}, elsewhere{0};
+    History::setBeforeCapture([&] {
+        (QThread::currentThread() == QCoreApplication::instance()->thread() ? here : elsewhere)++;
+    });
+    const auto unhook = qScopeGuard([] { History::setBeforeCapture({}); });
+    // Restoring a version keeps the text it replaces on a worker first.
+    QCOMPARE(store.restoreVersion(document, opened), DocumentStore::Restore::Restored);
+    QCOMPARE(document->buffer()->text(), QStringLiteral("base\n"));
+    QVERIFY(historyHas(store.history(), document->id(), "two one base\n"));
+    // So do Reload and Overwrite, for the text each replaces.
+    store.save(document);
+    QTRY_COMPARE(document->state(), Document::State::Clean);
+    document->buffer()->replace({0, 0}, QStringLiteral("mine "));
+    writeFile(file, "theirs\n");
+    QTRY_COMPARE_WITH_TIMEOUT(document->state(), Document::State::Conflict, 3000);
+    QVERIFY(store.resolveConflict(document, ConflictChoice::Reload));
+    QCOMPARE(document->buffer()->text(), QStringLiteral("theirs\n"));
+    QVERIFY(historyHas(store.history(), document->id(), "mine base\n"));
+    document->buffer()->replace({0, 0}, QStringLiteral("mine again "));
+    writeFile(file, "theirs again\n");
+    QTRY_COMPARE_WITH_TIMEOUT(document->state(), Document::State::Conflict, 3000);
+    QVERIFY(store.resolveConflict(document, ConflictChoice::Overwrite));
+    QVERIFY(historyHas(store.history(), document->id(), "theirs again\n"));
+    QTRY_COMPARE(readFile(file), QByteArray("mine again theirs\n"));
+    QCOMPARE(here.load(), 0);
+    QVERIFY(elsewhere.load() >= 3);
+
+    // A history that does not answer, as on a disk that stopped, holds a
+    // restore up only so long, and the text it would replace stays.
+    const auto gate = std::make_shared<QSemaphore>();
+    History::setBeforeCapture([gate] { gate->tryAcquire(1, DocumentStore::HistoryWaitMs + 5000); });
+    const QString before = document->buffer()->text();
+    QString refusal;
+    QElapsedTimer clock;
+    clock.start();
+    QCOMPARE(store.restoreVersion(document, opened, &refusal), DocumentStore::Restore::Refused);
+    QVERIFY2(clock.elapsed() < DocumentStore::HistoryWaitMs + 1000, qPrintable(QString::number(clock.elapsed())));
+    QVERIFY(!refusal.isEmpty());
+    QCOMPARE(document->buffer()->text(), before);
+    gate->release();
+    store.waitForSaves();
+}
+
 void ParchTests::restoreIsUndoable()
 {
     QTemporaryDir root;
@@ -7433,13 +8211,10 @@ void ParchTests::captureThatCannotBeKeptPauses()
 
 void ParchTests::rebuiltIndexReadsTimesAsUtc()
 {
-    const QByteArray oldZone = qgetenv("TZ");
-    qputenv("TZ", "America/New_York");
-    tzset();
-    auto restore = qScopeGuard([&] {
-        if (oldZone.isNull()) qunsetenv("TZ"); else qputenv("TZ", oldZone);
-        tzset();
-    });
+    if (const auto failed = runsInZone("America/New_York")) {
+        QVERIFY2(failed->isEmpty(), qPrintable(*failed));
+        return;
+    }
     QTemporaryDir root;
     QVERIFY(root.isValid());
     const AppPaths paths = AppPaths::under(root.path());
@@ -7459,14 +8234,10 @@ void ParchTests::versionTimesInALocalGapStayExact()
     // A version id's digits are UTC. In a zone whose clocks skip the hour
     // they name, here the hour Berlin skips on the last Sunday of March,
     // they still give that UTC time, to the millisecond.
-    const QByteArray oldZone = qgetenv("TZ");
-    qputenv("TZ", "Europe/Berlin");
-    tzset();
-    auto restore = qScopeGuard([&] {
-        if (oldZone.isNull()) qunsetenv("TZ");
-        else qputenv("TZ", oldZone);
-        tzset();
-    });
+    if (const auto failed = runsInZone("Europe/Berlin")) {
+        QVERIFY2(failed->isEmpty(), qPrintable(*failed));
+        return;
+    }
     QTemporaryDir root;
     QVERIFY(root.isValid());
     const AppPaths paths = AppPaths::under(root.path());
@@ -7967,6 +8738,36 @@ void ParchTests::duplicateViewsKeepIndependentPositions()
     // Each view holds the whole document.
     QCOMPARE(narrow.textDocument()->characterCount() - 1, buffer->length());
     QCOMPARE(wide.textDocument()->characterCount() - 1, buffer->length());
+}
+
+void ParchTests::editsAboveAViewKeepWhatItShows()
+{
+    // Another view of the same text, as in a second window, adds and takes
+    // away whole paragraphs above what this view shows: this view goes on
+    // showing the same text, rather than the same distance from the top.
+    EditorFixture fixture;
+    Document *document = fixture.open("shared.md", QStringLiteral("one two three four five six seven eight nine ten\n").repeated(80));
+    QVERIFY(document);
+    EditorView other(fixture.engine, document, 400);
+    EditorView view(fixture.engine, document, 400);
+    QVERIFY2(other.ok() && view.ok(), qPrintable(other.error + view.error));
+    SourceBuffer *buffer = document->buffer();
+    view.flickable->setProperty("contentY", 600);
+    const int top = view.binding->topSourcePosition();
+    QVERIFY(top > 0);
+    verifyTopLine(view, top);
+    const QString added = QStringLiteral("A paragraph written in the other window.\n").repeated(5);
+    QCOMPARE(buffer->replace({0, 0}, added), SourceBuffer::EditOutcome::Applied);
+    QCOMPARE(view.binding->topSourcePosition(), top + int(added.size()));
+    verifyTopLine(view, top + int(added.size()));
+    QCOMPARE(buffer->replace({0, int(added.size())}, QString()), SourceBuffer::EditOutcome::Applied);
+    QCOMPARE(view.binding->topSourcePosition(), top);
+    verifyTopLine(view, top);
+    // An edit below the top moves nothing in view.
+    const qreal before = view.contentY();
+    QCOMPARE(buffer->replace({buffer->length(), 0}, added), SourceBuffer::EditOutcome::Applied);
+    QCOMPARE(view.contentY(), before);
+    QCOMPARE(view.binding->topSourcePosition(), top);
 }
 
 void ParchTests::plainKeysTypeText()
@@ -11992,6 +12793,32 @@ void ParchTests::sessionRestoresWindowsTabsAndAnchors()
     QVERIFY(QDir(empty.path()).isEmpty());
 }
 
+void ParchTests::restoreLooksForFilesOffTheUiThread()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString idA = newUuid(), idB = newUuid();
+    const QString fileA = root.filePath(QStringLiteral("a.md")), fileB = root.filePath(QStringLiteral("b.md"));
+    writeFile(fileB, "beta\n");
+    SessionState state{{WindowState{{{idA, fileA, 0, 0, 0}, {idB, fileB, 0, 0, 0}}, 1, false, QSize(900, 700)}}};
+    QVERIFY(Session::save(paths, state));
+    Backend backend(paths);
+    TabModel *tabs = nullptr;
+    {
+        // No look at the file system for the UI can run: the start does not
+        // wait for one, and the tab whose file is gone says so once it has.
+        PoolBlock block(DiskFile::looks());
+        backend.restoreSession();
+        tabs = backend.windows().first()->tabs();
+        QCOMPARE(tabs->rowCount(), 2);
+        QCOMPARE(tabs->data(tabs->index(0), TabModel::StateRole).toString(), QString());
+        QVERIFY(tabs->documentAt(1));
+    }
+    QTRY_COMPARE(tabs->data(tabs->index(0), TabModel::StateRole).toString(), QStringLiteral("File not found"));
+    QCOMPARE(tabs->documentAt(0), nullptr);
+}
+
 void ParchTests::missingFileOnRestoreIsReportedNotRecreated()
 {
     QTemporaryDir root;
@@ -12006,7 +12833,7 @@ void ParchTests::missingFileOnRestoreIsReportedNotRecreated()
     Backend backend(paths);
     QFile::remove(fileA);  backend.restoreSession();
     WindowContext *firstWindow = backend.windows().first();
-    QCOMPARE(firstWindow->tabs()->data(firstWindow->tabs()->index(0), TabModel::StateRole).toString(), QStringLiteral("File not found"));
+    QTRY_COMPARE(firstWindow->tabs()->data(firstWindow->tabs()->index(0), TabModel::StateRole).toString(), QStringLiteral("File not found"));
     QVERIFY(!QFile::exists(fileA));
     // The tab keeps the file's name and path, and holds no document.
     TabModel *tabs = firstWindow->tabs();
@@ -14456,14 +15283,29 @@ void ParchTests::listingStaysOffTheUiThread()
         QCOMPARE(f.model.rowCount(folder), 0);
         QVERIFY(f.model.canFetchMore(folder));
     }
-    // Thousands of entries arrive as one insertion.
-    QSignalSpy inserted(&f.model, &QAbstractItemModel::rowsInserted);
+    // Thousands of entries arrive a chunk at a time, each one insertion, and
+    // the folder says it is loading until the last is in.
+    QList<int> chunks;
+    QList<bool> loading;
+    const auto counting = connect(&f.model, &QAbstractItemModel::rowsInserted, this,
+                                  [&](const QModelIndex &parent, int first, int last) {
+        if (parent != folder) return;
+        chunks << last - first + 1;
+        loading << folder.data(LibraryModel::LoadingRole).toBool();
+    });
     QVERIFY(listed(f.model, folder));
+    disconnect(counting);
     QCOMPARE(f.model.rowCount(folder), 5000);
-    int intoFolder = 0;
-    for (const QList<QVariant> &signal : std::as_const(inserted))
-        intoFolder += signal.at(0).value<QModelIndex>() == folder ? 1 : 0;
-    QCOMPARE(intoFolder, 1);
+    QCOMPARE(chunks, QList<int>(5000 / LibraryModel::ListingChunk, LibraryModel::ListingChunk));
+    QCOMPARE(loading, QList<bool>(chunks.size(), true));
+    QVERIFY(!folder.data(LibraryModel::LoadingRole).toBool());
+    // Listed again with a few more, what is there already stays as it is.
+    for (int i = 5000; i < 5003; ++i) writeFile(big + QStringLiteral("/note %1.md").arg(i), "x\n");
+    const QPersistentModelIndex first = f.model.index(0, 0, folder);
+    QSignalSpy removed(&f.model, &QAbstractItemModel::rowsRemoved);
+    QTRY_COMPARE(f.model.rowCount(folder), 5003);
+    QVERIFY(first.isValid());
+    QCOMPARE(removed.size(), 0);
     {
         // Removed while it is listed again, the folder takes nothing either.
         PoolBlock block(&f.pool);
@@ -14474,6 +15316,60 @@ void ParchTests::listingStaysOffTheUiThread()
         drainPool(&f.pool);
         QCOMPARE(topLevelNames(f.model), (QStringList{"Drafts", "Recent"}));
     }
+}
+
+void ParchTests::librariesOfOneStoreShareTheirWatch()
+{
+    LibraryFixture f;
+    QVERIFY(f.root.isValid());
+    // A second window's library, as Backend makes one for each window.
+    LibraryModel second(f.paths, &f.store, &f.recent, &f.settings, &f.pool);
+    LibraryWatch *shared = f.model.shared();
+    QCOMPARE(second.shared(), shared);
+    QTRY_VERIFY(!shared->scanning());
+    // Folders are added to the watch on a thread of its own, never this one,
+    // since adding one asks the file system.
+    std::atomic<int> here{0}, elsewhere{0};
+    LibraryWatch::setBeforeWatching([&](const QString &) {
+        (QThread::currentThread() == QCoreApplication::instance()->thread() ? here : elsewhere)++;
+    });
+    const auto unhook = qScopeGuard([] { LibraryWatch::setBeforeWatching({}); });
+    const QString essays = f.folder(QStringLiteral("Essays"));
+    writeFile(essays + QStringLiteral("/a.md"), "a\n");
+    f.model.addFolder(essays);
+    QVERIFY(listed(f.model, rowNamed(f.model, QStringLiteral("Essays"))));
+    QVERIFY(listed(second, rowNamed(second, QStringLiteral("Essays"))));
+    QCOMPARE(f.model.watchedFolders(), QStringList{essays});
+    QCOMPARE(second.watchedFolders(), QStringList{essays});
+    // One watch of the folder serves both.
+    QCOMPARE(shared->folders(), QStringList{essays});
+    QTRY_COMPARE(elsewhere.load(), 1);
+    QCOMPARE(here.load(), 0);
+    writeFile(essays + QStringLiteral("/b.md"), "b\n");
+    const QStringList both{QStringLiteral("a.md"), QStringLiteral("b.md")};
+    QTRY_COMPARE(namesUnder(f.model, rowNamed(f.model, QStringLiteral("Essays"))), both);
+    QTRY_COMPARE(namesUnder(second, rowNamed(second, QStringLiteral("Essays"))), both);
+    // It is watched while either library has it open.
+    f.model.setExpanded(rowNamed(f.model, QStringLiteral("Essays")), false);
+    QCOMPARE(shared->folders(), QStringList{essays});
+    second.setExpanded(rowNamed(second, QStringLiteral("Essays")), false);
+    QVERIFY(shared->folders().isEmpty());
+
+    // One look at the drafts on disk serves both, however many libraries
+    // hear that a draft was saved or closed.
+    QSignalSpy scans(shared, &LibraryWatch::draftsScanned);
+    Document *draft = f.store.newDraft();
+    draft->buffer()->replace({0, 0}, QStringLiteral("A draft on disk"));
+    f.store.save(draft);
+    QTRY_COMPARE(draft->state(), Document::State::Clean);
+    QTRY_COMPARE(scans.size(), 1);
+    QVERIFY(f.store.drop(draft));
+    QTRY_COMPARE(scans.size(), 2);
+    QTest::qWait(200);
+    QCOMPARE(scans.size(), 2);
+    const QStringList drafts{QStringLiteral("A draft on disk")};
+    QTRY_COMPARE(namesUnder(f.model, f.model.index(0, 0)), drafts);
+    QTRY_COMPARE(namesUnder(second, second.index(0, 0)), drafts);
 }
 
 void ParchTests::draftsFollowCreationNamingAndRemoval()
@@ -19658,6 +20554,137 @@ void ParchTests::textTypedWhileClosingIsKeptInHistory()
     QVERIFY(historyHolds(shell, id, "first. and more"));
 }
 
+void ParchTests::closingAfterAPausedCaptureNoticesASave()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    Backend backend(paths);
+    backend.newDraft();
+    keepDraft(backend.document());
+    backend.newDraft();
+    Document *draft = backend.document();
+    WindowContext *window = backend.windows().first();
+    TabModel *tabs = window->tabs();
+    QCOMPARE(tabs->rowCount(), 2);
+    // Saved once, its next save fails, since a folder stands where its file
+    // goes, and history, which is full, will not take its text.
+    const QString file = DocumentStore::draftFile(paths, draft->id());
+    draft->buffer()->replace({0, 0}, QStringLiteral("words"));
+    backend.store()->save(draft);
+    QTRY_COMPARE(draft->state(), Document::State::Clean);
+    QVERIFY(QFile::remove(file));
+    QVERIFY(QDir().mkpath(file));
+    draft->buffer()->replace({5, 0}, QStringLiteral("."));
+    backend.store()->save(draft);
+    QTRY_COMPARE(draft->state(), Document::State::SaveFailed);
+    fillHistory(paths, draft->id());
+    QSignalSpy asked(window, &WindowContext::closeConfirmationRequested);
+    const auto go = std::make_shared<QSemaphore>();
+    History::setBeforeCapture([go] { go->acquire(); });
+    const auto unhook = qScopeGuard([go] {
+        go->release();
+        History::setBeforeCapture({});
+    });
+    // Closing without saving keeps the text in history first, off the UI
+    // thread; meanwhile the way clears and the text is saved after all.
+    backend.closeWithoutSaving();
+    QVERIFY(QDir(file).removeRecursively());
+    backend.retrySave();
+    QTRY_COMPARE(draft->state(), Document::State::Clean);
+    go->release();
+    // History paused, but the text is in its file now, so nothing is asked:
+    // the tab closes as any clean one does.
+    QTRY_VERIFY(tabs->indexOf(draft) < 0);
+    QCOMPARE(tabs->rowCount(), 1);
+    QCOMPARE(asked.size(), 0);
+    QCOMPARE(readFile(file), QByteArray("words."));
+}
+
+void ParchTests::quitDoesNotWaitForAStuckSave()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString file = root.filePath(QStringLiteral("a.md"));
+    writeFile(file, "alpha\n");
+    Backend backend(paths);
+    backend.start({file});
+    QSignalSpy quits(&backend, &Backend::quitRequested);
+    Document *named = backend.document();
+    QVERIFY(named);
+    named->buffer()->replace({0, 0}, QStringLiteral("edited "));
+    {
+        // The save starts and does not end, as on a file system that stopped
+        // answering: its first step, keeping the opened text in history,
+        // waits. The quit waits as long as an end that cannot be refused
+        // does, and no longer.
+        // Shared with the hook, which may still be returning as this ends.
+        const auto gate = std::make_shared<QSemaphore>();
+        History::setBeforeCapture([gate] { gate->tryAcquire(1, Backend::EndWaitMs + 5000); });
+        const auto unhook = qScopeGuard([gate] {
+            gate->release();
+            History::setBeforeCapture({});
+        });
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("parch: a\\.md: .*recovery")));
+        QElapsedTimer clock;
+        clock.start();
+        backend.quit();
+        const qint64 waited = clock.elapsed();
+        QVERIFY2(waited < Backend::EndWaitMs + 1500, qPrintable(QString::number(waited)));
+        // The text is in recovery, so the quit goes ahead, with the save
+        // still running, which the end does not wait for.
+        QCOMPARE(quits.count(), 1);
+        QVERIFY(backend.store()->savesRunning());
+        QVERIFY(inRecovery(paths, named->id()));
+        QCOMPARE(readFile(file), QByteArray("alpha\n"));
+    }
+    backend.store()->waitForSaves();
+    QVERIFY(!backend.store()->savesRunning());
+}
+
+void ParchTests::closingDoesNotWaitForAStuckSave()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.path());
+    const QString file = root.filePath(QStringLiteral("a.md"));
+    writeFile(file, "alpha\n");
+    Backend backend(paths);
+    backend.newDraft();
+    keepDraft(backend.document());
+    backend.newWindow();
+    QCOMPARE(backend.windows().size(), 2);
+    WindowContext *second = backend.windows().last();
+    Document *named = backend.store()->open(file);
+    QVERIFY(named);
+    second->tabs()->openDocument(named);
+    named->buffer()->replace({0, 0}, QStringLiteral("edited "));
+    // Recovery cannot take the text, and its save starts but does not end.
+    QDir(paths.recovery()).removeRecursively();
+    writeFile(paths.recovery(), "in the way");
+    {
+        // Shared with the hook, which may still be returning as this ends.
+        const auto gate = std::make_shared<QSemaphore>();
+        History::setBeforeCapture([gate] { gate->tryAcquire(1, Backend::EndWaitMs + 5000); });
+        const auto unhook = qScopeGuard([gate] {
+            gate->release();
+            History::setBeforeCapture({});
+        });
+        QElapsedTimer clock;
+        clock.start();
+        backend.closeWindow(second);
+        const qint64 waited = clock.elapsed();
+        QVERIFY2(waited < Backend::EndWaitMs + 1500, qPrintable(QString::number(waited)));
+        // The window stays, and says why.
+        QVERIFY(backend.windows().contains(second));
+        QVERIFY(second->tabs()->indexOf(named) >= 0);
+        QVERIFY2(backend.problemDetail().contains(QStringLiteral("not finished")), qPrintable(backend.problemDetail()));
+    }
+    backend.store()->waitForSaves();
+    QTRY_COMPARE(named->state(), Document::State::Clean);
+}
+
 void ParchTests::restoreRefusalsAlwaysSayWhy()
 {
     ShellFixture shell;
@@ -19858,6 +20885,37 @@ void ParchTests::dialogsStartInTheFolderLastUsed()
     QCOMPARE(files->startFolder(), root.path() + QStringLiteral("/also-none"));
 }
 
+void ParchTests::dialogsDoNotWaitOnAFolderThatDoesNotAnswer()
+{
+    QTemporaryDir root, documents, last;
+    QVERIFY(root.isValid() && documents.isValid() && last.isValid());
+    Backend backend(AppPaths::under(root.path()));
+    FileRequests *files = backend.fileRequests();
+    files->setFallbackFolders({documents.path(), root.path()});
+    FakePicker picker;
+    backend.setFilePicker(&picker);
+    backend.start({});
+    backend.settings()->setLastFolder(last.path());
+    QCOMPARE(files->startFolder(), last.path());
+    {
+        // Every look at the file system for the UI waits, as on a mount that
+        // stopped answering: the dialog still opens, in the last fallback,
+        // having waited only so long.
+        PoolBlock block(DiskFile::looks());
+        QElapsedTimer clock;
+        clock.start();
+        backend.open();
+        const qint64 waited = clock.elapsed();
+        QVERIFY2(waited < FileRequests::StartFolderWaitMs + 500, qPrintable(QString::number(waited)));
+        QCOMPARE(picker.opens, 1);
+        QCOMPARE(picker.startFolder(), root.path());
+    }
+    // Answering again, the folder last used is where it starts.
+    backend.open();
+    QCOMPARE(picker.opens, 2);
+    QCOMPARE(picker.startFolder(), last.path());
+}
+
 void ParchTests::pausedHistorySaysWhy()
 {
     ShellFixture shell;
@@ -19909,6 +20967,13 @@ void ParchTests::messagesNameParchsFoldersPlainly()
              QStringLiteral("~/notes/a.md: Permission denied"));
     QCOMPARE(backend.shownText(home + QStringLiteral("other/a.md")), home + QStringLiteral("other/a.md"));
     QCOMPARE(backend.shownText(QStringLiteral("/elsewhere/a.md")), QStringLiteral("/elsewhere/a.md"));
+    // Only a path that starts with the home folder is written from ~: one
+    // that holds the same folders further in is another path.
+    QCOMPARE(backend.shownText(QStringLiteral("/mnt/backup") + home + QStringLiteral("/a.md")),
+             QStringLiteral("/mnt/backup") + home + QStringLiteral("/a.md"));
+    QCOMPARE(backend.shownText(QStringLiteral("Moved to “") + home + QStringLiteral("/a.md” from ") + home),
+             QStringLiteral("Moved to “~/a.md” from ~"));
+    QCOMPARE(backend.shownText(QStringLiteral("(") + home + QStringLiteral("/a.md)")), QStringLiteral("(~/a.md)"));
     // A draft that cannot be saved, and recovery that cannot be written,
     // say so by what the folder is for, with the system's reason.
     blockDrafts(paths);

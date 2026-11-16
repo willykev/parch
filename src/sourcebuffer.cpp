@@ -57,6 +57,10 @@ SourceBuffer::EditOutcome SourceBuffer::replace(SourceRange range, const QString
     if (!sourceGraphemeRange(m_text, range)) return EditOutcome::Rejected;
     const auto removed = m_text.mid(range.start, range.length);
     if (removed == replacement) return EditOutcome::Unchanged;
+    if (m_replaying) {
+        wait({{range, replacement}}, kind, false);
+        return EditOutcome::Deferred;
+    }
     record(range, removed, replacement, kind);
     return EditOutcome::Applied;
 }
@@ -73,6 +77,10 @@ SourceBuffer::EditOutcome SourceBuffer::replace(const QList<SourceEdit> &edits)
         changes = changes || QStringView(m_text).mid(edit.range.start, edit.range.length) != edit.replacement;
     }
     if (!changes) return EditOutcome::Unchanged;
+    if (m_replaying) {
+        wait(edits, EditKind::Other, true);
+        return EditOutcome::Deferred;
+    }
     // From the last to the first, so that each range still addresses the
     // text it was given for.
     beginStep();
@@ -130,29 +138,49 @@ void SourceBuffer::record(SourceRange range, const QString &removed, const QStri
 
 void SourceBuffer::undo()
 {
-    if (m_historyPosition == 0) return;
-    const bool wasModified = modified();
-    m_canJoin = false;
-    m_stepStarted = false;
-    const auto &step = m_history.at(--m_historyPosition);
-    // Replay recorded edits exactly, newest first: insertion can have joined adjacent graphemes.
-    for (qsizetype i = step.edits.size(); i-- > 0;) {
-        const auto &transaction = step.edits.at(i);
-        apply({transaction.start, int(transaction.inserted.size())}, transaction.removed);
-    }
-    if (modified() != wasModified) emit modifiedChanged();
+    if (m_historyPosition == 0 || m_replaying) return;
+    replay(true);
 }
 
 void SourceBuffer::redo()
 {
-    if (m_historyPosition == m_history.size()) return;
+    if (m_historyPosition == m_history.size() || m_replaying) return;
+    replay(false);
+}
+
+void SourceBuffer::replay(bool backwards)
+{
     const bool wasModified = modified();
     m_canJoin = false;
     m_stepStarted = false;
-    const auto &step = m_history.at(m_historyPosition++);
-    for (const auto &transaction : step.edits)
-        apply({transaction.start, int(transaction.removed.size())}, transaction.inserted);
+    // A copy, and every edit asked for meanwhile waits for the step to be
+    // whole: a listener that edits as each change lands must neither take
+    // the step out of history nor move where its later changes go.
+    const QVector<Transaction> edits = m_history.at(backwards ? --m_historyPosition : m_historyPosition++).edits;
+    m_replaying = true;
+    if (backwards) {
+        // Recorded edits replay exactly, newest first: insertion can have joined adjacent graphemes.
+        for (qsizetype i = edits.size(); i-- > 0;) {
+            const auto &transaction = edits.at(i);
+            apply({transaction.start, int(transaction.inserted.size())}, transaction.removed);
+        }
+    } else {
+        for (const auto &transaction : edits)
+            apply({transaction.start, int(transaction.removed.size())}, transaction.inserted);
+    }
+    m_replaying = false;
     if (modified() != wasModified) emit modifiedChanged();
+    while (!m_waiting.isEmpty()) {
+        const Waiting waiting = m_waiting.takeFirst();
+        if (waiting.dropped) continue;
+        if (waiting.together) replace(waiting.edits);
+        else replace(waiting.edits.first().range, waiting.edits.first().replacement, waiting.kind);
+    }
+}
+
+void SourceBuffer::wait(const QList<SourceEdit> &edits, EditKind kind, bool together)
+{
+    m_waiting.append({edits, kind, together});
 }
 
 qsizetype SourceBuffer::undoDepth() const { return m_historyPosition; }
@@ -189,6 +217,20 @@ void SourceBuffer::markSaved()
 
 void SourceBuffer::apply(SourceRange range, const QString &replacement)
 {
+    // Edits waiting for a step address the text as it was when they were
+    // asked for, so each change made since carries them along: one before
+    // them moves them, one after leaves them, and one that touches their
+    // text drops them.
+    const int changeEnd = range.start + range.length;
+    const int shift = int(replacement.size()) - range.length;
+    for (Waiting &waiting : m_waiting) {
+        for (SourceEdit &edit : waiting.edits) {
+            const int end = edit.range.start + edit.range.length;
+            if (end <= range.start) continue;
+            if (edit.range.start >= changeEnd) edit.range.start += shift;
+            else waiting.dropped = true;
+        }
+    }
     m_text.replace(range.start, range.length, replacement);
     ++m_revision;
     emit sourceChanged(m_revision, range, replacement);

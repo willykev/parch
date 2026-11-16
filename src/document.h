@@ -88,6 +88,10 @@ public:
     // Whether a save of it runs, which state() does not say during a
     // conflict, since a naming can run while the conflict waits.
     bool isSaving() const;
+    // Whether the text is other than what parch last put in its file: edited
+    // since, or undone back to a point the buffer counts as saved while a
+    // later save, which landed after the text moved on, is in the file.
+    bool differsFromFile() const;
     // The document was opened again at a path parch recorded as its file,
     // which led to another file by then, and nothing kept its text: it has
     // none of its own. It shows no text and takes none, and has nothing to

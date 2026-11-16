@@ -198,10 +198,11 @@ public:
     // Clears a notice.
     Q_INVOKABLE void dismissNotice();
     // Saves what can be saved, keeps the rest in recovery, waits for every
-    // save, writes the session, and then asks to end the application with
-    // quitRequested(). Text that neither its file nor recovery could take
-    // keeps the application open, and problem says why until that text is
-    // safe.
+    // save, for at most EndWaitMs, writes the session, and then asks to end
+    // the application with quitRequested(). Text that neither its file nor
+    // recovery could take keeps the application open, and problem says why
+    // until that text is safe. A save still running then has its text in
+    // recovery, and the application ends without waiting for it.
     Q_INVOKABLE void quit();
     // Ends at once, as when the session ends and nothing can be refused:
     // the session is written, every text not in its file goes to recovery,
@@ -270,7 +271,8 @@ signals:
     void problemChanged();
     void historyPausedChanged();
     void recoveryFailuresChanged();
-    // Every text is safe and the application may end; main() quits on it.
+    // Every text is safe and the application may end; main() quits on it,
+    // at once if store()->savesRunning(), since such a save may never end.
     void quitRequested();
     // A window's context, with its tabs, before anything shows it.
     void windowAdded(WindowContext *window);
@@ -383,6 +385,9 @@ private:
     QVariantMap m_recoveryFailures;
     // The documents whose tab closes once their save lands, by id.
     QSet<QString> m_closing;
+    // Documents whose text was given up, whose recovery entries go once they
+    // have closed: at once, or once a save that runs has ended.
+    QSet<QString> m_givenUp;
     SpellChecker *m_spelling;
     // A dictionary that is missing is said once in a run, unless spelling is turned on again.
     bool m_dictionaryMissingSaid = false;

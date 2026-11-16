@@ -9,6 +9,8 @@
 #include <QMutex>
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
+#include <QTimer>
 #include <QWaitCondition>
 #include <functional>
 #include <optional>
@@ -18,6 +20,10 @@ struct HistoryLimits {
     int versions = 100;
     int days = 30;
     qint64 bytes = qint64(1) << 30;
+    // How often every document's versions are pruned by count and age while
+    // history runs, so that a document never captured again loses its old
+    // versions too.
+    int pruneEveryMs = 6 * 60 * 60 * 1000;
 };
 
 // Bounded local versions of each document, kept beneath AppPaths::history()
@@ -30,7 +36,10 @@ struct HistoryLimits {
 //
 // The bytes all documents' versions take are kept as running totals, worked
 // out once, on a thread of their own as History starts, which also removes
-// unnamed versions past the age limit, and kept up by each change. A capture
+// unnamed versions past the age limit, and kept up by each change. Every
+// document's versions are pruned by count and age again now and then, off
+// the thread History lives on, and a capture refused while history is paused
+// still prunes its own document's. A capture
 // reads only its own document's index, and looks at other documents'
 // versions only when the totals exceed the byte budget. Whether history is
 // paused follows from the totals alone; versions removed behind its back
@@ -137,6 +146,8 @@ private:
     // and when all documents together exceed the byte budget, every
     // document's are pruned with pruneAll().
     void prune(const QString &documentId, const QList<Version> &versions);
+    // Only the document's own versions beyond the count or the age.
+    void pruneOwn(const QString &documentId, const QList<Version> &versions);
     void pruneAll();
     void removeFiles(const QString &documentId, const Version &version) const;
     bool writeName(const QString &documentId, const QString &versionId, const QString &name) const;
@@ -167,4 +178,7 @@ private:
     mutable QWaitCondition m_scanned;
     mutable QHash<QString, int> m_indexReads;
     std::thread m_scan;
+    // Prunes every document's versions every HistoryLimits::pruneEveryMs.
+    QTimer m_pruneTimer;
+    QThreadPool m_pruner;
 };

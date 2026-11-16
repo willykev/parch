@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QThread>
 #include <QtConcurrent>
 #include <algorithm>
 #include <cerrno>
@@ -97,6 +98,138 @@ int naturalCompare(const QString &a, const QString &b)
 }
 } // namespace
 
+std::function<void(const QString &path)> LibraryFolderWatcher::beforeWatching;
+
+void LibraryFolderWatcher::add(const QString &path)
+{
+    if (beforeWatching) beforeWatching(path);
+    if (addPath(path)) emit added(path);
+}
+
+namespace {
+// The shared watches, by the store and pool their libraries use.
+using SharedKey = std::pair<DocumentStore *, QThreadPool *>;
+QHash<SharedKey, LibraryWatch *> &sharedWatches()
+{
+    static QHash<SharedKey, LibraryWatch *> watches;
+    return watches;
+}
+} // namespace
+
+LibraryWatch *LibraryWatch::take(const AppPaths &paths, DocumentStore *store, QThreadPool *pool)
+{
+    LibraryWatch *&shared = sharedWatches()[SharedKey{store, pool}];
+    if (!shared) shared = new LibraryWatch(paths, store, pool);
+    ++shared->m_users;
+    return shared;
+}
+
+void LibraryWatch::give(LibraryWatch *shared)
+{
+    if (!shared || --shared->m_users > 0) return;
+    sharedWatches().removeIf([shared](const auto &entry) { return entry.value() == shared; });
+    delete shared;
+}
+
+void LibraryWatch::setBeforeWatching(std::function<void(const QString &path)> hook)
+{
+    LibraryFolderWatcher::beforeWatching = std::move(hook);
+}
+
+LibraryWatch::LibraryWatch(const AppPaths &paths, DocumentStore *store, QThreadPool *pool)
+    : m_paths(paths), m_pool(pool), m_thread(new QThread), m_watcher(new LibraryFolderWatcher)
+{
+    // One look at the drafts on disk for every library, as one starts, as a
+    // document closes, and when a draft's first save makes its folder.
+    connect(store, &DocumentStore::documentClosed, this, &LibraryWatch::scanDrafts);
+    connect(store, &DocumentStore::documentSaved, this, [this](Document *document) {
+        if (document->isDraft() && !m_drafts.contains(document->id())) scanDrafts();
+    });
+    scanDrafts();
+    m_watcher->moveToThread(m_thread);
+    connect(m_thread, &QThread::finished, m_watcher, &QObject::deleteLater);
+    // What the watch sees is taken here, on the libraries' thread.
+    connect(m_watcher, &QFileSystemWatcher::directoryChanged, this, [this](const QString &path) {
+        if (path == m_paths.drafts()) scanDrafts();
+        else if (m_counts.contains(path)) emit folderChanged(path);
+    });
+    connect(m_watcher, &LibraryFolderWatcher::added, this, [this](const QString &path) {
+        if (m_counts.contains(path)) emit folderWatched(path);
+    });
+    m_thread->start();
+}
+
+LibraryWatch::~LibraryWatch()
+{
+    // A watch that never answers, as on a file system that stopped, is left
+    // to the end of the process rather than waited for.
+    disconnect(m_watcher, nullptr, this, nullptr);
+    m_thread->quit();
+    if (m_thread->wait(1000)) delete m_thread;
+}
+
+void LibraryWatch::watch(const QString &folder)
+{
+    if (++m_counts[folder] > 1) return;
+    QMetaObject::invokeMethod(m_watcher, [watcher = m_watcher, folder] { watcher->add(folder); });
+}
+
+void LibraryWatch::unwatch(const QString &folder)
+{
+    const auto count = m_counts.find(folder);
+    if (count == m_counts.end() || --*count > 0) return;
+    m_counts.erase(count);
+    QMetaObject::invokeMethod(m_watcher, [watcher = m_watcher, folder] { watcher->removePath(folder); });
+}
+
+QStringList LibraryWatch::folders() const
+{
+    return m_counts.keys();
+}
+
+void LibraryWatch::scanDrafts()
+{
+    if (m_scanning) {
+        m_scanAgain = true;
+        return;
+    }
+    m_scanning = true;
+    QtConcurrent::run(m_pool, [paths = m_paths] {
+        bool there = false;
+        QList<DiskDraft> drafts = scan(paths, &there);
+        return std::pair(drafts, there);
+    }).then(this, [this](const std::pair<QList<DiskDraft>, bool> &found) {
+        m_scanning = false;
+        m_drafts.clear();
+        for (const DiskDraft &draft : found.first) m_drafts.insert(draft.id, draft);
+        // The folder exists once a draft has been written; drafts that go
+        // from it, named or removed, then go from the list.
+        if (found.second && !m_draftsWatched) {
+            m_draftsWatched = true;
+            QMetaObject::invokeMethod(m_watcher, [watcher = m_watcher, folder = m_paths.drafts()] {
+                watcher->add(folder);
+            });
+        }
+        emit draftsScanned();
+        if (std::exchange(m_scanAgain, false)) scanDrafts();
+    });
+}
+
+QList<LibraryWatch::DiskDraft> LibraryWatch::scan(const AppPaths &paths, bool *folderThere)
+{
+    QList<DiskDraft> drafts;
+    *folderThere = QFileInfo(paths.drafts()).isDir();
+    const QStringList ids = QDir(paths.drafts()).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &id : ids) {
+        QFile file(DocumentStore::draftFile(paths, id));
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        QString text = QString::fromUtf8(file.read(titleBytes));
+        if (text.startsWith(QChar(0xfeff))) text.remove(0, 1);
+        drafts.append({id, Document::draftTitle(text), QFileInfo(file).lastModified()});
+    }
+    return drafts;
+}
+
 std::unique_ptr<LibraryModel::Node> LibraryModel::makeNode(const Row &row)
 {
     auto node = std::make_unique<Node>();
@@ -112,7 +245,7 @@ std::unique_ptr<LibraryModel::Node> LibraryModel::makeNode(const Row &row)
 LibraryModel::LibraryModel(const AppPaths &paths, DocumentStore *store, RecentFiles *recent, Settings *settings,
                            QThreadPool *pool, QObject *parent)
     : QAbstractItemModel(parent), m_paths(paths), m_store(store), m_recent(recent), m_settings(settings), m_pool(pool),
-      m_root(std::make_unique<Node>())
+      m_root(std::make_unique<Node>()), m_shared(LibraryWatch::take(paths, store, pool))
 {
     // The sections are there before any view, so they need no announcing.
     for (const QString &name : {tr("Drafts"), tr("Recent")}) {
@@ -132,24 +265,23 @@ LibraryModel::LibraryModel(const AppPaths &paths, DocumentStore *store, RecentFi
     // Not early, as a coarse timer may be: the time is the filter's to the end.
     m_searchingFor.setTimerType(Qt::PreciseTimer);
     connect(&m_searchingFor, &QTimer::timeout, this, &LibraryModel::sayWhetherSearching);
-    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this](const QString &path) {
+    // A folder this library watches changed, or is watched now, which
+    // catches what changed before then.
+    const auto changed = [this](const QString &path) {
+        if (!m_watching.contains(path)) return;
         m_changed.insert(path);
         m_settle.start();
-    });
-    connect(&m_draftsWatcher, &QFileSystemWatcher::directoryChanged, this, &LibraryModel::scanDraftsSoon);
+    };
+    connect(m_shared, &LibraryWatch::folderChanged, this, changed);
+    connect(m_shared, &LibraryWatch::folderWatched, this, changed);
+    connect(m_shared, &LibraryWatch::draftsScanned, this, &LibraryModel::rebuildDrafts);
 
     connect(m_store, &DocumentStore::documentOpened, this, [this](Document *document) {
         follow(document);
         rebuildDrafts();
     });
-    connect(m_store, &DocumentStore::documentClosed, this, [this] {
-        rebuildDrafts();
-        scanDraftsSoon();
-    });
-    // A draft's first save makes its folder, which the next look at the drafts finds.
-    connect(m_store, &DocumentStore::documentSaved, this, [this](Document *document) {
-        if (document->isDraft() && !m_diskDrafts.contains(document->id())) scanDraftsSoon();
-    });
+    // What the drafts on disk hold now, the shared watch looks at again.
+    connect(m_store, &DocumentStore::documentClosed, this, &LibraryModel::rebuildDrafts);
     for (Document *document : m_store->documents()) follow(document);
     connect(m_recent, &RecentFiles::changed, this, [this] {
         rebuildRecent();
@@ -160,11 +292,14 @@ LibraryModel::LibraryModel(const AppPaths &paths, DocumentStore *store, RecentFi
     rebuildDrafts();
     rebuildRecent();
     syncFolders();
-    scanDraftsSoon();
     checkRecent();
 }
 
-LibraryModel::~LibraryModel() = default;
+LibraryModel::~LibraryModel()
+{
+    for (const QString &folder : std::as_const(m_watching)) m_shared->unwatch(folder);
+    LibraryWatch::give(m_shared);
+}
 
 QModelIndex LibraryModel::index(int row, int column, const QModelIndex &parent) const
 {
@@ -343,9 +478,9 @@ QModelIndexList LibraryModel::nearestMatches(int limit) const
     return found;
 }
 
-QStringList LibraryModel::watchedFolders() const { return m_watcher.directories(); }
+QStringList LibraryModel::watchedFolders() const { return m_watching; }
 
-int LibraryModel::jobsInFlight() const { return m_jobs; }
+int LibraryModel::jobsInFlight() const { return m_jobs + (m_shared->scanning() ? 1 : 0); }
 
 // What runs off the UI thread works on plain values only.
 
@@ -414,20 +549,6 @@ LibraryModel::FolderListing LibraryModel::examine(const QString &path, bool prob
         return there;
     }
     return listFolder(path);
-}
-
-QList<LibraryModel::DiskDraft> LibraryModel::scanDrafts(const AppPaths &paths)
-{
-    QList<DiskDraft> drafts;
-    const QStringList ids = QDir(paths.drafts()).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QString &id : ids) {
-        QFile file(DocumentStore::draftFile(paths, id));
-        if (!file.open(QIODevice::ReadOnly)) continue;
-        QString text = QString::fromUtf8(file.read(titleBytes));
-        if (text.startsWith(QChar(0xfeff))) text.remove(0, 1);
-        drafts.append({id, Document::draftTitle(text), QFileInfo(file).lastModified()});
-    }
-    return drafts;
 }
 
 QString LibraryModel::kindName(Kind kind)
@@ -674,6 +795,7 @@ void LibraryModel::forget(Node *node)
     node->expanded = false;
     if (node->request) {
         m_probes.remove(node->request);
+        m_staged.remove(node->request);
         m_requests.remove(std::exchange(node->request, 0));
         if (node->listing == Listing::Pending) node->listing = Listing::None;
         changedData(node);
@@ -734,7 +856,10 @@ void LibraryModel::startJob(const QString &path)
 
 void LibraryModel::startRequest(Node *folder, quint64 request)
 {
-    if (folder->request) m_requests.remove(folder->request);
+    if (folder->request) {
+        m_requests.remove(folder->request);
+        m_staged.remove(folder->request);
+    }
     const bool wasLoading = folder->request != 0;
     folder->request = request;
     m_requests.insert(request, folder);
@@ -765,32 +890,70 @@ void LibraryModel::applyListing(quint64 request, const FolderListing &listing)
     const bool wasFailed = std::exchange(folder->failed, !listing.ok);
     // Most listings find what the last one did, as when a document in the
     // folder is saved, and change nothing.
-    if (!listing.ok || wasFailed || !sameEntries(folder, listing.entries)) {
-        QList<Row> rows;
-        if (!listing.ok) {
-            rows.append({Kind::Error, listing.error});
-        } else {
-            rows.reserve(listing.entries.size());
-            for (const Entry &entry : listing.entries)
-                rows.append({entry.folder ? Kind::Folder : Kind::Document, entry.name, folder->path + u'/' + entry.name});
-        }
-        replaceChildren(folder, rows);
+    if (listing.ok && !wasFailed && sameEntries(folder, listing.entries)) {
+        listingApplied(folder, true, listing.identity);
+        return;
     }
+    Staged staged{folder, {}, 0, listing.ok, listing.identity};
+    if (!listing.ok) {
+        staged.rows.append({Kind::Error, listing.error});
+    } else {
+        staged.rows.reserve(listing.entries.size());
+        for (const Entry &entry : listing.entries)
+            staged.rows.append({entry.folder ? Kind::Folder : Kind::Document, entry.name, folder->path + u'/' + entry.name});
+    }
+    // Still loading until the last chunk is in, and dropped, as a listing
+    // is, should the folder be collapsed, removed or listed again first.
+    folder->request = request;
+    m_staged.insert(request, staged);
+    applyChunk(request);
+}
+
+void LibraryModel::applyChunk(quint64 request)
+{
+    const auto found = m_staged.find(request);
+    if (found == m_staged.end()) return;
+    Staged &staged = *found;
+    Node *folder = staged.folder;
+    staged.ready = std::min(staged.rows.size(), staged.ready + ListingChunk);
+    // The rows of the listing up to here, and those it keeps further on that
+    // the folder shows already, where they are, so that no row is taken out
+    // and put back. Both are in the listing's order.
+    QList<Row> rows = staged.rows.mid(0, staged.ready);
+    if (staged.ready < staged.rows.size()) {
+        QSet<Key> later;
+        for (qsizetype i = staged.ready; i < staged.rows.size(); ++i) later.insert(keyOf(staged.rows.at(i)));
+        for (const auto &child : folder->children) {
+            if (!later.contains(keyOf(*child))) continue;
+            rows.append({child->kind, child->name, child->path, child->documentId, child->missing, child->order});
+        }
+    }
+    const bool whole = staged.ready == staged.rows.size();
+    const bool ok = staged.ok;
+    const QString identity = staged.identity;
+    if (whole) m_staged.erase(found);
+    replaceChildren(folder, rows);
+    if (!whole) {
+        QTimer::singleShot(0, this, [this, request] { applyChunk(request); });
+        return;
+    }
+    folder->request = 0;
+    listingApplied(folder, ok, identity);
+}
+
+void LibraryModel::listingApplied(Node *folder, bool ok, const QString &identity)
+{
     changedData(folder);
     // What it holds that is not listed yet, the filter lists too.
-    if (!m_filter.isEmpty() && listing.ok) {
-        m_searchSeen.insert(listing.identity);
+    if (!m_filter.isEmpty() && ok) {
+        m_searchSeen.insert(identity);
         searchBeneath(folder, depthOf(folder));
         pumpSearch();
     }
     // An expanded folder is watched once a listing has read it, so that
     // watching never waits on the file system here. What changed between
-    // that listing and the watch is caught by one more.
-    if (folder->expanded && listing.ok && !m_watcher.directories().contains(folder->path)
-        && m_watcher.addPath(folder->path)) {
-        m_changed.insert(folder->path);
-        m_settle.start();
-    }
+    // that listing and the watch is caught by one more, once it is in place.
+    if (folder->expanded && ok) startWatching(folder->path);
 }
 
 void LibraryModel::watch(Node *folder)
@@ -801,7 +964,7 @@ void LibraryModel::watch(Node *folder)
     // listing has read it, since a folder that cannot be read cannot be
     // watched, and asking would wait on the file system here.
     const bool read = folder->listing == Listing::Done && !folder->failed;
-    if (++m_watchCount[folder->path] == 1 && read) m_watcher.addPath(folder->path);
+    if (++m_watchCount[folder->path] == 1 && read) startWatching(folder->path);
 }
 
 void LibraryModel::unwatch(Node *folder)
@@ -811,7 +974,14 @@ void LibraryModel::unwatch(Node *folder)
     const auto count = m_watchCount.find(folder->path);
     if (count == m_watchCount.end() || --*count > 0) return;
     m_watchCount.erase(count);
-    if (m_watcher.directories().contains(folder->path)) m_watcher.removePath(folder->path);
+    if (m_watching.removeOne(folder->path)) m_shared->unwatch(folder->path);
+}
+
+void LibraryModel::startWatching(const QString &path)
+{
+    if (m_watching.contains(path)) return;
+    m_watching.append(path);
+    m_shared->watch(path);
 }
 
 void LibraryModel::listChangedFolders()
@@ -1056,8 +1226,8 @@ void LibraryModel::rebuildDrafts()
         if (!document->isDraft()) continue;
         open.insert(document->id());
         Row row{Kind::Draft, document->title(), {}, document->id()};
-        const auto disk = m_diskDrafts.constFind(document->id());
-        if (disk != m_diskDrafts.cend()) {
+        const auto disk = m_shared->drafts().constFind(document->id());
+        if (disk != m_shared->drafts().cend()) {
             row.order = disk->modified;
         } else {
             if (!m_firstSeen.contains(document->id())) m_firstSeen.insert(document->id(), now);
@@ -1065,7 +1235,9 @@ void LibraryModel::rebuildDrafts()
         }
         rows.append(row);
     }
-    for (const DiskDraft &draft : std::as_const(m_diskDrafts)) {
+    // A draft no longer open needs its first sighting kept no longer.
+    m_firstSeen.removeIf([&open](const auto &seen) { return !open.contains(seen.key()); });
+    for (const DiskDraft &draft : m_shared->drafts()) {
         if (open.contains(draft.id) || !m_store->isUnnamedDraft(draft.id)) continue;
         rows.append({Kind::Draft, draft.title, {}, draft.id, false, draft.modified});
     }
@@ -1087,28 +1259,6 @@ void LibraryModel::updateDraft(Document *draft)
         if (!m_filter.isEmpty()) applyFilter();
         return;
     }
-}
-
-void LibraryModel::scanDraftsSoon()
-{
-    if (m_scanning) {
-        m_scanAgain = true;
-        return;
-    }
-    m_scanning = true;
-    ++m_jobs;
-    QtConcurrent::run(m_pool, &LibraryModel::scanDrafts, m_paths).then(this, [this](const QList<DiskDraft> &drafts) {
-        --m_jobs;
-        m_scanning = false;
-        m_diskDrafts.clear();
-        for (const DiskDraft &draft : drafts) m_diskDrafts.insert(draft.id, draft);
-        // The folder exists once a draft has been written; drafts that go
-        // from it, named or removed, then go from the list.
-        if (m_draftsWatcher.directories().isEmpty() && QFileInfo(m_paths.drafts()).isDir())
-            m_draftsWatcher.addPath(m_paths.drafts());
-        rebuildDrafts();
-        if (std::exchange(m_scanAgain, false)) scanDraftsSoon();
-    });
 }
 
 void LibraryModel::rebuildRecent()

@@ -21,6 +21,11 @@ class Autosave : public QObject {
     Q_OBJECT
 public:
     static constexpr int RecoveryIdleMs = 500, RecoveryMaxMs = 2000, SaveIdleMs = 750, SaveMaxMs = 5000;
+    // A recovery write that failed is tried again after RecoveryRetryMs, and
+    // each further failure doubles the wait, up to RecoveryRetryMaxMs.
+    static constexpr int RecoveryRetryMs = 1000, RecoveryRetryMaxMs = 60000;
+    // How long a clean close waits for saves to land, at most.
+    static constexpr int FlushWaitMs = 3000;
 
     Autosave(DocumentStore *store, Recovery *recovery, QObject *parent = nullptr);
     ~Autosave() override;
@@ -29,9 +34,12 @@ public:
     // For a clean close: saves every modified document and waits for it, and
     // writes recovery for text that cannot be saved. Returns false, with a
     // line for each document whose text is still not in its file (failed save,
-    // conflict) and whether recovery holds it, so that a close can warn.
-    // `unkept` names the documents whose text is in neither its file nor recovery.
-    bool flush(QString *error = nullptr, QStringList *unkept = nullptr);
+    // conflict, a save that has not ended) and whether recovery holds it, so
+    // that a close can warn. `unkept` names the documents whose text is in
+    // neither its file nor recovery. Saves get at most waitMs in all to land:
+    // one still running then, as on a file system that stopped answering,
+    // has its text kept in recovery instead of holding the close up.
+    bool flush(QString *error = nullptr, QStringList *unkept = nullptr, int waitMs = FlushWaitMs);
     // For an end that cannot wait or be refused, as when the session ends:
     // every text that its file lacks goes to recovery first, then modified
     // documents start saving, and the saves get at most waitMs to land.

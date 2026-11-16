@@ -36,6 +36,9 @@ public:
     explicit DocumentStore(const AppPaths &paths, QObject *parent = nullptr);
     // Smaller limits than the defaults, so that tests can reach them.
     DocumentStore(const AppPaths &paths, HistoryLimits limits, QObject *parent = nullptr);
+    // How long a restore, Reload or Overwrite waits, at most, for history to
+    // keep the text it replaces; history writes off the UI thread.
+    static constexpr int HistoryWaitMs = 1000;
     ~DocumentStore() override;
 
     Document *newDraft();
@@ -57,10 +60,12 @@ public:
     // One retain per view showing the document, and one release when it closes.
     void retain(Document *document);
     void release(Document *document);
-    // Lets go at once of a document that no view shows, whatever its text:
-    // what is not in its file is given up, as when it is closed without
-    // saving. False, and nothing changes, while a view shows it or a save of
-    // it runs.
+    // Lets go of a document that no view shows, whatever its text: what is
+    // not in its file is given up, as when it is closed without saving. At
+    // once, or, while a save of it runs, as soon as that save ends, whatever
+    // it ends in, with nothing more saved or asked; a view that takes the
+    // document meanwhile keeps it. False, and nothing changes, while a view
+    // shows it.
     bool drop(Document *document);
     // Both return at once and report through the document's state.
     void save(Document *document);
@@ -125,8 +130,9 @@ public:
     History *history() const;
     // Replaces the text with a version from history, as one edit that a single
     // undo reverts. The document becomes modified and is saved like any edit.
-    // The current text is recorded first. If history cannot write it because
-    // of an error, nothing is replaced, so that the text is never lost; if
+    // The current text is recorded first, off the UI thread. If history
+    // cannot write it because of an error, or does not answer within
+    // HistoryWaitMs, nothing is replaced, so that the text is never lost; if
     // history is only paused by its size limit, the restore goes on, since
     // ordinary work continues while capture is paused. A version that is
     // missing or is not valid UTF-8 changes nothing.
@@ -138,6 +144,8 @@ public:
     void waitForSaves();
     // The same, but for at most timeoutMs: false when a save is still running then.
     bool waitForSaves(int timeoutMs);
+    // Whether a save, or other work on a document's file, is still running.
+    bool savesRunning() const;
     QList<Document *> documents() const;
     // Whether the id is an unnamed draft's: one of the ids parch gives
     // drafts, and not a document's that has been named since. A draft
@@ -269,6 +277,9 @@ private:
         // The draft's assets, left in its folder because a folder they
         // would go in beside the named file is not a folder of its own.
         QString assetsLeft;
+        // The draft's assets that are beside the named file now, by their
+        // names within its assets folder.
+        QStringList assetsPlaced;
         // A file made again found its name taken by something else.
         bool nameTaken = false;
         // The text was put at the document's own name, as Put this text
@@ -336,6 +347,12 @@ private:
     // has ended, whether or not history took them.
     QFuture<void> keepInHistory(const QString &documentId, const QByteArray &bytes, History::Reason reason,
                                 std::function<void()> then = {});
+    // The same for a choice the writer waits on: the bytes are kept on a
+    // worker, unless history's newest version holds them, and the answer is
+    // waited for at most HistoryWaitMs. Failed when history did not answer
+    // by then, as on a disk that stopped answering; the capture still lands
+    // when it can.
+    History::CaptureStatus keepInHistoryNow(const QString &documentId, const QByteArray &bytes, History::Reason reason);
     // The held entry recorded at this path.
     const Held *heldAt(const QString &path) const;
     // The path an entry is recorded at: its own, or for a draft named
@@ -407,6 +424,10 @@ private:
     // Why a file is not opened, worded whole: gone, no regular file, or not readable.
     QString cannotOpen(const QString &path, const LoadedFile &loaded) const;
     void loadRegistry();
+    // Lets go, off the UI thread, of the identities nothing is left to tie
+    // to: their file is gone, and neither history nor recovery holds
+    // anything under their id, nor does an open document or held text.
+    void pruneRegistry();
     // Writes the registry as it is now, on a thread of its own, after any
     // write asked for before.
     void writeRegistry();
@@ -419,6 +440,8 @@ private:
     // Documents whose last view closed while they had unsaved text. They stay
     // until they are clean and then close.
     QSet<Document *> m_unviewed;
+    // Documents given up while a save of them ran, which close once it ends.
+    QSet<Document *> m_dropping;
     // Canonical path to document id, as kept in AppPaths::registryFile().
     QHash<QString, QString> m_registry;
     // The file there could not be read, nor moved aside to keep it. Only

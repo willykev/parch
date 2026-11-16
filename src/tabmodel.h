@@ -8,6 +8,7 @@
 #include <QAbstractListModel>
 #include <QList>
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QVariantMap>
 #include <functional>
@@ -97,7 +98,9 @@ public:
     void relocate(const QString &from, const QString &to);
 
     // The tabs of a session, none of them read yet. The tab in front is read
-    // by loadActive(), the others when first shown.
+    // by loadActive(), the others when first shown. Whether the others' files
+    // are there is asked off the UI thread, and a tab whose file is not there
+    // says so once the answer is in.
     void restore(const QList<ViewState> &views, int active);
     // Gives a document that is already open, as one restored from recovery,
     // to every tab here that waits for it. Returns how many took it.
@@ -154,6 +157,8 @@ private:
     int insert(int at, const Tab &tab);
     // Reads the tab's document, or finds out why it cannot.
     void load(int index);
+    // The restored tabs still waiting for these files, which are not there, say so.
+    void notFound(const QSet<QString> &paths);
     void take(int index, Document *document);
     void release(Document *document);
     QString titleOf(const Tab &tab) const;

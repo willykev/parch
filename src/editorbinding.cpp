@@ -412,6 +412,24 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     // before the selection is read, so that the selection the composition
     // covered is the one that follows the edit.
     cancelComposition();
+    // Where this view's top line is, while the projection still shows the
+    // old text: a change wholly above it, as another view's edit or a
+    // replacement made all through the text, leaves what is in view in place.
+    // Only a change that starts above the view is looked at further, so
+    // that typing in view costs one lookup.
+    QQuickItem *view = viewport();
+    int top = 0;
+    qreal intoTop = 0;
+    if (view) {
+        QRectF line;
+        m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(range.start)));
+        const qreal contentY = view->property("contentY").toReal();
+        if (m_editor->y() + line.y() < contentY) top = topSourcePosition();
+        if (top > 0) {
+            m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(top)));
+            intoTop = contentY - (m_editor->y() + line.y());
+        }
+    }
     m_topAnchor.valid = false;
     const QString source = m_buffer->text();
     const int start = range.start;
@@ -461,6 +479,12 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     if ((oldLength > largeTextUnits) != (source.size() > largeTextUnits))
         m_editor->setFlag(QQuickItem::ItemObservesViewport, source.size() > largeTextUnits);
     refreshCursor();
+    if (top > 0 && oldEnd <= top) {
+        QRectF line;
+        m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(top + delta)));
+        const qreal maximum = qMax<qreal>(0, view->property("contentHeight").toReal() - view->height());
+        view->setProperty("contentY", qBound<qreal>(0, m_editor->y() + line.y() + intoTop, maximum));
+    }
 }
 
 void EditorBinding::setLineHeight(qreal lineHeight)

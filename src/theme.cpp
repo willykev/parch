@@ -194,7 +194,7 @@ void Theme::takeHyprland(const QString &option, const QJsonObject &reply) {
     }
 }
 
-QVariantMap Theme::sizes() const { return forQml(m_sizes); }
+QVariantMap Theme::sizes() const { return m_sizesForQml; }
 
 int Theme::size(const QString &token) const { return m_sizes.value(token, m_fontSize); }
 
@@ -369,6 +369,8 @@ void Theme::reload() {
         m_menuBorder = menuBorder;
         m_scrim = scrim;
         m_sizes = sizes;
+        // Made once here, since QML reads it in every binding that uses a size.
+        m_sizesForQml = forQml(sizes);
         m_fontSize = base;
         m_controlBorderWidth = borderWidth;
         m_loaded = true;

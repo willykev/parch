@@ -162,6 +162,8 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     connect(m_store.get(), &DocumentStore::documentClosed, this, [this](const QString &documentId) {
         m_closing.remove(documentId);
         forgetRecoveryFailure(documentId);
+        // After any write of it already waiting, and with no more to come.
+        if (m_givenUp.remove(documentId)) m_autosave->discard(documentId);
     });
     // A recovery write that failed is shown until one succeeds.
     connect(m_autosave.get(), &Autosave::recoveryFailed, this, [this](const QString &documentId, const QString &error) {
@@ -582,13 +584,20 @@ void Backend::quit()
 {
     QString problems;
     QStringList unkept;
-    // Flushing waits for every save, those already running included.
-    m_autosave->flush(&problems, &unkept);
+    // Flushing waits for every save, those already running included, as
+    // long as an end that cannot be refused does.
+    m_autosave->flush(&problems, &unkept, EndWaitMs);
     // The session is kept either way, since a refused quit can still end in a crash.
     m_sessionTimer.stop();
     m_sessionWriter.finish(collectSession());
     m_unsafe = QSet<QString>(unkept.begin(), unkept.end());
     if (m_unsafe.isEmpty()) {
+        // A save that has not ended has its text in recovery, which the
+        // next launch brings back and says so; parch ends without it.
+        for (Document *document : m_store->documents())
+            if (document->isSaving())
+                qWarning("parch: %s: its save had not finished, so its text is kept in recovery",
+                         qPrintable(document->title()));
         m_notice = false;
         setProblem({}, {});
         emit quitRequested();
@@ -682,6 +691,13 @@ void Backend::recordThenGiveUp(WindowContext *window, Document *document, bool k
         // Written to while history took the text: the newer text is recorded too.
         if (target->buffer()->revision() != recorded) {
             recordThenGiveUp(holder, target, keepInHistory);
+            return;
+        }
+        // History did not keep the text, but it was saved meanwhile: the
+        // file holds it, and the tab closes as any other does, asking nothing.
+        const bool kept = status == History::CaptureStatus::Recorded || status == History::CaptureStatus::Held;
+        if (keepInHistory && !kept && !asksBeforeClosing(target)) {
+            closeTab(holder, holder->tabs()->indexOf(target));
             return;
         }
         if (keepInHistory && status == History::CaptureStatus::Failed) {
@@ -810,10 +826,14 @@ QString Backend::shownText(const QString &text) const
     shown.replace(QRegularExpression(drafts + QStringLiteral("(/") + id + QStringLiteral(")?")), tr("the drafts folder"));
     shown.replace(m_paths.recovery(), tr("the recovery folder"));
     shown.replace(m_paths.history(), tr("the history folder"));
-    // Elsewhere, the home folder is ~, as the header writes it.
+    // Elsewhere, the home folder is ~, as the header writes it, but only at
+    // the start of a path: after the start of the text, a space, a quote or
+    // a bracket, not further into another path.
     const QString home = QDir::homePath();
-    if (home.size() > 1) shown.replace(QRegularExpression(QRegularExpression::escape(home) + QStringLiteral("(?=/|$)")),
-                                       QStringLiteral("~"));
+    if (home.size() > 1)
+        shown.replace(QRegularExpression(QStringLiteral("(?<![^\\s\"'“‘(\\[<])") + QRegularExpression::escape(home)
+                                         + QStringLiteral("(?=/|$|[\\s\"'”’)\\]>])")),
+                      QStringLiteral("~"));
     return shown;
 }
 
@@ -1120,8 +1140,11 @@ void Backend::giveUp(WindowContext *window, Document *document)
     const QString id = document->id();
     rememberPositions(window);
     tabs->closeTab(index);
-    // A view opened meanwhile still shows the text, which stays.
-    if (m_store->drop(document)) m_autosave->discard(id);
+    // A view opened meanwhile still shows the text, which stays. Otherwise
+    // the document goes, once a save of it that runs has ended, and its
+    // recovery entry with it.
+    m_givenUp.insert(id);
+    if (!m_store->drop(document)) m_givenUp.remove(id);
     if (tabs->rowCount() > 0) return;
     // The window went with its last tab; it stays only if quitting is
     // refused, and then with a draft to write in.
@@ -1147,9 +1170,13 @@ bool Backend::keepText(Document *document, QString *reason)
     }
     // Recovery holds the text whatever the save does.
     if (m_autosave->keep(document, reason)) return true;
-    // A save that is running may still put the text in its file.
-    m_store->waitForSaves();
-    return document->state() == Document::State::Clean;
+    // A save that is running may still put the text in its file, and gets
+    // as long to do so as an end that cannot be refused gives it.
+    const bool settled = m_store->waitForSaves(EndWaitMs);
+    if (document->state() == Document::State::Clean) return true;
+    if (!settled && document->isSaving() && reason)
+        *reason = tr("its save has not finished, and recovery cannot keep it: %1").arg(*reason);
+    return false;
 }
 
 int Backend::viewsOf(const Document *document, const WindowContext *leavingOut) const

@@ -8,6 +8,7 @@
 #include <QRandomGenerator>
 #include <QScopeGuard>
 #include <QStringDecoder>
+#include <QThreadPool>
 #include <atomic>
 #include <fcntl.h>
 #include <climits>
@@ -151,7 +152,7 @@ constexpr int notRegularFailure = -1;
 // there but cannot be read. A file that still stands as `known` did is that
 // version, unless its bytes are asked for, and is not read.
 bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString &error, struct stat *found = nullptr,
-           int *failure = nullptr, const DiskVersion *known = nullptr)
+           int *failure = nullptr, const DiskVersion *known = nullptr, qint64 limit = -1)
 {
     int code = 0;
     const auto fail = [&](int number, const QString &message) {
@@ -191,6 +192,9 @@ bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString
     struct stat state {};
     FileStamp stamp;
     if (!stamped(file.handle(), state, stamp) || !S_ISREG(state.st_mode)) return notRegular();
+    if (limit >= 0 && state.st_size > limit)
+        return fail(EFBIG, QCoreApplication::translate("DiskFile", "it is larger than the %1 MiB parch opens")
+                               .arg(limit >> 20));
     char name[PATH_MAX];
     const ssize_t nameLength = ::readlink(QFile::encodeName(QStringLiteral("/proc/self/fd/%1").arg(file.handle())).constData(),
                                           name, sizeof name - 1);
@@ -503,7 +507,7 @@ LoadedFile load(const QString &path)
     LoadedFile loaded;
     QByteArray bytes;
     int failure = 0;
-    if (!probe(path, loaded.version, &bytes, loaded.error, nullptr, &failure)) {
+    if (!probe(path, loaded.version, &bytes, loaded.error, nullptr, &failure, nullptr, MaxLoadBytes)) {
         loaded.missing = failure == ENOENT || failure == ENOTDIR;
         if (!loaded.missing) {
             loaded.unreadable = loaded.error;
@@ -802,6 +806,18 @@ bool readVersion(const QString &path, const DiskVersion &version, QByteArray &by
     DiskVersion read;
     QString error;
     return probe(path, read, &bytes, error) && read == version;
+}
+
+QThreadPool *looks()
+{
+    // Made once and never deleted, so that nothing waits for a look still
+    // running as the process ends.
+    static QThreadPool *pool = [] {
+        auto *made = new QThreadPool;
+        made->setMaxThreadCount(2);
+        return made;
+    }();
+    return pool;
 }
 
 quint64 canonicalLookups()

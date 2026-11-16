@@ -34,9 +34,14 @@ public:
     // last is taken whether it is there or not. Documents, then home, unless
     // set otherwise.
     void setFallbackFolders(const QStringList &folders);
+    // How long a dialog waits, at most, to learn which folder it starts in.
+    static constexpr int StartFolderWaitMs = 250;
     // The first of the candidates that is a folder, or else the fallback.
     static QString firstFolder(const QStringList &candidates, const QString &fallback);
-    // Where a dialog starts: the folder last opened from or saved to, or a fallback.
+    // Where a dialog starts: the folder last opened from or saved to, or a
+    // fallback. Which of them is a folder is asked off the UI thread, and
+    // waited for at most StartFolderWaitMs: without an answer by then, as
+    // from a mount that stopped answering, the last fallback.
     QString startFolder() const;
 
     // Each is false, with a problem said, when there is no file dialog.

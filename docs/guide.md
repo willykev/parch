@@ -18,6 +18,9 @@ while you work.
   document that becomes that file when you first type.
 - A file that is not valid UTF-8 opens read-only, so its bytes stay exactly as
   they are.
+- parch opens files of up to 64 MiB, at paths of up to 4,095 bytes with every
+  link followed. A larger file, or a longer path, is not opened, and parch
+  says why.
 
 parch keeps each file's line endings and byte-order mark. Text you paste gets
 the document's line endings.

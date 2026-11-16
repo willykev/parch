@@ -111,9 +111,16 @@ struct SaveResult {
     DiskVersion version;
 };
 
+class QThreadPool;
+
 // Stateless file access. Checks and the final rename are not one atomic
 // compare-and-swap: a program that writes in the instant between them can
 // still be overwritten, but any change made earlier is always detected.
+//
+// A path the kernel resolves, links followed, to more than PATH_MAX - 1
+// bytes (4,095 on Linux) is refused, as the kernel refuses it, with its
+// error ("File name too long"): it is neither read nor written, and never
+// cut short to fit.
 namespace DiskFile {
 // Keeps the bytes a file holds before a save writes over them in place, as
 // history does, when they need keeping; false, with the reason, when they
@@ -144,7 +151,16 @@ QString cleanPath(const QString &path);
 // nothing there, the name creating it would give. For a path that leads
 // nowhere it can be resolved, the path made absolute.
 QString canonicalPath(const QString &path);
+// Larger files are not read: load() refuses them as unreadable, saying
+// why, so that one never fills memory or holds up the thread reading it.
+constexpr qint64 MaxLoadBytes = qint64(64) << 20;
 LoadedFile load(const QString &path);
+// A pool for short looks at the file system made for the UI, as whether a
+// folder or file is there, which a file system that stopped answering can
+// hold up for ever: a caller waits for one only so long, if at all, and
+// the pool is never waited for, not even as the process ends. Never the
+// pool saves run on.
+QThreadPool *looks();
 // The bytes of the file at the path, while it is still the version given;
 // false when it is not, or cannot be read.
 bool readVersion(const QString &path, const DiskVersion &version, QByteArray &bytes);

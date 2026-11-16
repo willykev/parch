@@ -13,6 +13,7 @@
 #include <QStringList>
 #include <QThreadPool>
 #include <QTimer>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -20,8 +21,80 @@
 
 class Document;
 class DocumentStore;
+class QThread;
 class RecentFiles;
 class Settings;
+
+// The watch a LibraryWatch keeps on a thread of its own: it adds folders as
+// asked there, and says which it could add.
+class LibraryFolderWatcher : public QFileSystemWatcher {
+    Q_OBJECT
+public:
+    using QFileSystemWatcher::QFileSystemWatcher;
+    void add(const QString &path);
+    // For tests: called on the watch's thread as a folder is added.
+    static std::function<void(const QString &path)> beforeWatching;
+
+signals:
+    void added(const QString &path);
+};
+
+// What the libraries of every window share, one for each document store:
+// one watch of the folders they have open and of the drafts folder, and one
+// look at the drafts on disk for all of them. The watch lives on a thread of
+// its own, since adding a folder to it asks the file system, which can be
+// slow to answer; what it sees is said on the thread the libraries live on.
+class LibraryWatch : public QObject {
+    Q_OBJECT
+public:
+    struct DiskDraft {
+        QString id;
+        QString title;
+        QDateTime modified;
+    };
+    // The one the libraries of this store and pool share, made for the first
+    // and gone with the last. The pool must outlive every library given it.
+    static LibraryWatch *take(const AppPaths &paths, DocumentStore *store, QThreadPool *pool);
+    static void give(LibraryWatch *watch);
+    // For tests: called on the watch's own thread as a folder is added to it.
+    static void setBeforeWatching(std::function<void(const QString &path)> hook);
+
+    // Watches a folder for as many libraries as ask, until as many let it go.
+    void watch(const QString &folder);
+    void unwatch(const QString &folder);
+    // The folders watched for any library.
+    QStringList folders() const;
+    // The drafts on disk, as the last look at them found them.
+    const QHash<QString, DiskDraft> &drafts() const { return m_drafts; }
+    // Looks at the drafts on disk again, once the look still running ends.
+    void scanDrafts();
+    bool scanning() const { return m_scanning; }
+
+signals:
+    // Something in a watched folder changed.
+    void folderChanged(const QString &path);
+    // A folder asked for is watched now: a change made before then is
+    // caught by one more listing.
+    void folderWatched(const QString &path);
+    // A look at the drafts on disk ended.
+    void draftsScanned();
+
+private:
+    LibraryWatch(const AppPaths &paths, DocumentStore *store, QThreadPool *pool);
+    ~LibraryWatch() override;
+    static QList<DiskDraft> scan(const AppPaths &paths, bool *folderThere);
+
+    AppPaths m_paths;
+    QThreadPool *m_pool;
+    int m_users = 0;
+    QThread *m_thread;
+    LibraryFolderWatcher *m_watcher;
+    QHash<QString, int> m_counts;
+    QHash<QString, DiskDraft> m_drafts;
+    bool m_scanning = false;
+    bool m_scanAgain = false;
+    bool m_draftsWatched = false;
+};
 
 // What one window's library shows, as a tree for a QML TreeView. At the top
 // are two sections, Drafts and Recent, and then each folder the settings
@@ -85,6 +158,10 @@ public:
     // How long a filter says it is searching at most, so that a folder that
     // never answers does not keep it saying so; what lands later still shows.
     static constexpr int SearchingMs = 5000;
+    // At most this many rows of a listing are put in a folder in one turn of
+    // the event loop; the rest follow as many at a time in the turns after,
+    // so that a folder of many thousand entries never holds up a frame.
+    static constexpr int ListingChunk = 1000;
 
     // The pool must outlive the model.
     LibraryModel(const AppPaths &paths, DocumentStore *store, RecentFiles *recent, Settings *settings,
@@ -123,10 +200,12 @@ public:
     Q_INVOKABLE QModelIndexList matches() const;
     // The same, nearest the top first, and at most `limit` of them.
     Q_INVOKABLE QModelIndexList nearestMatches(int limit) const;
-    // The folders watched now.
+    // The folders watched now for this library.
     QStringList watchedFolders() const;
-    // The jobs this model has on its pool.
+    // The jobs this model has on its pool, the look at the drafts it shares included.
     int jobsInFlight() const;
+    // What it shares with the other libraries of its store.
+    LibraryWatch *shared() const { return m_shared; }
 
 signals:
     void filterChanged();
@@ -160,11 +239,7 @@ private:
         QString path;
         int depth = 0;
     };
-    struct DiskDraft {
-        QString id;
-        QString title;
-        QDateTime modified;
-    };
+    using DiskDraft = LibraryWatch::DiskDraft;
     // What a row shows, as plain values, before it is given a node.
     struct Row {
         Kind kind = Kind::Section;
@@ -176,10 +251,17 @@ private:
     };
     // Within one parent, what makes a row the same row when the parent is built again.
     using Key = std::pair<int, QString>;
+    // A listing put in its folder a chunk at a time: its rows, and how many are in.
+    struct Staged {
+        Node *folder = nullptr;
+        QList<Row> rows;
+        qsizetype ready = 0;
+        bool ok = false;
+        QString identity;
+    };
 
     static FolderListing listFolder(const QString &path);
     static FolderListing examine(const QString &path, bool probeOnly);
-    static QList<DiskDraft> scanDrafts(const AppPaths &paths);
     static std::unique_ptr<Node> makeNode(const Row &row);
     static QString kindName(Kind kind);
     static Key keyOf(Kind kind, const QString &name, const QString &path, const QString &documentId);
@@ -213,6 +295,12 @@ private:
     void startRequest(Node *folder, quint64 request);
     void startJob(const QString &path);
     void applyListing(quint64 request, const FolderListing &listing);
+    // Puts the next chunk of a staged listing in its folder.
+    void applyChunk(quint64 request);
+    // What follows once the whole of a listing is in its folder.
+    void listingApplied(Node *folder, bool ok, const QString &identity);
+    // Has the shared watch watch a folder this library shows open.
+    void startWatching(const QString &path);
     void watch(Node *folder);
     void unwatch(Node *folder);
     void listChangedFolders();
@@ -238,7 +326,6 @@ private:
     void syncFolders();
     void rebuildDrafts();
     void updateDraft(Document *draft);
-    void scanDraftsSoon();
     void rebuildRecent();
     void checkRecent();
     void follow(Document *document);
@@ -262,16 +349,17 @@ private:
     // The folders with a job on the pool, and how many jobs it has of this model's.
     QSet<QString> m_running;
     int m_jobs = 0;
-    QFileSystemWatcher m_watcher;
+    // The listings being put in their folders a chunk at a time, by request.
+    QHash<quint64, Staged> m_staged;
+    LibraryWatch *m_shared;
     QHash<QString, int> m_watchCount;
+    // The folders this library has the shared watch watch, in the order asked.
+    QStringList m_watching;
     QSet<QString> m_changed;
     QTimer m_settle;
 
-    QHash<QString, DiskDraft> m_diskDrafts;
+    // When each open draft with no file yet was first seen, for its order.
     QHash<QString, QDateTime> m_firstSeen;
-    QFileSystemWatcher m_draftsWatcher;
-    bool m_scanning = false;
-    bool m_scanAgain = false;
 
     QHash<QString, bool> m_missing;
     bool m_checking = false;

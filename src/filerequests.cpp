@@ -10,7 +10,10 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QSemaphore>
 #include <QStandardPaths>
+#include <QThreadPool>
+#include <memory>
 #include <utility>
 
 FileRequests::FileRequests(DocumentStore *store, Settings *settings, QObject *parent)
@@ -54,8 +57,19 @@ QString FileRequests::firstFolder(const QStringList &candidates, const QString &
 
 QString FileRequests::startFolder() const
 {
-    return firstFolder(QStringList{m_settings->lastFolder()} + m_fallbacks.mid(0, m_fallbacks.size() - 1),
-                       m_fallbacks.last());
+    const QStringList candidates = QStringList{m_settings->lastFolder()} + m_fallbacks.mid(0, m_fallbacks.size() - 1);
+    const QString fallback = m_fallbacks.last();
+    // Shared with the look, which may end long after the dialog has opened.
+    struct Answer {
+        QSemaphore given;
+        QString folder;
+    };
+    const auto answer = std::make_shared<Answer>();
+    DiskFile::looks()->start([answer, candidates, fallback] {
+        answer->folder = firstFolder(candidates, fallback);
+        answer->given.release();
+    });
+    return answer->given.tryAcquire(1, StartFolderWaitMs) ? answer->folder : fallback;
 }
 
 bool FileRequests::askForDocuments(WindowContext *window)

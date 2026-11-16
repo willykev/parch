@@ -93,6 +93,21 @@ History::History(const AppPaths &paths, HistoryLimits limits, std::function<QDat
         m_totals = sumLocked();
         m_scanned.wakeAll();
     });
+    // From then on every document's versions are pruned by count and age
+    // now and then, on a thread of the pruner's own, so that a document
+    // never captured again loses its old versions while parch runs too.
+    m_pruner.setMaxThreadCount(1);
+    m_pruneTimer.setInterval(m_limits.pruneEveryMs);
+    connect(&m_pruneTimer, &QTimer::timeout, this, [this] {
+        // One at a time: a prune still running is not joined by another.
+        if (m_pruner.activeThreadCount() > 0) return;
+        m_pruner.start([this] {
+            QMutexLocker lock(&m_mutex);
+            pruneAll();
+            announceLocked();
+        });
+    });
+    m_pruneTimer.start();
 }
 
 History::Usage History::sumLocked() const
@@ -108,6 +123,8 @@ History::Usage History::sumLocked() const
 
 History::~History()
 {
+    m_pruneTimer.stop();
+    m_pruner.waitForDone();
     m_scan.join();
 }
 
@@ -406,7 +423,10 @@ QString History::captureLocked(const QString &documentId, QList<Version> version
     // history paused for good.
     m_full = false;
     const qint64 named = totalsLocked().named;
+    // A capture that is refused still lets the document's own versions go
+    // that are past the count or the age, as any capture does.
     if (named > m_limits.bytes) {
+        pruneOwn(documentId, versions);
         status = CaptureStatus::Paused;
         return {};
     }
@@ -417,6 +437,7 @@ QString History::captureLocked(const QString &documentId, QList<Version> version
     // the writer asked for it by name; history is then paused, and once named
     // versions alone exceed the budget no further capture is accepted.
     if (name.isEmpty() && named + bytes.size() > m_limits.bytes) {
+        pruneOwn(documentId, versions);
         m_full = true;
         status = CaptureStatus::Paused;
         return {};
@@ -503,6 +524,12 @@ void History::removeFiles(const QString &documentId, const Version &version) con
 // versions are never removed.
 void History::prune(const QString &documentId, const QList<Version> &versions)
 {
+    pruneOwn(documentId, versions);
+    if (totalsLocked().bytes > m_limits.bytes) pruneAll();
+}
+
+void History::pruneOwn(const QString &documentId, const QList<Version> &versions)
+{
     const QDateTime limit = utc(m_now()).addDays(-m_limits.days);
     QList<Version> kept;
     int unnamed = 0;
@@ -517,7 +544,6 @@ void History::prune(const QString &documentId, const QList<Version> &versions)
         noteDocument(documentId, kept);
         store(documentId, kept);
     }
-    if (totalsLocked().bytes > m_limits.bytes) pruneAll();
 }
 
 void History::pruneAll()

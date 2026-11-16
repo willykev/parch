@@ -58,6 +58,10 @@ public:
     // drops: doubling from the first, and no more attempts after the last.
     static constexpr int FirstRetryMs = 1000;
     static constexpr int LastRetryMs = 60000;
+    // The newest Hyprland session folder beside `folder` other than it, one
+    // whose request and event sockets are both there, as a restarted
+    // Hyprland makes under a new instance signature; nothing when there is none.
+    static QString newestSessionBeside(const QString &folder);
 
 signals:
     // Hyprland's JSON answer for an option.
@@ -72,6 +76,9 @@ private:
     QString m_folder;
     QStringList m_options;
     QStringList m_asking;
+    // Options asked while their earlier question was still out, as after a
+    // reload that the earlier answer may predate: asked again once it lands.
+    QStringList m_askAgain;
     // Where the questions are asked, one thread each, and what tells one
     // still waiting for its answer that it is no longer wanted.
     QThreadPool m_pool;

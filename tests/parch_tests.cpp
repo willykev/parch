@@ -246,6 +246,8 @@ private slots:
     void themeFollowsHyprlandEventsAndActivation();
     void themeAsksHyprlandNothingWhileIdle();
     void themeListensToHyprlandAgainAfterItGoes();
+    void themeFollowsARestartedHyprland();
+    void hyprlandAsksAgainAfterAReloadDuringAQuestion();
     void themeWithoutHyprlandKeepsDefaults();
     void hyprlandHearsTheQuestionBeforeTheEventLoopRuns();
     void hyprlandNeverWaitsOnABusyUiThread();
@@ -930,6 +932,76 @@ void ParchTests::themeListensToHyprlandAgainAfterItGoes()
     hyprland.setInt(QStringLiteral("decoration:rounding"), 3);
     hyprland.send("configreloaded>>");
     QTRY_COMPARE(theme.radius(), 3);
+}
+
+void ParchTests::themeFollowsARestartedHyprland()
+{
+    // A restarted Hyprland makes its sockets under a new signature, beside
+    // the old folder, which goes: the theme follows it there.
+    QTemporaryDir dir, runtime;
+    writeTheme(dir.path(), "dark", "#1a1b26", "#a9b1d6", "#7aa2f7");
+    const QString first = runtime.filePath(QStringLiteral("a1"));
+    const QString second = runtime.filePath(QStringLiteral("b2"));
+    SKIP_UNLESS_SOCKET_FITS(first + QStringLiteral("/.socket2.sock"));
+    QVERIFY(QDir().mkpath(first));
+    auto hyprland = std::make_unique<FakeHyprland>(first);
+    hyprland->setInt(QStringLiteral("decoration:rounding"), 8);
+    Theme theme(dir.path(), nullptr, first);
+    QTRY_COMPARE(hyprland->listeners(), 1);
+    QTRY_COMPARE(theme.radius(), 8);
+    hyprland.reset();
+    QVERIFY(QDir(first).removeRecursively());
+    QVERIFY(QDir().mkpath(second));
+    FakeHyprland restarted(second);
+    restarted.setInt(QStringLiteral("decoration:rounding"), 4);
+    QTRY_COMPARE_WITH_TIMEOUT(restarted.listeners(), 1, 5000);
+    QTRY_COMPARE(theme.radius(), 4);
+    restarted.setInt(QStringLiteral("decoration:rounding"), 2);
+    restarted.send("configreloaded>>");
+    QTRY_COMPARE(theme.radius(), 2);
+}
+
+void ParchTests::hyprlandAsksAgainAfterAReloadDuringAQuestion()
+{
+    // A reload heard while a question is still out may postdate its answer,
+    // so the option is asked again once that answer lands.
+    QTemporaryDir sockets;
+    SKIP_UNLESS_SOCKET_FITS(sockets.path() + QStringLiteral("/.socket2.sock"));
+    QLocalServer requests, events;
+    QVERIFY(requests.listen(sockets.path() + QStringLiteral("/.socket.sock")));
+    QVERIFY(events.listen(sockets.path() + QStringLiteral("/.socket2.sock")));
+    QList<QLocalSocket *> held;
+    QList<QLocalSocket *> listeners;
+    connect(&requests, &QLocalServer::newConnection, &requests, [&] {
+        while (QLocalSocket *socket = requests.nextPendingConnection()) held.append(socket);
+    });
+    connect(&events, &QLocalServer::newConnection, &events, [&] {
+        while (QLocalSocket *socket = events.nextPendingConnection()) listeners.append(socket);
+    });
+    const QString option = QStringLiteral("decoration:rounding");
+    HyprlandOptions options(sockets.path(), {option});
+    QSignalSpy answered(&options, &HyprlandOptions::answered);
+    QTRY_COMPARE(held.size(), 1);
+    QTRY_COMPARE(listeners.size(), 1);
+    // A reload while the first question waits for its answer.
+    listeners.first()->write("configreloaded>>\n");
+    listeners.first()->flush();
+    QTest::qWait(100);
+    QCOMPARE(held.size(), 1);
+    const auto answer = [&](QLocalSocket *socket, int value) {
+        QTRY_VERIFY(socket->bytesAvailable() > 0 || socket->waitForReadyRead(100));
+        socket->readAll();
+        socket->write(QStringLiteral("{\"option\":\"%1\",\"int\":%2,\"set\":true}").arg(option).arg(value).toUtf8());
+        socket->flush();
+        socket->disconnectFromServer();
+    };
+    answer(held.first(), 1);
+    QTRY_COMPARE(answered.count(), 1);
+    // The option is asked again, and its newer answer arrives too.
+    QTRY_COMPARE(held.size(), 2);
+    answer(held.at(1), 2);
+    QTRY_COMPARE(answered.count(), 2);
+    QCOMPARE(answered.at(1).at(1).toJsonObject().value(QStringLiteral("int")).toInt(), 2);
 }
 
 void ParchTests::themeWithoutHyprlandKeepsDefaults()

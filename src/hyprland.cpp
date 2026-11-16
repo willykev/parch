@@ -1,6 +1,8 @@
 #include "hyprland.h"
 
+#include <QDateTime>
 #include <QDeadlineTimer>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
@@ -8,6 +10,7 @@
 #include <QLocalSocket>
 #include <QScopeGuard>
 #include <QThread>
+#include <QTimeZone>
 #include <QtConcurrent>
 #include <algorithm>
 #include <cerrno>
@@ -118,8 +121,10 @@ void HyprlandOptions::ask()
         m_retryMs = FirstRetryMs;
         listen();
     }
-    for (const QString &option : std::as_const(m_options))
+    for (const QString &option : std::as_const(m_options)) {
         if (!m_asking.contains(option)) question(option);
+        else if (!m_askAgain.contains(option)) m_askAgain.append(option);
+    }
 }
 
 void HyprlandOptions::question(const QString &option)
@@ -134,15 +139,44 @@ void HyprlandOptions::question(const QString &option)
         const Answer reply = watcher->result();
         const QJsonDocument json = reply ? QJsonDocument::fromJson(*reply) : QJsonDocument();
         if (json.isObject()) emit answered(option, json.object());
+        if (m_askAgain.removeAll(option) > 0) question(option);
     });
     watcher->setFuture(QtConcurrent::run(&m_pool, &HyprlandOptions::request, requestSocket(m_folder),
                                          "j/getoption " + option.toUtf8(), int(AnswerTimeoutMs),
                                          std::shared_ptr<const std::atomic_bool>(m_stopped)));
 }
 
+QString HyprlandOptions::newestSessionBeside(const QString &folder)
+{
+    const QFileInfo here(folder);
+    QString newest;
+    QDateTime newestTime;
+    const QFileInfoList sessions = QDir(here.path()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+    for (const QFileInfo &session : sessions) {
+        if (session.absoluteFilePath() == here.absoluteFilePath()) continue;
+        const QFileInfo request(requestSocket(session.absoluteFilePath()));
+        if (!request.exists() || !QFileInfo::exists(eventSocket(session.absoluteFilePath()))) continue;
+        const QDateTime made = request.lastModified(QTimeZone::UTC);
+        if (newest.isEmpty() || made > newestTime) {
+            newest = session.absoluteFilePath();
+            newestTime = made;
+        }
+    }
+    return newest;
+}
+
 void HyprlandOptions::listen()
 {
     if (m_events || m_folder.isEmpty()) return;
+    // A Hyprland that restarted has sockets under a new signature beside the
+    // old folder, which is gone: everything is asked again there.
+    if (!QFileInfo::exists(requestSocket(m_folder))) {
+        const QString moved = newestSessionBeside(m_folder);
+        if (!moved.isEmpty()) {
+            m_folder = moved;
+            m_lost = true;
+        }
+    }
     auto *socket = new QLocalSocket(this);
     m_events = socket;
     connect(socket, &QLocalSocket::readyRead, this, &HyprlandOptions::readEvents);

@@ -1727,7 +1727,16 @@ void includedTextLeadsToItsFile()
                 return item;
         return nullptr;
     }()));
-    QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, centreOf(row));
+    // The window may still be settling from the chapter opened above, when a
+    // press can miss the row; the row is clicked again until it takes it,
+    // as a person clicking would.
+    QPointer<QQuickItem> rowGuard(row);
+    QSignalSpy pressed(row, SIGNAL(pressed()));
+    QTRY_VERIFY([&] {
+        if (!rowGuard || pressed.count() > 0) return true;
+        QTest::mouseClick(w.window, Qt::LeftButton, Qt::NoModifier, centreOf(rowGuard));
+        return pressed.count() > 0;
+    }());
     QTRY_COMPARE(w.tabs()->activePath(), one);
     QTRY_COMPARE(w.shell.binding()->cursorSource(), 0);
 }

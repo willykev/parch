@@ -1961,6 +1961,8 @@ void Builder::citationText(const Node &node, const Char &state)
             asWritten(item);
             return;
         }
+        // A prefix, as in `[see @key]`, comes before the number.
+        if (!item.title.isEmpty()) text(item.title + u' ', state);
         Char link = state;
         link.ink = PreviewStyle::Link;
         link.href = QStringLiteral("#cite-%1").arg(item.number);

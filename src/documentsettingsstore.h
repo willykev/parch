@@ -108,5 +108,8 @@ private:
     mutable QStringList m_canonicalFolders;
     mutable QStringList m_foldersGiven;
     QList<QPointer<Document>> m_documents;
+    // The own settings of documents of parch's own, by id: kept while parch
+    // runs, never written, as nothing of such a document is.
+    QHash<QString, Dialect::Layer> m_scratch;
     int m_revision = 0;
 };

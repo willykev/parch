@@ -46,6 +46,10 @@ public:
     // A document of parch's own, such as its guide, with the title and text
     // given, read-only when asked: see Document::isScratch().
     Document *newScratch(const QString &title, const QString &text, bool readOnly);
+    // The same, finding its pictures, includes and bibliography in `folder`
+    // (Document::scratchFolder()). Save as names it as it names a draft, and
+    // it is an ordinary document from then on.
+    Document *newScratch(const QString &title, const QString &text, bool readOnly, const QString &folder);
     // The unnamed draft with this id, read from <drafts>/<id>/draft.md unless
     // it is open already; null when there is no such draft.
     // Opens a draft by its id. One that cannot be opened is null, with why
@@ -282,6 +286,9 @@ signals:
     // Text recovery held since the launch came back when its path, opened
     // again, led to its own file: the document is as restore() makes it.
     void heldRestored(Document *document, DocumentStore::Recovered how);
+    // A document of parch's own was saved as a file, and is an ordinary
+    // document now, kept as any other is.
+    void scratchNamed(Document *document);
     // Another program renamed or moved an open document's file, within its
     // folder or into another watched one, and the document followed it,
     // keeping its identity, text, undo, history and recovery. A file moved

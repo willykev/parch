@@ -276,6 +276,18 @@ void PreviewResources::loaded(const QString &key, quint64 generation, const QIma
     emit changed(key);
 }
 
+void PreviewResources::reread(const QString &path)
+{
+    const QString key = QStringLiteral("parch:image/%1").arg(digest(path));
+    const auto at = m_entries.find(key);
+    if (at == m_entries.end()) return;
+    at->waiting = true;
+    const quint64 generation = m_generation;
+    QtConcurrent::run(&m_pool, readFile, path).then(this, [this, key, generation](const Loaded &loaded) {
+        this->loaded(key, generation, loaded.image, loaded.error);
+    });
+}
+
 void PreviewResources::keepOnly(const QSet<QString> &keys)
 {
     for (auto it = m_entries.begin(); it != m_entries.end();) {

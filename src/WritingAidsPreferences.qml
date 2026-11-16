@@ -3,9 +3,9 @@ import QtQuick.Templates as T
 import Parch
 
 // The writing aids, as a section of the Preferences dialog: whether spelling
-// is checked, with what the dictionary is or why there is none, and what
-// focus mode keeps bright. Each choice applies at once, in every window, and
-// is kept.
+// is checked, with what the dictionary is or why there is none, what focus
+// mode keeps bright and how much it dims the rest. Each choice applies at
+// once, in every window, and is kept.
 PreferenceSection {
     id: section
 
@@ -65,6 +65,41 @@ PreferenceSection {
                 text: qsTr("The paragraph")
                 checked: settings.focusUnit === "paragraph"
                 onToggled: settings.setFocusUnit("paragraph")
+            }
+        }
+    }
+
+    // How far the rest is dimmed: a group of its own, so that its choices
+    // and the ones above are chosen apart.
+    PreferenceRow {
+        width: parent.width
+        label: qsTr("Dimming")
+
+        Column {
+            width: parent.width
+            spacing: Math.round(theme.fontSize / 4)
+
+            Note { text: qsTr("Dimmed text always stays readable against the background.") }
+
+            Choice {
+                objectName: "focusDimOff"
+                text: qsTr("Off")
+                checked: settings.focusDimming === "off"
+                onToggled: settings.setFocusDimming("off")
+            }
+
+            Choice {
+                objectName: "focusDimLight"
+                text: qsTr("Light")
+                checked: settings.focusDimming === "light"
+                onToggled: settings.setFocusDimming("light")
+            }
+
+            Choice {
+                objectName: "focusDimStrong"
+                text: qsTr("Strong")
+                checked: settings.focusDimming === "strong"
+                onToggled: settings.setFocusDimming("strong")
             }
         }
     }

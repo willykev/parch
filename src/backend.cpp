@@ -22,6 +22,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QPointer>
 #include <QRegularExpression>
@@ -35,8 +36,9 @@ namespace {
 // neither its file nor anywhere else the writer can see.
 bool asksBeforeClosing(const Document *document)
 {
-    // A document with no text of its own has none to lose.
-    if (document->isTextless()) return false;
+    // A document with no text of its own has none to lose, and parch's own
+    // text, whose copy could not be saved, has nothing it was to keep.
+    if (document->isTextless() || document->isScratch()) return false;
     return document->state() == Document::State::SaveFailed || document->state() == Document::State::Conflict;
 }
 
@@ -208,6 +210,8 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
         const QString line = recoveredLine(how, {document->title()});
         if (!line.isEmpty()) inform(tr("Restored from recovery"), line);
     });
+    // parch's own text saved as a file is kept from then on as any file is.
+    connect(m_store.get(), &DocumentStore::scratchNamed, this, &Backend::watch);
     // A file saved, or a draft named, is the newest recent file.
     connect(m_store.get(), &DocumentStore::documentSaved, this, [this](Document *document) {
         if (!document->isDraft()) m_recentFiles->note(document->path());
@@ -351,6 +355,7 @@ void Backend::addCommands()
                           [this](WindowContext *) { m_settings->setLiveFormatting(!m_settings->liveFormatting()); });
     m_commands->setAction(QStringLiteral("clearRecent"), inWindow(&Backend::clearRecent));
     m_commands->setAction(QStringLiteral("userGuide"), inWindow(&Backend::openUserGuide));
+    m_commands->setAction(QStringLiteral("markdownGuide"), inWindow(&Backend::openMarkdownGuide));
 }
 RecentFiles *Backend::recentFiles() const { return m_recentFiles.get(); }
 ReadingPositions *Backend::readingPositions() const { return m_positions.get(); }
@@ -1281,8 +1286,9 @@ void Backend::giveUp(WindowContext *window, Document *document)
 
 bool Backend::keepText(Document *document, QString *reason)
 {
-    // A document with no text of its own has none to keep, and recovery is not touched.
-    if (document->isTextless()) return true;
+    // A document with no text of its own has none to keep, and recovery is
+    // not touched; parch's own text is never kept.
+    if (document->isTextless() || document->isScratch()) return true;
     switch (document->state()) {
     case Document::State::Clean:
     case Document::State::ReadOnly:
@@ -1393,6 +1399,28 @@ void Backend::chooseSettingsFiles(const QString &purpose)
                              {QStringLiteral("*.csl")}, false);
     else if (purpose == u"libraryRoot")
         m_files->askForFiles(window, purpose, tr("Choose the library root"), {}, {}, false);
+}
+
+void Backend::openMarkdownGuide()
+{
+    clearNotice();
+    WindowContext *window = activeWindow();
+    if (!window) return;
+    // One guide at a time: the tab that shows it comes to the front, as it is.
+    if (m_markdownGuide && m_markdownGuide->isScratch() && m_store->documents().contains(m_markdownGuide)) {
+        showDocument(window, m_markdownGuide)->raise();
+        return;
+    }
+    // parch's resources are in memory: reading them waits on no disk.
+    const QString folder = QString::fromLatin1(MarkdownGuideFolder);
+    QFile file(folder + QStringLiteral("/markdown-guide.md"));
+    if (!file.open(QIODevice::ReadOnly)) return;
+    m_markdownGuide = m_store->newScratch(tr("Markdown guide"), QString::fromUtf8(file.readAll()), false, folder);
+    // The text and what it reads as, side by side, from the top.
+    WindowContext *shown = showDocument(window, m_markdownGuide);
+    shown->tabs()->setActiveMode(TabModel::Split);
+    shown->focusText();
+    shown->raise();
 }
 
 void Backend::setSpellchecking(bool on)

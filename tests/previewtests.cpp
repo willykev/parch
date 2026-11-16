@@ -9,11 +9,13 @@
 #include "documentsettingsstore.h"
 #include "editorbinding.h"
 #include "editordecorations.h"
+#include "focusmode.h"
 #include "mdinclude.h"
 #include "mdtree.h"
 #include "preview.h"
 #include "previewbuilder.h"
 #include "previewresources.h"
+#include "previewwatch.h"
 #include "remotefetcher.h"
 #include "renderservice.h"
 #include "rendertesting.h"
@@ -1315,10 +1317,16 @@ void viewsShowTheTextThePreviewOrBoth()
     QVERIFY(w.surface->width() < room * 0.8);
     QVERIFY(qAbs(w.surface->x() - (room - w.surface->width()) / 2) <= 1);
     QVERIFY2(everyVisibleItemFitsWithin(w.window, &problems), qPrintable(problems.join("; ")));
-    // What formats the text needs the text in view: the toolbar's buttons wait.
+    // What formats the text needs the text in view: the toolbar is hidden,
+    // and the room it takes is kept, so that the preview stays where it is.
+    QQuickItem *toolbar = w.shell.item(QStringLiteral("toolbar"));
     QQuickItem *bold = w.shell.item(QStringLiteral("toolbar-bold"));
-    QVERIFY(bold && bold->isVisible());
-    QVERIFY(!bold->isEnabled());
+    QVERIFY(toolbar && bold);
+    QVERIFY(!toolbar->isVisible());
+    QVERIFY(!bold->isVisible());
+    QVERIFY(toolbar->height() > 0);
+    QVERIFY(w.shell.settings()->showToolbar());
+    const qreal readingTop = w.previewPane->mapToScene(QPointF(0, 0)).y();
     w.shot("reading");
 
     // Back to the source, where nothing is built while the preview is out of sight.
@@ -1326,7 +1334,9 @@ void viewsShowTheTextThePreviewOrBoth()
     QTRY_VERIFY(!w.previewPane->isVisible());
     QVERIFY(w.editorPane->isVisible());
     QCOMPARE(w.editorPane->width(), room);
-    QVERIFY(bold->isEnabled());
+    QVERIFY(toolbar->isVisible());
+    QVERIFY(bold->isVisible() && bold->isEnabled());
+    QCOMPARE(w.editorPane->mapToScene(QPointF(0, 0)).y(), readingTop);
     const int updates = w.preview->updates();
     w.document->buffer()->replace({2, 0}, QStringLiteral("x"));
     QTest::qWait(Preview::UpdateDelayMs + 150);
@@ -3214,7 +3224,8 @@ void focusModeDimsTheTextAlone()
     QTest::keyClick(w.window, Qt::Key_D, Qt::ControlModifier | Qt::ShiftModifier);
     QVERIFY(w.window->property("focusMode").toBool());
     QVERIFY(decorations->focusing());
-    QCOMPARE(w.editor->property("color").value<QColor>(), theme.muted());
+    QCOMPARE(w.editor->property("color").value<QColor>(),
+             FocusMode::dimmed(theme.foreground(), theme.background(), FocusMode::Strength::Strong));
     QTest::qWait(2 * Preview::UpdateDelayMs);
     QCOMPARE(w.surface->property("color").value<QColor>(), reading);
     QCOMPARE(w.preview->textDocument()->toHtml(), html);
@@ -3246,7 +3257,8 @@ void focusModeDimsTheTextAlone()
     w.run("viewSource");
     QTRY_VERIFY(w.editorPane->isVisible());
     QVERIFY(decorations->focusing());
-    QCOMPARE(w.editor->property("color").value<QColor>(), theme.muted());
+    QCOMPARE(w.editor->property("color").value<QColor>(),
+             FocusMode::dimmed(theme.foreground(), theme.background(), FocusMode::Strength::Strong));
 }
 
 void distractionFreeWritingKeepsEachView()
@@ -3360,11 +3372,13 @@ void distractionFreeWritingKeepsEachView()
     QTRY_VERIFY(!w.editorPane->isVisible());
     w.preview->showSource(int(text.indexOf(QStringLiteral("Paragraph 77 "))));
     QTRY_COMPARE(topLine(w).left(13), QStringLiteral("Paragraph 77 "));
-    // F11 brings everything back around the preview, where it was.
+    // F11 brings everything back around the preview, where it was, but the
+    // toolbar, which the preview alone never shows.
     QTest::keyClick(w.window, Qt::Key_F11);
     QVERIFY(!w.window->property("distractionFree").toBool());
-    for (const char *name : {"header", "toolbar", "statusLine", "library"})
+    for (const char *name : {"header", "statusLine", "library"})
         QTRY_VERIFY2(w.shell.item(QString::fromLatin1(name))->isVisible(), name);
+    QVERIFY(!w.shell.item(QStringLiteral("toolbar"))->isVisible());
     QCOMPARE(w.tabs()->activeMode(), TabModel::Reading);
     QTRY_COMPARE(topLine(w).left(13), QStringLiteral("Paragraph 77 "));
     QTRY_VERIFY(w.surface->hasActiveFocus());
@@ -3677,6 +3691,102 @@ void documentSettingsReachThePreview()
     QVERIFY(!shows(QStringLiteral("John Doe, Writing")));
     QCOMPARE(w.document->buffer()->text(), text);
     w.shot("citations");
+}
+
+void previewFollowsFilesOnDisk()
+{
+    // What the text depends on is watched: a file it includes, its
+    // bibliography, its style file and its pictures, changed on disk, are
+    // shown changed with no edit, and only the parts that use them are
+    // built again.
+    QTemporaryDir made;
+    QVERIFY(made.isValid());
+    const QString folder = QFileInfo(made.path()).canonicalFilePath();
+    const QString chapter = folder + QStringLiteral("/chapter.md");
+    const QString refs = folder + QStringLiteral("/refs.bib");
+    const QString style = folder + QStringLiteral("/style.csl");
+    const QString picture = folder + QStringLiteral("/picture.png");
+    const auto bundled = [](const char *name) {
+        QFile file(QStringLiteral(":/csl/") + QLatin1String(name));
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    writeFile(chapter, "Chapter words, first.\n");
+    writeFile(refs, references);
+    writeFile(style, bundled("apa.csl"));
+    writeFile(picture, pngOf(80, 40, Qt::darkRed));
+    const QString path = folder + QStringLiteral("/follows.md");
+    const QString text = QStringLiteral("---\nbibliography: refs.bib\ncsl: style.csl\n---\n\n# Follows\n\n"
+                                        "As shown [@doe2006].\n\nchapter.md\n\n![A picture](picture.png)\n\nThe end.\n");
+    writeFile(path, text.toUtf8());
+    ShellOptions options;
+    options.files = {path};
+    PreviewWindow w(QString(), 1280, options);
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    w.run("viewSplit");
+    QVERIFY(w.settled());
+    const auto shows = [&](const QString &needle) {
+        const QStringList lines = w.lines();
+        return std::any_of(lines.cbegin(), lines.cend(), [&](const QString &line) { return line.contains(needle); });
+    };
+    // The width of the picture as it is shown.
+    const auto pictureWidth = [&] {
+        for (QTextBlock block = w.preview->textDocument()->begin(); block.isValid(); block = block.next())
+            for (auto it = block.begin(); !it.atEnd(); ++it) {
+                const QTextCharFormat format = it.fragment().charFormat();
+                if (format.isImageFormat() && format.toImageFormat().name().startsWith(QLatin1String("parch:image/")))
+                    return format.toImageFormat().width();
+            }
+        return -1.0;
+    };
+    const Revision revision = w.document->buffer()->revision();
+    QTRY_COMPARE(pictureWidth(), 80.0);
+    QVERIFY(w.settled());
+    QVERIFY2(shows(QStringLiteral("As shown (Doe, 2006).")), qPrintable(w.lines().join(u'|')));
+    QVERIFY(shows(QStringLiteral("Chapter words, first.")));
+    QVERIFY(w.lines().contains(QStringLiteral("Doe, J. (2006). Writing with examples. Example Press.")));
+    QTRY_COMPARE(QSet<QString>(w.preview->watchedFiles().cbegin(), w.preview->watchedFiles().cend()),
+                 (QSet<QString>{chapter, refs, style, picture}));
+
+    // The included file: its part alone.
+    int built = w.preview->sectionsBuilt();
+    writeFile(chapter, "Chapter words, second.\n");
+    QTRY_VERIFY2(shows(QStringLiteral("Chapter words, second.")), qPrintable(w.lines().join(u'|')));
+    QVERIFY(w.settled());
+    QCOMPARE(w.preview->sectionsBuilt() - built, 1);
+
+    // The bibliography: the entry alone, since the citation reads as it did.
+    built = w.preview->sectionsBuilt();
+    writeFile(refs, QByteArray(references).replace("Writing with examples", "Writing with more examples"));
+    QTRY_VERIFY2(w.lines().contains(QStringLiteral("Doe, J. (2006). Writing with more examples. Example Press.")),
+                 qPrintable(w.lines().join(u'|')));
+    QVERIFY(w.settled());
+    QCOMPARE(w.preview->sectionsBuilt() - built, 1);
+
+    // The style: the paragraph that cites and the entry.
+    built = w.preview->sectionsBuilt();
+    writeFile(style, bundled("ieee.csl"));
+    QTRY_VERIFY2(shows(QStringLiteral("As shown [1].")), qPrintable(w.lines().join(u'|')));
+    QVERIFY(w.settled());
+    QCOMPARE(w.preview->sectionsBuilt() - built, 2);
+
+    // The picture: the section that shows it, once the new one is read.
+    built = w.preview->sectionsBuilt();
+    writeFile(picture, pngOf(120, 60, Qt::darkBlue));
+    QTRY_COMPARE(pictureWidth(), 120.0);
+    QVERIFY(w.settled());
+    QCOMPARE(w.preview->sectionsBuilt() - built, 1);
+
+    // A file that goes is seen to go.
+    QVERIFY(QFile::remove(chapter));
+    QTRY_VERIFY2(!shows(QStringLiteral("Chapter words")), qPrintable(w.lines().join(u'|')));
+    QCOMPARE(w.document->buffer()->revision(), revision);
+    QCOMPARE(w.document->buffer()->text(), text);
+
+    // However many pictures a text names, the watch is bounded.
+    QString many;
+    for (int i = 0; i < PreviewWatch::MaxFiles + 40; ++i) many += QStringLiteral("![](many-%1.png)\n\n").arg(i);
+    w.document->buffer()->replace({int(text.size()), 0}, many);
+    QTRY_COMPARE(w.preview->watchedFiles().size(), PreviewWatch::MaxFiles);
 }
 
 } // namespace PreviewTests

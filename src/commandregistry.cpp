@@ -114,6 +114,7 @@ QList<CommandInfo> standardCommands()
         command("shortcuts", "Keyboard shortcuts…", "Settings"),
         command("vimKeys", "Turn Vim keys on or off", "Settings"),
         command("userGuide", "User guide", "Help", {QStringLiteral("F1")}),
+        command("markdownGuide", "Markdown guide", "Help"),
         editing("bold", "Bold", "Format", {QStringLiteral("Ctrl+B")}),
         editing("italic", "Italic", "Format", {QStringLiteral("Ctrl+I")}),
         editing("strikethrough", "Strikethrough", "Format", {QStringLiteral("Ctrl+Shift+X")}),

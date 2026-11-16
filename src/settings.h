@@ -69,6 +69,8 @@ class Settings : public QObject {
     Q_PROPERTY(bool remoteImages READ remoteImages NOTIFY changed)
     // What focus mode keeps bright: "sentence" or "paragraph".
     Q_PROPERTY(QString focusUnit READ focusUnit NOTIFY changed)
+    // How strongly focus mode dims the rest: "off", "light" or "strong".
+    Q_PROPERTY(QString focusDimming READ focusDimming NOTIFY changed)
     // Whether the editor styles its Markdown as it is written; on by default.
     Q_PROPERTY(bool liveFormatting READ liveFormatting NOTIFY changed)
     // How much history keeps: at most historyVersions unnamed versions of
@@ -128,6 +130,9 @@ public:
     QString focusUnit() const { return m_focusUnit; }
     // Takes "sentence" or "paragraph"; anything else is ignored.
     Q_INVOKABLE void setFocusUnit(const QString &unit);
+    QString focusDimming() const { return m_focusDimming; }
+    // Takes "off", "light" or "strong"; anything else is ignored.
+    Q_INVOKABLE void setFocusDimming(const QString &strength);
     bool liveFormatting() const { return m_liveFormatting; }
     Q_INVOKABLE void setLiveFormatting(bool on);
     int historyVersions() const { return m_historyVersions; }
@@ -226,6 +231,7 @@ private:
     bool m_remoteImages = true;
     std::optional<bool> m_spellcheck;
     QString m_focusUnit = QStringLiteral("sentence");
+    QString m_focusDimming = QStringLiteral("strong");
     bool m_liveFormatting = true;
     int m_historyVersions = 100;
     int m_historyDays = 30;

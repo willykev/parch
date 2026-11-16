@@ -69,6 +69,7 @@ QString styleTitle(const QString &style)
 
 QString folderOfDocument(const Document *document)
 {
+    if (document && document->isScratch()) return document->scratchFolder();
     return document && !document->isDraft() ? PathText::folderOf(document->path()) : QString();
 }
 
@@ -117,6 +118,12 @@ Dialect::Layers DocumentSettingsStore::layersFor(const Document *document) const
         layers.application = m_store.application();
         return layers;
     }
+    // One of parch's own, such as its guide, reads as parch's defaults,
+    // whatever the writer's are, unless it was given settings of its own.
+    if (document->isScratch()) {
+        layers.document = m_scratch.value(document->id());
+        return layers;
+    }
     const DocumentSettings::Saved saved =
         m_store.savedFor(document->id(), document->isDraft() ? QString() : document->path(), folders());
     layers.document = saved.document;
@@ -151,7 +158,11 @@ void DocumentSettingsStore::watch(Document *document)
     // A document that moves, or a draft that is named, may come into
     // another library folder.
     connect(document, &Document::changed, this, [this, document] { apply(document); });
-    connect(document, &QObject::destroyed, this, [this, document] { m_documents.removeAll(document); });
+    connect(document, &QObject::destroyed, this,
+            [this, document, id = document->id()] {
+                m_documents.removeAll(document);
+                m_scratch.remove(id);
+            });
     apply(document);
 }
 
@@ -232,6 +243,12 @@ bool DocumentSettingsStore::edit(Document *document, const QString &scope,
         Dialect::Layer layer = m_store.application();
         if (!change(layer)) return false;
         kept = m_store.setApplication(layer, &error);
+    } else if (scope == u"document" && document && document->isScratch()) {
+        // Kept for as long as parch runs, and never written.
+        Dialect::Layer layer = m_scratch.value(document->id());
+        if (!change(layer)) return false;
+        m_scratch.insert(document->id(), layer);
+        kept = true;
     } else if (scope == u"document") {
         if (!document) return false;
         Dialect::Layer layer = m_store.document(document->id());

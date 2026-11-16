@@ -7,6 +7,7 @@
 #include "caretrest.h"
 #include "citationtests.h"
 #include "settingstests.h"
+#include "guidetests.h"
 #include "cli.h"
 #include "diskfile.h"
 #include "document.h"
@@ -317,6 +318,7 @@ private slots:
     void markdownDefinitionLists() { MarkdownTests::definitionLists(); }
     void markdownFootnotes() { MarkdownTests::footnotes(); }
     void markdownCitations() { MarkdownTests::citations(); }
+    void markdownCitationPrefixes() { MarkdownTests::citationPrefixes(); }
     void markdownComments() { MarkdownTests::comments(); }
     void markdownRawHtmlPolicy() { MarkdownTests::rawHtmlPolicy(); }
     void markdownMath() { MarkdownTests::math(); }
@@ -705,6 +707,13 @@ private slots:
     void distractionFreeWritingKeepsEachView() { PreviewTests::distractionFreeWritingKeepsEachView(); }
     void citationsReadAsTheirStyleWordsThem() { PreviewTests::citationsReadAsTheirStyleWordsThem(); }
     void documentSettingsReachThePreview() { PreviewTests::documentSettingsReachThePreview(); }
+    void previewFollowsFilesOnDisk() { PreviewTests::previewFollowsFilesOnDisk(); }
+    // The Markdown guide, written in guidetests.cpp.
+    void markdownGuideOpensBesideItsPreview() { GuideTests::markdownGuideOpensBesideItsPreview(); }
+    void markdownGuideRendersEveryPart() { GuideTests::markdownGuideRendersEveryPart(); }
+    void markdownGuideKeepsNothingOnDisk() { GuideTests::markdownGuideKeepsNothingOnDisk(); }
+    void markdownGuideClosesWithoutAsking() { GuideTests::markdownGuideClosesWithoutAsking(); }
+    void markdownGuideIsSavedAsACopy() { GuideTests::markdownGuideIsSavedAsACopy(); }
     // Vim keys, written in vimtests.cpp.
     void undoStepsJoinIntoOneChange() { VimTests::undoStepsJoinIntoOneChange(); }
     void vimKeysAreOffUntilChosenAndKept() { VimTests::vimKeysAreOffUntilChosenAndKept(); }
@@ -754,6 +763,8 @@ private slots:
     void spellingTurnsOnAndOff();
     void focusFindsTheSentenceOrParagraph();
     void focusModeDimsAllButTheCaretsPart();
+    void focusDimmingKeepsTextReadable();
+    void focusDimmingIsAPreference();
     void distractionFreeWritingKeepsTheView();
     void writingAidsAreNamedAndReachable();
     void bindingOutlivesItsEditor();
@@ -10793,8 +10804,9 @@ void ParchTests::focusFindsTheSentenceOrParagraph()
 
 void ParchTests::focusModeDimsAllButTheCaretsPart()
 {
-    // Focus mode draws the text in the theme's muted colour and the sentence
-    // or paragraph with the caret in its foreground; it follows the caret,
+    // Focus mode draws the text dimmed, its foreground blended into the
+    // background, and the sentence or paragraph with the caret in its
+    // foreground; it follows the caret,
     // formatting again only the parts it leaves and enters, and leaves the
     // text, the caret and undo as they were.
     EditorFixture fixture;
@@ -10811,7 +10823,10 @@ void ParchTests::focusModeDimsAllButTheCaretsPart()
     QCOMPARE(view.editor->property("color").value<QColor>(), theme.foreground());
     view.pane->setProperty("focusMode", true);
     QVERIFY(decorations->focusing());
-    QCOMPARE(view.editor->property("color").value<QColor>(), theme.muted());
+    const auto dimmed = [&] {
+        return FocusMode::dimmed(theme.foreground(), theme.background(), FocusMode::Strength::Strong);
+    };
+    QCOMPARE(view.editor->property("color").value<QColor>(), dimmed());
     QCOMPARE(block(0), QStringList{QStringLiteral("5+19:%1").arg(bright())});
     QCOMPARE(block(2), QStringList{});
     // Into another paragraph: the two formatted again, no others.
@@ -10841,7 +10856,7 @@ void ParchTests::focusModeDimsAllButTheCaretsPart()
     QCOMPARE(block(2), QStringList{});
     // A theme's new colours are followed.
     replaceTheme(fixture.themeFolder.path(), "light", "#F8F1E3", "#342B27", "#A7353A");
-    QTRY_COMPARE(view.editor->property("color").value<QColor>(), theme.muted());
+    QTRY_COMPARE(view.editor->property("color").value<QColor>(), dimmed());
     QTRY_COMPARE(block(0), QStringList{QStringLiteral("0+24:#342b27")});
     // Off: no formatting at all, and the text as typed, with its undo.
     view.pane->setProperty("focusMode", false);
@@ -10851,6 +10866,105 @@ void ParchTests::focusModeDimsAllButTheCaretsPart()
     QCOMPARE(document->buffer()->text(), QString(source).insert(end, QStringLiteral(" More")));
     view.binding->undo();
     QCOMPARE(document->buffer()->text(), source);
+}
+
+void ParchTests::focusDimmingKeepsTextReadable()
+{
+    // Focus mode dims by blending the text's colour into the background, and
+    // never so far that it reads at less than 3:1: in every theme Omarchy
+    // has installed here, read where they are and never changed, and in the
+    // dark and light palettes of the tests' own, which are all there is
+    // where Omarchy is not.
+    QStringList palettes;
+    for (const QString &folder : themesFolders())
+        for (const QFileInfo &theme : QDir(folder).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+            if (QFileInfo::exists(theme.filePath() + QStringLiteral("/colors.toml")))
+                palettes << theme.filePath() + QStringLiteral("/colors.toml");
+    const QString fixtures = QStringLiteral(PARCH_SOURCE_DIR "/tests/fixtures/themes");
+    for (const QString &name : {QStringLiteral("dusk"), QStringLiteral("linen")})
+        palettes << fixtures + u'/' + name + QStringLiteral("/colors.toml");
+    bool dark = false, light = false;
+    for (const QString &palette : std::as_const(palettes)) {
+        QTemporaryDir copy;
+        writeFile(copy.filePath(QStringLiteral("theme/colors.toml")), readFile(palette));
+        const Theme theme(copy.path());
+        const QByteArray name = palette.toUtf8();
+        const QColor text = theme.foreground(), paper = theme.background();
+        (theme.dark() ? dark : light) = true;
+        const QColor strong = FocusMode::dimmed(text, paper, FocusMode::Strength::Strong);
+        const QColor gentle = FocusMode::dimmed(text, paper, FocusMode::Strength::Light);
+        QCOMPARE(FocusMode::dimmed(text, paper, FocusMode::Strength::Off), text);
+        // The default strength, and the lighter one, read at 3:1 or better.
+        QVERIFY2(contrastRatio(strong, paper) >= 3.0, name + " " + strong.name().toUtf8());
+        QVERIFY2(contrastRatio(gentle, paper) >= contrastRatio(strong, paper), name);
+        // Text that reads well is dimmed visibly: half way to the floor at least.
+        if (contrastRatio(text, paper) >= 4.5) {
+            QVERIFY2(contrastRatio(strong, paper) <= (contrastRatio(text, paper) + 3.0) / 2, name);
+            QVERIFY2(gentle != text, name);
+        }
+    }
+    QVERIFY(dark && light);
+    // The default is the strong one.
+    QTemporaryDir root;
+    QCOMPARE(Settings(root.filePath(QStringLiteral("settings.json"))).focusDimming(), QStringLiteral("strong"));
+    // A theme whose text reads at less than 3:1 already is not dimmed further.
+    QCOMPARE(FocusMode::dimmed(QColor("#555555"), QColor("#2a2a2a"), FocusMode::Strength::Strong), QColor("#555555"));
+}
+
+void ParchTests::focusDimmingIsAPreference()
+{
+    // Preferences choose how strongly focus mode dims: off, light or strong.
+    // Off leaves the text its own colour while focus mode stays on, and the
+    // choice is kept.
+    QTemporaryDir files;
+    const QString file = files.filePath(QStringLiteral("dim.md"));
+    writeFile(file, "One sentence. Another one.\n\nA paragraph.\n");
+    ShellFixture shell({.files = {file}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    const Theme &theme = *shell.theme;
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    auto *decorations = shell.item(QStringLiteral("editorPane"))->findChild<EditorDecorations *>(QStringLiteral("decorations"));
+    QVERIFY(editor && decorations);
+    const auto dimmed = [&](FocusMode::Strength strength) {
+        return FocusMode::dimmed(theme.foreground(), theme.background(), strength);
+    };
+    QVERIFY(runCommand(window, "focusMode"));
+    QTRY_VERIFY(decorations->focusing());
+    QCOMPARE(editor->property("color").value<QColor>(), dimmed(FocusMode::Strength::Strong));
+
+    QVERIFY(runCommand(window, "preferences"));
+    QObject *dialog = shell.object(QStringLiteral("preferencesDialog"));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QQuickItem *off = shell.item(QStringLiteral("focusDimOff"));
+    QQuickItem *gentle = shell.item(QStringLiteral("focusDimLight"));
+    QVERIFY(off && gentle && shell.item(QStringLiteral("focusDimStrong")));
+    QVERIFY(shell.item(QStringLiteral("focusDimStrong"))->property("checked").toBool());
+    off->forceActiveFocus(Qt::TabFocusReason);
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(shell.settings()->focusDimming(), QStringLiteral("off"));
+    // Focus mode is still on, and still follows the caret, but nothing is dimmed.
+    QVERIFY(window->property("focusMode").toBool());
+    QVERIFY(decorations->focusing());
+    QTRY_COMPARE(editor->property("color").value<QColor>(), theme.foreground());
+    // The arrows choose among the strengths, as among the units.
+    QCOMPARE(window->activeFocusItem(), off);
+    QTest::keyClick(window, Qt::Key_Down);
+    QTRY_VERIFY(gentle->property("checked").toBool());
+    QTRY_COMPARE(shell.settings()->focusDimming(), QStringLiteral("light"));
+    QCOMPARE(shell.settings()->focusUnit(), QStringLiteral("sentence"));
+    QTRY_COMPARE(editor->property("color").value<QColor>(), dimmed(FocusMode::Strength::Light));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    // Kept.
+    QTRY_VERIFY(readFile(shell.paths().settingsFile()).contains("\"focusDimming\": \"light\""));
+    QCOMPARE(Settings(shell.paths().settingsFile()).focusDimming(), QStringLiteral("light"));
+    // Leaving focus mode and coming back keeps the strength.
+    QVERIFY(runCommand(window, "focusMode"));
+    QTRY_COMPARE(editor->property("color").value<QColor>(), theme.foreground());
+    QVERIFY(runCommand(window, "focusMode"));
+    QTRY_COMPARE(editor->property("color").value<QColor>(), dimmed(FocusMode::Strength::Light));
 }
 
 void ParchTests::distractionFreeWritingKeepsTheView()
@@ -10994,10 +11108,12 @@ void ParchTests::writingAidsAreNamedAndReachable()
             QTest::keyClick(window, Qt::Key_Tab);
         }
         // The keys' section, and then Markdown and citations for every document.
-        QCOMPARE(reached.mid(0, 5),
-                 (QStringList{"spellingCheck", "focusSentence", "focusParagraph", "vimKeysChoice", "profileChoice"}));
+        QCOMPARE(reached.mid(0, 8),
+                 (QStringList{"spellingCheck", "focusSentence", "focusParagraph", "focusDimOff", "focusDimLight",
+                              "focusDimStrong", "vimKeysChoice", "profileChoice"}));
         QCOMPARE(reached.last(), QStringLiteral("closePreferences"));
-        for (const char *name : {"spellingCheck", "focusSentence", "focusParagraph", "closePreferences"}) {
+        for (const char *name : {"spellingCheck", "focusSentence", "focusParagraph", "focusDimOff", "focusDimLight",
+                                 "focusDimStrong", "closePreferences"}) {
             QAccessibleInterface *access = QAccessible::queryAccessibleInterface(shell.item(QString::fromLatin1(name)));
             QVERIFY2(access && !access->text(QAccessible::Name).isEmpty(), name);
         }

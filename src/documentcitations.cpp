@@ -328,7 +328,11 @@ Formatted format(const md::Document &document, const Setup &setup)
                 CitationItemSpec item;
                 item.key = part->label;
                 item.locator = part->text;
-                item.mode = part->marker == u'-' ? CslCite::Mode::SuppressAuthor : CslCite::Mode::Normal;
+                item.prefix = part->title;
+                // `[-@key]` leaves the author out; `@key` in the text names them there.
+                item.mode = part->marker == u'-'   ? CslCite::Mode::SuppressAuthor
+                            : part->marker == u'@' ? CslCite::Mode::AuthorInText
+                                                   : CslCite::Mode::Normal;
                 cluster.items.append(item);
                 citation.keys.append(part->label);
             }

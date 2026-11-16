@@ -1299,13 +1299,117 @@ void citations()
         // Not citations: code, a link whose text starts with @, an escaped bracket.
         {"`[p. 1][#Doe]` and `[@doe]`\n\n[#Doe]: D.", "<p><code>[p. 1][#Doe]</code> and <code>[@doe]</code></p>\n"},
         {"[@handle](https://example.org/handle)", "<p><a href=\"https://example.org/handle\">@handle</a></p>\n"},
-        {"\\[@doe] and [not @doe]\n\n[#doe]: D.", "<p>[@doe] and [not @doe]</p>\n"},
+        {"\\[@doe] and [not@doe]\n\n[#doe]: D.", "<p>[@doe] and [not@doe]</p>\n"},
         {"[@]", "<p>[@]</p>\n"},
     };
     CHECK_CASES(literal, blockWriter);
     // Standard reads `[#key]: text` as an ordinary link definition.
     QCOMPARE(html(QStringLiteral("[x][#k]\n\n[#k]: /url"), standard()), QStringLiteral("<p><a href=\"/url\">x</a></p>\n"));
     QCOMPARE(html(QStringLiteral("[@doe]"), standard()), QStringLiteral("<p>[@doe]</p>\n"));
+}
+
+void citationPrefixes()
+{
+    const QString works = QStringLiteral("\n\n[#doe99]: Doe.\n[#smith04]: Smith.\n");
+    // Words before a key are its prefix, item by item, and the locator
+    // after it stays where it was; each item's node starts at its `@`.
+    const md::Document group =
+        md::parse(QStringLiteral("Blah [see @doe99, pp. 33-35; also @smith04, chap. 1].") + works);
+    QVERIFY2(group.diagnostics.empty(), qPrintable(describe(group)));
+    const std::vector<const Node *> cites = all(group, NodeType::Citation);
+    QCOMPARE(cites.size(), size_t(3));
+    QCOMPARE(group.source(*cites[0]).toString(), QStringLiteral("[see @doe99, pp. 33-35; also @smith04, chap. 1]"));
+    QCOMPARE(cites[1]->label, QStringLiteral("doe99"));
+    QCOMPARE(cites[1]->title, QStringLiteral("see"));
+    QCOMPARE(cites[1]->text, QStringLiteral("pp. 33-35"));
+    QCOMPARE(group.source(*cites[1]).toString(), QStringLiteral("@doe99, pp. 33-35"));
+    QCOMPARE(group.source(0, cites[1]->open).toString(), QStringLiteral("@"));
+    QCOMPARE(group.source(0, cites[1]->target).toString(), QStringLiteral("doe99"));
+    QCOMPARE(cites[2]->label, QStringLiteral("smith04"));
+    QCOMPARE(cites[2]->title, QStringLiteral("also"));
+    QCOMPARE(cites[2]->text, QStringLiteral("chap. 1"));
+    QVERIFY(md::toHtml(group).startsWith(QStringLiteral(
+        "<p>Blah <span class=\"citation\">[see <a href=\"#cite-1\">1</a>, pp. 33-35; "
+        "also <a href=\"#cite-2\">2</a>, chap. 1]</span>.</p>")));
+
+    // One work, with a prefix, a suppressed author or both.
+    const md::Document one = md::parse(QStringLiteral("A [see @doe99] and [cf. -@smith04, p. 3].") + works);
+    QVERIFY2(one.diagnostics.empty(), qPrintable(describe(one)));
+    const std::vector<const Node *> single = all(one, NodeType::Citation);
+    QCOMPARE(single.size(), size_t(2));
+    QCOMPARE(single[0]->title, QStringLiteral("see"));
+    QCOMPARE(single[0]->marker, QChar());
+    QCOMPARE(one.source(0, single[0]->open).toString(), QStringLiteral("["));
+    QCOMPARE(one.source(0, single[0]->close).toString(), QStringLiteral("]"));
+    QCOMPARE(one.source(0, single[0]->target).toString(), QStringLiteral("doe99"));
+    QCOMPARE(single[1]->title, QStringLiteral("cf."));
+    QCOMPARE(single[1]->marker, QChar(u'-'));
+    QCOMPARE(single[1]->text, QStringLiteral("p. 3"));
+    QVERIFY(md::toHtml(one).startsWith(QStringLiteral(
+        "<p>A <span class=\"citation\">[see <a href=\"#cite-1\">1</a>]</span> and "
+        "<span class=\"citation\">[cf. <a href=\"#cite-2\">2</a>, p. 3]</span>.</p>")));
+
+    // A key nothing defines is still a citation inside brackets, and reported.
+    const md::Document missing = md::parse(QStringLiteral("See [see @nobody, p. 2]."));
+    QCOMPARE(count(missing, DiagnosticCode::MissingCitation), 1);
+    QVERIFY(!first(missing, NodeType::Citation)->resolved);
+    QCOMPARE(md::toHtml(missing), QStringLiteral("<p>See [see @nobody, p. 2].</p>\n"));
+
+    // In the text, `@key` names the author: only a key that is defined, so
+    // that a handle or a name after an @ stays text. Punctuation after the
+    // key ends it, and a locator in brackets may follow.
+    const md::Document inText = md::parse(QStringLiteral(
+        "@doe99 says so, and @smith04 [p. 33] agrees. So does @doe99.\n\nAsk @nobody or @doe99x.") + works);
+    QVERIFY2(inText.diagnostics.empty(), qPrintable(describe(inText)));
+    const std::vector<const Node *> named = all(inText, NodeType::Citation);
+    QCOMPARE(named.size(), size_t(3));
+    QCOMPARE(inText.source(*named[0]).toString(), QStringLiteral("@doe99"));
+    QCOMPARE(named[0]->marker, QChar(u'@'));
+    QCOMPARE(named[0]->label, QStringLiteral("doe99"));
+    QCOMPARE(named[0]->text, QString());
+    QCOMPARE(inText.source(0, named[0]->open).toString(), QStringLiteral("@"));
+    QCOMPARE(inText.source(0, named[0]->target).toString(), QStringLiteral("doe99"));
+    QCOMPARE(inText.source(*named[1]).toString(), QStringLiteral("@smith04 [p. 33]"));
+    QCOMPARE(named[1]->text, QStringLiteral("p. 33"));
+    QCOMPARE(inText.source(0, named[1]->close).toString(), QStringLiteral("]"));
+    QCOMPARE(inText.source(*named[2]).toString(), QStringLiteral("@doe99"));
+    QVERIFY(md::toHtml(inText).startsWith(QStringLiteral(
+        "<p><span class=\"citation\">[<a href=\"#cite-1\">1</a>]</span> says so, and "
+        "<span class=\"citation\">[<a href=\"#cite-2\">2</a>, p. 33]</span> agrees. So does "
+        "<span class=\"citation\">[<a href=\"#cite-1\">1</a>]</span>.</p>\n<p>Ask @nobody or @doe99x.</p>")));
+    // An external bibliography's keys count as defined.
+    md::Source source;
+    source.externalCitationKeys = {QStringLiteral("knuth84")};
+    const md::Document external = md::parse(QStringLiteral("As @knuth84 shows."), writer(), source);
+    QCOMPARE(all(external, NodeType::Citation).size(), size_t(1));
+    QCOMPARE(first(external, NodeType::Citation)->marker, QChar(u'@'));
+
+    // E-mail addresses, links and code stay as they were, defined keys or not.
+    const Case unchanged[] = {
+        {"Write to jane@doe99.org.\n\n[#doe99]: D.",
+         "<p>Write to <a href=\"mailto:jane@doe99.org\">jane@doe99.org</a>.</p>\n"},
+        {"[mail jane@doe99.org]\n\n[#doe99]: D.",
+         "<p>[mail <a href=\"mailto:jane@doe99.org\">jane@doe99.org</a>]</p>\n"},
+        {"[see @doe99](https://example.org)\n\n[#doe99]: D.",
+         "<p><a href=\"https://example.org\">see @doe99</a></p>\n"},
+        {"[@doe99 said](https://example.org)\n\n[#doe99]: D.",
+         "<p><a href=\"https://example.org\">@doe99 said</a></p>\n"},
+        {"[see @doe99][ref]\n\n[ref]: https://example.org\n[#doe99]: D.",
+         "<p><a href=\"https://example.org\">see @doe99</a></p>\n"},
+        {"[x-@doe99] and [see\\@doe99] and \\@doe99\n\n[#doe99]: D.",
+         "<p>[x-@doe99] and [see@doe99] and @doe99</p>\n"},
+        {"[see `@doe99`] and `@doe99` and [see ` @doe99 `]\n\n[#doe99]: D.",
+         "<p>[see <code>@doe99</code>] and <code>@doe99</code> and [see <code>@doe99</code>]</p>\n"},
+        {"<https://example.org/@doe99> and https://example.org/@doe99\n\n[#doe99]: D.",
+         "<p><a href=\"https://example.org/@doe99\">https://example.org/@doe99</a> and "
+         "<a href=\"https://example.org/@doe99\">https://example.org/@doe99</a></p>\n"},
+        // Every item of a group needs a key; and inside brackets that are
+        // no citation, `@key` stays text.
+        {"[a; b @doe99]\n\n[#doe99]: D.", "<p>[a; b @doe99]</p>\n"},
+    };
+    CHECK_CASES(unchanged, blockWriter);
+    // Standard Markdown has no citations at all.
+    QCOMPARE(html(QStringLiteral("[see @doe] and @doe"), standard()), QStringLiteral("<p>[see @doe] and @doe</p>\n"));
 }
 
 void comments()

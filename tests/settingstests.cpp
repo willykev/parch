@@ -831,12 +831,13 @@ void preferencesChooseForEveryDocument()
 void citationSuffixesAndSuppressedAuthors()
 {
     // A locator with a suffix after it, and `-@` for an author the text names
-    // already, alone or in a group; words before the `@key` make no citation.
+    // already, alone or in a group; a key's `@` that follows a word makes no
+    // citation, nor does a link.
     md::Source source;
     source.externalCitationKeys = {QStringLiteral("doe2006"), QStringLiteral("roe2010")};
     const md::Document document = md::parse(
         QStringLiteral("A [@doe2006, p. 23, emphasis added] and [-@roe2010] and [@doe2006; -@roe2010, ch. 2].\n"
-                       "Not: [see @doe2006], [x-@doe2006], [- @doe2006], [-@doe2006](url).\n"),
+                       "Not: [see@doe2006], [x-@doe2006], [-@doe2006](url).\n"),
         md::Options(), source);
     std::vector<const md::Node *> cites;
     std::function<void(const md::Node &)> collect = [&](const md::Node &node) {
@@ -872,6 +873,17 @@ void citationSuffixesAndSuppressedAuthors()
         DocumentCitations::format(formatted, DocumentCitations::prepare(choice));
     QCOMPARE(citationTexts(result),
              (QStringList{QStringLiteral("(Doe, 2006, p. 23, emphasis added)"), QStringLiteral("(2010)")}));
+
+    // A prefix before each key, and a key in the text that names its author
+    // there, reach the style as Pandoc gives them to a CSL processor.
+    md::Document prefixed = md::parse(
+        QStringLiteral("A [see @doe2006, p. 23; also -@roe2010]. As @doe2006 [p. 4] shows, and @roe2010 too.\n"),
+        md::Options(), source);
+    QVERIFY(prefixed.diagnostics.empty());
+    const DocumentCitations::Formatted words =
+        DocumentCitations::format(prefixed, DocumentCitations::prepare(choice));
+    QCOMPARE(citationTexts(words), (QStringList{QStringLiteral("(see Doe, 2006, p. 23; also 2010)"),
+                                                QStringLiteral("Doe (2006, p. 4)"), QStringLiteral("Roe (2010)")}));
 }
 
 void citationsAuthorDateInHtml()

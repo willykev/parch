@@ -329,6 +329,17 @@ public:
     // "libraryRoot" (a folder). The answer is settingsFilesChosen().
     Q_INVOKABLE void chooseSettingsFiles(const QString &purpose);
 
+    // Shows the Markdown guide in a tab of the active window, beside its
+    // preview: a document of parch's own (Document::isScratch()) whose
+    // examples can be edited and whose pictures, included file and
+    // bibliography are parch's resources. Nothing of it is kept, and closing
+    // it asks nothing; Save as writes a copy, which is then an ordinary
+    // document. A guide open already comes to the front as it is; once
+    // closed, it opens afresh.
+    Q_INVOKABLE void openMarkdownGuide();
+    // Where the guide finds what its examples name.
+    static constexpr const char *MarkdownGuideFolder = ":/guide";
+
 signals:
     void settingsFilesChosen(const QString &purpose, const QStringList &paths);
     void problemChanged();
@@ -482,6 +493,8 @@ private:
     std::unique_ptr<RenderService> m_render;
     std::function<bool(const QUrl &url)> m_linkOpener;
     RemoteFetcher *m_remoteFetcher = nullptr;
+    // The Markdown guide, while a tab shows it.
+    QPointer<Document> m_markdownGuide;
     // Declared last, so that it goes first and its copies end before the
     // documents they insert into do.
     std::unique_ptr<Attachments> m_attachments;

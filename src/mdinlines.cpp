@@ -108,6 +108,7 @@ public:
         if (st.writer() && o.superSubscript) special[int('^')] = true;
         if (o.math) special[int('$')] = true;
         if (o.autolinks) special[int(':')] = special[int('w')] = special[int('@')] = true;
+        if (o.citations) special[int('@')] = true;
     }
 
     void parse(const std::vector<Piece> &pieces, const InlineContext &context, std::vector<Node> &out);
@@ -157,6 +158,7 @@ private:
     bool closeNote(const Bracket &opener, int closePos);
     bool variable();
     bool pandocCitation();
+    bool inTextCitation();
     bool urlAutolink();
     bool wwwAutolink();
     int headingLabel(int *open, int *close);
@@ -549,7 +551,10 @@ void InlineParserPrivate::run()
         case u']': handled = closeBracket(); break;
         case u':': handled = urlAutolink(); break;
         case u'w': handled = wwwAutolink(); break;
-        case u'@': sawAt = true; break;
+        case u'@':
+            sawAt = true;
+            handled = inTextCitation();
+            break;
         }
         if (!handled) ++m_pos;
     }
@@ -1110,9 +1115,9 @@ bool InlineParserPrivate::openBracket()
     const char16_t next = start + 1 < m_len ? s[start + 1].unicode() : 0;
     const Options &o = st.options;
     if (next == u'%' && o.variables && variable()) return true;
-    // `[@key]`, and `[-@key]`, which leaves the author out.
-    const bool suppressed = next == u'-' && start + 2 < m_len && s[start + 2] == u'@';
-    if ((next == u'@' || suppressed) && o.citations && pandocCitation()) return true;
+    // `[@key]`, `[-@key]`, which leaves the author out, and `[see @key]`;
+    // `[^` is a note's and `[%` a variable's.
+    if (o.citations && next != u'^' && next != u'%' && pandocCitation()) return true;
     const bool note = next == u'^' && o.footnotes && st.writer();
     const int width = note ? 2 : 1;
     flush(start);
@@ -1174,20 +1179,28 @@ bool InlineParserPrivate::variable()
 
 // `[@key]`, `[@key, locator]` and `[@one; @two, locator]`, where what
 // follows a locator is a suffix (`[@key, p. 23, emphasis added]`), and
-// `[-@key]`, which leaves the author out, as Pandoc has them. Each item
-// starts with its `@key` (or `-@key`); words before it make no citation.
+// `[-@key]`, which leaves the author out, as Pandoc has them. Words before
+// an item's key are its prefix (`[see @one, p. 3; also @two]`). The key's
+// `@` (or `-@`) starts the item or follows white space, so that an e-mail
+// address is never one; every item needs a key, and a bracket followed by
+// `(` or `[` is a link.
 bool InlineParserPrivate::pandocCitation()
 {
     const int start = m_pos;
     int close = start + 1;
-    while (close < m_len && s[close] != u']' && s[close] != u'[' && s[close] != u'\n') ++close;
-    if (close >= m_len || s[close] != u']') return false;
+    bool anyAt = false;
+    while (close < m_len && s[close] != u']' && s[close] != u'[' && s[close] != u'\n') {
+        if (s[close] == u'@') anyAt = true;
+        ++close;
+    }
+    if (!anyAt || close >= m_len || s[close] != u']') return false;
     if (close + 1 < m_len && (s[close + 1] == u'(' || s[close + 1] == u'[')) return false;
 
     struct Item {
+        // The item's own source, from its `@` or `-@`; its prefix is before it.
         int start, end, at, keyEnd;
         bool suppressAuthor;
-        QString key, locator;
+        QString key, prefix, locator;
     };
     std::vector<Item> items;
     int i = start + 1;
@@ -1197,21 +1210,39 @@ bool InlineParserPrivate::pandocCitation()
         int a = i, b = itemEnd;
         while (a < b && s[a].isSpace()) ++a;
         while (b > a && s[b - 1].isSpace()) --b;
-        const bool suppress = a + 1 < b && s[a] == u'-' && s[a + 1] == u'@';
-        const int at = suppress ? a + 1 : a;
-        if (at >= b || s[at] != u'@') return false;
+        int at = -1;
+        bool suppress = false;
+        for (int p = a; p < b; ++p) {
+            if (s[p] != u'@') continue;
+            const bool dash = p > a && s[p - 1] == u'-';
+            const int marker = dash ? p - 1 : p;
+            if (marker == a || s[marker - 1].isSpace()) {
+                at = p;
+                suppress = dash;
+                break;
+            }
+        }
+        if (at < 0) return false;
+        const int marker = suppress ? at - 1 : at;
+        // A prefix is words: code, markup, math or an escape before the key
+        // could hold the key itself.
+        for (int p = a; p < marker; ++p) {
+            const char16_t c = s[p].unicode();
+            if (c == u'`' || c == u'<' || c == u'\\' || c == u'$') return false;
+        }
         int keyEnd = at + 1;
         while (keyEnd < b && !s[keyEnd].isSpace() && s[keyEnd] != u',') ++keyEnd;
         if (keyEnd == at + 1) return false;
         int locator = keyEnd;
         if (locator < b && s[locator] == u',') ++locator;
         Item item;
-        item.start = a;
+        item.start = marker;
         item.end = b;
         item.at = at;
         item.keyEnd = keyEnd;
         item.suppressAuthor = suppress;
         item.key = QString(s + at + 1, keyEnd - at - 1);
+        item.prefix = trimmedView(QStringView(s + a, marker - a)).toString();
         item.locator = trimmedView(QStringView(s + locator, b - locator)).toString();
         items.push_back(item);
         i = itemEnd + 1;
@@ -1227,6 +1258,7 @@ bool InlineParserPrivate::pandocCitation()
         const int entry = citation(item.key, &external);
         data(node).label = item.key;
         data(node).text = item.locator;
+        if (!item.prefix.isEmpty()) data(node).title = item.prefix;
         if (item.suppressAuthor) n(node).marker = u'-';
         n(node).targetStart = item.at + 1;
         n(node).targetEnd = item.keyEnd;
@@ -1248,6 +1280,60 @@ bool InlineParserPrivate::pandocCitation()
         }
     }
     done(close + 1);
+    return true;
+}
+
+// `@key` in the running text, a citation whose author is part of the
+// sentence, as Pandoc writes it: `@doe99 says`, and with a locator,
+// `@doe99 [p. 33] says`. Its `@` starts the text or follows white space or
+// an emphasis marker, so that an e-mail address is never one. A key holds
+// letters, digits and `_`, and inside them also `:.#$%&-+?<>~/`, so that
+// punctuation after it ends it. Only a key the document defines, or its
+// bibliography has, is a citation: a handle such as `@someone` stays text.
+// Inside brackets that are not a citation (link text, say) it is text.
+bool InlineParserPrivate::inTextCitation()
+{
+    if (!st.options.citations || plainBrackets > 0) return false;
+    const int at = m_pos;
+    if (at > 0 && !s[at - 1].isSpace() && s[at - 1] != u'*' && s[at - 1] != u'_') return false;
+    const auto keyChar = [](QChar c) { return c.isLetterOrNumber() || c == u'_'; };
+    if (at + 1 >= m_len || !keyChar(s[at + 1])) return false;
+    int end = at + 1;
+    while (end < m_len && (keyChar(s[end]) || QStringView(u":.#$%&-+?<>~/").contains(s[end]))) ++end;
+    while (!keyChar(s[end - 1])) --end;
+    const QString key(s + at + 1, end - at - 1);
+    bool external = false;
+    const int entry = citation(key, &external);
+    if (entry < 0) return false;
+
+    // `@key [locator]`: one space, then brackets that are no link, note or
+    // variable, and hold no other citation, code or escape.
+    int nodeEnd = end, closeStart = end;
+    QString locator;
+    if (end + 2 < m_len && s[end] == u' ' && s[end + 1] == u'[' && s[end + 2] != u'^' && s[end + 2] != u'%') {
+        int c = end + 2;
+        while (c < m_len && !QStringView(u"[]\n@`\\").contains(s[c])) ++c;
+        const bool link = c + 1 < m_len && (s[c + 1] == u'(' || s[c + 1] == u'[');
+        if (c < m_len && s[c] == u']' && !link) {
+            const QStringView written = trimmedView(QStringView(s + end + 2, c - end - 2));
+            if (!written.isEmpty()) {
+                locator = written.toString();
+                closeStart = c;
+                nodeEnd = c + 1;
+            }
+        }
+    }
+    flush(at);
+    const int node = add(NodeType::Citation, at, nodeEnd);
+    n(node).openEnd = at + 1;
+    n(node).closeStart = closeStart;
+    n(node).marker = u'@';
+    n(node).targetStart = at + 1;
+    n(node).targetEnd = end;
+    n(node).number = -(entry + 1); // until notes are numbered
+    data(node).label = key;
+    data(node).text = locator;
+    done(nodeEnd);
     return true;
 }
 

@@ -2,6 +2,7 @@
 
 #include "document.h"
 #include "sourcebuffer.h"
+#include "theme.h"
 
 #include <QRegularExpression>
 #include <QTextBoundaryFinder>
@@ -123,20 +124,74 @@ void FocusMode::setUnit(const QString &unit)
     emit unitChanged();
 }
 
-void FocusMode::setDim(const QColor &dim)
-{
-    if (dim == m_dim) return;
-    m_dim = dim;
-    if (m_decorations) m_decorations->setFocusColors(m_dim, m_normal);
-    emit colorsChanged();
-}
-
 void FocusMode::setNormal(const QColor &normal)
 {
     if (normal == m_normal) return;
     m_normal = normal;
+    recolor();
+}
+
+void FocusMode::setBackground(const QColor &background)
+{
+    if (background == m_background) return;
+    m_background = background;
+    recolor();
+}
+
+QString FocusMode::strength() const
+{
+    switch (m_strength) {
+    case Strength::Off: return QStringLiteral("off");
+    case Strength::Light: return QStringLiteral("light");
+    case Strength::Strong: break;
+    }
+    return QStringLiteral("strong");
+}
+
+void FocusMode::setStrength(const QString &strength)
+{
+    const Strength given = strengthNamed(strength);
+    if (given == m_strength) return;
+    m_strength = given;
+    recolor();
+}
+
+FocusMode::Strength FocusMode::strengthNamed(const QString &name)
+{
+    if (name == u"off") return Strength::Off;
+    if (name == u"light") return Strength::Light;
+    return Strength::Strong;
+}
+
+void FocusMode::recolor()
+{
+    m_dim = dimmed(m_normal, m_background, m_strength);
     if (m_decorations) m_decorations->setFocusColors(m_dim, m_normal);
     emit colorsChanged();
+}
+
+QColor FocusMode::dimmed(const QColor &normal, const QColor &background, Strength strength)
+{
+    if (strength == Strength::Off || !normal.isValid() || !background.isValid()) return normal;
+    const auto contrast = [&background](const QColor &color) {
+        const double a = Theme::luminance(color), b = Theme::luminance(background);
+        return (std::max(a, b) + 0.05) / (std::min(a, b) + 0.05);
+    };
+    // As the screen draws it: eight bits a channel.
+    const auto blend = [&](double amount) {
+        const QColor mixed = Theme::mix(normal, background, amount);
+        return QColor(mixed.red(), mixed.green(), mixed.blue());
+    };
+    if (contrast(normal) < MinimumContrast) return normal;
+    const double wanted = strength == Strength::Light ? LightBlend : StrongBlend;
+    if (contrast(blend(wanted)) >= MinimumContrast) return blend(wanted);
+    // The furthest blend short of that which still reads at the floor.
+    double near = 0, far = wanted;
+    for (int i = 0; i < 24; ++i) {
+        const double middle = (near + far) / 2;
+        (contrast(blend(middle)) >= MinimumContrast ? near : far) = middle;
+    }
+    return blend(near);
 }
 
 void FocusMode::refresh()

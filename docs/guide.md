@@ -6,7 +6,9 @@ while you work.
 
 This guide is also in parch: **User guide** in the menu, or `F1`, opens it
 in a read-only tab. The package installs it as
-`/usr/share/doc/parch/guide.md`.
+`/usr/share/doc/parch/guide.md`. Beside it in the menu, **Markdown guide**
+teaches the Markdown parch reads, with examples you can edit; see
+[The Markdown guide](#the-markdown-guide).
 
 ## Documents and drafts
 
@@ -58,6 +60,24 @@ the document's line endings.
   files are not there, and the links to headings (`#a-heading`,
   `other.md#a-heading`) that the document, with what it includes, or that
   other document does not have.
+
+## The Markdown guide
+
+**Markdown guide**, beside **User guide** in the menu (`F10`) or in the
+command palette, opens a tab that teaches the Markdown parch reads, beside its preview: every
+part of the dialect as an example, and the cases that do not do what you
+might expect, such as emphasis that never closes or a list that starts at 7.
+What the preview shows is what parch makes of the text, so change an example
+and watch it change. Its pictures, its included file and its bibliography
+come with parch, so every example works without any file of yours.
+
+Nothing written in the guide is kept. It is not a draft, it is never saved or
+kept in recovery or history, the next launch does not bring it back, and
+closing it asks nothing. Opened again while it is open, it comes to the front
+as it is; once closed, it opens fresh. **Save** or **Save as…** writes a copy
+where you choose, which is then an ordinary document. Its last part tells how
+to read it as Standard Markdown in **Document settings…**, a choice that is
+not kept either.
 
 ## Writing and formatting
 
@@ -156,7 +176,14 @@ middle. A window too narrow for both shows one at a time: **Markdown** and
 **Preview** above the text choose which, as does `Ctrl+Alt+E`.
 
 The preview follows the text a moment after you pause, and keeps up while you
-type. Only what changed is set again, so it stays where you were reading.
+type. Only what changed is set again, so it stays where you were reading. It
+follows the files the text uses as well: a picture, an included file, a
+bibliography or a `.csl` style changed on disk is shown changed without an
+edit, and only what uses it is set again.
+
+The formatting toolbar is hidden in the reading view, where there is no text
+to format, and comes back in the source and split views; the room it takes
+stays, so the preview does not move.
 
 What it shows:
 
@@ -217,12 +244,12 @@ another command has can be swapped. **Remove** leaves a command without keys,
 the theme's; the text size; the line height; the longest line, in
 characters; whether the Markdown is styled as you write; how headings are
 written; whether the formatting toolbar shows; whether spelling is checked;
-what focus mode keeps bright; and how many versions history keeps, for how
-long and in how much space. A window too narrow for the toolbar hides it
-until you ask for it with **Show toolbar**. Every change applies at once in
-every window. Under **Keys**, **Edit with Vim keys** turns on Vim keys. Under
-**Markdown and citations**, the Markdown profile, extensions, citation style
-and bibliography for every document, as
+what focus mode keeps bright, and how strongly it dims the rest; and how many
+versions history keeps, for how long and in how much space. A window too
+narrow for the toolbar hides it until you ask for it with **Show toolbar**.
+Every change applies at once in every window. Under **Keys**, **Edit with Vim
+keys** turns on Vim keys. Under **Markdown and citations**, the Markdown
+profile, extensions, citation style and bibliography for every document, as
 [Document settings](#document-settings) describes them.
 
 Under **Preview** it sets the reading font, which is a serif made for reading
@@ -272,9 +299,16 @@ A statement[p. 23][#Doe:2006].          Writer: the locator, then the key
 Another statement [@doe2006, p. 23].    Pandoc: the key, then the locator
 Doe shows [-@doe2006] that it works.    Pandoc, leaving the author out
 Two at once [@doe2006, p. 5; @roe2010].
+More [see @doe2006, ch. 2; also @roe2010].   Words before each key
+@doe2006 [p. 4] shows it as well.       The author named in the sentence
 
 [#Doe:2006]: John Doe. *A Sample Book*. Example Press, 2006.
 ```
+
+In brackets, a key's `@` starts the item or follows a space, so an e-mail
+address is never a citation, and brackets followed by `(` or `[` are a link.
+Without brackets, `@key` is a citation only when the document or its
+bibliography has that key, so a handle such as `@someone` stays text.
 
 A Writer definition, `[#key]: …`, is a bibliography entry written in the
 document itself. Keys of a bibliography file are cited the same way: choose
@@ -312,8 +346,8 @@ numbered as they are first cited: `[1, p. 23]`.
 In the preview a key that nothing defines stays where it is cited, in the
 theme's colour for what is wrong, and says which key it is when the pointer
 rests on it. The preview shows a new style or bibliography as soon as you
-choose it; a bibliography file changed on disk is read again at your next
-edit.
+choose it, and a bibliography or style file changed on disk as soon as it
+changes.
 
 `parch check` reports a key that neither the document nor its bibliography
 defines, a key given to two entries of one file or found in two files, a
@@ -599,7 +633,11 @@ when you turn it on.
 
 **Focus mode** (`Ctrl+Shift+D`) dims everything but the sentence you are
 writing; **Preferences…** switches it to the paragraph. It dims the text you
-write, never its preview. **Distraction-free writing** (`F11`) hides the
+write, never its preview. Dimming blends the text's colour into the
+background: **Strong**, the default, or **Light**, and in any theme never so
+far that the dimmed text reads at less than 3:1 against the background.
+**Off**, under **Dimming** in **Preferences…**, leaves the text as it is
+while focus mode stays on. **Distraction-free writing** (`F11`) hides the
 library, the tabs, the header, the toolbar and the status line, and leaves
 only the document, in the view it is in: the text, centred; the text and its
 preview side by side; or the preview alone. `F11` or `Esc` brings them back,

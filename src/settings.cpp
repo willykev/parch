@@ -33,6 +33,7 @@ const auto themeFamily = QStringLiteral("monospace");
 const auto outlineShownKey = QStringLiteral("outlineShown");
 const auto spellcheckKey = QStringLiteral("spellcheck");
 const auto focusUnitKey = QStringLiteral("focusUnit");
+const auto focusDimmingKey = QStringLiteral("focusDimming");
 const auto liveFormattingKey = QStringLiteral("liveFormatting");
 const auto historyVersionsKey = QStringLiteral("historyVersions");
 const auto historyDaysKey = QStringLiteral("historyDays");
@@ -48,6 +49,7 @@ const auto scrollSyncKey = QStringLiteral("scrollSync");
 const auto remoteImagesKey = QStringLiteral("remoteImages");
 
 bool isFocusUnit(const QString &unit) { return unit == u"sentence" || unit == u"paragraph"; }
+bool isFocusDimming(const QString &strength) { return strength == u"off" || strength == u"light" || strength == u"strong"; }
 // More folders than anyone lists, so that a damaged file costs little.
 constexpr qsizetype maxLibraryFolders = 1000;
 
@@ -276,6 +278,15 @@ void Settings::setFocusUnit(const QString &unit)
     if (!isFocusUnit(unit) || unit == m_focusUnit) return;
     m_focusUnit = unit;
     m_stored.insert(focusUnitKey, unit);
+    write();
+    emit changed();
+}
+
+void Settings::setFocusDimming(const QString &strength)
+{
+    if (!isFocusDimming(strength) || strength == m_focusDimming) return;
+    m_focusDimming = strength;
+    m_stored.insert(focusDimmingKey, strength);
     write();
     emit changed();
 }
@@ -522,6 +533,12 @@ void Settings::load()
             m_focusUnit = m_stored.value(focusUnitKey).toString();
         else
             ignored << focusUnitKey;
+    }
+    if (present(focusDimmingKey)) {
+        if (isFocusDimming(m_stored.value(focusDimmingKey).toString()))
+            m_focusDimming = m_stored.value(focusDimmingKey).toString();
+        else
+            ignored << focusDimmingKey;
     }
     if (present(liveFormattingKey)) {
         if (m_stored.value(liveFormattingKey).isBool())

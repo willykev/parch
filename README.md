@@ -15,6 +15,8 @@ safe and stays out of your way.
   style of your own, chosen per document or per library folder.
 - Check your spelling as you write, and dim all but the sentence you are on
   in focus mode.
+- Learn the Markdown parch reads from a guide of live examples you can edit,
+  beside what they become.
 - Save as you type, and get your text back after a crash.
 - Go back to an earlier version of any document from its history.
 - See when a file changes on disk, compare, and choose what to keep.

@@ -159,6 +159,7 @@ bool Document::nameTaken() const { return m_nameTaken && m_problem == Problem::C
 bool Document::isSaving() const { return m_saving; }
 bool Document::isTextless() const { return m_textless; }
 bool Document::isScratch() const { return m_scratch; }
+QString Document::scratchFolder() const { return m_scratch ? m_scratchFolder : QString(); }
 QString Document::convertedFrom() const { return m_convertedFrom; }
 TextConvention Document::convention() const { return m_convention; }
 
@@ -210,6 +211,8 @@ Document::State Document::state() const
 
 QString Document::statusText() const
 {
+    // parch's own text, which nothing keeps, until Save as writes a copy.
+    if (m_scratch && (state() == State::Clean || state() == State::Modified)) return tr("Not saved");
     switch (state()) {
     case State::Clean:
         // Nothing has been written yet, so nothing is saved.

@@ -48,6 +48,10 @@ public:
     preview::Picture diagram(const QString &source) override;
     preview::Picture image(const md::Destination &destination, const QString &written) override;
 
+    // Reads the local image at this path again, as when it changed on disk:
+    // the picture as it was stays until the new one is read, and changed()
+    // names it then. A picture never asked for is left to be read when it is.
+    void reread(const QString &path);
     // Forgets every picture but those with these keys.
     void keepOnly(const QSet<QString> &keys);
     void clear();

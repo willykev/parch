@@ -24,6 +24,7 @@
 #include <vector>
 
 class PreviewResources;
+class PreviewWatch;
 class QTextDocument;
 class QTextTable;
 
@@ -206,6 +207,8 @@ public:
     qreal longestSlice() const { return m_longestSlice; }
     void resetLongestSlice() { m_longestSlice = 0; }
     PreviewResources *resources() const { return m_resources; }
+    // The files on disk the text as last read depends on, which are watched.
+    QStringList watchedFiles() const;
 
     // A view's TextEdit takes an island's document to show it.
     Q_INVOKABLE void adopt(quint64 island, QQuickItem *textEdit);
@@ -347,6 +350,9 @@ private:
     bool toggleTask(int source);
     void setCurrent(bool current);
     void pictureChanged(const QString &key);
+    // A file the text depends on changed on disk: a picture is read again,
+    // and an included file, a bibliography or a style has the text read again.
+    void dependencyChanged(const QString &path);
 
     QPointer<Document> m_document;
     QPointer<Backend> m_backend;
@@ -365,6 +371,10 @@ private:
     PreviewStyle m_style;
 
     PreviewResources *m_resources;
+    // The files the text as last read depends on, watched: its local
+    // pictures, as the builder finds them, and what it reads besides.
+    PreviewWatch *m_watch;
+    QSet<QString> m_pictureFiles, m_readFiles;
     PreviewMarks *m_marks;
     QThreadPool m_pool;
     QTimer m_timer;

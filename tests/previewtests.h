@@ -40,5 +40,6 @@ void focusModeDimsTheTextAlone();
 void distractionFreeWritingKeepsEachView();
 void citationsReadAsTheirStyleWordsThem();
 void documentSettingsReachThePreview();
+void previewFollowsFilesOnDisk();
 
 } // namespace PreviewTests

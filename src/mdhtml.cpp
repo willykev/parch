@@ -417,6 +417,11 @@ void Writer::citationText(const Node &node)
             return;
         }
         const QString number = QString::number(item.number);
+        // A prefix, as in `[see @key]`, is written before the number.
+        if (!item.title.isEmpty()) {
+            esc(item.title);
+            out.append(u' ');
+        }
         lit(QLatin1StringView("<a href=\"#cite-"));
         out.append(number);
         lit(QLatin1StringView("\">"));

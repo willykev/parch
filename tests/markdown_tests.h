@@ -21,6 +21,7 @@ void tables();
 void definitionLists();
 void footnotes();
 void citations();
+void citationPrefixes();
 void comments();
 void rawHtmlPolicy();
 void math();

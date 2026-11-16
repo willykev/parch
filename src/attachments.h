@@ -81,7 +81,7 @@ public:
     qint64 largeFileBytes() const;
 
     // The folder a document's relative links start from: its file's
-    // folder, or a draft's own folder.
+    // folder, a draft's own folder, or the resources of one of parch's own.
     QString documentFolder(const Document *document) const;
     // The library folder that holds the document, the nearest when several
     // do; empty for a draft or a document outside every library.

@@ -526,7 +526,8 @@ void TabModel::documentChanged()
         emit dataChanged(index(i), index(i));
         if (i == m_active) emit activeChanged();
     }
-    emit changed();
+    // A document of parch's own is no part of the session, whatever it does.
+    if (!document || !document->isScratch()) emit changed();
 }
 
 void TabModel::relocate(const QString &from, const QString &to)

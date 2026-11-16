@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120">
+  <title>Hills under a round sun</title>
+  <circle cx="232" cy="44" r="22" fill="none" stroke="#8a8a8a" stroke-width="4"/>
+  <path d="M0 108 C40 70 80 70 120 96 C150 116 180 72 220 78 C260 84 290 100 320 92"
+        fill="none" stroke="#8a8a8a" stroke-width="4" stroke-linecap="round"/>
+  <path d="M0 118 L320 118" stroke="#8a8a8a" stroke-width="4"/>
+</svg>

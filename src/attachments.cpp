@@ -268,6 +268,9 @@ qint64 Attachments::largeFileBytes() const
 QString Attachments::documentFolder(const Document *document) const
 {
     if (!document) return {};
+    // parch's own text finds what it names among parch's resources, where
+    // nothing can be put: it keeps nothing on disk.
+    if (document->isScratch()) return document->scratchFolder();
     return document->isDraft() ? m_paths.drafts() + u'/' + document->id() : PathText::folderOf(document->path());
 }
 

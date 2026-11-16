@@ -160,6 +160,7 @@ ThemedMenu {
     }
     MenuLine {}
     CommandEntry { objectName: "userGuideEntry"; command: "userGuide" }
+    CommandEntry { objectName: "markdownGuideEntry"; command: "markdownGuide" }
     MenuLine {}
     CommandEntry { command: "quit" }
 

@@ -4,13 +4,16 @@
 #include "codehighlight.h"
 #include "documentreading.h"
 #include "mdinclude.h"
+#include "mdparser_p.h"
 #include "outline.h"
 #include "previewresources.h"
+#include "previewwatch.h"
 #include "renderrequest.h"
 #include "sourcebuffer.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QClipboard>
+#include <QDir>
 #include <QFileInfo>
 #include <QFontMetricsF>
 #include <QGuiApplication>
@@ -135,6 +138,9 @@ struct Preview::Parsed {
     // The tree's citations as its citation style formats them.
     std::shared_ptr<const DocumentCitations::Formatted> citations;
     std::shared_ptr<const std::vector<Part>> parts;
+    // The files on disk the text depends on: its local pictures, and the
+    // files it was read with (included files, bibliographies, a style file).
+    QStringList pictures, files;
 };
 
 // Sections that go and the parts that are built in their place.
@@ -189,11 +195,47 @@ bool readsAsMarkdown(const QString &path)
     return suffixes.contains(QFileInfo(path).suffix().toLower());
 }
 
+// The local pictures a tree shows, by the paths the builder reads them
+// from: Markdown images and HTML `img` elements, in every file it includes.
+void picturesOf(const md::Document &document, const md::Node &node, QStringList &out)
+{
+    QString written;
+    if (node.type == md::NodeType::Image) {
+        written = node.dest;
+    } else if (node.type == md::NodeType::HtmlElement && node.label == QLatin1StringView("img")) {
+        for (const md::Attribute &attribute : node.attributes)
+            if (attribute.name == QLatin1StringView("src")) written = attribute.value;
+    }
+    if (!written.isEmpty() && md::detail::isSafeUrl(written, true)) {
+        const int file = std::clamp(node.file, 0, int(document.files.size()) - 1);
+        const md::Destination target = md::classifyDestination(written, document.files[size_t(file)].directory);
+        if (target.kind == md::Destination::Kind::LocalFile && target.absolute) out.append(target.path);
+    }
+    for (const md::Node &child : node.children) picturesOf(document, child, out);
+}
+
+// The files a reading read besides the text: what it includes, its
+// bibliographies, its own or its chapters', and a style from a file.
+QStringList filesRead(const DocumentReading::Reading &reading)
+{
+    QStringList files;
+    for (size_t i = 1; i < reading.document.files.size(); ++i) files.append(reading.document.files[i].path);
+    files.append(reading.dialect.bibliography);
+    for (const QList<DocumentCitations::Database> &databases : reading.citations.fileDatabases)
+        for (const DocumentCitations::Database &database : databases)
+            if (database) files.append(database->identity());
+    if (Dialect::isStyleFile(reading.dialect.citationStyle)) files.append(reading.dialect.citationStyle);
+    for (QString &file : files) file = QDir::cleanPath(file);
+    return files;
+}
+
 } // namespace
 
 Preview::Preview(QObject *parent)
-    : QObject(parent), m_resources(new PreviewResources(this)), m_marks(new PreviewMarks(this))
+    : QObject(parent), m_resources(new PreviewResources(this)), m_watch(new PreviewWatch(this)),
+      m_marks(new PreviewMarks(this))
 {
+    connect(m_watch, &PreviewWatch::fileChanged, this, &Preview::dependencyChanged);
     m_pool.setMaxThreadCount(1);
     m_timer.setSingleShot(true);
     connect(&m_timer, &QTimer::timeout, this, &Preview::parse);
@@ -482,6 +524,9 @@ void Preview::clear()
     m_citations.reset();
     m_target.reset();
     m_reread = false;
+    m_pictureFiles.clear();
+    m_readFiles.clear();
+    m_watch->setFiles({});
     m_startsValid = 0;
     m_shownRevision = 0;
     m_trimmed = 0;
@@ -568,6 +613,8 @@ Preview::Parsed Preview::parseJob(QSharedPointer<const SourceSnapshot> snapshot,
     result.citations = std::shared_ptr<const DocumentCitations::Formatted>(reading, &reading->formatted);
     result.parts = std::make_shared<std::vector<Part>>(preview::parts(*result.tree, result.citations.get()));
     preview::warm(*result.tree);
+    picturesOf(reading->document, reading->document.root, result.pictures);
+    result.files = filesRead(*reading);
     return result;
 }
 
@@ -667,6 +714,10 @@ void Preview::plan(const Parsed &result)
     m_citations = result.citations;
     m_target = result.parts;
     m_reread = false;
+    // What the text was read with is watched from now on, and nothing else.
+    m_pictureFiles = QSet<QString>(result.pictures.cbegin(), result.pictures.cend());
+    m_readFiles = QSet<QString>(result.files.cbegin(), result.files.cend());
+    m_watch->setFiles(result.files + result.pictures);
     m_planRevision = result.revision;
     ++m_updates;
     // Text that reads as it did, as after an undo and its redo, is shown already.
@@ -864,6 +915,20 @@ void Preview::rebuildAll()
     m_work.push_back(std::move(operation));
     m_dirty.clear();
     work();
+}
+
+QStringList Preview::watchedFiles() const { return m_watch->files(); }
+
+// A picture changed on disk is read again, and the sections that show it
+// are built again once it has been; the picture as it was stays until then.
+// What the text was read with, changed, has the text read again, and only
+// the parts that read otherwise now are built again.
+void Preview::dependencyChanged(const QString &path)
+{
+    if (m_pictureFiles.contains(path)) m_resources->reread(path);
+    if (!m_readFiles.contains(path)) return;
+    m_reread = true;
+    if (m_active && m_document) schedule(0);
 }
 
 void Preview::pictureChanged(const QString &key)

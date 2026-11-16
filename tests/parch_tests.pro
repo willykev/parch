@@ -27,6 +27,7 @@ HEADERS += \
     rendertesting.h \
     markdown_tests.h \
     citationtests.h \
+    guidetests.h \
     settingstests.h \
     cslfixture.h \
     testfiles.h \
@@ -94,6 +95,7 @@ HEADERS += \
     ../src/preview.h \
     ../src/previewbuilder.h \
     ../src/previewresources.h \
+    ../src/previewwatch.h \
     ../src/previewstyle.h \
     ../src/qmltypes.h \
     ../src/quitsignals.h \
@@ -134,6 +136,7 @@ SOURCES += \
     stylingtests.cpp \
     rendertesting.cpp \
     citationtests.cpp \
+    guidetests.cpp \
     settingstests.cpp \
     cslfixture.cpp \
     testfiles.cpp \
@@ -206,6 +209,7 @@ SOURCES += \
     ../src/preview.cpp \
     ../src/previewbuilder.cpp \
     ../src/previewresources.cpp \
+    ../src/previewwatch.cpp \
     ../src/previewstyle.cpp \
     ../src/qmltypes.cpp \
     ../src/quitsignals.cpp \
@@ -234,6 +238,7 @@ SOURCES += \
 
 RESOURCES += ../src/resources.qrc
 RESOURCES += ../src/csl/csl.qrc
+RESOURCES += ../src/guide/guide.qrc
 
 CONFIG += link_pkgconfig
 PKGCONFIG += yaml-0.1

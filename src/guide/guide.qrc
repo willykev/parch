@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/guide">
+        <file>markdown-guide.md</file>
+        <file>guide-include.md</file>
+        <file>sample.bib</file>
+        <file>picture.svg</file>
+    </qresource>
+</RCC>

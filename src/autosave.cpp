@@ -42,8 +42,9 @@ Autosave::~Autosave()
 
 bool Autosave::needsRecovery(const Document *document)
 {
-    // A document with no text of its own has nothing to keep.
-    if (document->isTextless()) return false;
+    // A document with no text of its own has nothing to keep, nor has one
+    // of parch's own, whatever is written in it.
+    if (document->isTextless() || document->isScratch()) return false;
     switch (document->state()) {
     case Document::State::Modified:
     case Document::State::Saving:
@@ -196,8 +197,9 @@ void Autosave::saveNow(Watch *watch)
 bool Autosave::keep(Document *document, QString *error)
 {
     // A document with no text of its own has nothing to keep, and its
-    // entry, if one is there, is not its text to replace.
-    if (document->isTextless()) return true;
+    // entry, if one is there, is not its text to replace. parch's own text
+    // is never kept.
+    if (document->isTextless() || document->isScratch()) return true;
     // Writes already queued finish first, so the entry written here is the newest.
     m_pool.waitForDone();
     const auto snapshot = document->buffer()->snapshot();
@@ -278,6 +280,8 @@ bool Autosave::flush(QString *error, QStringList *unkept, int waitMs)
     QStringList problems, notKept;
     // Read again, since the last wait may have closed documents.
     for (Document *document : m_store->documents()) {
+        // parch's own text is neither saved nor kept, and asks for neither.
+        if (document->isScratch()) continue;
         const auto state = document->state();
         if (state == Document::State::Clean) {
             m_recovery->discard(document->id());

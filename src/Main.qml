@@ -867,15 +867,17 @@ ApplicationWindow {
             }
 
             // Under the tabs, in the layout, its buttons before the editor
-            // for Tab; a click on them leaves the keys in the text.
+            // for Tab; a click on them leaves the keys in the text. The
+            // preview alone has no text to format: there it is hidden, its
+            // room kept, so that what is below stays where it was.
             FormatToolbar {
                 id: toolbar
                 objectName: "toolbar"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: tabStrip.bottom
-                visible: window.toolbarShown
-                height: visible ? implicitHeight : 0
+                visible: window.toolbarShown && window.viewMode !== TabModel.Reading
+                height: window.toolbarShown ? implicitHeight : 0
                 commands: window.commands
                 keys: window.keys
                 canRun: window.canRun
@@ -1110,10 +1112,13 @@ ApplicationWindow {
                     spellChecker: backend.spelling
                     focusMode: window.focusMode
                     focusUnit: settings.focusUnit
+                    focusDimming: settings.focusDimming
                     liveFormatting: settings.liveFormatting
                     onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
                     onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
-                    onViewMoved: window.context.noteViewMoved()
+                    // Where the view is goes into the session, but not in a
+                    // document of parch's own, which the session never keeps.
+                    onViewMoved: if (!window.document || !window.document.scratch) window.context.noteViewMoved()
                     // :w saves and :q closes the tab, as their commands do.
                     onVimCommand: (command) => window.run(command)
                     onEscapePressed: window.escapeInText()

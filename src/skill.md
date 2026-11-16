@@ -62,7 +62,9 @@ tables, strikethrough, task lists and bare links, plus:
 - Footnotes `text[^1]` with `[^1]: The note.`, and inline notes
   `text[^A note written in place.]`.
 - Citations `[p. 23][#Doe:2006]` with `[#Doe:2006]: John Doe. *A Book*.`,
-  and Pandoc's `[@key, p. 23]`, `[@a; @b]` and `[-@key]` (no author). Keys
+  and Pandoc's `[@key, p. 23]`, `[@a; @b]`, `[see @a, p. 3; also @b]`
+  (words before a key), `[-@key]` (no author) and `@key` in the sentence
+  (the author named there, for a key the document defines). Keys
   of a BibTeX, BibLaTeX, CSL JSON or CSL YAML file are cited the same way
   when the front matter names it, `bibliography: refs.bib`, with a style,
   `csl: apa` (or `chicago-author-date`, `chicago-notes-bibliography`,

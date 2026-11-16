@@ -34,7 +34,13 @@ The first version: a native Markdown writing app for Omarchy.
 - English spell checking as you write, with wavy underlines, suggestions, a
   personal dictionary and Ignore, from a right click or the `Menu` key.
 - Focus mode, which dims all but the sentence or paragraph being written, and
-  distraction-free writing, which shows the text alone.
+  distraction-free writing, which shows the text alone. Dimming blends the
+  text into the background, light or strong or off, and never further than
+  3:1 against it in any theme.
+- A Markdown guide, from Help in the menu or the command palette: every
+  part of the dialect as an example you can edit, beside its preview, with
+  the cases that surprise. Nothing written in it is kept; Save as keeps a
+  copy.
 - Preferences for the writing font, text size, line height, line length,
   live formatting, heading syntax, toolbar, spelling and focus mode, applied
   at once in every window.
@@ -47,7 +53,9 @@ The first version: a native Markdown writing app for Omarchy.
   where each setting comes from, and live formatting, spelling, the outline,
   the word count and Check links read the document as they say.
 - Citations and bibliographies: Writer `[p. 23][#key]` and Pandoc
-  `[@key, p. 23]` citations, `[-@key]` without the author, Writer
+  `[@key, p. 23]` citations, with words before each key
+  (`[see @doe99, p. 33; also @roe04]`), `[-@key]` without the author and
+  `@key` in the sentence for the author's name there; Writer
   bibliography entries written in the document, and BibTeX, BibLaTeX, CSL
   JSON and CSL YAML files, chosen in Document settings or with
   `bibliography:` and `csl:` in the front matter. Seven bundled CSL styles
@@ -74,6 +82,11 @@ The first version: a native Markdown writing app for Omarchy.
   the Standard profile too, and follows a change of them at once.
 - The preview follows the text as you type, setting again only what changed,
   and scrolls with it; a book of 100,000 words keeps up.
+- It also follows the files the text uses: a picture, an included file, a
+  bibliography or a `.csl` style changed on disk is shown changed, and only
+  what uses it is set again.
+- The formatting toolbar steps aside in the reading view, where there is no
+  text to format, and the preview stays where it was.
 - Tables, code and formulas wider than the column scroll sideways by
   themselves.
 - In the preview, links open, a task's box ticks the task in the text, a

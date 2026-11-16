@@ -79,6 +79,7 @@ HEADERS += \
     src/preview.h \
     src/previewbuilder.h \
     src/previewresources.h \
+    src/previewwatch.h \
     src/previewstyle.h \
     src/qmltypes.h \
     src/quitsignals.h \
@@ -177,6 +178,7 @@ SOURCES += \
     src/preview.cpp \
     src/previewbuilder.cpp \
     src/previewresources.cpp \
+    src/previewwatch.cpp \
     src/previewstyle.cpp \
     src/qmltypes.cpp \
     src/quitsignals.cpp \
@@ -207,6 +209,8 @@ RESOURCES += src/resources.qrc
 
 # Citation styles and locales, from the official CSL repositories.
 RESOURCES += src/csl/csl.qrc
+# The Markdown guide and what its examples name.
+RESOURCES += src/guide/guide.qrc
 
 # libyaml reads CSL YAML bibliographies.
 CONFIG += link_pkgconfig

@@ -55,6 +55,8 @@ Rectangle {
     // Focus mode dims all but the sentence or the paragraph with the caret.
     property bool focusMode: false
     property string focusUnit: "sentence"
+    // How strongly: "off", "light" or "strong".
+    property string focusDimming: "strong"
     // Live formatting styles the Markdown as it is written, its punctuation
     // kept and dimmed; without it the source is plain text.
     property bool liveFormatting: true
@@ -454,7 +456,8 @@ Rectangle {
         decorations: decorations
         enabled: pane.focusMode
         unit: pane.focusUnit
-        dim: theme.muted
+        background: theme.background
+        strength: pane.focusDimming
         normal: theme.foreground
     }
 

@@ -38,8 +38,8 @@ class Document : public QObject {
     // A document of parch's own, such as its guide, under a title of its
     // own: it has no file and is no draft that the library lists, it is
     // never saved or kept in recovery, history or the session, and it goes
-    // when its last tab closes.
-    Q_PROPERTY(bool scratch READ isScratch CONSTANT)
+    // when its last tab closes. Saved as a file, it is an ordinary document.
+    Q_PROPERTY(bool scratch READ isScratch NOTIFY changed)
     // The encoding the text was read in, as the writer chose for a file that
     // is not UTF-8, until the writer confirms that saving writes UTF-8 over
     // the file: nothing saves it meanwhile. Empty otherwise.
@@ -124,6 +124,10 @@ public:
     // followed.
     bool isTextless() const;
     bool isScratch() const;
+    // The folder a document of parch's own finds its pictures, included
+    // files and bibliography in, as a file finds them in its own folder:
+    // one of parch's resources, such as ":/guide"; empty for any other.
+    QString scratchFolder() const;
     QString convertedFrom() const;
 
 signals:
@@ -199,6 +203,7 @@ private:
     // A document of parch's own, and its title.
     bool m_scratch = false;
     QString m_scratchTitle;
+    QString m_scratchFolder;
     QString m_convertedFrom;
     // The file may have changed again while a save or a comparison ran.
     bool m_checkAgain = false;

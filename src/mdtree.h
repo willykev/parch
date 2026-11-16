@@ -147,8 +147,10 @@ enum class NodeType : quint8 {
     MathInline,            // text: the TeX; display for `$$…$$` inside a paragraph
     FootnoteReference,     // label, number, resolved
     InlineNote,            // number; children: the note
-    Citation,              // label (the key), text (the locator and what follows it), marker (`-` for `[-@key]`,
-                           // which leaves the author out), number, resolved; children: the Citations of a group
+    Citation,              // label (the key), text (the locator and what follows it), title (the prefix, as
+                           // "see" in `[see @key]`), marker (`-` for `[-@key]`, which leaves the author out;
+                           // `@` for `@key` in the text, which names the author there), number, resolved;
+                           // children: the Citations of a group, each from its `@` or `-@`
     Variable,              // label (the key), text (the value), resolved
     TaskMarker,            // checked; `[ ]` or `[x]` at the start of a task item
     HeadingLabel,          // label; the `[Label]` that ends a heading, not printed

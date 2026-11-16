@@ -307,9 +307,15 @@ Document *DocumentStore::newDraft()
 
 Document *DocumentStore::newScratch(const QString &title, const QString &text, bool readOnly)
 {
+    return newScratch(title, text, readOnly, {});
+}
+
+Document *DocumentStore::newScratch(const QString &title, const QString &text, bool readOnly, const QString &folder)
+{
     auto *document = new Document(newId(), {}, text, {}, {}, readOnly, this);
     document->m_scratch = true;
     document->m_scratchTitle = title;
+    document->m_scratchFolder = folder;
     document->m_shown = document->shown();
     return adopt(document);
 }
@@ -1155,8 +1161,9 @@ void DocumentStore::save(Document *document)
     // Text read from invalid UTF-8 cannot be written back unchanged, and a
     // conflict waits for a choice, so neither is ever saved over; nor is a
     // file read in another encoding until the writer confirms writing UTF-8.
+    // parch's own text has no file, nor a draft's: only a naming writes it.
     if (document->m_readOnly || document->m_problem == Document::Problem::Conflict
-        || !document->m_convertedFrom.isEmpty())
+        || !document->m_convertedFrom.isEmpty() || document->m_scratch)
         return;
     if (document->m_saving) {
         document->m_saveAgain = true;
@@ -1272,8 +1279,9 @@ void DocumentStore::nameAs(Document *document, const QString &path, const std::o
     job.name = path;
     job.notesSave = true;
     job.from = contentOf(document->m_diskVersion);
-    if (document->isDraft()) job.draftFolder = draftFolder(document->m_id);
-    else job.ownPath = document->m_path;
+    // parch's own text has no draft folder, nor assets in one.
+    if (document->isDraft() && !document->m_scratch) job.draftFolder = draftFolder(document->m_id);
+    else if (!document->isDraft()) job.ownPath = document->m_path;
     job.mode = document->m_diskVersion.mode;
     m_claims.insert(job.claim, document);
     run(document, job);
@@ -1537,6 +1545,8 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
     else if (!saved && job.notesSave)
         Recovery(m_paths).dropSave(document->m_id, QCryptographicHash::hash(job.bytes, QCryptographicHash::Sha256),
                                    job.revision);
+    // parch's own text, saved as a file, is that file's from now on.
+    bool wasScratch = false;
     if (saved) {
         document->m_problem = Document::Problem::None;
         document->m_lastError.clear();
@@ -1545,8 +1555,10 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
         // Written as UTF-8, by a naming or a choice made in a conflict.
         document->m_convertedFrom.clear();
         if (job.renames) {
-            const bool wasDraft = document->isDraft();
-            if (!wasDraft) {
+            wasScratch = std::exchange(document->m_scratch, false);
+            // parch's own text had no draft, and leaves none behind.
+            const bool wasDraft = document->isDraft() && !wasScratch;
+            if (!document->isDraft()) {
                 m_registry.remove(document->m_path);
                 m_watch.unwatch(document->m_path);
             }
@@ -1600,6 +1612,7 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
     if (!dropping && !pendingName.isEmpty()) nameAs(document, pendingName, pendingExpected);
     else if (!dropping && again && saved) save(document);
     document->refresh();
+    if (wasScratch) emit scratchNamed(document);
     if (saved) emit documentSaved(document);
     emit saveFinished(document, job.name, result.status);
     if (dropping) {
@@ -1656,8 +1669,9 @@ void DocumentStore::close(Document *document)
     if (!document->m_path.isEmpty()) m_watch.unwatch(document->m_path);
     // Its file holds its text, or the text was given up, so its saves no
     // longer need telling apart from another program's. One with no text of
-    // its own leaves recovery as it is.
-    if (!document->m_textless) forgetSaves(document->m_id);
+    // its own leaves recovery as it is, and so does one of parch's own,
+    // which recovery never had.
+    if (!document->m_textless && !document->m_scratch) forgetSaves(document->m_id);
     emit documentClosed(document->m_id);
     // Deleted later, because the view that let it go may still be using it.
     document->deleteLater();

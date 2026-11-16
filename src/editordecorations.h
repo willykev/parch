@@ -33,6 +33,12 @@ struct DecorationLayerOptions {
     // An edit removes the ranges it touches, rather than moving them, for a
     // layer whose ranges describe exactly the text they cover.
     bool dropEdited = false;
+    // By style: whether a range of that style takes what is typed just
+    // inside either of its ends, as text typed at the end of a heading goes
+    // on being the heading's. Where one range ends and the next starts, the
+    // next takes the typing if it may, and otherwise the one that ends.
+    // Styles not listed take nothing there; a dropEdited layer never does.
+    QList<bool> growAtEdges = {};
 };
 
 // The wavy underlines in and near the view, where the TextEdit shows them:
@@ -68,11 +74,11 @@ private:
 // positions through its EditorBinding, CRLF pairs included.
 //
 // A layer's ranges follow every edit of the source as text attributes do: a
-// range grows with what is typed inside it, not at its ends, and moves with
-// what is typed before it; a layer can instead drop the ranges an edit
-// touches. Its owner, usually working on a worker thread, replaces its
-// ranges, or those within one part of the source, with what it found for a
-// source revision. A result for an older revision still applies where no
+// range grows with what is typed inside it, not at its ends unless its style
+// grows at its edges, and moves with what is typed before it; a layer can
+// instead drop the ranges an edit touches. Its owner, usually working on a
+// worker thread, replaces its ranges, or those within one part of the
+// source, with what it found for a source revision. A result for an older revision still applies where no
 // edit since has touched the part it covers, moved by the edits before that
 // part; otherwise it is stale and dropped, and the owner looks again.
 //
@@ -128,6 +134,10 @@ public:
     std::vector<DecorationSpan> spans(const QString &name) const;
     // The layer's range that holds `position`, its end included; null when none does.
     const DecorationSpan *spanAt(const QString &name, int position) const;
+    // Where a range of the source as it was at `revision` is now, moved over
+    // the edits made since; false, and the range unchanged, when one of them
+    // touched it, at its edges too, or the edits are no longer remembered.
+    bool follow(Revision revision, SourceRange *range) const;
 
     // Dims everything but `range`, in the colours given, or stops dimming.
     void setFocus(SourceRange range);
@@ -166,6 +176,10 @@ private:
         QList<QTextCharFormat> drawn;
         QList<QColor> waves;
         std::vector<DecorationSpan> spans;
+        bool grows(int style) const
+        {
+            return !options.dropEdited && style >= 0 && style < options.growAtEdges.size() && options.growAtEdges[style];
+        }
     };
     struct Edit {
         Revision revision;

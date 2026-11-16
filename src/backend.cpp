@@ -284,6 +284,9 @@ void Backend::addCommands()
     m_commands->setAction(QStringLiteral("checkSpelling"),
                           [this](WindowContext *) { setSpellchecking(!m_spelling->wanted()); });
     m_commands->setAction(QStringLiteral("vimKeys"), [this](WindowContext *) { m_settings->setVimKeys(!m_settings->vimKeys()); });
+    // So is the Markdown styled as it is written.
+    m_commands->setAction(QStringLiteral("liveFormatting"),
+                          [this](WindowContext *) { m_settings->setLiveFormatting(!m_settings->liveFormatting()); });
 }
 RecentFiles *Backend::recentFiles() const { return m_recentFiles.get(); }
 ReadingPositions *Backend::readingPositions() const { return m_positions.get(); }

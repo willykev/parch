@@ -547,6 +547,7 @@ ApplicationWindow {
         focusMode: window.focusMode
         distractionFree: window.distractionFree
         spellingWanted: backend.spelling.wanted
+        liveFormatting: settings.liveFormatting
         canRun: window.canRun
         // Each command is this window's, whichever window the backend last
         // heard was in front. Finding a document gives the keys to the
@@ -736,6 +737,7 @@ ApplicationWindow {
                 spellChecker: backend.spelling
                 focusMode: window.focusMode
                 focusUnit: settings.focusUnit
+                liveFormatting: settings.liveFormatting
                 onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
                 onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
                 onViewMoved: window.context.noteViewMoved()

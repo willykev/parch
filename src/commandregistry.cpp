@@ -88,6 +88,7 @@ QList<CommandInfo> standardCommands()
         command("palette", "Command palette…", "View", {QStringLiteral("Ctrl+Shift+P")}),
         command("library", "Show or hide library", "View", {QStringLiteral("F9")}),
         command("toolbar", "Show or hide toolbar", "View"),
+        command("liveFormatting", "Live formatting", "View"),
         command("focusMode", "Focus mode", "View", {QStringLiteral("Ctrl+Shift+D")}),
         command("distractionFree", "Distraction-free writing", "View", {QStringLiteral("F11")}),
         command("nextTab", "Next tab", "View", {QStringLiteral("Ctrl+Tab"), QStringLiteral("Ctrl+PgDown")}),

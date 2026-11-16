@@ -2,8 +2,9 @@ import QtQuick
 import Parch
 
 // The writing surface: its font, text size, line height and line length,
-// the syntax headings are written in, and the toolbar. Each change applies
-// at once in every window and is kept.
+// whether its Markdown is styled as it is written, the syntax headings are
+// written in, and the toolbar. Each change applies at once in every window
+// and is kept.
 PreferenceSection {
     id: section
 
@@ -78,6 +79,24 @@ PreferenceSection {
             value: settings.maxLineLength
             Accessible.name: qsTr("Line length, in characters")
             onValueModified: settings.setMaxLineLength(value)
+        }
+    }
+
+    PreferenceRow {
+        width: parent.width
+        label: qsTr("Live formatting")
+
+        ThemedCheck {
+            objectName: "liveFormattingChoice"
+            width: Math.min(implicitWidth, parent.width)
+            text: qsTr("Style the Markdown as I write")
+            checked: settings.liveFormatting
+            Accessible.name: text
+            // The box follows the setting again, whoever changes it next.
+            onToggled: {
+                settings.setLiveFormatting(checked)
+                checked = Qt.binding(() => settings.liveFormatting)
+            }
         }
     }
 

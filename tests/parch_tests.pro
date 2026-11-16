@@ -17,6 +17,7 @@ INCLUDEPATH += ../src
 HEADERS += \
     clitests.h \
     editingtests.h \
+    stylingtests.h \
     rendertesting.h \
     markdown_tests.h \
     citationtests.h \
@@ -69,6 +70,7 @@ HEADERS += \
     ../src/markdownediting.h \
     ../src/markdownexport.h \
     ../src/librarywalk.h \
+    ../src/markdownstyling.h \
     ../src/outline.h \
     ../src/mathrender.h \
     ../src/mdhtml.h \
@@ -108,6 +110,7 @@ SOURCES += \
     parch_tests.cpp \
     clitests.cpp \
     editingtests.cpp \
+    stylingtests.cpp \
     rendertesting.cpp \
     citationtests.cpp \
     cslfixture.cpp \
@@ -159,6 +162,7 @@ SOURCES += \
     ../src/markdownediting.cpp \
     ../src/markdownexport.cpp \
     ../src/librarywalk.cpp \
+    ../src/markdownstyling.cpp \
     ../src/outline.cpp \
     ../src/mathrender.cpp \
     ../src/mdblocks.cpp \

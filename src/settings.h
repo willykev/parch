@@ -56,6 +56,8 @@ class Settings : public QObject {
     Q_PROPERTY(bool outlineShown READ outlineShown WRITE setOutlineShown NOTIFY changed)
     // What focus mode keeps bright: "sentence" or "paragraph".
     Q_PROPERTY(QString focusUnit READ focusUnit NOTIFY changed)
+    // Whether the editor styles its Markdown as it is written; on by default.
+    Q_PROPERTY(bool liveFormatting READ liveFormatting NOTIFY changed)
 
 public:
     static constexpr int MinFontPixelSize = 10, MaxFontPixelSize = 40;
@@ -95,6 +97,8 @@ public:
     QString focusUnit() const { return m_focusUnit; }
     // Takes "sentence" or "paragraph"; anything else is ignored.
     Q_INVOKABLE void setFocusUnit(const QString &unit);
+    bool liveFormatting() const { return m_liveFormatting; }
+    Q_INVOKABLE void setLiveFormatting(bool on);
 
     // Makes the text `steps` pixels larger, or smaller for a negative number,
     // within MinFontPixelSize and MaxFontPixelSize, and keeps that size. A
@@ -159,4 +163,5 @@ private:
     bool m_outlineShown = false;
     std::optional<bool> m_spellcheck;
     QString m_focusUnit = QStringLiteral("sentence");
+    bool m_liveFormatting = true;
 };

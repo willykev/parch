@@ -265,15 +265,19 @@ void EditorDecorations::sourceEdited(Revision revision, SourceRange range, int i
 {
     if (!m_loaded) return;
     const EditMap map{range.start, range.start + range.length, range.start + inserted, inserted - range.length};
+    // Text typed in, replacing nothing, which a growing range at either side takes.
+    const bool typedIn = range.length == 0 && inserted > 0;
     for (Layer &layer : m_layers) {
         auto &spans = layer.spans;
         // Spans that end before the edit are untouched; those that start
         // after it only move, which is all a long document's many spans do.
-        // Only those between are changed one by one.
+        // Only those between are changed one by one, with those that start
+        // where text is typed in when they may grow to take it.
         const auto first = spans.begin() + (firstEndingAfter(spans, range.start - 1) - spans.cbegin());
         const bool dropping = layer.options.dropEdited;
+        const bool growing = typedIn && !dropping && !layer.options.growAtEdges.isEmpty();
         const auto after = std::partition_point(first, spans.end(), [&](const DecorationSpan &span) {
-            return dropping ? span.start <= map.oldEnd : span.start < map.oldEnd;
+            return dropping || growing ? span.start <= map.oldEnd : span.start < map.oldEnd;
         });
         for (auto span = after; span != spans.end(); ++span) {
             span->start += map.delta;
@@ -283,8 +287,15 @@ void EditorDecorations::sourceEdited(Revision revision, SourceRange range, int i
         for (auto in = first; in != after; ++in) {
             DecorationSpan span = *in;
             if (dropping && span.start <= map.oldEnd && span.end >= map.start) continue;
-            span.start = map.startOf(span.start);
-            span.end = map.endOf(span.end);
+            const int start = span.start, end = span.end;
+            span.start = map.startOf(start);
+            span.end = map.endOf(end);
+            if (growing && layer.grows(span.style)) {
+                const auto next = in + 1;
+                if (start == range.start) span.start = start;
+                else if (end == range.start && !(next != after && next->start == range.start && layer.grows(next->style)))
+                    span.end = map.newEnd;
+            }
             if (span.start < span.end) *out++ = span;
         }
         spans.erase(out, after);
@@ -372,6 +383,15 @@ bool EditorDecorations::forward(Revision revision, Range &range, int &shift) con
             shift += delta;
         }
     }
+    return true;
+}
+
+bool EditorDecorations::follow(Revision revision, SourceRange *range) const
+{
+    Range moved{range->start, range->start + range->length};
+    int shift = 0;
+    if (!forward(revision, moved, shift)) return false;
+    *range = {moved.start, moved.end - moved.start};
     return true;
 }
 

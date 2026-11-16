@@ -47,6 +47,7 @@
 #include "sourcebuffer.h"
 #include "spellchecker.h"
 #include "spellinglayer.h"
+#include "stylingtests.h"
 #include "tabmodel.h"
 #include "testfiles.h"
 #include "textsearch.h"
@@ -613,6 +614,16 @@ private slots:
     void decorationsFormatOnlyTheParagraphsTheyChange();
     void decorationsKeepTextLinesAndCaret();
     void typingWithDecorationsStaysWithinAFrame();
+    void decorationRangesCanGrowAtTheirEdges() { StylingTests::decorationRangesCanGrowAtTheirEdges(); }
+    void constructsGetTheirStylesOnTheirMarkersAndContent() { StylingTests::constructsGetTheirStylesOnTheirMarkersAndContent(); }
+    void stylesFollowCrlfAndUnicodeAndStayFew() { StylingTests::stylesFollowCrlfAndUnicodeAndStayFew(); }
+    void editorStylesMarkdownAsItIsWritten() { StylingTests::editorStylesMarkdownAsItIsWritten(); }
+    void stylingFollowsEditsWithoutStaleResults() { StylingTests::stylingFollowsEditsWithoutStaleResults(); }
+    void themeChangeRecoloursTheStyling() { StylingTests::themeChangeRecoloursTheStyling(); }
+    void stylingKeepsEveryGlyphWhereItWas() { StylingTests::stylingKeepsEveryGlyphWhereItWas(); }
+    void liveFormattingTurnsOff() { StylingTests::liveFormattingTurnsOff(); }
+    void liveFormattingIsAPreferenceAndACommand() { StylingTests::liveFormattingIsAPreferenceAndACommand(); }
+    void typingWithLiveFormattingStaysWithinAFrame() { StylingTests::typingWithLiveFormattingStaysWithinAFrame(); }
     void spellingSkipsWhatIsNotProse();
     void spellingSegmentsUnicodeWords();
     void spellCheckerUsesItsDictionaries();

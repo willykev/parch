@@ -8,6 +8,10 @@ The first version: a native Markdown writing app for Omarchy.
 
 - Markdown as plain text, with its punctuation in view, in a window that
   follows the Omarchy theme and font, light or dark.
+- Live formatting: headings, bold, italic, strikethrough, highlights, links,
+  images, code, math, notes and citations styled as you write, in the
+  theme's colours, with every mark of Markdown kept in the text and dimmed,
+  and the caret and line breaks never moved. It can be turned off.
 - Tabs, separate windows, and several views of one document.
 - Drafts that are kept from the first keystroke and named when saved.
 - Each file's line endings and byte-order mark are kept.
@@ -27,8 +31,8 @@ The first version: a native Markdown writing app for Omarchy.
 - Focus mode, which dims all but the sentence or paragraph being written, and
   distraction-free writing, which shows the text alone.
 - Preferences for the writing font, text size, line height, line length,
-  heading syntax, toolbar, spelling and focus mode, applied at once in every
-  window.
+  live formatting, heading syntax, toolbar, spelling and focus mode, applied
+  at once in every window.
 - A word count and reading time for the document or the selection, of the
   text a reader sees.
 - Optional Vim keys, off until chosen: Normal, Insert and Visual modes;

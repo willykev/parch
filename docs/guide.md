@@ -97,6 +97,33 @@ reader sees: link addresses, task boxes, comments, front matter and
 Markdown punctuation are not words. Chinese and Japanese count each
 character as a word.
 
+## Live formatting
+
+parch styles your Markdown as you write and never hides any of it: every `#`,
+`*` and `[link](…)` stays in the text, drawn dimmed, while what it marks takes
+its look. Headings are in the heading weight, bold text is bold and italic
+text italic, struck-through text is struck through, and highlighted text
+(`==`) has the highlighter's colour behind it. The text of links and images
+is in the theme's accent with the address dimmed, and so are notes,
+citations and `[%variables]`. Code is in the theme's code colour, a code span
+on a tinted ground; math between dollars is tinted. List and quote marks,
+task boxes, table pipes, code fences, page breaks (`+++`) and thematic breaks
+are dimmed, and so are comments, front matter and link definitions.
+
+Styling changes colour, weight and slant only, never the size or the spacing
+of the text, so the caret, the selection and where lines break stay exactly
+where they are. If the editor's font draws bold or italic wider than its
+plain text, as proportional fonts do, that text takes a colour instead. Every
+colour comes from your Omarchy theme and changes with it; a theme colour too
+pale to read as text on your background, as a yellow often is on a light
+one, is drawn closer to the colour of the text.
+
+New formatting is styled as soon as you pause, in a book-length document too,
+and text typed at the end of a heading or inside bold text takes its style at
+once. **Turn off live formatting**, in the menu (`F10`) or the command
+palette, or **Live formatting** in **Preferences…**, shows the source as
+plain text; turning it on again styles it at once.
+
 ## Commands and keys
 
 The command palette (`Ctrl+Shift+P`) lists everything parch can do. Type a
@@ -113,8 +140,9 @@ another command has can be swapped. **Remove** leaves a command without keys,
 
 **Preferences…** (`Ctrl+,`) sets the writing font, any installed family or
 the theme's; the text size; the line height; the longest line, in
-characters; how headings are written; whether the formatting toolbar shows;
-whether spelling is checked; and what focus mode keeps bright. A window too
+characters; whether the Markdown is styled as you write; how headings are
+written; whether the formatting toolbar shows; whether spelling is checked;
+and what focus mode keeps bright. A window too
 narrow for the toolbar hides it until you ask for it with **Show toolbar**.
 Every change applies at once in every window. Under **Keys**, **Edit with Vim
 keys** turns on Vim keys.

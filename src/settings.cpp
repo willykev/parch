@@ -33,6 +33,7 @@ const auto themeFamily = QStringLiteral("monospace");
 const auto outlineShownKey = QStringLiteral("outlineShown");
 const auto spellcheckKey = QStringLiteral("spellcheck");
 const auto focusUnitKey = QStringLiteral("focusUnit");
+const auto liveFormattingKey = QStringLiteral("liveFormatting");
 
 bool isFocusUnit(const QString &unit) { return unit == u"sentence" || unit == u"paragraph"; }
 // More folders than anyone lists, so that a damaged file costs little.
@@ -250,6 +251,15 @@ void Settings::setFocusUnit(const QString &unit)
     emit changed();
 }
 
+void Settings::setLiveFormatting(bool on)
+{
+    if (on == m_liveFormatting) return;
+    m_liveFormatting = on;
+    m_stored.insert(liveFormattingKey, on);
+    write();
+    emit changed();
+}
+
 void Settings::load()
 {
     QFile file(m_file);
@@ -381,6 +391,12 @@ void Settings::load()
             m_focusUnit = m_stored.value(focusUnitKey).toString();
         else
             ignored << focusUnitKey;
+    }
+    if (present(liveFormattingKey)) {
+        if (m_stored.value(liveFormattingKey).isBool())
+            m_liveFormatting = m_stored.value(liveFormattingKey).toBool();
+        else
+            ignored << liveFormattingKey;
     }
     if (!ignored.isEmpty())
         qWarning("parch: ignoring settings out of range in %s: %s", qPrintable(m_file), qPrintable(ignored.join(", ")));

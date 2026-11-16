@@ -18,6 +18,7 @@ ThemedMenu {
     property bool focusMode: false
     property bool distractionFree: false
     property bool spellingWanted: false
+    property bool liveFormatting: true
     // Whether a command can run now, as the window says.
     property var canRun: function(command) { return true }
 
@@ -95,6 +96,11 @@ ThemedMenu {
         objectName: "toolbarEntry"
         command: "toolbar"
         text: windowMenu.toolbarShown ? qsTr("Hide toolbar") : qsTr("Show toolbar")
+    }
+    CommandEntry {
+        objectName: "liveFormattingEntry"
+        command: "liveFormatting"
+        text: windowMenu.liveFormatting ? qsTr("Turn off live formatting") : qsTr("Turn on live formatting")
     }
     CommandEntry {
         objectName: "focusModeEntry"

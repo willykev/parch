@@ -55,6 +55,7 @@ HEADERS += \
     src/markdownediting.h \
     src/markdownexport.h \
     src/librarywalk.h \
+    src/markdownstyling.h \
     src/outline.h \
     src/mathrender.h \
     src/mdhtml.h \
@@ -135,6 +136,7 @@ SOURCES += \
     src/markdownediting.cpp \
     src/markdownexport.cpp \
     src/librarywalk.cpp \
+    src/markdownstyling.cpp \
     src/outline.cpp \
     src/mathrender.cpp \
     src/mdblocks.cpp \

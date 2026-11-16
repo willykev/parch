@@ -55,6 +55,9 @@ Rectangle {
     // Focus mode dims all but the sentence or the paragraph with the caret.
     property bool focusMode: false
     property string focusUnit: "sentence"
+    // Live formatting styles the Markdown as it is written, its punctuation
+    // kept and dimmed; without it the source is plain text.
+    property bool liveFormatting: true
 
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
@@ -409,6 +412,24 @@ Rectangle {
         id: decorations
         objectName: "decorations"
         binding: binding
+    }
+
+    // The Markdown, styled from the parsed text on a worker: headings,
+    // emphasis, links, code, math and the rest, every colour the theme's.
+    MarkdownStyling {
+        id: styling
+        objectName: "styling"
+        decorations: decorations
+        enabled: pane.liveFormatting
+        font: editor.font
+        foreground: theme.foreground
+        background: theme.background
+        markerColor: theme.dim
+        linkColor: theme.accent
+        codeColor: theme.good
+        codeFill: theme.raised
+        mathColor: theme.warning
+        markColor: theme.warning
     }
 
     SpellingLayer {

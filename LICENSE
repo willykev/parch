@@ -28,7 +28,8 @@ Parts of parch come from other MIT-licensed work, under the same terms:
   (src/themefolder.h), the line icons (src/Icon.qml, src/icons.js), the file
   picker (src/filepicker.h, src/portalfilepicker.h, src/portalfilepicker.cpp)
   and the package recipe and install script (pkgbuild/PKGBUILD, bin/install)
-  are adapted from sprawl. Copyright (c) 2026 willykev.
+  are adapted from sprawl, and the release script (bin/release) from nudge.
+  Copyright (c) 2026 willykev.
 - The desktop file picker follows Omacut's, through sprawl; watching the theme
   follows Omacut, reading the whole palette follows Hype, and the control
   states and roles follow the Omarchy shell. Copyright (c) David Heinemeier

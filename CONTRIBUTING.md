@@ -37,4 +37,34 @@ time and memory in a real window on three generated documents (10,000 words,
 100,000 words, and one long paragraph), three runs each. Run it in a desktop
 session with the screen awake, and leave its window in front until it ends.
 
+## Releases
+
+Every release has its own version. Update `VERSION`, `pkgver` in
+`pkgbuild/PKGBUILD` and `CHANGELOG.md` (a dated section for the version)
+together, and write `docs/releases/v<VERSION>.md` with the changes and
+installation notes. Then build, test, commit, and create an annotated tag:
+
+```sh
+release_version=$(cat VERSION)
+git tag -a "v$release_version" -m "Release v$release_version"
+bin/release
+```
+
+`bin/release` writes the tagged source archive and the standalone `PKGBUILD`
+that downloads it to `dist/v<VERSION>/`, builds the Arch package from that
+`PKGBUILD` and archive, fetches the helpers and test fixtures, runs the tests,
+and writes `SHA256SUMS`. It needs Python 3.12 or newer and Arch's `makepkg`.
+Packages are built for the current machine's architecture; the build
+workflow adds the x86_64 package and its checksum to the release when the
+tag is pushed.
+
+Maintainers can run `bin/release --publish` to push the commit and tag, set
+the GitHub description and topics, and publish the release with its assets.
+It needs the GitHub CLI, signed in with admin access to the repository.
+Before it pushes anything, it checks the release notes, the tag, GitHub
+access, and that the push will be accepted. Verified local assets are reused
+on retries, and assets already on the release must match them: one that
+differs stops the release before the push, so delete it from the release or
+restore the uploaded file, then retry.
+
 Contributions use the project's [MIT license](LICENSE).

@@ -26,9 +26,10 @@ depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-porta
 optdepends=('noto-fonts-cjk: Chinese, Japanese and Korean text in diagrams'
             'noto-fonts-emoji: emoji in diagrams')
 makedepends=('gcc' 'make')
-# This recipe builds a checkout. The math and diagram helpers are the pinned
-# release builds of RaTeX and Merman, the same archives and checksums as
-# bin/fetch-helpers.
+# This recipe builds a checkout. bin/release also produces a standalone
+# download recipe with a versioned source URL and SHA-256 checksum.
+# The math and diagram helpers are the pinned release builds of RaTeX and
+# Merman, the same archives and checksums as bin/fetch-helpers.
 _ratex=0.1.15
 _merman=0.10.0
 source=()

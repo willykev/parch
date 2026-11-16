@@ -429,6 +429,18 @@ void checkDrawsFormulasAndDiagrams()
     QVERIFY2(ran.code == Cli::Ok, qPrintable(ran.said()));
     QVERIFY(helperRuns(log) > before);
 
+    // --no-render leaves them undrawn, and says so without failing for it.
+    const int beforeSkipping = helperRuns(log);
+    ran = runCliWith(root, paths, helpers, {QStringLiteral("check"), path, QStringLiteral("--no-render"), QStringLiteral("--json")});
+    QVERIFY2(ran.code == Cli::Ok, qPrintable(ran.said()));
+    QVERIFY(problemPlaces(ran.json()).isEmpty());
+    QCOMPARE(ran.json().value(QStringLiteral("skipped")).toArray(),
+             (QJsonArray{QStringLiteral("math"), QStringLiteral("diagram")}));
+    ran = runCliWith(root, paths, helpers, {QStringLiteral("check"), path, QStringLiteral("--no-render")});
+    QVERIFY2(ran.code == Cli::Ok, qPrintable(ran.said()));
+    QVERIFY2(ran.err.contains(QStringLiteral("not checked, as --no-render asks")), qPrintable(ran.said()));
+    QCOMPARE(helperRuns(log), beforeSkipping);
+
     // Without the record of their versions, Merman says its own; render-svg cannot.
     QVERIFY(QFile::remove(helpersFolder + QStringLiteral("/.pins")));
     ran = runCliWith(root, paths, helpers, {QStringLiteral("check"), clean, QStringLiteral("--json")});

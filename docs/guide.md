@@ -905,6 +905,7 @@ no display, never change the document, and print text for people or, with
 
 ```sh
 parch check notes.md chapters/*.md   # What is wrong, file by file
+parch check notes.md --no-render     # The same, without drawing formulas and diagrams
 parch render notes.md --to outline   # html, text, outline or json-tree
 parch export book.md -o book.html    # A page of its own
 parch export book.md -o book.pdf --page-size Letter

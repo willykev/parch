@@ -455,11 +455,12 @@ int check(const QStringList &arguments, const Context &context)
                                    "that cannot be drawn, front matter, and HTML that is shown as text. Each\n"
                                    "problem has its file, line and column."));
     addDialectOptions(command);
+    command.add({QStringLiteral("no-render"), QStringLiteral("Do not draw formulas and diagrams to check them")});
     command.add({QStringLiteral("json"), jsonDescription});
     command.notes = dialectNotes() +
                     QStringLiteral("\n\nFormulas are drawn with render-svg (RaTeX) and diagrams with merman-cli (Merman),\n"
-                                   "as the preview draws them. When one cannot be found, what it draws is not checked,\n"
-                                   "and check says so without counting it as a problem.\n\n"
+                                   "as the preview draws them. When one cannot be found, or with --no-render, what it\n"
+                                   "draws is not checked, and check says so without counting it as a problem.\n\n"
                                    "Exit status: 0 nothing wrong (notes of severity info alone are not problems),\n"
                                    "1 a wrong command line, 2 problems found, 3 a document could not be read.");
     if (const auto done = command.parse(arguments, context)) return *done;
@@ -471,6 +472,7 @@ int check(const QStringList &arguments, const Context &context)
     // Formulas and diagrams are drawn as the preview draws them, by a
     // service made the first time a document has one.
     const HelperSet helpers = context.helpers ? *context.helpers : HelperSet::find();
+    const bool drawing = !command.parser.isSet(QStringLiteral("no-render"));
     std::unique_ptr<RenderService> service;
     int skippedFormulas = 0, skippedDiagrams = 0;
     QJsonArray documents;
@@ -489,7 +491,7 @@ int check(const QStringList &arguments, const Context &context)
         }
         std::vector<RenderCheck::Item> drawn;
         for (RenderCheck::Item &item : RenderCheck::items(loaded.document)) {
-            if (RenderCheck::canDraw(helpers, item.kind)) drawn.push_back(std::move(item));
+            if (drawing && RenderCheck::canDraw(helpers, item.kind)) drawn.push_back(std::move(item));
             else ++(item.isMath() ? skippedFormulas : skippedDiagrams);
         }
         std::vector<DocumentCheck::Problem> drawingProblems;
@@ -570,10 +572,14 @@ int check(const QStringList &arguments, const Context &context)
             missing << QStringLiteral("merman-cli");
         }
         const bool one = skippedFormulas + skippedDiagrams == 1;
-        line(context.err, QStringLiteral("parch check: %1 %2 not checked, since %3 %4 not found")
-                              .arg(what.join(QStringLiteral(" and ")), one ? QStringLiteral("was") : QStringLiteral("were"),
-                                   missing.join(QStringLiteral(" and ")),
-                                   missing.size() == 1 ? QStringLiteral("was") : QStringLiteral("were")));
+        if (!drawing)
+            line(context.err, QStringLiteral("parch check: %1 %2 not checked, as --no-render asks")
+                                  .arg(what.join(QStringLiteral(" and ")), one ? QStringLiteral("was") : QStringLiteral("were")));
+        else
+            line(context.err, QStringLiteral("parch check: %1 %2 not checked, since %3 %4 not found")
+                                  .arg(what.join(QStringLiteral(" and ")), one ? QStringLiteral("was") : QStringLiteral("were"),
+                                       missing.join(QStringLiteral(" and ")),
+                                       missing.size() == 1 ? QStringLiteral("was") : QStringLiteral("were")));
     }
     return code;
 }

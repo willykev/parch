@@ -69,9 +69,13 @@ private:
 // TextEdit would apply itself, from keys, input methods, the clipboard or its
 // own editing methods, is turned into a SourceBuffer edit at grapheme
 // boundaries instead, and comes back to this and every other view as a source
-// change. Cursor, selection and scroll stay with the view. Qt's own cursor
-// is kept from blinking, since each of its blinks draws the whole editor
-// again; the view draws a caret of its own. The document and
+// change. A write that reaches the projection some other way, as assistive
+// technology makes through Qt's own interface for the TextEdit, is taken
+// back once Qt has finished it and made the same kind of edit, or refused
+// when the view takes no edits. Cursor, selection and scroll stay with the
+// view; a caret or selection set from outside is followed as a click's is.
+// Qt's own cursor is kept from blinking, since each of its blinks draws the
+// whole editor again; the view draws a caret of its own. The document and
 // the TextEdit may each be destroyed before the binding; it then lets go of
 // the other and acts as a binding without one.
 class EditorBinding : public QObject {
@@ -242,6 +246,14 @@ private:
     QTextBlockFormat lineFormat() const;
     // Notices a change of the TextEdit's text that did not come from the source.
     void checkNativeChange(int position, int removed, int added);
+    // Gathers a write into the projection that did not come from the source,
+    // to be taken in by takeForeignWrite() once Qt has finished it.
+    void noteForeignWrite(int position, int removed, int added);
+    // The projection shows the source again where a write changed it, and
+    // what the write left there becomes one source edit, as the TextEdit's
+    // own insert or remove makes one; a view that takes no edits keeps the
+    // source as it is.
+    void takeForeignWrite();
     void scheduleResync();
     void refreshEditable();
     // Follows the TextEdit's caret and selection into source offsets.
@@ -320,6 +332,21 @@ private:
     // The binding is placing the selection, so the view does not scroll to it.
     bool m_selecting = false;
     bool m_resyncPending = false;
+    // A write into the projection that did not come from the source, waiting
+    // for takeForeignWrite(): Qt is still inside it when it reports it, and
+    // one write, as a replacement, can come as a removal and an insertion.
+    // From `start` it covers the projection up to `oldEnd` before the write
+    // and up to `newEnd` after it.
+    struct ForeignWrite {
+        bool pending = false;
+        int start = 0;
+        int oldEnd = 0;
+        int newEnd = 0;
+        // This view's selection before the write, in source offsets.
+        int anchor = 0;
+        int cursor = 0;
+    };
+    ForeignWrite m_foreign;
     bool m_composing = false;
     // The source range a composition will replace, kept while Qt shows its preedit.
     SourceRange m_compositionSelection{0, 0};

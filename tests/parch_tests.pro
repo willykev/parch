@@ -1,4 +1,4 @@
-QT += core gui qml quick quick-private quickcontrols2 testlib dbus svg concurrent network
+QT += core gui qml quick quickcontrols2 testlib dbus svg concurrent network
 CONFIG += c++20 testcase link_pkgconfig
 # fontconfig picks the fonts diagrams are drawn with; Hunspell checks spelling.
 PKGCONFIG += fontconfig hunspell
@@ -68,7 +68,6 @@ HEADERS += \
     ../src/documentsettings.h \
     ../src/documentsettingsstore.h \
     ../src/documentstore.h \
-    ../src/editoraccessible.h \
     ../src/editorbinding.h \
     ../src/editordecorations.h \
     ../src/encodings.h \
@@ -196,7 +195,6 @@ SOURCES += \
     ../src/documentsettings.cpp \
     ../src/documentsettingsstore.cpp \
     ../src/documentstore.cpp \
-    ../src/editoraccessible.cpp \
     ../src/editorbinding.cpp \
     ../src/editordecorations.cpp \
     ../src/encodings.cpp \

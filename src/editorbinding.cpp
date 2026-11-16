@@ -1,7 +1,6 @@
 #include "editorbinding.h"
 
 #include "caretrest.h"
-#include "editoraccessible.h"
 #include "sourceboundaries.h"
 
 #include <QClipboard>
@@ -65,6 +64,19 @@ int graphemeAtOrBefore(QStringView source, int position)
 int graphemeAtOrAfter(QStringView source, int position)
 {
     return sourceGraphemeBoundary(source, position) ? position : nextSourceGrapheme(source, position);
+}
+
+// True when every surrogate in the text is half of a pair.
+bool wellFormed(QStringView text)
+{
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        if (text[i].isLowSurrogate()) return false;
+        if (text[i].isHighSurrogate()) {
+            if (i + 1 == text.size() || !text[i + 1].isLowSurrogate()) return false;
+            ++i;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -240,8 +252,6 @@ void EditorBinding::setEditor(QQuickItem *editor)
     detach();
     disconnect(m_editorGone);
     m_editor = editor;
-    // Assistive technology edits its text through this binding too.
-    if (editor) EditorAccessible::serve(editor, this);
     if (editor) {
         // A destroyed TextEdit takes its text document with it: detach()
         // leaves that projection alone and drops the buffer's connection, so
@@ -364,6 +374,7 @@ void EditorBinding::detach()
     m_textDocument = nullptr;
     m_pairs.reset({});
     m_loaded = false;
+    m_foreign = {};
     m_topAnchor = {};
     m_cursorSource = m_anchorSource = 0;
     refreshEditable();
@@ -393,6 +404,8 @@ void EditorBinding::load()
     cursor.insertText(source);
     m_pairs.reset(source);
     m_loaded = true;
+    // The projection is the source again, whatever was written into it.
+    m_foreign = {};
     m_topAnchor = {};
     selectEditor(0, 0);
     m_projecting = false;
@@ -404,6 +417,24 @@ void EditorBinding::load()
 void EditorBinding::applySourceChange(Revision revision, SourceRange range, const QString &replacement)
 {
     if (!m_loaded || !m_editor || !m_textDocument) return;
+    if (m_foreign.pending) {
+        // The source changed while a write into the projection waited, so
+        // the projection no longer shows the text the write was made in: it
+        // shows the source anew, and the write is dropped. The selection
+        // from before the write moves with the change, as below.
+        m_foreign = {};
+        const auto track = [&](int position) {
+            if (position < range.start) return position;
+            if (position >= range.start + range.length) return position + int(replacement.size()) - range.length;
+            return range.start + int(replacement.size());
+        };
+        const int cursor = track(m_cursorSource), anchor = track(m_anchorSource);
+        const int top = topSourcePosition();
+        m_loaded = false;
+        load();
+        restore(cursor, anchor, top);
+        return;
+    }
     // From here to the end the buffer holds the new text while the projection
     // and the pairs still describe the old one, so the TextEdit's notices in
     // between are part of following the change: neither a write past the
@@ -640,14 +671,24 @@ void EditorBinding::checkNativeChange(int position, int removed, int added)
     if (m_projecting || !m_loaded || m_resyncPending || (removed == 0 && added == 0)) return;
     // A composition event the binding sends makes Qt redraw the preedit's
     // paragraph, reported as a change of equal length; that needs no
-    // comparing on every key of an input method. A change of length is still
-    // a write.
-    if (m_dispatching && removed == added) return;
+    // comparing on every key of an input method. A change of length then is
+    // Qt's own doing, which the binding never asked for, so it is not taken
+    // in: the view shows the source again.
+    if (m_dispatching) {
+        if (removed != added) scheduleResync();
+        return;
+    }
+    // Whatever Qt reports while a write waits belongs to it.
+    if (m_foreign.pending) {
+        noteForeignWrite(position, removed, added);
+        return;
+    }
     // Qt reports its own formatting, the preedit among it, as a change of
     // equal length; only a change of the characters is a write past the source.
     if (removed == added) {
         const int shownLength = m_textDocument->characterCount() - 1;
         if (shownLength != m_pairs.toEditor(m_buffer->length())) {
+            // Then the projection no longer follows the source at all.
             scheduleResync();
             return;
         }
@@ -666,14 +707,123 @@ void EditorBinding::checkNativeChange(int position, int removed, int added)
         }
         if (span.selectedText() == expected) return;
     }
-    scheduleResync();
+    noteForeignWrite(position, removed, added);
+}
+
+void EditorBinding::noteForeignWrite(int position, int removed, int added)
+{
+    ForeignWrite &write = m_foreign;
+    if (!write.pending) {
+        // The selection was last followed before the write moved Qt's.
+        write = {true, position, position + removed, position + added, m_anchorSource, m_cursorSource};
+        // Qt is still inside its edit, which can go on with more changes, so
+        // the write is taken in afterwards, before anything else that waits.
+        QMetaObject::invokeMethod(this, &EditorBinding::takeForeignWrite, Qt::QueuedConnection);
+        return;
+    }
+    // One span covers both: positions before it are where they were, and
+    // positions after it are shifted by what it changed so far.
+    const int end = qMax(write.newEnd, position + removed);
+    write.oldEnd += end - write.newEnd;
+    write.newEnd = end + added - removed;
+    write.start = qMin(write.start, position);
+}
+
+void EditorBinding::takeForeignWrite()
+{
+    if (!m_foreign.pending) return;
+    const ForeignWrite write = std::exchange(m_foreign, {});
+    if (!m_loaded || !m_textDocument || !m_editor) return;
+    const int oldShown = m_pairs.toEditor(m_buffer->length());
+    const int newShown = m_textDocument->characterCount() - 1;
+    // Qt can count the separator it keeps after the last paragraph, as when
+    // clearing; the span stays inside the text, and is all of it when what it
+    // changed does not add up.
+    int start = qBound(0, write.start, qMin(oldShown, newShown));
+    int oldEnd = qBound(start, write.oldEnd, oldShown);
+    int newEnd = qBound(start, write.newEnd, newShown);
+    if (newEnd - oldEnd != newShown - oldShown) {
+        start = 0;
+        oldEnd = oldShown;
+        newEnd = newShown;
+    }
+    QTextCursor span(m_textDocument);
+    span.setPosition(start);
+    span.setPosition(newEnd, QTextCursor::KeepAnchor);
+    const QString written = span.selectedText();
+    const int sourceStart = m_pairs.toSource(start);
+    const int sourceEnd = m_pairs.toSource(oldEnd);
+    SourceRange range;
+    QString replacement;
+    {
+        // The copy of the text is gone before the edit, or the buffer would copy all of it to change it.
+        const QString source = m_buffer->text();
+        const QString before = source.mid(sourceStart, sourceEnd - sourceStart);
+        m_projecting = true;
+        // A composition is dropped, as for any edit; nothing it showed was written.
+        const bool composed = m_composing;
+        const SourceRange composition = m_compositionSelection;
+        cancelComposition();
+        // The span shows the source again, its paragraphs with the line
+        // height, which a write that cleared the text took from them; Qt
+        // makes the separators of the source's line breaks as it always does.
+        span.insertText(before);
+        span.setPosition(start);
+        span.setPosition(oldEnd, QTextCursor::KeepAnchor);
+        span.mergeBlockFormat(lineFormat());
+        // The selection from before the write, which the edit moves as it moves every view's.
+        const int length = int(source.size());
+        const int anchor = composed ? composition.start : write.anchor;
+        const int cursor = composed ? composition.start + composition.length : write.cursor;
+        selectEditor(m_pairs.toEditor(qBound(0, anchor, length)), m_pairs.toEditor(qBound(0, cursor, length)));
+        m_projecting = false;
+        refreshCursor();
+        // Only what the write changed is edited: what it left as the source
+        // shows it is trimmed from both ends.
+        QString shown;
+        shown.reserve(before.size());
+        for (qsizetype i = 0; i < before.size(); ++i) {
+            const QChar c = before.at(i);
+            if (c == u'\r' && i + 1 < before.size() && before.at(i + 1) == u'\n') ++i;
+            shown += showsAsSeparator(c) ? QChar(QChar::ParagraphSeparator) : c;
+        }
+        qsizetype head = 0;
+        const qsizetype common = qMin(shown.size(), written.size());
+        while (head < common && shown.at(head) == written.at(head)) ++head;
+        qsizetype tail = 0;
+        while (tail < common - head && shown.at(shown.size() - 1 - tail) == written.at(written.size() - 1 - tail))
+            ++tail;
+        if (head == shown.size() && head == written.size()) return;
+        const int from = m_pairs.toSource(start + int(head));
+        const int to = m_pairs.toSource(oldEnd - int(tail));
+        // Qt shows every line break it was given as a paragraph separator;
+        // the source takes the document's own.
+        QString added = written.mid(head, written.size() - head - tail);
+        added.replace(QChar(QChar::ParagraphSeparator), u'\n');
+        added = withDocumentBreaks(added);
+        // An edit inside a grapheme takes the whole grapheme, with the
+        // units of it the write left as they were; one that would leave half
+        // a surrogate pair goes to whole graphemes instead, as the TextEdit's
+        // own insert and remove do.
+        const int first = graphemeAtOrBefore(source, from);
+        const int last = graphemeAtOrAfter(source, to);
+        range = {first, last - first};
+        replacement = source.mid(first, from - first) + added + source.mid(to, last - to);
+        if (!wellFormed(replacement)) {
+            range = {first, (to == from ? first : last) - first};
+            replacement = added;
+        }
+    }
+    // As the TextEdit's own methods, this leaves the caret to follow the edit;
+    // a view that takes no edits now refuses it and goes on showing the source.
+    replace(range, replacement, EditKind::Other, false);
 }
 
 void EditorBinding::scheduleResync()
 {
-    // Something wrote into the TextEdit without going through the source:
-    // that write cannot be trusted, so the view shows the source again. Qt is
-    // still inside its own edit here, so the document is rebuilt afterwards.
+    // Something wrote into the TextEdit that cannot be followed into the
+    // source, so the view shows the source again. Qt is still inside its own
+    // edit here, so the document is rebuilt afterwards.
     if (m_resyncPending) return;
     m_resyncPending = true;
     QTimer::singleShot(0, this, [this] {
@@ -698,7 +848,9 @@ void EditorBinding::refreshEditable()
 
 void EditorBinding::refreshCursor()
 {
-    if (!m_loaded) return;
+    // While a write waits, the projection is ahead of the source and its
+    // positions map to nothing yet.
+    if (!m_loaded || m_foreign.pending) return;
     const int cursor = m_pairs.toSource(editorCursor());
     const int anchor = m_pairs.toSource(editorAnchor());
     if (cursor == m_cursorSource && anchor == m_anchorSource) return;
@@ -709,7 +861,9 @@ void EditorBinding::refreshCursor()
 
 void EditorBinding::editorCursorMoved()
 {
-    if (m_projecting) return;
+    // A caret set from outside, as assistive technology sets one, is followed
+    // as a click's is; one that a waiting write moved is placed once it is taken in.
+    if (m_projecting || m_foreign.pending) return;
     refreshCursor();
     // A caret moved by keys or the mouse stays in view; one the binding
     // placed, for another view's edit or a restore, leaves the scroll alone.
@@ -1141,6 +1295,10 @@ bool EditorBinding::eventFilter(QObject *watched, QEvent *event)
         return true;
     }
     if (watched == m_editor && !m_dispatching && m_loaded) {
+        // A write into the projection that waits is taken in first, so that
+        // the key or the input method acts on the text it left.
+        if (m_foreign.pending && (event->type() == QEvent::InputMethod || event->type() == QEvent::KeyPress))
+            takeForeignWrite();
         if (event->type() == QEvent::InputMethod) {
             auto *input = static_cast<QInputMethodEvent *>(event);
             // Outside Insert mode, Vim keys take what an input method sends as keys.

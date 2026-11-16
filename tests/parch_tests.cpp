@@ -105,6 +105,7 @@
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTextBlock>
+#include <QTextCursor>
 #include <QTextDocument>
 #include <QTextLayout>
 #include <QTranslator>
@@ -8825,6 +8826,9 @@ void tryEveryEdit(EditorView &view)
     QMetaObject::invokeMethod(view.editor, "paste");
     QMetaObject::invokeMethod(view.editor, "cut");
     QMetaObject::invokeMethod(view.editor, "clear");
+    // Past the TextEdit's methods, as Qt's interface for assistive technology writes.
+    view.editor->setProperty("text", QStringLiteral("written"));
+    QTextCursor(view.textDocument()).insertText(QStringLiteral("written"));
     sendKey(&view.window, Qt::Key_Z, Qt::ControlModifier);
     sendKey(&view.window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
     view.binding->undo();
@@ -9536,12 +9540,25 @@ void ParchTests::nativeWritesReturnToSource()
     QVERIFY(!view.textDocument()->isUndoRedoEnabled());
     QVERIFY(!view.editor->property("canUndo").toBool());
     QVERIFY(!view.editor->property("canRedo").toBool());
-    // A write straight into the TextEdit cannot reach the source; the view returns to it.
+    // A write straight into the TextEdit, past its methods, as Qt's interface
+    // for assistive technology makes, comes back as one edit of the source,
+    // in the document's line breaks, and the view shows the source.
     const Revision revision = buffer->revision();
-    view.editor->setProperty("text", QStringLiteral("replaced"));
-    QTRY_COMPARE(view.textDocument()->toRawText(), projectionOf(original));
+    view.editor->setProperty("text", QStringLiteral("replaced\nall"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("replaced\r\nall"));
+    QCOMPARE(buffer->revision(), revision + 1);
+    verifyProjection(view, buffer->text());
+    buffer->undo();
     QCOMPARE(buffer->text(), original);
-    QCOMPARE(buffer->revision(), revision);
+    verifyProjection(view, original);
+    // Only what it changed is edited: CRLF pairs it left in place stay.
+    QTextCursor write(view.textDocument());
+    write.setPosition(4);
+    write.insertText(QStringLiteral("2: "));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("one\r\n2: two\n"));
+    verifyProjection(view, buffer->text());
+    buffer->undo();
+    QCOMPARE(buffer->text(), original);
     verifyProjection(view, original);
 }
 

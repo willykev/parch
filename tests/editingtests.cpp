@@ -25,6 +25,9 @@
 #include <QSemaphore>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocument>
 #include <QtTest>
 #include <functional>
 #include <memory>
@@ -1338,9 +1341,10 @@ void undefinedNotesBecomeInlineOrDefined()
 
 void assistiveTechnologyEditsTheSource()
 {
-    // A screen reader's or another assistive tool's edits, through the
-    // editor's editable text, are edits of the source: each one step to
-    // undo, at the place the text shows, a CRLF pair one place among them.
+    // A screen reader's or another assistive tool's edits, through Qt's own
+    // interface for the editor, are edits of the source: each one step to
+    // undo, at the place the text shows, a CRLF pair one place among them,
+    // and the editor shows the source again once Qt has finished the edit.
     QAccessible::setActive(true);
     const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
     QTemporaryDir folder;
@@ -1355,27 +1359,102 @@ void assistiveTechnologyEditsTheSource()
     QQuickItem *editor = shell.item(QStringLiteral("editor"));
     EditorBinding *binding = shell.binding();
     SourceBuffer *buffer = shell.document()->buffer();
+    const auto shown = [&] { return binding->textDocument() ? binding->textDocument()->toRawText() : QString(); };
     QAccessibleInterface *access = QAccessible::queryAccessibleInterface(editor);
     QVERIFY(access);
     QCOMPARE(access->role(), QAccessible::EditableText);
     QAccessibleEditableTextInterface *editable = access->editableTextInterface();
     QAccessibleTextInterface *text = access->textInterface();
     QVERIFY(editable && text);
+    const Revision typed = buffer->revision();
     editable->insertText(5, QStringLiteral(","));
-    QCOMPARE(buffer->text(), QStringLiteral("Hello, world"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Hello, world"));
+    QCOMPARE(shown(), QStringLiteral("Hello, world"));
+    QCOMPARE(buffer->revision(), typed + 1);
     editable->replaceText(7, 12, QStringLiteral("there"));
-    QCOMPARE(buffer->text(), QStringLiteral("Hello, there"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Hello, there"));
+    // Qt removes, then inserts: one edit all the same.
+    QCOMPARE(buffer->revision(), typed + 2);
     editable->deleteText(0, 7);
-    QCOMPARE(buffer->text(), QStringLiteral("there"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("there"));
+    QCOMPARE(buffer->revision(), typed + 3);
     QTest::qWait(50);
     QCOMPARE(text->text(0, text->characterCount()), QStringLiteral("there"));
+    QCOMPARE(shown(), QStringLiteral("there"));
     binding->undo();
     QCOMPARE(buffer->text(), QStringLiteral("Hello, there"));
     binding->undo();
     QCOMPARE(buffer->text(), QStringLiteral("Hello, world"));
     binding->undo();
     QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
-    // The caret and the selection are the view's.
+    QCOMPARE(shown(), QStringLiteral("Hello world"));
+    binding->redo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello, world"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    // The caret follows an edit before it, as it follows any.
+    text->setCursorPosition(11);
+    editable->insertText(0, QStringLiteral("Oh "));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Oh Hello world"));
+    QCOMPARE(binding->cursorSource(), 14);
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    // Line breaks become the document's own.
+    editable->insertText(11, QStringLiteral("\nagain"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Hello world\nagain"));
+    QCOMPARE(shown(), QStringLiteral("Hello world\u2029again"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    // The whole text set at once, as Qt clears it and fills it again.
+    access->setText(QAccessible::Value, QStringLiteral("Hello there\nand more"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Hello there\nand more"));
+    QCOMPARE(shown(), QStringLiteral("Hello there\u2029and more"));
+    // Every paragraph keeps the line height that clearing took from it.
+    const qreal lineHeight = binding->textDocument()->firstBlock().blockFormat().lineHeight();
+    QVERIFY(lineHeight > 0);
+    QCOMPARE(binding->textDocument()->lastBlock().blockFormat().lineHeight(), lineHeight);
+    QCOMPARE(binding->textDocument()->lastBlock().blockFormat().lineHeightType(), int(QTextBlockFormat::FixedHeight));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    QCOMPARE(shown(), QStringLiteral("Hello world"));
+    // Half a surrogate pair is never written: an edit there takes whole
+    // graphemes. One inside a grapheme keeps what it left of it.
+    const QString grin = QString(QChar(0xd83d)) + QChar(0xde00);
+    const QString beam = QString(QChar(0xd83d)) + QChar(0xde01);
+    const QChar acute(0x0301), grave(0x0300);
+    const QString marks = QStringLiteral("A") + grin + u'e' + acute + u'Z';
+    QCOMPARE(buffer->replace({0, buffer->length()}, marks), SourceBuffer::EditOutcome::Applied);
+    editable->insertText(2, QStringLiteral("x"));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Ax") + grin + u'e' + acute + u'Z');
+    QCOMPARE(shown(), buffer->text());
+    binding->undo();
+    editable->deleteText(1, 2);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("Ae") + acute + u'Z');
+    binding->undo();
+    editable->replaceText(1, 3, beam);
+    QTRY_COMPARE(buffer->text(), QStringLiteral("A") + beam + u'e' + acute + u'Z');
+    binding->undo();
+    editable->replaceText(4, 5, QString(grave));
+    QTRY_COMPARE(buffer->text(), QStringLiteral("A") + grin + u'e' + grave + u'Z');
+    QCOMPARE(shown(), buffer->text());
+    binding->undo();
+    QCOMPARE(buffer->text(), marks);
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    // A write the source changes under before it is taken in is dropped,
+    // and the editor shows the source.
+    QTextCursor(binding->textDocument()).insertText(QStringLiteral("dropped "));
+    QCOMPARE(buffer->replace({0, 0}, QStringLiteral("Kept ")), SourceBuffer::EditOutcome::Applied);
+    QCOMPARE(shown(), QStringLiteral("Kept Hello world"));
+    QTest::qWait(50);
+    QCOMPARE(buffer->text(), QStringLiteral("Kept Hello world"));
+    QCOMPARE(shown(), QStringLiteral("Kept Hello world"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+
+    // The caret and the selection are the view's, set as a click sets them:
+    // no edit, nothing to undo, and typing goes where they are.
+    const Revision placed = buffer->revision();
     text->setCursorPosition(3);
     QCOMPARE(binding->cursorSource(), 3);
     QCOMPARE(binding->anchorSource(), 3);
@@ -1383,33 +1462,90 @@ void assistiveTechnologyEditsTheSource()
     text->setSelection(0, 1, 4);
     QCOMPARE(binding->anchorSource(), 1);
     QCOMPARE(binding->cursorSource(), 4);
+    int start = -1, end = -1;
+    text->selection(0, &start, &end);
+    QCOMPARE(start, 1);
+    QCOMPARE(end, 4);
     text->removeSelection(0);
     QCOMPARE(binding->anchorSource(), binding->cursorSource());
+    QCOMPARE(buffer->revision(), placed);
+    text->setCursorPosition(5);
+    QCOMPARE(binding->cursorSource(), 5);
+    typeText(window, QStringLiteral("!"));
+    QCOMPARE(buffer->text(), QStringLiteral("Hello! world"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    text->setSelection(0, 6, 11);
+    QCOMPARE(binding->anchorSource(), 6);
+    QCOMPARE(binding->cursorSource(), 11);
+    typeText(window, QStringLiteral("W"));
+    QCOMPARE(buffer->text(), QStringLiteral("Hello W"));
+    binding->undo();
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    // Two edits typed and their two undos.
+    QCOMPARE(buffer->revision(), placed + 4);
+
+    // While a dialog is open the view takes no edits, these neither.
+    binding->setBlocked(true);
+    editable->insertText(0, QStringLiteral("x"));
+    QTest::qWait(50);
+    QCOMPARE(buffer->text(), QStringLiteral("Hello world"));
+    QCOMPARE(shown(), QStringLiteral("Hello world"));
+    binding->setBlocked(false);
 
     // In a file with CRLF line breaks, a place in the shown text is the
     // same place in the source.
     shell.backend->openFiles({crlf});
     QTRY_COMPARE(shell.document()->path(), QFileInfo(crlf).canonicalFilePath());
+    SourceBuffer *lines = shell.document()->buffer();
+    EditorBinding *linesBinding = shell.binding();
     QAccessibleInterface *second = QAccessible::queryAccessibleInterface(shell.item(QStringLiteral("editor")));
     QVERIFY(second && second->editableTextInterface());
     second->editableTextInterface()->insertText(4, QStringLiteral("2: "));
-    QCOMPARE(shell.document()->buffer()->text(), QStringLiteral("one\r\n2: two\r\n"));
-    shell.binding()->undo();
-    QCOMPARE(shell.document()->buffer()->text(), QStringLiteral("one\r\ntwo\r\n"));
+    QTRY_COMPARE(lines->text(), QStringLiteral("one\r\n2: two\r\n"));
+    linesBinding->undo();
+    QCOMPARE(lines->text(), QStringLiteral("one\r\ntwo\r\n"));
+    second->editableTextInterface()->deleteText(3, 4);
+    QTRY_COMPARE(lines->text(), QStringLiteral("onetwo\r\n"));
+    QCOMPARE(linesBinding->textDocument()->toRawText(), QStringLiteral("onetwo\u2029"));
+    linesBinding->undo();
+    QCOMPARE(lines->text(), QStringLiteral("one\r\ntwo\r\n"));
+    second->editableTextInterface()->insertText(0, QStringLiteral("zero\n"));
+    QTRY_COMPARE(lines->text(), QStringLiteral("zero\r\none\r\ntwo\r\n"));
+    QCOMPARE(linesBinding->textDocument()->toRawText(), QStringLiteral("zero\u2029one\u2029two\u2029"));
+    QCOMPARE(linesBinding->editorToSource(9), 11);
+    linesBinding->undo();
+    QCOMPARE(lines->text(), QStringLiteral("one\r\ntwo\r\n"));
+    second->textInterface()->setSelection(0, 4, 7);
+    QCOMPARE(linesBinding->anchorSource(), 5);
+    QCOMPARE(linesBinding->cursorSource(), 8);
 
-    // A document that takes no edits takes none this way either.
+    // A document that takes no edits takes none this way either, and shows
+    // its text as it is.
     const QString bytes = folder.filePath(QStringLiteral("bytes.md"));
     writeFile(bytes, QByteArray("caf\xe9\n"));
     shell.backend->openFiles({bytes});
     QTRY_COMPARE(shell.document()->state(), Document::State::ReadOnly);
     const QString before = shell.document()->buffer()->text();
+    const Revision unedited = shell.document()->buffer()->revision();
     QAccessibleInterface *locked = QAccessible::queryAccessibleInterface(shell.item(QStringLiteral("editor")));
     QVERIFY(locked);
     QVERIFY(locked->state().readOnly);
-    if (QAccessibleEditableTextInterface *refused = locked->editableTextInterface())
+    if (QAccessibleEditableTextInterface *refused = locked->editableTextInterface()) {
         refused->insertText(0, QStringLiteral("x"));
+        refused->deleteText(0, 1);
+    }
+    locked->setText(QAccessible::Value, QStringLiteral("x"));
+    // Nor any other write into what the editor shows.
+    QTextCursor(shell.binding()->textDocument()).insertText(QStringLiteral("x"));
     QTest::qWait(50);
     QCOMPARE(shell.document()->buffer()->text(), before);
+    QCOMPARE(shell.document()->buffer()->revision(), unedited);
+    QCOMPARE(shell.binding()->textDocument()->toRawText(), before.chopped(1) + QChar(QChar::ParagraphSeparator));
+    // It can still be selected.
+    locked->textInterface()->setSelection(0, 1, 3);
+    QCOMPARE(shell.binding()->anchorSource(), 1);
+    QCOMPARE(shell.binding()->cursorSource(), 3);
 }
 
 void wordCountsFollowTextAndSelection()

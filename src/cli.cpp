@@ -4,8 +4,17 @@
 #include "diskfile.h"
 
 #include <QCoreApplication>
+#include <QRegularExpression>
 
 #include <algorithm>
+#include <cmath>
+
+QStringList Picture::panels()
+{
+    return {QStringLiteral("export"),  QStringLiteral("print"),   QStringLiteral("document-settings"),
+            QStringLiteral("history"), QStringLiteral("palette"), QStringLiteral("outline"),
+            QStringLiteral("preferences"), QStringLiteral("shortcuts")};
+}
 
 QString versionLine()
 {
@@ -17,12 +26,28 @@ QString openHelpText()
     // Translated as one block so a catalog can keep the columns aligned.
     return QCoreApplication::translate("cli",
         "Usage: parch [open] [--theme DIR] [--benchmark OUT] [FILE...]\n"
+        "       parch --screenshot PNG [OPTION...] [FILE...]\n"
         "\n"
         "  open             Open the files that follow (optional; bare files also open)\n"
-        "  --theme DIR      Read theme tokens from DIR instead of the Omarchy theme\n"
+        "  --theme DIR      Show the Omarchy theme in DIR, or the installed one so named\n"
+        "  --default-theme  Show Omarchy's default theme as it ships, not the desktop's\n"
         "  --benchmark OUT  Measure the window on a copy of one FILE; write JSON to OUT\n"
+        "  --screenshot     Draw the window off screen, save it as PNG once all of it\n"
+        "                   is drawn, and exit; nothing parch keeps is changed\n"
         "  --version        Print the version and exit\n"
-        "  --help           Print this help and exit\n");
+        "  --help           Print this help and exit\n"
+        "\n"
+        "With --screenshot:\n"
+        "  --size WxH       The window's size, such as 1280x800\n"
+        "  --view VIEW      The text (source), both (split) or the preview (reading)\n"
+        "  --show PANEL     Open export, print, document-settings, history, palette,\n"
+        "                   outline, preferences or shortcuts\n"
+        "  --library        Show the library\n"
+        "  --no-library     Hide the library\n"
+        "  --focus          Turn focus mode on\n"
+        "  --line N         Put line N at the top of the text and of the preview\n"
+        "  --scroll AMOUNT  Scroll that far down instead, from 0 (the top) to 1\n"
+        "  --select A,B     Select the text from offset A to offset B\n");
 }
 
 QString helpText()
@@ -79,6 +104,53 @@ QStringList withoutQtOptions(const QStringList &arguments)
     return kept;
 }
 
+namespace {
+
+// Takes the value of one of the options that set a window up for a
+// picture; returns why it cannot, or nothing.
+QString takePictureValue(Picture &picture, const QString &name, const QString &value)
+{
+    const auto said = [](const char *text) { return QCoreApplication::translate("cli", text); };
+    if (name == u"--size") {
+        static const QRegularExpression size(QStringLiteral("^([0-9]{1,5})x([0-9]{1,5})$"));
+        const QRegularExpressionMatch match = size.match(value);
+        const int width = match.captured(1).toInt(), height = match.captured(2).toInt();
+        if (!match.hasMatch() || width < 100 || height < 100 || width > 10000 || height > 10000)
+            return said("parch: --size takes WIDTHxHEIGHT in pixels, each from 100 to 10000, such as 1280x800");
+        picture.size = QSize(width, height);
+    } else if (name == u"--view") {
+        if (value != u"source" && value != u"split" && value != u"reading")
+            return said("parch: --view takes source, split or reading");
+        picture.view = value;
+    } else if (name == u"--show") {
+        if (!Picture::panels().contains(value))
+            return QCoreApplication::translate("cli", "parch: --show takes one of %1").arg(Picture::panels().join(u", "));
+        picture.show = value;
+    } else if (name == u"--scroll") {
+        bool number = false;
+        const double fraction = value.toDouble(&number);
+        if (!number || !std::isfinite(fraction) || fraction < 0 || fraction > 1)
+            return said("parch: --scroll takes a fraction from 0 to 1, such as 0.4");
+        picture.scroll = fraction;
+    } else if (name == u"--line") {
+        bool number = false;
+        const int line = value.toInt(&number);
+        if (!number || line < 1) return said("parch: --line takes a line number from 1");
+        picture.line = line;
+    } else if (name == u"--select") {
+        const QStringList ends = value.split(u',');
+        bool from = false, to = false;
+        const int start = ends.value(0).toInt(&from), end = ends.value(1).toInt(&to);
+        if (ends.size() != 2 || !from || !to || start < 0 || end < 0)
+            return said("parch: --select takes A,B, two offsets in the text such as 120,180");
+        picture.selectFrom = start;
+        picture.selectTo = end;
+    }
+    return {};
+}
+
+} // namespace
+
 Launch parseLaunch(const QStringList &given)
 {
     Launch launch;
@@ -89,6 +161,15 @@ Launch parseLaunch(const QStringList &given)
     };
     // Qt's own options are Qt's, whichever place they have.
     const QStringList arguments = withoutQtOptions(given);
+    // The options that take a value, and those that stand alone.
+    static const QStringList valued = {
+        QStringLiteral("--theme"), QStringLiteral("--benchmark"), QStringLiteral("--screenshot"),
+        QStringLiteral("--size"),  QStringLiteral("--view"),      QStringLiteral("--show"),
+        QStringLiteral("--scroll"), QStringLiteral("--line"),     QStringLiteral("--select")};
+    static const QStringList alone = {QStringLiteral("--default-theme"), QStringLiteral("--focus"),
+                                      QStringLiteral("--library"), QStringLiteral("--no-library")};
+    // The options given that set the window up for a picture, in order.
+    QStringList forPicture;
     bool onlyFiles = false;
     // The first entry is the program name.
     for (qsizetype i = 1; i < arguments.size(); ++i) {
@@ -113,7 +194,7 @@ Launch parseLaunch(const QStringList &given)
         // An option with a value takes it as the next argument or after '='.
         const qsizetype equals = argument.indexOf(u'=');
         const QString name = equals > 0 ? argument.left(equals) : argument;
-        if (name == QLatin1String("--theme") || name == QLatin1String("--benchmark")) {
+        if (valued.contains(name)) {
             QString value;
             if (equals > 0) {
                 value = argument.mid(equals + 1);
@@ -122,7 +203,29 @@ Launch parseLaunch(const QStringList &given)
             }
             if (value.isEmpty())
                 return refuse(QCoreApplication::translate("cli", "parch: %1 needs a value").arg(name));
-            (name == QLatin1String("--theme") ? launch.themeDirectory : launch.benchmarkOutput) = value;
+            if (name == QLatin1String("--theme")) {
+                launch.themeDirectory = value;
+            } else if (name == QLatin1String("--benchmark")) {
+                launch.benchmarkOutput = value;
+            } else if (name == QLatin1String("--screenshot")) {
+                launch.picture.file = value;
+            } else {
+                const QString why = takePictureValue(launch.picture, name, value);
+                if (!why.isEmpty()) return refuse(why);
+                forPicture.append(name);
+            }
+            continue;
+        }
+        if (alone.contains(name)) {
+            if (equals > 0)
+                return refuse(QCoreApplication::translate("cli", "parch: %1 takes no value").arg(name));
+            if (name == QLatin1String("--default-theme")) {
+                launch.defaultTheme = true;
+            } else {
+                if (name == QLatin1String("--focus")) launch.picture.focus = true;
+                else launch.picture.library = name == QLatin1String("--library");
+                forPicture.append(name);
+            }
             continue;
         }
         // Anything else that looks like an option is refused rather than
@@ -140,5 +243,17 @@ Launch parseLaunch(const QStringList &given)
         }
         launch.files.append(argument);
     }
+    const auto together = [&refuse](const char *one, const char *other) {
+        return refuse(QCoreApplication::translate("cli", "parch: %1 and %2 cannot both be given")
+                          .arg(QLatin1StringView(one), QLatin1StringView(other)));
+    };
+    if (!launch.themeDirectory.isEmpty() && launch.defaultTheme) return together("--theme", "--default-theme");
+    if (!launch.picture.file.isEmpty() && !launch.benchmarkOutput.isEmpty()) return together("--screenshot", "--benchmark");
+    if (forPicture.contains(QLatin1String("--line")) && forPicture.contains(QLatin1String("--scroll")))
+        return together("--line", "--scroll");
+    if (forPicture.contains(QLatin1String("--library")) && forPicture.contains(QLatin1String("--no-library")))
+        return together("--library", "--no-library");
+    if (launch.picture.file.isEmpty() && !forPicture.isEmpty())
+        return refuse(QCoreApplication::translate("cli", "parch: %1 works only with --screenshot").arg(forPicture.first()));
     return launch;
 }

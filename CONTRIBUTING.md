@@ -56,7 +56,9 @@ that downloads it to `dist/v<VERSION>/`, builds the Arch package from that
 and writes `SHA256SUMS`. It needs Python 3.12 or newer and Arch's `makepkg`.
 Packages are built for the current machine's architecture; the build
 workflow adds the x86_64 package and its checksum to the release when the
-tag is pushed.
+tag is pushed. Each package is also published as `parch-<arch>.pkg.tar.zst`,
+a name without the version, which the README's install command downloads
+from `releases/latest/download/`.
 
 Maintainers can run `bin/release --publish` to push the commit and tag, set
 the GitHub description and topics, and publish the release with its assets.

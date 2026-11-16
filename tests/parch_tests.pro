@@ -29,6 +29,7 @@ HEADERS += \
     markdown_tests.h \
     citationtests.h \
     guidetests.h \
+    screenshottests.h \
     settingstests.h \
     diagnosticstests.h \
     cslfixture.h \
@@ -125,6 +126,7 @@ HEADERS += \
     ../src/renderrequest.h \
     ../src/renderservice.h \
     ../src/scrollsync.h \
+    ../src/screenshot.h \
     ../src/session.h \
     ../src/settings.h \
     ../src/sourceboundaries.h \
@@ -155,6 +157,7 @@ SOURCES += \
     rendertesting.cpp \
     citationtests.cpp \
     guidetests.cpp \
+    screenshottests.cpp \
     settingstests.cpp \
     diagnosticstests.cpp \
     cslfixture.cpp \
@@ -256,6 +259,7 @@ SOURCES += \
     ../src/renderrequest.cpp \
     ../src/renderservice.cpp \
     ../src/scrollsync.cpp \
+    ../src/screenshot.cpp \
     ../src/session.cpp \
     ../src/settings.cpp \
     ../src/sourceboundaries.cpp \

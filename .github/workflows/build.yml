@@ -81,6 +81,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cd package
+          # The package again under a name without its version, as
+          # bin/release gives the aarch64 one, for releases/latest/download.
+          for package in parch-*-x86_64.pkg.tar.*; do
+            cp "$package" "parch-x86_64.pkg.tar.${package##*.pkg.tar.}"
+          done
           sha256sum *.pkg.tar.* > SHA256SUMS-x86_64
           # bin/release creates the release just after it pushes the tag.
           for attempt in $(seq 1 40); do

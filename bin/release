@@ -92,6 +92,11 @@ def prepare(version, tag, commit):
         packages = [Path(name) for name in package_list.splitlines()]
         if not packages or not all(package.is_file() for package in packages):
             raise RuntimeError("makepkg did not produce the expected packages")
+        # The package again under a name without its version, so that
+        # releases/latest/download/<app>-<arch>.pkg.tar.zst always finds it.
+        stable = output / f"{APP}-{os.uname().machine}{''.join(packages[0].suffixes[-3:])}"
+        shutil.copyfile(packages[0], stable)
+        packages.append(stable)
 
     assets = [archive, output / "PKGBUILD", *packages]
     checksums = output / "SHA256SUMS"

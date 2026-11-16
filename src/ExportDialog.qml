@@ -89,10 +89,19 @@ ThemedDialog {
         dialog.close()
     }
 
-    // Keeps the control with the keys in view.
+    // Keeps the control with the keys in view. The pages after the options
+    // are kept in view by their place there.
     function reveal(item) {
         if (!item || !visible)
             return
+        for (let at = item; at; at = at.parent) {
+            if (at === pagesColumn) {
+                if (dialog.sideBySide)
+                    return
+                item = below
+                break
+            }
+        }
         for (let at = item; at; at = at.parent) {
             if (at === body) {
                 const box = item.mapToItem(body, 0, 0, item.width, item.height)
@@ -108,104 +117,145 @@ ThemedDialog {
     title: dialog.mode === "print"
            ? qsTr("Print “%1”").arg(dialog.document ? dialog.document.title : "")
            : qsTr("Export “%1”").arg(dialog.document ? dialog.document.title : "")
-    preferredCharacters: 64
-    preferredHeight: Math.round(theme.fontSize * 34)
+    // A PDF's or a print's pages need room beside the options, and are
+    // shown there once the dialog is wide enough; otherwise they follow the
+    // options, and scroll with them.
+    readonly property bool sideBySide: dialog.paged && dialog.availableWidth >= 96 * dialog.characterWidth
+    preferredCharacters: dialog.paged ? 124 : 64
+    preferredHeight: Math.round(theme.fontSize * (dialog.paged ? 46 : 34))
     // The safe place to start: the format, or Cancel when printing.
     initialFocus: dialog.mode === "print" ? cancelButton : formatChoice
 
-    contentItem: Flickable {
-        id: flick
-        objectName: "exportBody"
-        clip: true
-        contentHeight: body.implicitHeight
-        boundsBehavior: Flickable.StopAtBounds
-        implicitHeight: body.implicitHeight
+    contentItem: Item {
+        id: content
+        implicitHeight: flick.implicitHeight
 
-        Connections {
-            target: dialog.visible ? flick.Window.window : null
-            function onActiveFocusItemChanged() { dialog.reveal(flick.Window.window.activeFocusItem) }
-        }
+        Flickable {
+            id: flick
+            objectName: "exportBody"
+            width: dialog.sideBySide ? Math.round((content.width - dialog.gap) / 2) : content.width
+            height: content.height
+            clip: true
+            contentHeight: body.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+            implicitHeight: body.implicitHeight
 
-        Column {
-            id: body
-            width: flick.width - (scroller.visible ? scroller.width : 0)
-            spacing: Math.round(theme.fontSize * 2 / 3)
-
-            PreferenceRow {
-                width: parent.width
-                visible: dialog.mode === "export"
-                label: qsTr("Format")
-
-                ThemedComboBox {
-                    id: formatChoice
-                    objectName: "exportFormat"
-                    width: Math.min(Math.round(theme.fontSize * 14), parent.width)
-                    model: dialog.formats.map(format => format.title)
-                    currentIndex: Math.max(0, dialog.formats.findIndex(format => format.format === dialog.format))
-                    Accessible.name: qsTr("Format")
-                    onActivated: (index) => dialog.format = dialog.formats[index].format
-                }
-            }
-
-            Repeater {
-                model: dialog.shownOptions
-
-                delegate: Loader {
-                    id: option
-                    width: body.width
-                    readonly property var info: modelData
-                    sourceComponent: info.kind === "switch" ? switchOption : rowOption
-                }
+            Connections {
+                target: dialog.visible ? flick.Window.window : null
+                function onActiveFocusItemChanged() { dialog.reveal(flick.Window.window.activeFocusItem) }
             }
 
             Column {
-                objectName: "exportLimitations"
-                width: parent.width
-                spacing: Math.round(theme.fontSize / 4)
+                id: body
+                width: flick.width - (scroller.visible ? scroller.width : 0)
+                spacing: Math.round(theme.fontSize * 2 / 3)
 
-                Text {
-                    objectName: "exportLimitationsHeading"
+                PreferenceRow {
                     width: parent.width
-                    text: backend.exports.reading ? qsTr("Reading the document…")
-                          : dialog.limitations.length > 0
-                            ? (dialog.mode === "print" ? qsTr("On paper:") : qsTr("In %1:").arg(dialog.formatInfo ? dialog.formatInfo.title : ""))
-                            : qsTr("Everything in this document goes into it.")
-                    textFormat: Text.PlainText
-                    font.family: theme.fontFamily
-                    font.pixelSize: theme.fontSize
-                    font.weight: Font.DemiBold
-                    color: theme.foreground
-                    wrapMode: Text.Wrap
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: text
+                    visible: dialog.mode === "export"
+                    label: qsTr("Format")
+
+                    ThemedComboBox {
+                        id: formatChoice
+                        objectName: "exportFormat"
+                        width: Math.min(Math.round(theme.fontSize * 14), parent.width)
+                        model: dialog.formats.map(format => format.title)
+                        currentIndex: Math.max(0, dialog.formats.findIndex(format => format.format === dialog.format))
+                        Accessible.name: qsTr("Format")
+                        onActivated: (index) => dialog.format = dialog.formats[index].format
+                    }
                 }
 
                 Repeater {
-                    model: backend.exports.reading ? [] : dialog.limitations
+                    model: dialog.shownOptions
 
-                    delegate: Text {
-                        required property string modelData
-                        objectName: "exportLimitation"
-                        width: parent ? parent.width : 0
-                        leftPadding: Math.round(theme.fontSize)
-                        text: modelData
+                    delegate: Loader {
+                        id: option
+                        width: body.width
+                        readonly property var info: modelData
+                        sourceComponent: info.kind === "switch" ? switchOption : rowOption
+                    }
+                }
+
+                Column {
+                    objectName: "exportLimitations"
+                    width: parent.width
+                    spacing: Math.round(theme.fontSize / 4)
+
+                    Text {
+                        objectName: "exportLimitationsHeading"
+                        width: parent.width
+                        text: backend.exports.reading ? qsTr("Reading the document…")
+                              : dialog.limitations.length > 0
+                                ? (dialog.mode === "print" ? qsTr("On paper:") : qsTr("In %1:").arg(dialog.formatInfo ? dialog.formatInfo.title : ""))
+                                : qsTr("Everything in this document goes into it.")
                         textFormat: Text.PlainText
                         font.family: theme.fontFamily
-                        font.pixelSize: theme.sizes.small
-                        color: theme.dim
+                        font.pixelSize: theme.fontSize
+                        font.weight: Font.DemiBold
+                        color: theme.foreground
                         wrapMode: Text.Wrap
                         Accessible.role: Accessible.StaticText
                         Accessible.name: text
                     }
+
+                    Repeater {
+                        model: backend.exports.reading ? [] : dialog.limitations
+
+                        delegate: Text {
+                            required property string modelData
+                            objectName: "exportLimitation"
+                            width: parent ? parent.width : 0
+                            leftPadding: Math.round(theme.fontSize)
+                            text: modelData
+                            textFormat: Text.PlainText
+                            font.family: theme.fontFamily
+                            font.pixelSize: theme.sizes.small
+                            color: theme.dim
+                            wrapMode: Text.Wrap
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: text
+                        }
+                    }
+                }
+
+                // The pages' place after the options, where there is no room
+                // beside them: they are drawn over it, as it scrolls.
+                Item {
+                    id: below
+                    objectName: "exportPagesBelow"
+                    width: parent.width
+                    visible: dialog.paged && !dialog.sideBySide
+                    height: visible ? pagesColumn.implicitHeight : 0
                 }
             }
 
-            // The pages as they will come out, side by side; the arrows
-            // move from page to page.
+            ScrollBar.vertical: ThemedDialog.Scroller {
+                id: scroller
+                Accessible.name: qsTr("Scroll the export options")
+            }
+        }
+
+        // The pages as they will come out, side by side; the arrows move
+        // from page to page. Beside the options they take the dialog's
+        // height; after them, a height of their own, over the place kept
+        // for them there and moving with it, seen only through the options'
+        // view. They are never moved from one item to another, which the
+        // processor's renderer would not draw.
+        Item {
+            id: pagesView
+            objectName: "exportPagesView"
+            visible: dialog.paged
+            clip: true
+            x: dialog.sideBySide ? flick.width + dialog.gap : 0
+            width: dialog.sideBySide ? Math.max(0, content.width - x) : body.width
+            height: content.height
+
             Column {
+                id: pagesColumn
                 objectName: "printPreview"
-                visible: dialog.paged
                 width: parent.width
+                y: dialog.sideBySide ? 0 : below.y - flick.contentY
                 spacing: Math.round(theme.fontSize / 3)
 
                 Text {
@@ -227,7 +277,7 @@ ThemedDialog {
                     id: pages
                     objectName: "previewPages"
                     width: parent.width
-                    height: Math.round(theme.fontSize * 20)
+                    height: dialog.sideBySide ? Math.max(0, pagesView.height - y) : Math.round(theme.fontSize * 20)
                     orientation: ListView.Horizontal
                     spacing: Math.round(theme.fontSize)
                     clip: true
@@ -273,11 +323,6 @@ ThemedDialog {
                     }
                 }
             }
-        }
-
-        ScrollBar.vertical: ThemedDialog.Scroller {
-            id: scroller
-            Accessible.name: qsTr("Scroll the export options")
         }
     }
 

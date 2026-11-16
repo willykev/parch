@@ -8,9 +8,133 @@ This guide is also in parch: **User guide** in the menu, or `F1`, opens it
 in a read-only tab. The package installs it as
 `/usr/share/doc/parch/guide.md`. Beside it in the menu, **Markdown guide**
 teaches the Markdown parch reads, with examples you can edit; see
-[The Markdown guide](#the-markdown-guide).
+[Learn the Markdown parch reads](#learn-the-markdown-parch-reads).
 
-## Documents and drafts
+**Contents:** [Install](#install) · [First steps](#first-steps) ·
+[Start and open documents](#start-and-open-documents) ·
+[Format your writing](#format-your-writing) ·
+[See formatting as you write](#see-formatting-as-you-write) ·
+[Paste text, images and files](#paste-text-images-and-files) ·
+[Learn the Markdown parch reads](#learn-the-markdown-parch-reads) ·
+[Preview your writing](#preview-your-writing) ·
+[Write math and diagrams](#write-math-and-diagrams) ·
+[Citations and bibliographies](#citations-and-bibliographies) ·
+[Export and print](#export-and-print) · [Check a document](#check-a-document) ·
+[Find text](#find-text) · [Keep a library](#keep-a-library) ·
+[Work in tabs and windows](#work-in-tabs-and-windows) ·
+[Check spelling and focus](#check-spelling-and-focus) ·
+[Edit with Vim keys](#edit-with-vim-keys) ·
+[Keep your writing safe](#keep-your-writing-safe) ·
+[Choose how a document is read](#choose-how-a-document-is-read) ·
+[Keyboard shortcuts](#keyboard-shortcuts) · [Command line](#command-line) ·
+[Settings](#settings) · [Appearance](#appearance) · [Your data](#your-data) ·
+[Troubleshooting](#troubleshooting) · [Conformance](#conformance) ·
+[What parch does not do](#what-parch-does-not-do) · [Getting help](#getting-help)
+
+## Install
+
+parch runs on Omarchy and other Arch Linux systems, on x86_64 and ARM64. It
+is installed from its GitHub releases, not from the AUR (see
+[Another package called parch](#another-package-called-parch)).
+
+### From a package
+
+Each release has a package for each architecture, under a name that stays
+the same from one release to the next:
+
+```sh
+curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-$(uname -m).pkg.tar.zst"
+sudo pacman -U "parch-$(uname -m).pkg.tar.zst"
+```
+
+pacman installs what parch needs from the Arch repositories with it. Then
+open **parch** from the app launcher, or run `parch` with the files to open.
+It is offered for Markdown files too, so a file manager can open `.md` files
+in it.
+
+### From source
+
+```sh
+sudo pacman -S --needed base-devel git qt6-base qt6-declarative qt6-svg qt6-wayland fontconfig hunspell libyaml syntax-highlighting librsvg cairo libzip
+git clone https://github.com/willykev/parch.git
+cd parch
+bin/install
+```
+
+`bin/install` builds parch, then builds and installs its Arch package with
+`makepkg`, asking for any package it still needs, such as `hunspell-en_us`
+and `xdg-desktop-portal`. The package holds the program, the math and
+diagram helpers (in `/usr/lib/parch`), their licences, the launcher entry and
+icon, this guide in `/usr/share/doc/parch`, and an example write-up with its
+bibliography in `/usr/share/doc/parch/examples/weather-station`.
+
+### Another package called parch
+
+The AUR has an unrelated package that is also named `parch`: a wrapper for
+paru and pacman, which installs its own `/usr/bin/parch`. The two cannot be
+installed together, and installing either one replaces the other. When
+that package's version number is the higher, an AUR helper such as `yay` or
+`paru` offers it as an update to this parch: decline it. To stop the
+question, add `parch` to the `IgnorePkg` line of `/etc/pacman.conf`, which
+AUR helpers respect; installing a new release with `pacman -U` is not
+affected.
+
+### Update
+
+Run the two commands under [From a package](#from-a-package) again. Built
+from source, run `git pull` and then `bin/install` in your clone. Your
+documents, drafts, history and settings are kept.
+
+### Remove
+
+```sh
+sudo pacman -R parch
+```
+
+Your documents stay where they are. parch's own folders stay too (see
+[Your data](#your-data)); to remove them as well:
+
+```sh
+rm -rf ~/.local/share/parch ~/.local/state/parch ~/.config/parch ~/.cache/parch
+```
+
+That deletes your drafts and version history, so save any draft you want to
+keep as a file first.
+
+### What it changes on your system
+
+Nothing outside its own files and folders: parch never edits your desktop's
+configuration or theme. The package adds a launcher entry, which offers
+parch for Markdown files, and removing the package takes it away.
+`parch skill install` adds a skill for coding agents in your home folder (see
+[For coding agents](#for-coding-agents)).
+
+## First steps
+
+1. Open **parch** from the app launcher, or run `parch` in a terminal. The
+   window opens with an empty draft, and the library beside it.
+2. Type. A draft is kept from the first key you press, so nothing is lost if
+   you close the window; it is listed under **Drafts** in the library.
+3. Press `Ctrl+S`, choose a folder and a name, and the draft becomes a file.
+   From then on parch saves it a moment after you pause.
+4. Press `Ctrl+Alt+2` to see the preview beside the text, and `Ctrl+Alt+1`
+   for the text alone.
+5. In the library (`F9`), **Open folder** adds the folder you keep your
+   writing in, so that its documents are a click away and `Ctrl+Shift+O`
+   finds them by name.
+6. `Ctrl+Shift+P` finds any command by name, and `F10` opens the menu.
+   **Markdown guide** in the menu teaches the Markdown parch reads.
+
+To try parch on something written already, copy the example the package
+installs, a short write-up with code, math, a table, a diagram and
+citations, and open it:
+
+```sh
+cp -r /usr/share/doc/parch/examples/weather-station ~/
+parch ~/weather-station/weather-station.md
+```
+
+## Start and open documents
 
 - **New draft** (`Ctrl+N`) opens an empty tab. A draft is kept in parch's own
   folder from the first keystroke, so it survives closing the window and
@@ -36,65 +160,7 @@ teaches the Markdown parch reads, with examples you can edit; see
 parch keeps each file's line endings and byte-order mark. Text you paste gets
 the document's line endings.
 
-## Pasting, images and attachments
-
-- **Paste** (`Ctrl+V`) turns rich text copied from a web page or a word
-  processor into Markdown: headings, emphasis, links, lists and task lists,
-  quotes, code and tables. Scripts, styles and hidden text are left out, and
-  characters that would otherwise turn into Markdown are escaped. One undo
-  takes the whole paste back. `Ctrl+Shift+V` always pastes plain text.
-- A pasted image, such as a screenshot, is saved in the `assets` folder beside
-  the document, named after the day as in `pasted-2026-11-16-1.png`, and
-  linked where you pasted it. Pasting the same image again reuses its file.
-  An image pasted without alt text puts the caret between `![` and `]`, so
-  that you can describe it for readers who cannot see it; one undo still
-  takes the paste back.
-  Images in the web page itself stay links to where they are online; nothing
-  is downloaded.
-- Dropping files on the text, or pasting files copied in a file manager,
-  links them where they land. A file already in the document's folder or in
-  the library is linked where it is; anything else is copied into `assets`,
-  keeping its name, with `-2`, `-3` added when another file has it. Files
-  over 50 MiB are copied only once you agree, and nothing you drop is moved.
-- Dropping a Markdown document offers **Insert link** or **Include**, which
-  puts its path on a line of its own so that its text is shown there.
-- A draft keeps its assets in its own folder until you save it; they then go
-  into `assets` beside the file. An asset whose name another file already
-  has there, as a screenshot pasted into another draft on the same day, is
-  given `-2`, `-3` before its extension, and the draft's links to it are
-  changed to match before the file is written; one undo changes them back.
-- **Check document…** in the menu or the command palette lists everything
-  wrong in the document and the files it includes, a line each as
-  `file:line:column: message`: links, images and includes whose files are not
-  there, links to headings (`#a-heading`, `other.md#a-heading`) that the
-  document, with what it includes, or that other document does not have,
-  references, notes, citations and variables that lead nowhere, include
-  cycles (with the chain of files) and limits, malformed table rows,
-  unclosed math, formulas and diagrams that cannot be drawn, citation and
-  bibliography problems, and HTML shown as text. It reads the text as it is
-  when you ask, without holding up the window. `Up` and `Down` move through
-  the list, and `Enter` opens the place, in the included file when the
-  problem is in one.
-
-## The Markdown guide
-
-**Markdown guide**, beside **User guide** in the menu (`F10`) or in the
-command palette, opens a tab that teaches the Markdown parch reads, beside its preview: every
-part of the dialect as an example, and the cases that do not do what you
-might expect, such as emphasis that never closes or a list that starts at 7.
-What the preview shows is what parch makes of the text, so change an example
-and watch it change. Its pictures, its included file and its bibliography
-come with parch, so every example works without any file of yours.
-
-Nothing written in the guide is kept. It is not a draft, it is never saved or
-kept in recovery or history, the next launch does not bring it back, and
-closing it asks nothing. Opened again while it is open, it comes to the front
-as it is; once closed, it opens fresh. **Save** or **Save as…** writes a copy
-where you choose, which is then an ordinary document. Its last part tells how
-to read it as Standard Markdown in **Document settings…**, a choice that is
-not kept either.
-
-## Writing and formatting
+## Format your writing
 
 Every formatting command writes plain Markdown into the text, and each is one
 step for `Ctrl+Z` to take back. Find them under **Format** in the menu
@@ -156,7 +222,7 @@ reader sees: link addresses, task boxes, comments, front matter and
 Markdown punctuation are not words. Chinese and Japanese count each
 character as a word.
 
-## Live formatting
+## See formatting as you write
 
 parch styles your Markdown as you write and never hides any of it: every `#`,
 `*` and `[link](…)` stays in the text, drawn dimmed, while what it marks takes
@@ -183,7 +249,53 @@ once. **Turn off live formatting**, in the menu (`F10`) or the command
 palette, or **Live formatting** in **Preferences…**, shows the source as
 plain text; turning it on again styles it at once.
 
-## Preview
+## Paste text, images and files
+
+- **Paste** (`Ctrl+V`) turns rich text copied from a web page or a word
+  processor into Markdown: headings, emphasis, links, lists and task lists,
+  quotes, code and tables. Scripts, styles and hidden text are left out, and
+  characters that would otherwise turn into Markdown are escaped. One undo
+  takes the whole paste back. `Ctrl+Shift+V` always pastes plain text.
+- A pasted image, such as a screenshot, is saved in the `assets` folder beside
+  the document, named after the day as in `pasted-2026-11-16-1.png`, and
+  linked where you pasted it. Pasting the same image again reuses its file.
+  An image pasted without alt text puts the caret between `![` and `]`, so
+  that you can describe it for readers who cannot see it; one undo still
+  takes the paste back.
+  Images in the web page itself stay links to where they are online; nothing
+  is downloaded.
+- Dropping files on the text, or pasting files copied in a file manager,
+  links them where they land. A file already in the document's folder or in
+  the library is linked where it is; anything else is copied into `assets`,
+  keeping its name, with `-2`, `-3` added when another file has it. Files
+  over 50 MiB are copied only once you agree, and nothing you drop is moved.
+- Dropping a Markdown document offers **Insert link** or **Include**, which
+  puts its path on a line of its own so that its text is shown there.
+- A draft keeps its assets in its own folder until you save it; they then go
+  into `assets` beside the file. An asset whose name another file already
+  has there, as a screenshot pasted into another draft on the same day, is
+  given `-2`, `-3` before its extension, and the draft's links to it are
+  changed to match before the file is written; one undo changes them back.
+
+## Learn the Markdown parch reads
+
+**Markdown guide**, beside **User guide** in the menu (`F10`) or in the
+command palette, opens a tab that teaches the Markdown parch reads, beside its preview: every
+part of the dialect as an example, and the cases that do not do what you
+might expect, such as emphasis that never closes or a list that starts at 7.
+What the preview shows is what parch makes of the text, so change an example
+and watch it change. Its pictures, its included file and its bibliography
+come with parch, so every example works without any file of yours.
+
+Nothing written in the guide is kept. It is not a draft, it is never saved or
+kept in recovery or history, the next launch does not bring it back, and
+closing it asks nothing. Opened again while it is open, it comes to the front
+as it is; once closed, it opens fresh. **Save** or **Save as…** writes a copy
+where you choose, which is then an ordinary document. Its last part tells how
+to read it as Standard Markdown in **Document settings…**, a choice that is
+not kept either.
+
+## Preview your writing
 
 parch shows what a document reads as, set in a reading font in the colours of
 your theme. There are three views, under **View** in the menu:
@@ -243,7 +355,7 @@ What it shows:
   a footnote or a heading link that nothing defines. Assistive technology
   hears the same with the preview's description.
 
-The preview reads the document as its [document settings](#document-settings)
+The preview reads the document as its [document settings](#choose-how-a-document-is-read)
 say: a document in the Standard profile is previewed as Standard.
 
 In the preview:
@@ -264,7 +376,7 @@ In the preview:
 - `Up`, `Down`, `PageUp`, `PageDown`, `Space`, `Home` and `End` scroll.
   `F6` moves the keys between the library, the text and the preview.
 
-## Math and diagrams
+## Write math and diagrams
 
 parch draws formulas and diagrams itself, with two programs that come with
 it: RaTeX for TeX math and Merman for Mermaid diagrams. Both run on your
@@ -336,78 +448,6 @@ lines, a label such as `"A & <B>"` loses what follows the `&`, Markdown in
 a label (`"**Bold** label"`) keeps its asterisks, and the colours of a
 Sankey diagram's nodes and of architecture icons are Mermaid's own rather
 than the theme's. A diagram is a picture: its text cannot be selected.
-
-## Commands and keys
-
-The command palette (`Ctrl+Shift+P`) lists everything parch can do. Type a
-few letters of a command's name, in order, to find it; the arrows choose and
-`Enter` runs it.
-
-**Keyboard shortcuts…** in the menu lists every command and its keys. Choose
-one and press **Change…** (or `Enter`), then the keys you want. Keys that
-type text, and keys kept for editing such as `Ctrl+C`, are refused; keys
-another command has can be swapped. **Remove** leaves a command without keys,
-**Reset** gives it its own back, and **Reset all** every command.
-
-## Preferences
-
-**Preferences…** (`Ctrl+,`) sets the writing font, any installed family or
-the theme's; the text size; the line height; the longest line, in
-characters; whether the Markdown is styled as you write; how headings are
-written; whether the formatting toolbar shows; whether parch starts with a
-new draft in front of the documents it reopens (**Start with a new
-draft**); whether spelling is checked;
-what focus mode keeps bright, and how strongly it dims the rest; and how many
-versions history keeps, for how long and in how much space. A window too
-narrow for the toolbar hides it until you ask for it with **Show toolbar**.
-Every change applies at once in every window. Under **Keys**, **Edit with Vim
-keys** turns on Vim keys. Under **Markdown and citations**, the Markdown
-profile, extensions, citation style and bibliography for every document, as
-[Document settings](#document-settings) describes them.
-
-Under **Preview** it sets the reading font, which is a serif made for reading
-unless you choose another; the preview's text size, two pixels larger than
-the text's until you choose one; its line height and longest line; whether
-the text and the preview scroll together; and whether pictures are fetched
-from the web.
-
-## Document settings
-
-**Document settings…**, in the menu (`F10`) or the command palette, shows how
-the document in front is read, and where each setting comes from:
-
-- **Markdown**: **Writer-compatible**, the default, with the syntax of iA
-  Writer and parch's extensions; or **Standard**, CommonMark 0.31.2 with
-  GFM tables, strikethrough, task lists and bare web addresses as links.
-- **Extensions**: what the Markdown is read with beyond the profile's own,
-  such as footnotes, citations, math, Mermaid diagrams, `//` comment lines,
-  front matter and included files, each on or off.
-- **Citation style** and **Bibliography**, described in
-  [Citations and bibliographies](#citations-and-bibliographies).
-- **Library root**: the folder that includes starting with `/` are found in;
-  the library folder that holds the document unless you choose another.
-- **Includes**: the limits that keep included files from running away: how
-  deep includes may nest (**Depth**, 32 by default), how much text the
-  document and everything it includes may hold together (**Size**, 100 MiB),
-  and how many includes are read in all (**Files**, 10,000). An include past
-  a limit is not read, the preview and **Check document** say which and why,
-  and an export of the document is refused.
-
-Each setting is the first of these that has one: the document's own
-settings; its front matter (the bibliography and the citation style only);
-the settings of the library folder that holds it; **Markdown and citations**
-in **Preferences…**, for every document; and the defaults. Under each
-setting the dialog says which it is.
-
-Choose **This document** to change the document alone, or **Every document
-in the library folder** to change every document in it; a setting of the
-document itself still wins over its folder's. **Use the default** gives a
-setting back to the next of these. A change applies at once to the preview,
-live formatting, spelling, the outline, the word count and **Check document**. It
-changes how the text is read, never the text: parch keeps these settings
-itself, in `~/.local/share/parch/document-settings.json`, and they follow a
-document when parch renames or moves it. A draft has settings of its own
-from the start, and a library folder once it is saved in one.
 
 ## Citations and bibliographies
 
@@ -485,7 +525,7 @@ What citations cannot do yet:
   are rare cases of telling authors and years apart, of "ibid." across
   notes and the text, and of capitalisation.
 
-## Export and printing
+## Export and print
 
 **Export…** (`Ctrl+Shift+E`) writes the document in front as Markdown, HTML,
 PDF, DOCX (Word) or EPUB (an e-book). The dialog shows the format's options
@@ -501,7 +541,7 @@ page to page.
 
 - The export reads the document as it is when it starts, with the files it
   includes, its bibliography and its citation style, in its own
-  [document settings](#document-settings), and you can go on writing
+  [document settings](#choose-how-a-document-is-read), and you can go on writing
   meanwhile. Its progress shows above the text, with **Cancel**. When it
   ends, the notice says what was written and what was left out, or why
   nothing was.
@@ -551,7 +591,120 @@ Formulas and diagrams are drawn by the same helpers as the preview, dark on
 white whatever the desktop's theme. Without them they are written as their
 source, and the dialog says so before you export.
 
-## Vim keys
+## Check a document
+
+**Check document…** in the menu or the command palette lists everything
+wrong in the document and the files it includes, a line each as
+`file:line:column: message`: links, images and includes whose files are not
+there, links to headings (`#a-heading`, `other.md#a-heading`) that the
+document, with what it includes, or that other document does not have,
+references, notes, citations and variables that lead nowhere, include
+cycles (with the chain of files) and limits, malformed table rows,
+unclosed math, formulas and diagrams that cannot be drawn, citation and
+bibliography problems, and HTML shown as text. It reads the text as it is
+when you ask, without holding up the window. `Up` and `Down` move through
+the list, and `Enter` opens the place, in the included file when the
+problem is in one.
+
+`parch check` reports the same problems from the terminal, and can check
+several documents at once (see [Command line](#command-line)).
+
+## Find text
+
+- **Find…** (`Ctrl+F`) opens a bar above the text. `Enter` and `F3` go to the
+  next match, `Shift+Enter` and `Shift+F3` to the one before, and the bar
+  counts them ("3 of 12"). The bar's buttons match case, whole words, or a
+  regular expression.
+- **Find and replace…** (`Ctrl+H`) adds a replace field: **Replace** changes
+  the current match and **All** every match, as one step for
+  `Ctrl+Z`. With regular expressions, `$1` in the replacement is the first
+  group.
+- `Escape` closes the bar and gives the keys back to the text.
+- **Search the library…** (`Ctrl+Shift+F`) searches the text of every
+  document in the library's folders and the drafts. Matches arrive as they
+  are found, grouped by document, with the line around each; choosing one
+  opens the document there.
+- **Go to heading…** (`Ctrl+R`) lists the document's headings to jump to.
+
+Each document opens again where you were in it last time.
+
+## Keep a library
+
+`F9` shows or hides the library beside the text. Drag its edge to make it
+wider or narrower, or reach the edge with `Tab` and use `Left` and `Right`
+(`Home` and `End` for as narrow or as wide as it goes). Each window keeps its
+own width, and the session brings it back; a new window starts at the width
+you chose last.
+
+- **Drafts** lists your drafts. **Recent** lists the files you opened last.
+- `Delete` on a recent file, or **Remove from recent** in its menu, takes it
+  out of **Recent**; the file stays where it is. **Clear recent files**, in
+  the menu (`F10`), the command palette and the menu of **Recent**, empties
+  the list, and **Undo** in the notice that says so brings it back.
+- `Delete` on a draft, or **Delete draft** in its menu, deletes it. Its text
+  is kept in its history first, and **Undo** in the notice that says so
+  brings the draft back, attachments and all, while the notice shows. A draft
+  open in another window with text not yet saved is not deleted.
+- **Open folder** adds a folder. Its `.md`, `.markdown` and `.txt` files are
+  listed beneath it and follow changes on disk.
+- **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
+  including folders you have not opened.
+- **Outline**, at the foot of the library, lists the headings of the document
+  in front; choosing one goes there, in the text and in the preview. The
+  headings of the files it includes are listed where it includes them, and
+  choosing one of those opens its file at the heading, as **Go to heading**
+  does. `Ctrl+Alt+O` shows it with the keys on the headings, and hides it.
+- A folder's menu (right click, or the `Menu` key) makes a **New document…**
+  or **New folder…** in it. A document's menu can **Rename…** it (`F2`),
+  **Move to…** another library folder (or drag it there), and **Move to
+  trash…** (`Delete`), from where the desktop's trash can bring it back.
+  The same commands are in the menu (`F10`) and the command palette for the
+  document in front, with **New document in folder…**, which makes one
+  beside it, when it is in one of the library's folders.
+- When a renamed or moved document has links, images, includes or reference
+  definitions leading to it in other documents of the library, or relative
+  ones of its own, parch lists them and offers to update them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
+  A moved document keeps its tab, its history and any unsaved text.
+- **Undo**, in the notice a rename or move leaves, puts it back where it
+  was, and the links it updated with it, as long as nothing else has taken
+  its old name and no other rename or move has been made since.
+
+## Work in tabs and windows
+
+- `Ctrl+Tab` / `Ctrl+Shift+Tab`, or `Ctrl+PageDown` / `Ctrl+PageUp`, move
+  between tabs. `Ctrl+W` closes one.
+- `Ctrl+Shift+N` opens a new window. **New view** in the menu shows the same
+  document in another tab; edits appear in both.
+- Closing a tab saves it first. If it cannot be saved, parch asks before
+  closing.
+- `Ctrl+Q` saves everything and quits. The next launch reopens your windows
+  and tabs where you left them.
+
+## Check spelling and focus
+
+parch checks English spelling as you write, once a pause lets it, and
+underlines misspelled words with a wavy line. Code, URLs and email addresses,
+math, HTML, front matter and link destinations are not checked. Right-click a
+misspelled word, or press the `Menu` key or `Shift+F10` with the caret on it,
+for up to five suggestions, **Add to dictionary** (kept for good) and
+**Ignore** (until parch ends). **Check spelling**, in the menu or the command
+palette, or **Preferences…**, turns spell checking on or off. It needs the
+`hunspell-en_us` dictionary; without it, spelling is off and parch says so
+when you turn it on.
+
+**Focus mode** (`Ctrl+Shift+D`) dims everything but the sentence you are
+writing; **Preferences…** switches it to the paragraph. It dims the text you
+write, never its preview. Dimming blends the text's colour into the
+background: **Strong**, the default, or **Light**, and in any theme never so
+far that the dimmed text reads at less than 3:1 against the background.
+**Off**, under **Dimming** in **Preferences…**, leaves the text as it is
+while focus mode stays on. **Distraction-free writing** (`F11`) hides the
+library, the tabs, the header, the toolbar and the status line, and leaves
+only the document, in the view it is in: the text, centred; the text and its
+preview side by side; or the preview alone. `F11` or `Esc` brings them back,
+and so does asking for the library or the toolbar.
+
+## Edit with Vim keys
 
 Vim keys are off until you turn them on: **Turn on Vim keys** in the menu
 (`F10`) or the command palette, or **Edit with Vim keys** in **Preferences**.
@@ -676,7 +829,13 @@ Not covered: other Vim commands, such as `gj`, `ge`, `R`, block selection,
 marks, macros and folds; regular expressions, `:s` and line ranges; Vim's
 settings and mappings.
 
-## Saving
+## Keep your writing safe
+
+parch saves as you write, keeps text that is not yet in its file through a
+crash, keeps earlier versions of every document, and never saves over a file
+that changed on disk without asking.
+
+### Saving
 
 A named document saves itself a moment after you pause typing, and at least
 every five seconds while you keep going. `Ctrl+S` saves at once.
@@ -691,14 +850,14 @@ every five seconds while you keep going. `Ctrl+S` saves at once.
 - When a save fails, the notice bar says why and offers **Retry** and
   **Save as…**. Your text stays in the window and in recovery.
 
-## Recovery
+### Recovery
 
 Text that is not in its file yet is copied to recovery within half a second
 of a pause. If parch or the computer stops, the next launch brings the text
 back and says so. Recovery for a document is cleared once its file holds the
 text.
 
-## History
+### History
 
 parch keeps earlier versions of each document. Open them with
 **Version history…** from the menu (`F10`).
@@ -721,7 +880,7 @@ parch keeps earlier versions of each document. Open them with
 - If named versions alone fill that space, history pauses and the notice bar
   says so. Saving carries on.
 
-## Changes on disk
+### Changes on disk
 
 parch watches the files you have open.
 
@@ -747,114 +906,57 @@ parch watches the files you have open.
   or written to that file unless you choose **Follow the link**. **Put this
   text at “name”** replaces the link with a file holding your text.
 
-## Tabs and windows
+## Choose how a document is read
 
-- `Ctrl+Tab` / `Ctrl+Shift+Tab`, or `Ctrl+PageDown` / `Ctrl+PageUp`, move
-  between tabs. `Ctrl+W` closes one.
-- `Ctrl+Shift+N` opens a new window. **New view** in the menu shows the same
-  document in another tab; edits appear in both.
-- Closing a tab saves it first. If it cannot be saved, parch asks before
-  closing.
-- `Ctrl+Q` saves everything and quits. The next launch reopens your windows
-  and tabs where you left them.
+**Document settings…**, in the menu (`F10`) or the command palette, shows how
+the document in front is read, and where each setting comes from:
 
-## The library
+- **Markdown**: **Writer-compatible**, the default, with the syntax of iA
+  Writer and parch's extensions; or **Standard**, CommonMark 0.31.2 with
+  GFM tables, strikethrough, task lists and bare web addresses as links.
+- **Extensions**: what the Markdown is read with beyond the profile's own,
+  such as footnotes, citations, math, Mermaid diagrams, `//` comment lines,
+  front matter and included files, each on or off.
+- **Citation style** and **Bibliography**, described in
+  [Citations and bibliographies](#citations-and-bibliographies).
+- **Library root**: the folder that includes starting with `/` are found in;
+  the library folder that holds the document unless you choose another.
+- **Includes**: the limits that keep included files from running away: how
+  deep includes may nest (**Depth**, 32 by default), how much text the
+  document and everything it includes may hold together (**Size**, 100 MiB),
+  and how many includes are read in all (**Files**, 10,000). An include past
+  a limit is not read, the preview and **Check document** say which and why,
+  and an export of the document is refused.
 
-`F9` shows or hides the library beside the text. Drag its edge to make it
-wider or narrower, or reach the edge with `Tab` and use `Left` and `Right`
-(`Home` and `End` for as narrow or as wide as it goes). Each window keeps its
-own width, and the session brings it back; a new window starts at the width
-you chose last.
+Each setting is the first of these that has one: the document's own
+settings; its front matter (the bibliography and the citation style only);
+the settings of the library folder that holds it; **Markdown and citations**
+in **Preferences…**, for every document; and the defaults. Under each
+setting the dialog says which it is.
 
-- **Drafts** lists your drafts. **Recent** lists the files you opened last.
-- `Delete` on a recent file, or **Remove from recent** in its menu, takes it
-  out of **Recent**; the file stays where it is. **Clear recent files**, in
-  the menu (`F10`), the command palette and the menu of **Recent**, empties
-  the list, and **Undo** in the notice that says so brings it back.
-- `Delete` on a draft, or **Delete draft** in its menu, deletes it. Its text
-  is kept in its history first, and **Undo** in the notice that says so
-  brings the draft back, attachments and all, while the notice shows. A draft
-  open in another window with text not yet saved is not deleted.
-- **Open folder** adds a folder. Its `.md`, `.markdown` and `.txt` files are
-  listed beneath it and follow changes on disk.
-- **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
-  including folders you have not opened.
-- **Outline**, at the foot of the library, lists the headings of the document
-  in front; choosing one goes there, in the text and in the preview. The
-  headings of the files it includes are listed where it includes them, and
-  choosing one of those opens its file at the heading, as **Go to heading**
-  does. `Ctrl+Alt+O` shows it with the keys on the headings, and hides it.
-- A folder's menu (right click, or the `Menu` key) makes a **New document…**
-  or **New folder…** in it. A document's menu can **Rename…** it (`F2`),
-  **Move to…** another library folder (or drag it there), and **Move to
-  trash…** (`Delete`), from where the desktop's trash can bring it back.
-  The same commands are in the menu (`F10`) and the command palette for the
-  document in front, with **New document in folder…**, which makes one
-  beside it, when it is in one of the library's folders.
-- When a renamed or moved document has links, images, includes or reference
-  definitions leading to it in other documents of the library, or relative
-  ones of its own, parch lists them and offers to update them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
-  A moved document keeps its tab, its history and any unsaved text.
-- **Undo**, in the notice a rename or move leaves, puts it back where it
-  was, and the links it updated with it, as long as nothing else has taken
-  its old name and no other rename or move has been made since.
+Choose **This document** to change the document alone, or **Every document
+in the library folder** to change every document in it; a setting of the
+document itself still wins over its folder's. **Use the default** gives a
+setting back to the next of these. A change applies at once to the preview,
+live formatting, spelling, the outline, the word count and **Check document**. It
+changes how the text is read, never the text: parch keeps these settings
+itself, in `~/.local/share/parch/document-settings.json`, and they follow a
+document when parch renames or moves it. A draft has settings of its own
+from the start, and a library folder once it is saved in one.
 
-## Finding text
+## Keyboard shortcuts
 
-- **Find…** (`Ctrl+F`) opens a bar above the text. `Enter` and `F3` go to the
-  next match, `Shift+Enter` and `Shift+F3` to the one before, and the bar
-  counts them ("3 of 12"). The bar's buttons match case, whole words, or a
-  regular expression.
-- **Find and replace…** (`Ctrl+H`) adds a replace field: **Replace** changes
-  the current match and **All** every match, as one step for
-  `Ctrl+Z`. With regular expressions, `$1` in the replacement is the first
-  group.
-- `Escape` closes the bar and gives the keys back to the text.
-- **Search the library…** (`Ctrl+Shift+F`) searches the text of every
-  document in the library's folders and the drafts. Matches arrive as they
-  are found, grouped by document, with the line around each; choosing one
-  opens the document there.
-- **Go to heading…** (`Ctrl+R`) lists the document's headings to jump to.
+The command palette (`Ctrl+Shift+P`) lists everything parch can do. Type a
+few letters of a command's name, in order, to find it; the arrows choose and
+`Enter` runs it.
 
-Each document opens again where you were in it last time.
+**Keyboard shortcuts…** in the menu lists every command and its keys. Choose
+one and press **Change…** (or `Enter`), then the keys you want. Keys that
+type text, and keys kept for editing such as `Ctrl+C`, are refused; keys
+another command has can be swapped. **Remove** leaves a command without keys,
+**Reset** gives it its own back, and **Reset all** every command.
 
-## Appearance
-
-parch draws everything from your Omarchy theme and follows it as you switch
-themes, light or dark, along with the theme's font. `Ctrl+=` and `Ctrl+-`
-change the text size, and `Ctrl+0` returns to the theme's size.
-
-Screen readers and other assistive technology reach every control by name.
-They can also edit the text, place the caret and select: each edit they
-make is one step for `Ctrl+Z`, as typing is.
-
-## Spelling and focus
-
-parch checks English spelling as you write, once a pause lets it, and
-underlines misspelled words with a wavy line. Code, URLs and email addresses,
-math, HTML, front matter and link destinations are not checked. Right-click a
-misspelled word, or press the `Menu` key or `Shift+F10` with the caret on it,
-for up to five suggestions, **Add to dictionary** (kept for good) and
-**Ignore** (until parch ends). **Check spelling**, in the menu or the command
-palette, or **Preferences…**, turns spell checking on or off. It needs the
-`hunspell-en_us` dictionary; without it, spelling is off and parch says so
-when you turn it on.
-
-**Focus mode** (`Ctrl+Shift+D`) dims everything but the sentence you are
-writing; **Preferences…** switches it to the paragraph. It dims the text you
-write, never its preview. Dimming blends the text's colour into the
-background: **Strong**, the default, or **Light**, and in any theme never so
-far that the dimmed text reads at less than 3:1 against the background.
-**Off**, under **Dimming** in **Preferences…**, leaves the text as it is
-while focus mode stays on. **Distraction-free writing** (`F11`) hides the
-library, the tabs, the header, the toolbar and the status line, and leaves
-only the document, in the view it is in: the text, centred; the text and its
-preview side by side; or the preview alone. `F11` or `Esc` brings them back,
-and so does asking for the library or the toolbar.
-
-## Keys
-
-| Key | Action |
+| Key | Does |
 | --- | --- |
 | `Ctrl+N` | New draft |
 | `Ctrl+Shift+N` | New window |
@@ -915,12 +1017,28 @@ The keys of every command can be changed with **Keyboard shortcuts…**.
 ```text
 Usage: parch [open] [--theme DIR] [--benchmark OUT] [FILE...]
        parch COMMAND [options]
+       parch --screenshot PNG [OPTION...] [FILE...]
 
   open             Open the files that follow (optional; bare files also open)
-  --theme DIR      Read theme tokens from DIR instead of the Omarchy theme
+  --theme DIR      Show the Omarchy theme in DIR, or the installed one so named
+  --default-theme  Show Omarchy's default theme as it ships, not the desktop's
   --benchmark OUT  Measure the window on a copy of one FILE; write JSON to OUT
+  --screenshot     Draw the window off screen, save it as PNG once all of it
+                   is drawn, and exit; nothing parch keeps is changed
   --version        Print the version and exit
   --help           Print this help and exit
+
+With --screenshot:
+  --size WxH       The window's size, such as 1280x800
+  --view VIEW      The text (source), both (split) or the preview (reading)
+  --show PANEL     Open export, print, document-settings, history, palette,
+                   outline, preferences or shortcuts
+  --library        Show the library
+  --no-library     Hide the library
+  --focus          Turn focus mode on
+  --line N         Put line N at the top of the text and of the preview
+  --scroll AMOUNT  Scroll that far down instead, from 0 (the top) to 1
+  --select A,B     Select the text from offset A to offset B
 
 Commands that need no display (parch help COMMAND for its options):
   check FILE...    Report what is wrong in documents, with file, line and column
@@ -972,7 +1090,7 @@ parch stats book.md                  # Words, characters, reading time, headings
   (`json-tree`). Relative links and images lead from the folder the HTML is
   written to, or from the document's.
 - **export** writes the document in any of the formats the window's
-  [Export](#export-and-printing) writes, in the same way: `md`, the document
+  [Export](#export-and-print) writes, in the same way: `md`, the document
   as one file with each include in place (an included file's front matter
   left out and its variables written out, its footnote and link labels kept
   apart from the document's, and its paths written from the new file's
@@ -1006,9 +1124,9 @@ machine. These options change it, the highest first:
   bibliography and the citation style, a bundled one or a `.csl` file.
 - `--max-include-depth N`, `--max-include-size SIZE` (bytes, or with `K`,
   `M` or `G`, as in `20M`) and `--max-includes N`: the include limits of
-  [document settings](#document-settings).
+  [document settings](#choose-how-a-document-is-read).
 - `--use-saved-settings`: read the document as the window reads it, with the
-  [document settings](#document-settings) kept for the document, its library
+  [document settings](#choose-how-a-document-is-read) kept for the document, its library
   folder and every document, and the library folder for `/rooted` includes.
   What the options say still wins.
 
@@ -1028,6 +1146,19 @@ dialect version, and the version of what drew the result.
 | 3 | A file could not be read or written, or is there and `--force` was not given |
 | 4 | The export could not be made |
 
+### Pictures of the window
+
+`--screenshot PNG` draws the window as the options after it set it up, off
+screen, and saves it once everything in it is drawn: the preview with its
+formulas and diagrams, spelling and live formatting, and any panel it opens.
+No window shows. It reads copies of your settings and changes nothing parch
+keeps, and it neither hands files to a running parch nor takes them from one.
+
+```sh
+parch --screenshot notes.png --size 1280x800 --view split --line 40 notes.md
+parch --screenshot export.png --default-theme --show export notes.md
+```
+
 ### For coding agents
 
 `parch skill` prints a skill that tells coding agents how to write, check,
@@ -1037,12 +1168,149 @@ installs it as `~/.agents/skills/parch/SKILL.md`, with a link to it from
 it; other skills, and a file or link there that is not parch's, are left
 alone.
 
+## Settings
+
+**Preferences…** (`Ctrl+,`) sets the writing font, any installed family or
+the theme's; the text size; the line height; the longest line, in
+characters; whether the Markdown is styled as you write; how headings are
+written; whether the formatting toolbar shows; whether parch starts with a
+new draft in front of the documents it reopens (**Start with a new
+draft**); whether spelling is checked;
+what focus mode keeps bright, and how strongly it dims the rest; and how many
+versions history keeps, for how long and in how much space. A window too
+narrow for the toolbar hides it until you ask for it with **Show toolbar**.
+Every change applies at once in every window. Under **Keys**, **Edit with Vim
+keys** turns on Vim keys. Under **Markdown and citations**, the Markdown
+profile, extensions, citation style and bibliography for every document, as
+[Document settings](#choose-how-a-document-is-read) describes them.
+
+Under **Preview** it sets the reading font, which is a serif made for reading
+unless you choose another; the preview's text size, two pixels larger than
+the text's until you choose one; its line height and longest line; whether
+the text and the preview scroll together; and whether pictures are fetched
+from the web.
+
+## Appearance
+
+parch draws everything from your Omarchy theme and follows it as you switch
+themes, light or dark, along with the theme's font. `Ctrl+=` and `Ctrl+-`
+change the text size, and `Ctrl+0` returns to the theme's size.
+
+Screen readers and other assistive technology reach every control by name.
+They can also edit the text, place the caret and select: each edit they
+make is one step for `Ctrl+Z`, as typing is.
+
+## Your data
+
+Your documents are ordinary Markdown files, saved where you put them, with
+their line endings kept. Everything else parch keeps is in these folders:
+
+| Path | Contents |
+| --- | --- |
+| `~/.local/share/parch/drafts/` | Drafts, one folder each |
+| `~/.local/share/parch/history/` | Version history, one folder per document |
+| `~/.local/share/parch/documents.json` | Which history belongs to which file |
+| `~/.local/share/parch/dictionary.txt` | Words added to the spelling dictionary |
+| `~/.local/share/parch/document-settings.json` | Document settings, by document, library folder and for every document |
+| `~/.local/share/parch/exports.json` | Each document's last export, which Export again repeats |
+| `~/.local/state/parch/recovery/` | Text not yet in its file |
+| `~/.local/state/parch/session.json` | Open windows and tabs |
+| `~/.local/state/parch/recent.json` | Recent files |
+| `~/.local/state/parch/positions.json` | Where you were in each document |
+| `~/.config/parch/settings.json` | Settings, such as library folders, text size and your own keys |
+| `~/.cache/parch/render/` | Formulas and diagrams already drawn, at most 128 MiB |
+
+These follow `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and
+`XDG_CACHE_HOME` when they are set.
+
+### Back up and restore
+
+Back up your documents as you always do, and with them parch's folders:
+`~/.local/share/parch` holds your drafts, version history, document settings
+and the words you added to the dictionary, and `~/.config/parch` your
+settings and keys. `~/.local/state/parch` holds what parch was doing (open
+tabs, recent files, text not yet saved), and `~/.cache/parch` only drawings
+it can make again.
+
+To restore, or to move to another computer, quit parch, put the folders back
+in the same places, and start it. History follows a document by its path, so
+put your documents back at the same paths too; a document at another path
+starts a history of its own.
+
+### Privacy
+
+There is no account, and nothing you write leaves your computer. The one
+thing parch fetches from the network is a picture a document names by web
+address, for the preview; **Fetch pictures from the web** under **Preview** in
+**Preferences…** turns that off, and exports never fetch pictures. A link you click in
+the preview opens in your browser. Formulas and diagrams are drawn by helper
+programs that run on your computer, cut off from the network.
+
+## Troubleshooting
+
+**An AUR helper wants to replace parch.** That is the unrelated AUR package
+of the same name; decline it. See
+[Another package called parch](#another-package-called-parch).
+
+**A formula or diagram shows its source.** It is being drawn, or it cannot
+be: the reason is shown in its place, and **Check document** lists every one.
+A TeX command parch cannot draw is listed under [Math](#math), and a Mermaid
+syntax error is said as Merman reports it. If none is drawn at all, the
+helpers are missing from `/usr/lib/parch`: install the package again.
+
+**Words are not underlined, or parch says spelling is not checked.** The
+English dictionary is missing: `sudo pacman -S hunspell-en_us`. Spelling may
+also be turned off: **Check spelling** in the menu turns it on.
+
+**Open, Save as or Print says the dialog cannot be reached.** parch asks the
+desktop for these through `xdg-desktop-portal`. Make sure it and a portal
+backend for your desktop are installed and running; Omarchy has both.
+
+**A file opens read-only.** It is not valid UTF-8: **Reopen as…** reads it
+in the encoding it was written in (see
+[Start and open documents](#start-and-open-documents)). A file larger than
+64 MiB is not opened at all, and parch says so.
+
+**parch says it restored text from recovery.** parch or the computer
+stopped before the text reached its file. The text is back in its tab; save
+it, or look in **Version history…** for what the file held.
+
+**The document is in conflict.** The file changed on disk while you had
+unsaved changes. **Review** shows both and lets you choose (see
+[Changes on disk](#changes-on-disk)).
+
+**The notice bar says history is paused.** Versions you named fill the space
+history may use. **Delete version** in **Version history…** removes one, or
+give history more
+room under **History** in **Preferences…**. Saving carries on meanwhile.
+
+**A picture does not show in the preview.** A picture from the web needs a
+network connection and **Fetch pictures from the web** turned on in
+**Preferences…**. A local
+picture is read from the document's folder; **Check document** lists any
+whose file is missing.
+
+**An included file is not shown.** It cannot be found, it includes itself, or
+it passes a limit in [Choose how a document is read](#choose-how-a-document-is-read).
+The preview marks it, and pointing at it says why.
+
+**Citations show as their keys.** No bibliography defines them, or the
+document has no citation style. `parch check` names each key and what is
+missing (see [Citations and bibliographies](#citations-and-bibliographies)).
+
+**Opening a file from the terminal adds a tab instead of a window.** A
+running parch takes the files it is given. `Ctrl+Shift+N` opens a new window,
+and **New view** shows one document in two tabs.
+
+**`parch export` refuses to write a file.** The file is already there:
+add `--force` to replace it. It never writes over the document itself.
+
 ## Conformance
 
 ### Profiles
 
 parch reads Markdown in one of two profiles, chosen in
-[document settings](#document-settings) or with `--profile`:
+[document settings](#choose-how-a-document-is-read) or with `--profile`:
 
 - **Writer-compatible**, the default: the syntax of iA Writer (merged table
   cells, inline notes, `//` comment lines, `+++` page breaks, included
@@ -1106,22 +1374,25 @@ A tag without its partner is shown as text too. HTML comments are kept in
 the text and left out of what is shown. **Check document** and `parch check`
 report each of these as a note.
 
-## Files parch keeps
+## What parch does not do
 
-| Path | Contents |
-| --- | --- |
-| `~/.local/share/parch/drafts/` | Drafts, one folder each |
-| `~/.local/share/parch/history/` | Version history, one folder per document |
-| `~/.local/share/parch/documents.json` | Which history belongs to which file |
-| `~/.local/share/parch/dictionary.txt` | Words added to the spelling dictionary |
-| `~/.local/share/parch/document-settings.json` | Document settings, by document, library folder and for every document |
-| `~/.local/share/parch/exports.json` | Each document's last export, which Export again repeats |
-| `~/.local/state/parch/recovery/` | Text not yet in its file |
-| `~/.local/state/parch/session.json` | Open windows and tabs |
-| `~/.local/state/parch/recent.json` | Recent files |
-| `~/.local/state/parch/positions.json` | Where you were in each document |
-| `~/.config/parch/settings.json` | Settings, such as library folders, text size and your own keys |
-| `~/.cache/parch/render/` | Formulas and diagrams already drawn, at most 128 MiB |
+- **Hide the Markdown.** Every `#`, `*` and `[link](…)` stays in the text;
+  the preview is where it reads as formatted.
+- **Sync or share.** There is no account, cloud or collaboration; put your
+  documents in a folder another tool syncs if you want them elsewhere.
+- **Languages other than English.** The window, spelling and the bundled
+  citation locales are English.
+- **Every Vim command.** See what [Vim keys](#edit-with-vim-keys) cover;
+  macros, marks, folds, block selection and `:s` are not among them.
+- **Run anything in a document.** Raw HTML parch does not support is shown as
+  text, and nothing in a document ever runs.
+- **Word equations.** Formulas and diagrams are pictures in a DOCX file.
+- **Fetch web pictures for exports.** A PDF or EPUB shows the picture's
+  description instead; an HTML page links to it.
+- **Come packaged for other systems.** The packages are for Arch Linux and
+  Omarchy.
 
-These follow `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and
-`XDG_CACHE_HOME` when they are set.
+## Getting help
+
+Found a bug, or stuck on something this guide does not cover? Open an
+[issue](https://github.com/willykev/parch/issues).

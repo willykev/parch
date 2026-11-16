@@ -1,117 +1,147 @@
-![parch with a Markdown essay open beside its library](screenshot.png)
-
 # parch
 
-[![Build](https://github.com/willykev/parch/actions/workflows/build.yml/badge.svg)](https://github.com/willykev/parch/actions/workflows/build.yml)
-[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Guide](docs/guide.md)
+parch is a Markdown writing app for Omarchy, in the spirit of iA Writer: you
+write plain Markdown with its punctuation in view, and read it beside the text
+as a preview with coloured code, math, diagrams and citations. It saves as you
+type and brings your text back after a crash. Your writing stays in ordinary
+files on your computer, and there is no account.
 
-A Markdown writing app for Omarchy. Open it and write: parch keeps every word
-safe and stays out of your way.
+[Install](#install) · [Guide](docs/guide.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/willykev/parch/releases)
 
-- Write Markdown with its punctuation in view, in tabs and separate windows.
-- Read it as it will look, beside the text or alone: a preview with tables,
-  coloured code, math, diagrams and footnotes that scrolls with what you write.
-- Cite from your BibTeX or CSL bibliography in APA, Chicago, MLA, IEEE or a
-  style of your own, chosen per document or per library folder.
-- Check your spelling as you write, and dim all but the sentence you are on
-  in focus mode.
-- Learn the Markdown parch reads from a guide of live examples you can edit,
-  beside what they become.
-- Save as you type, and get your text back after a crash.
-- Go back to an earlier version of any document from its history.
-- See when a file changes on disk, compare, and choose what to keep.
-- Keep your folders, drafts and recent files in a library, and find any
-  document by name.
-- Follow your Omarchy theme automatically, light or dark.
+![parch in Split view: a weather-station write-up with its Python script, a formula and a table beside their preview, and the library open on the left](screenshots/hero.png)
 
-Your writing stays in ordinary Markdown files on your computer. No account or
-cloud service is required.
+## Features
+
+- **Preview beside the text.** `Ctrl+Alt+2` shows tables, coloured code,
+  math, Mermaid diagrams and footnotes beside the Markdown, scrolling with it.
+- **Citations.** Write `[@key]` against a BibTeX or CSL file, and the preview
+  sets the citations and the bibliography in APA, Chicago, IEEE, MLA or a
+  style of your own.
+- **Export and print.** PDF, Word, EPUB, HTML or Markdown, with the PDF's
+  pages shown before anything is written.
+- **Vim keys.** Normal, Insert and Visual modes, registers, search and `:w`,
+  turned on in **Preferences**; `Ctrl` keys keep their meaning.
+- **Focus and spelling.** `Ctrl+Shift+D` dims all but the sentence you are on,
+  and misspelled words are underlined as you write.
+- **Never lose a word.** parch saves a moment after you pause, keeps unsaved
+  text through a crash, keeps earlier versions to go back to, and shows both
+  sides when a file changes on disk.
+- **Your library.** Folders, drafts and recent files beside the text;
+  `Ctrl+Shift+O` finds any document by name.
 
 ## Install
 
-Build and install from source on Omarchy or Arch Linux:
+parch runs on Omarchy and other Arch Linux systems, on x86_64 and ARM64.
 
 ```sh
+curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-$(uname -m).pkg.tar.zst"
+sudo pacman -U "parch-$(uname -m).pkg.tar.zst"
+```
+
+Then open **parch** from the app launcher, or run `parch` with the files to
+open. An unrelated AUR package, a pacman wrapper, is also called `parch`: if
+an AUR helper offers it as an update, decline it.
+
+To build from source instead:
+
+```sh
+sudo pacman -S --needed base-devel git qt6-base qt6-declarative qt6-svg qt6-wayland fontconfig hunspell libyaml syntax-highlighting librsvg cairo libzip
 git clone https://github.com/willykev/parch.git
 cd parch
 bin/install
 ```
 
-This builds and installs the app. Open **parch** from the app launcher, or run
-`parch` with the files you want to open.
-
-Building requires a C++ compiler, `make`, `qmake6`, and the `qt6-base`,
-`qt6-declarative`, `qt6-svg`, `qt6-wayland`, `fontconfig`, `hunspell`,
-`syntax-highlighting`, `librsvg`, `cairo` and `libzip` packages. File dialogs
-and printing use `xdg-desktop-portal` and your desktop's portal backend; spell
-checking uses the `hunspell-en_us` dictionary.
+Update by running the two install commands again, or `git pull` and
+`bin/install` in your clone. Remove parch with `sudo pacman -R parch`; your
+documents stay where they are.
 
 ## Start writing
 
-Press **Ctrl+N** for a new draft and start typing. Drafts are kept for you
-until you give them a name with **Ctrl+S**; after that, parch saves the file a
-moment after you pause.
+Press `Ctrl+N` and type. The draft is kept from the first key you press;
+`Ctrl+S` gives it a name and a folder, and from then on parch saves it a moment
+after you pause. `Ctrl+Alt+2` puts the preview beside it.
 
-| Key | Action |
+### See code, math and diagrams as they read
+
+Fenced code is coloured by its language, `$…$` and `$$…$$` become formulas,
+and a `mermaid` block becomes a diagram, all in your theme's colours.
+
+![The shell and Python blocks of the write-up, plain in the Markdown on the left and coloured in the preview on the right](screenshots/code.png)
+
+### Cite your sources
+
+Name a bibliography and a style in the front matter and write `[@key]` where
+you cite: the preview sets each citation, and the bibliography after the text.
+
+![The preview in Reading view: a paragraph citing three works in Chicago author-date style, its footnote, and the bibliography it produces](screenshots/citations.png)
+
+### Export and print
+
+`Ctrl+Shift+E` exports to PDF, Word, EPUB, HTML or Markdown. The dialog says
+what the format leaves out of this document and shows a PDF's pages as you
+change its options. `Ctrl+P` prints the same pages.
+
+![The Export dialog with PDF chosen: its options on the left, what a PDF leaves out below them, and the first two pages on the right](screenshots/export.png)
+
+### Follow your theme
+
+parch takes its colours and font from your Omarchy theme, light or dark, and
+changes when the theme does.
+
+![The same view in Catppuccin Latte and in Gruvbox, side by side](screenshots/themes.png)
+
+### Keys worth knowing
+
+| Key | Does |
 | --- | --- |
 | `Ctrl+N` | New draft |
-| `Ctrl+O` | Open a file |
-| `Ctrl+Shift+O` | Find a document |
-| `Ctrl+F` / `Ctrl+Shift+F` | Find in the document / search the library |
-| `Ctrl+S` / `Ctrl+Shift+S` | Save now / save as |
+| `Ctrl+O` / `Ctrl+Shift+O` | Open a file / find a document by name |
+| `Ctrl+S` | Save now |
+| `Ctrl+Alt+1` / `2` / `3` | The text / both / the preview |
 | `F9` | Show or hide the library |
-| `Ctrl+Alt+P` | Show or hide the preview |
-| `Ctrl+Alt+1` / `Ctrl+Alt+2` / `Ctrl+Alt+3` | Source / split / reading view |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
-| `Ctrl+W` | Close the tab |
-| `Ctrl+Shift+N` | New window |
-| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Larger / smaller / theme-sized text |
+| `Ctrl+F` / `Ctrl+H` | Find / find and replace |
+| `Ctrl+Shift+F` | Search the library |
 | `Ctrl+Shift+D` | Focus mode |
 | `F11` | Distraction-free writing |
-| `F10` | Open the menu |
-| `Ctrl+Shift+P` | Find and run any command |
 | `Ctrl+Shift+E` / `Ctrl+P` | Export / print |
-| `Ctrl+B` / `Ctrl+I` / `Ctrl+K` | Bold / italic / link |
+| `Ctrl+Shift+P` | Find and run any command |
+| `F1` | The user guide |
+
+**Keyboard shortcuts…** in the menu (`F10`) lists every key and lets you
+change them; the [guide](docs/guide.md#keyboard-shortcuts) has them all.
 
 ## Use the terminal
 
+Check, render and export documents from a script, with no window.
+
 ```sh
-parch notes.md ideas.md            # Open files, in the running parch if there is one
-parch ~/Writing                    # Add a folder to the library
-parch check notes.md               # Find broken links, missing images, notes and includes
-parch render notes.md --to text    # The HTML, text, outline or semantic tree
-parch export book.md -o book.pdf   # Also .html, .docx, .epub, or .md with its includes in place
-parch stats notes.md               # Words, characters and reading time
-parch skill install                # Teach your coding agents to use parch
+parch notes.md                          # open it, in the running parch if there is one
+parch check notes.md                    # broken links, missing pictures, unknown citations
+parch stats notes.md                    # words, characters and reading time
+parch render notes.md --to outline      # the headings; also html, text or the parsed tree
+parch export notes.md -o notes.pdf      # also .html, .docx, .epub, or .md with its includes
+parch skill install                     # teach your coding agents to use parch
 ```
 
-The commands need no display and take `--json`. Run `parch --help` for
-everything, and `parch help COMMAND` for one command's options.
+Add `--json` for scripts. `parch --help` lists everything, and
+`parch help COMMAND` one command's options.
 
 ## Your data
 
-Your documents are your own Markdown files, saved where you put them. parch
-keeps its own things separately:
+Your documents are ordinary Markdown files, saved where you put them. parch
+keeps drafts and history in `~/.local/share/parch/`, unsaved text and open
+tabs in `~/.local/state/parch/`, and settings in `~/.config/parch/`; back
+those up with your documents. There is no account and no cloud. The only
+network use is the preview fetching a picture a document names by web
+address, which **Preferences** turns off; links you click open in your
+browser. Spelling is checked in English only.
 
-- Drafts and version history in `~/.local/share/parch/`.
-- Crash recovery, your open tabs, and recent files in `~/.local/state/parch/`.
-- Words you add to the spelling dictionary in `~/.local/share/parch/dictionary.txt`.
-- Settings in `~/.config/parch/settings.json`, and document settings in
-  `~/.local/share/parch/document-settings.json`.
-- Formulas and diagrams already drawn in `~/.cache/parch/render/`.
+## More
 
-The preview fetches pictures a document names by web address; turn that off
-in **Preferences** if you prefer. Exports never fetch anything.
+The [guide](docs/guide.md) covers every key, command and setting, the
+Markdown parch reads, history and recovery, and what to do when something goes
+wrong. See the [changelog](CHANGELOG.md) for what is new, and
+[CONTRIBUTING](CONTRIBUTING.md) to build or change parch.
 
-## Development
-
-```sh
-bin/build     # Build into build/parch
-bin/test      # Run the tests without opening a window
-bin/fetch-helpers  # Fetch the pinned math and diagram helpers into build/helpers
-```
-
-See the [full guide](docs/guide.md) for every shortcut and for how saving,
-recovery, history, and conflicts work.
-
-[MIT license](LICENSE), with acknowledgments to the upstream projects.
+[MIT license](LICENSE) ·
+[![Build](https://github.com/willykev/parch/actions/workflows/build.yml/badge.svg)](https://github.com/willykev/parch/actions/workflows/build.yml)

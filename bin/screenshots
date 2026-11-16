@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Redraw the README's pictures into screenshots/.
+
+Every picture is drawn by parch itself, off screen, from the write-up in
+examples/weather-station. No window opens, nothing reaches the desktop, and
+nothing of your own is read or shown: the documents and the settings come
+from a scratch home that goes away afterwards, so neither your files nor
+your choice of font or theme can appear, and the theme is Omarchy's as it
+ships.
+
+Run it after changing how parch looks, and before a release. A picture that
+looks the same as the one already there is left alone, so only what changed
+shows up in git. It needs ImageMagick, the helpers that draw formulas and
+diagrams (bin/fetch-helpers), and Omarchy's themes for themes.png.
+"""
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+APP = ROOT / "build/parch"
+OUT = ROOT / "screenshots"
+EXAMPLE = ROOT / "examples/weather-station"
+DOCUMENT = "weather-station.md"
+# The library folder the write-up is kept in, and the notes beside it that
+# only fill the list.
+LIBRARY = "Garden"
+OTHER_NOTES = {
+    "compost-log.md": "# Compost log\n",
+    "seed-order.md": "# Seed order\n",
+    "tomato-trial.md": "# Tomato trial\n",
+}
+# One light and one dark theme of those Omarchy comes with.
+THEMES = ["catppuccin-latte", "gruvbox"]
+# The window sizes, in the pixels of a screen at normal scale. Pictures are
+# drawn at twice that, so they stay sharp where GitHub scales them down; the
+# two in themes.png at a scale that makes each as wide as WHOLE.
+WHOLE = "1280x800"
+CLOSE = "960x600"
+TILE = "960x576"
+
+
+def pixels(picture):
+    """A PNG's width and height."""
+    with open(picture, "rb") as file:
+        return struct.unpack(">II", file.read(24)[16:24])
+
+
+def line_of(text, start):
+    """The number, from 1, of the first line that starts with `start`."""
+    for number, line in enumerate(text.split("\n"), 1):
+        if line.startswith(start):
+            return number
+    sys.exit(f"screenshots: the example has no line starting {start!r}")
+
+
+class Stage:
+    """A scratch home with the write-up in its library, and parch drawing there."""
+
+    def __init__(self, scratch):
+        self.scratch = Path(scratch)
+        self.home = self.scratch / "home"
+        self.library = self.home / LIBRARY
+        self.env = {
+            "PATH": os.environ["PATH"],
+            "HOME": str(self.home),
+            "LANG": "C.UTF-8",
+            "TZ": "UTC",
+            # Off screen, drawn by the processor, and out of reach of the
+            # desktop: no window, no portal, the same picture on any machine.
+            "QT_QPA_PLATFORM": "offscreen",
+            "QT_QUICK_BACKEND": "software",
+            "QT_QPA_PLATFORMTHEME": "generic",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/nonexistent",
+            "NO_AT_BRIDGE": "1",
+            "PARCH_HELPERS": str(ROOT / "build/helpers" / platform.machine()),
+        }
+        for name in ("config", "data", "state", "cache", "runtime", "tmp"):
+            (self.scratch / name).mkdir()
+        (self.scratch / "runtime").chmod(0o700)
+        self.env.update({
+            "XDG_CONFIG_HOME": str(self.scratch / "config"),
+            "XDG_DATA_HOME": str(self.scratch / "data"),
+            "XDG_STATE_HOME": str(self.scratch / "state"),
+            "XDG_CACHE_HOME": str(self.scratch / "cache"),
+            "XDG_RUNTIME_DIR": str(self.scratch / "runtime"),
+            "TMPDIR": str(self.scratch / "tmp"),
+        })
+        self.home.mkdir()
+        # The settings a new window has, with the write-up's folder in the library.
+        settings = self.scratch / "config/parch/settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"libraryFolders": [str(self.library)]}) + "\n")
+        self.text = (EXAMPLE / DOCUMENT).read_text()
+        # What this screen's scale is, so pictures come out the same on any.
+        self.screen = 1
+        probe = self.scratch / "probe.png"
+        self.draw(probe, "200x150", scale=1)
+        self.screen = pixels(probe)[0] / 200
+
+    def draw(self, picture, size, *options, theme=None, scale=2):
+        """One picture of the write-up, on a fresh copy of it. It is `scale`
+        times the window's size in pixels: twice, unless said."""
+        shutil.rmtree(self.library, ignore_errors=True)
+        shutil.copytree(EXAMPLE, self.library)
+        for name, text in OTHER_NOTES.items():
+            (self.library / name).write_text(text)
+        look = ["--theme", theme] if theme else ["--default-theme"]
+        env = dict(self.env, QT_SCALE_FACTOR=f"{scale / self.screen:g}")
+        subprocess.run([str(APP), "--screenshot", str(picture), "--size", size, *look, *map(str, options),
+                        str(self.library / DOCUMENT)], env=env, check=True, cwd=self.scratch)
+
+
+def themes(stage, picture):
+    """The same view in a light and a dark theme, side by side."""
+    tiles = []
+    for theme in THEMES:
+        tiles.append(stage.scratch / f"{theme}.png")
+        stage.draw(tiles[-1], TILE, "--view", "split", "--no-library", "--line", line_of(stage.text, "$$"),
+                   theme=theme, scale=int(WHOLE.split("x")[0]) / int(TILE.split("x")[0]))
+    subprocess.run(["magick", "montage", *map(str, tiles), "-tile", "2x1", "-geometry", "+12+12",
+                    "-background", "none", "-depth", "8", "-strip", str(picture)], check=True)
+
+
+def settle(drawn, kept):
+    """Put a newly drawn picture in place, unless the one already there looks
+    the same. Says whether it changed."""
+    if kept.exists():
+        result = subprocess.run(["magick", "compare", "-metric", "AE", "-fuzz", "2%", str(kept), str(drawn),
+                                 "null:"], capture_output=True, text=True)
+        differing = re.search(r"\(([^)]+)\)", result.stderr)
+        if result.returncode in (0, 1) and differing and float(differing.group(1)) == 0:
+            return False
+    shutil.move(drawn, kept)
+    return True
+
+
+def main():
+    if not shutil.which("magick"):
+        sys.exit("screenshots: magick (ImageMagick) is needed, and is not installed")
+    helpers = ROOT / "build/helpers" / platform.machine()
+    if not (helpers / "render-svg").exists() or not (helpers / "merman-cli").exists():
+        sys.exit("screenshots: the formulas and diagrams need their helpers; run bin/fetch-helpers first")
+    for theme in THEMES:
+        if not (Path("/usr/share/omarchy/themes") / theme / "colors.toml").exists():
+            sys.exit(f"screenshots: themes.png needs Omarchy's {theme} theme, which is not installed")
+    subprocess.run([str(ROOT / "bin/build")], check=True, stdout=subprocess.DEVNULL)
+    OUT.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="parch-screenshots-") as scratch:
+        stage = Stage(scratch)
+        drawn = stage.scratch / "drawn"
+        drawn.mkdir()
+        text = stage.text
+        # The whole window: the library, the text, and the preview beside it
+        # from a heading, with the whole script coloured, the formula and
+        # the table.
+        stage.draw(drawn / "hero.png", WHOLE, "--view", "split", "--library",
+                   "--line", line_of(text, "## Reading the sensor"))
+        # The code blocks, coloured in the preview, beside their source.
+        stage.draw(drawn / "code.png", CLOSE, "--view", "split", "--no-library",
+                   "--line", line_of(text, "```sh"))
+        # A cited paragraph, and the notes and bibliography that follow it.
+        stage.draw(drawn / "citations.png", CLOSE, "--view", "reading", "--no-library",
+                   "--line", line_of(text, "## About the dew point"))
+        # Export as PDF: what it leaves out, and its pages.
+        stage.draw(drawn / "export.png", CLOSE, "--view", "split", "--no-library",
+                   "--line", line_of(text, "## Reading the sensor"), "--show", "export")
+        themes(stage, drawn / "themes.png")
+        for picture in sorted(drawn.iterdir()):
+            kept = OUT / picture.name
+            changed = settle(picture, kept)
+            width, height = pixels(kept)
+            size = kept.stat().st_size // 1024
+            print(f"{kept.relative_to(ROOT)}  {width}x{height}  {size} KB  {'redrawn' if changed else 'unchanged'}"
+                  + ("  (over 500 KB)" if size > 500 else ""))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.CalledProcessError as error:
+        sys.exit(f"screenshots: {error}")

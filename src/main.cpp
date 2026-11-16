@@ -10,6 +10,7 @@
 #include "qmltypes.h"
 #include "quitsignals.h"
 #include "remotefetcher.h"
+#include "screenshot.h"
 #include "settings.h"
 #include "theme.h"
 #include "themefolder.h"
@@ -25,8 +26,10 @@
 #include <QQmlEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QScopeGuard>
 #include <QSocketNotifier>
+#include <QStyleHints>
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QTimer>
@@ -87,14 +90,32 @@ int main(int argc, char *argv[])
     AppPaths paths = AppPaths::standard();
     QStringList files = absoluteFiles(launch.files, QDir::currentPath());
 
+    // A picture of the window, which goes where it is asked, in a folder
+    // that is there.
+    const bool picturing = !launch.picture.file.isEmpty();
+    Picture picture = launch.picture;
+    if (picturing) {
+        picture.file = QDir::current().absoluteFilePath(picture.file);
+        if (!QFileInfo(QFileInfo(picture.file).absolutePath()).isDir())
+            return refused(QCoreApplication::translate("main", "there is no folder for %1").arg(picture.file));
+    }
+
     // A theme asked for is made to stand in for Omarchy's current one: a
     // folder whose `theme` link points at it, which must outlive the Theme.
     // The person's own shell settings still go over it, as over the current
     // theme. It is settled before anything needs a display, so that a theme
-    // that is not there is said even where no window could open.
+    // that is not there is said even where no window could open. Omarchy's
+    // default as it ships, Tokyo Night, is the Theme's own look: it stands
+    // in for a folder with no theme, and none of the person's settings go
+    // over it.
     QTemporaryDir themeHome;
     QString themeFolder, userShell;
-    if (!launch.themeDirectory.isEmpty()) {
+    if (launch.defaultTheme) {
+        if (!themeHome.isValid())
+            return refused(QCoreApplication::translate("cli", "cannot make a temporary folder for the theme (%1)")
+                               .arg(themeHome.errorString()));
+        themeFolder = themeHome.path();
+    } else if (!launch.themeDirectory.isEmpty()) {
         const QString found = findTheme(launch.themeDirectory);
         if (found.isEmpty())
             return refused(QCoreApplication::translate("cli", "there is no theme %1").arg(launch.themeDirectory));
@@ -113,7 +134,7 @@ int main(int argc, char *argv[])
     // its own and opens a copy of its one file there. It never meets a
     // running parch: it neither hands its file over nor listens for others.
     const bool benchmarking = !launch.benchmarkOutput.isEmpty();
-    std::optional<QTemporaryDir> benchmarkRoot;
+    std::optional<QTemporaryDir> scratchRoot;
     QString benchmarkOutput, benchmarkLabel;
     if (benchmarking) {
         if (files.size() != 1)
@@ -121,18 +142,41 @@ int main(int argc, char *argv[])
         benchmarkOutput = QDir::current().absoluteFilePath(launch.benchmarkOutput);
         if (!QFileInfo(QFileInfo(benchmarkOutput).absolutePath()).isDir())
             return refused(QCoreApplication::translate("main", "there is no folder for %1").arg(benchmarkOutput));
-        benchmarkRoot.emplace(QDir::tempPath() + QStringLiteral("/parch-benchmark-XXXXXX"));
-        if (!benchmarkRoot->isValid())
+        scratchRoot.emplace(QDir::tempPath() + QStringLiteral("/parch-benchmark-XXXXXX"));
+        if (!scratchRoot->isValid())
             return refused(QCoreApplication::translate("main", "cannot make a temporary folder to measure in"));
-        paths = AppPaths::under(benchmarkRoot->path());
+        paths = AppPaths::under(scratchRoot->path());
         // Qt's and the graphics driver's caches go there too, so a measurement
         // leaves nothing in the person's own cache.
-        qputenv("XDG_CACHE_HOME", QFile::encodeName(benchmarkRoot->filePath(QStringLiteral("cache"))));
+        qputenv("XDG_CACHE_HOME", QFile::encodeName(scratchRoot->filePath(QStringLiteral("cache"))));
         benchmarkLabel = QFileInfo(files.first()).completeBaseName();
         QString error;
-        const QString copy = Benchmark::copyIn(files.first(), benchmarkRoot->filePath(QStringLiteral("document")), &error);
+        const QString copy = Benchmark::copyIn(files.first(), scratchRoot->filePath(QStringLiteral("document")), &error);
         if (copy.isEmpty()) return refused(error);
         files = {copy};
+    } else if (picturing) {
+        // A picture keeps every file parch writes beneath a temporary folder
+        // of its own, which starts with copies of the person's settings, so
+        // that the window looks as theirs do and nothing they keep changes.
+        // The documents are only read. It never meets a running parch.
+        scratchRoot.emplace(QDir::tempPath() + QStringLiteral("/parch-screenshot-XXXXXX"));
+        if (!scratchRoot->isValid())
+            return refused(QCoreApplication::translate("main", "cannot make a temporary folder to draw in"));
+        const AppPaths own = paths;
+        paths = AppPaths::under(scratchRoot->path());
+        const QList<std::pair<QString, QString>> kept{{own.settingsFile(), paths.settingsFile()},
+                                                      {own.documentSettingsFile(), paths.documentSettingsFile()},
+                                                      {own.personalDictionaryFile(), paths.personalDictionaryFile()}};
+        for (const auto &[from, to] : kept) {
+            if (!QFileInfo(from).isFile()) continue;
+            QDir().mkpath(QFileInfo(to).absolutePath());
+            if (QFile::copy(from, to)) QFile::setPermissions(to, QFile::ReadOwner | QFile::WriteOwner);
+        }
+        qputenv("XDG_CACHE_HOME", QFile::encodeName(scratchRoot->filePath(QStringLiteral("cache"))));
+        // Drawn off screen by the processor, with Qt's plainest platform
+        // theme: no window shows, and the picture is the same on any machine.
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        qputenv("QT_QPA_PLATFORMTHEME", "generic");
     } else {
         // A parch already running takes the files, in full paths since its
         // working folder is not this one. This is asked before any
@@ -147,6 +191,10 @@ int main(int argc, char *argv[])
                                            "main", "parch: parch is already running, so --theme %1 does not apply")
                                            .arg(launch.themeDirectory)
                                     << Qt::endl;
+            if (launch.defaultTheme)
+                QTextStream(stderr) << QCoreApplication::translate(
+                                           "main", "parch: parch is already running, so --default-theme does not apply")
+                                    << Qt::endl;
             return 0;
         }
         // An instance answered and did not take them.
@@ -156,9 +204,14 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     app.setDesktopFileName(QStringLiteral("parch"));
     app.setApplicationName(QStringLiteral("parch"));
+    if (picturing) {
+        QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+        // In a picture the caret is lit, never caught between two blinks.
+        QGuiApplication::styleHints()->setCursorFlashTime(0);
+    }
 
     AppService service(paths);
-    if (!benchmarking && !service.listen()) {
+    if (!benchmarking && !picturing && !service.listen()) {
         QString why;
         if (!service.error().isEmpty()) return refused(service.error());
         // Another launch has begun listening since the first try.
@@ -216,9 +269,11 @@ int main(int argc, char *argv[])
     // The desktop's print dialog and printing.
     std::optional<PortalPrinter> printer;
     // What a preview hands on: links to the desktop's handler for them, and
-    // the pictures a document names by web address to the network.
+    // the pictures a document names by web address to the network. A
+    // benchmark asks for none of them, and nor does a picture, which reaches
+    // nothing beyond the files it shows.
     std::optional<NetworkFetcher> fetcher;
-    if (!benchmarking) {
+    if (!benchmarking && !picturing) {
         picker.emplace();
         backend.setFilePicker(&*picker);
         printer.emplace();
@@ -242,11 +297,13 @@ int main(int argc, char *argv[])
         qDeleteAll(std::exchange(windows, {}));
     });
     // A benchmark's window has the size of the whole-document measurement
-    // whatever the session around it, so that its runs compare.
+    // whatever the session around it, so that its runs compare; a picture's
+    // has the size asked for, and keeps it.
     QVariantMap initial;
-    if (benchmarking) {
-        for (const char *size : {"width", "minimumWidth", "maximumWidth"}) initial.insert(QLatin1String(size), 1000);
-        for (const char *size : {"height", "minimumHeight", "maximumHeight"}) initial.insert(QLatin1String(size), 800);
+    const QSize fixed = benchmarking ? QSize(1000, 800) : picture.size;
+    if (fixed.isValid()) {
+        for (const char *size : {"width", "minimumWidth", "maximumWidth"}) initial.insert(QLatin1String(size), fixed.width());
+        for (const char *size : {"height", "minimumHeight", "maximumHeight"}) initial.insert(QLatin1String(size), fixed.height());
     }
     QObject::connect(&backend, &Backend::windowAdded, &app, [&](WindowContext *context) {
         QVariantMap properties = initial;
@@ -273,6 +330,17 @@ int main(int argc, char *argv[])
     backend.start(files);
     if (windows.isEmpty())
         return 1;
+    if (picturing) {
+        // Ends by itself, once the picture is saved or cannot be taken.
+        Screenshot screenshot(picture, &backend);
+        QObject::connect(&screenshot, &Screenshot::finished, &app, [](int code, const QString &message) {
+            if (code != 0)
+                QTextStream(stderr) << QCoreApplication::translate("main", "parch: --screenshot: %1").arg(message) << Qt::endl;
+            QCoreApplication::exit(code);
+        });
+        screenshot.start(windows.value(backend.windows().constFirst()));
+        return app.exec();
+    }
     if (!benchmark) {
         QObject::connect(&service, &AppService::openRequested, &backend, &Backend::openForwarded);
         return app.exec();

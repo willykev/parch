@@ -6,6 +6,7 @@
 #include "benchmark.h"
 #include "caretrest.h"
 #include "citationtests.h"
+#include "screenshottests.h"
 #include "settingstests.h"
 #include "diagnosticstests.h"
 #include "guidetests.h"
@@ -364,6 +365,16 @@ private slots:
     void cliJsonAndTextAreSafeToPrint() { CliTests::jsonAndTextAreSafeToPrint(); }
     void cliHtmlDestinationsCanBeRewritten() { CliTests::htmlDestinationsCanBeRewritten(); }
     void cliCommandsNeedNoDisplay() { CliTests::commandsNeedNoDisplay(); }
+    // Pictures of the window. The tests themselves are in screenshottests.cpp.
+    void screenshotOptionsAreParsed() { ScreenshotTests::optionsAreParsed(); }
+    void screenshotMalformedOptionsAreRefused() { ScreenshotTests::malformedOptionsAreRefused(); }
+    void screenshotHelpNamesEveryOption() { ScreenshotTests::helpNamesEveryOption(); }
+    void screenshotWindowIsSetUpAsAsked() { ScreenshotTests::windowIsSetUpAsAsked(); }
+    void screenshotPictureWaitsForEverythingDrawn() { ScreenshotTests::pictureWaitsForEverythingDrawn(); }
+    void screenshotExportDialogShowsItsPages() { ScreenshotTests::exportDialogShowsItsPages(); }
+    void screenshotDrawsOffScreenAtTheSizeAsked() { ScreenshotTests::drawsOffScreenAtTheSizeAsked(); }
+    void screenshotWritesNothingOfThePersons() { ScreenshotTests::writesNothingOfThePersons(); }
+    void screenshotNamesWhatCannotBeDone() { ScreenshotTests::namesWhatCannotBeDone(); }
     // Exports and printing. The tests themselves are in exporttests.cpp.
     void exportPdfSetsPagesWithSearchableText() { ExportTests::pdfSetsPagesWithSearchableText(); }
     void exportPdfKeepsHeadingsWithTheirText() { ExportTests::pdfKeepsHeadingsWithTheirText(); }
@@ -389,6 +400,7 @@ private slots:
     void exportAgainRepeatsTheRecipe() { ExportTests::exportAgainRepeatsTheRecipe(); }
     void printingGoesThroughThePortal() { ExportTests::printingGoesThroughThePortal(); }
     void printPreviewShowsThePagesThePdfHas() { ExportTests::printPreviewShowsThePagesThePdfHas(); }
+    void exportDialogShowsItsOptionsBesideThePages() { ExportTests::exportDialogShowsItsOptionsBesideThePages(); }
     void cliExportsEveryFormat() { ExportTests::cliExportsEveryFormat(); }
     void benchmarkReportsEveryMeasure();
     void benchmarkThatCannotStartEndsTheLoop();

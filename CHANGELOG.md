@@ -145,7 +145,8 @@ The first version: a native Markdown writing app for Omarchy.
 - PDF: real pages of the size, margins and template chosen, numbered, with
   searchable text, links, an outline of the headings, `+++` page breaks and
   headings kept with their text; formulas and diagrams as vectors. The Export
-  dialog shows the pages as they will come out, for a PDF and for printing.
+  dialog shows the pages as they will come out, for a PDF and for printing,
+  beside the format and its options where the window has room.
 - DOCX: real styles, lists, tables with merged cells, links, footnotes or
   endnotes, pictures with their descriptions and the document's properties.
 - EPUB 3: a file for each chapter, a table of contents, its images, formulas
@@ -218,3 +219,9 @@ The first version: a native Markdown writing app for Omarchy.
   bibliography files that cannot be read, and styles that cannot be used.
 - `parch skill install` installs a skill that teaches coding agents to use
   parch.
+- `parch --screenshot PNG` draws the window off screen into a picture, set
+  up by `--size`, `--view`, `--show`, `--library`, `--focus`, `--line`,
+  `--scroll` and `--select`, without changing anything parch keeps;
+  `--default-theme` shows Omarchy's default theme whatever the desktop's is.
+- An example write-up with code, math, a table, a diagram, a footnote and
+  citations, installed in `/usr/share/doc/parch/examples`.

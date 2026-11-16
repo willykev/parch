@@ -29,6 +29,7 @@ void exportDialogListsLimitationsAndExportsInTheBackground();
 void exportAgainRepeatsTheRecipe();
 void printingGoesThroughThePortal();
 void printPreviewShowsThePagesThePdfHas();
+void exportDialogShowsItsOptionsBesideThePages();
 void cliExportsEveryFormat();
 
 } // namespace ExportTests

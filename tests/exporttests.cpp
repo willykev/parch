@@ -1411,6 +1411,109 @@ void printPreviewShowsThePagesThePdfHas()
     QTRY_COMPARE(preview->pageCount(), 0);
 }
 
+namespace {
+
+// Whether all of an item is in sight: inside the frame, and inside every
+// item that clips it.
+bool inSight(QQuickItem *item, QQuickItem *frame)
+{
+    if (!item || !frame || !item->isVisible()) return false;
+    const QRectF drawn = item->mapRectToScene(QRectF(0, 0, item->width(), item->height())).adjusted(0.5, 0.5, -0.5, -0.5);
+    if (!frame->mapRectToScene(QRectF(0, 0, frame->width(), frame->height())).contains(drawn)) return false;
+    for (QQuickItem *at = item->parentItem(); at; at = at->parentItem())
+        if (at->clip() && !at->mapRectToScene(at->clipRect()).contains(drawn)) return false;
+    return true;
+}
+
+} // namespace
+
+void exportDialogShowsItsOptionsBesideThePages()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    const QString root = canonical(files.path());
+    const QString path = writeRich(root);
+    ShellFixture shell({.files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.backend->exports()->setRenderOptions(fakeHelpers(root + QStringLiteral("/work")));
+    const QStringList asked{QStringLiteral("exportFormat"), QStringLiteral("exportOption-page-size"),
+                            QStringLiteral("exportOption-margins"), QStringLiteral("exportOption-font"),
+                            QStringLiteral("exportOption-template")};
+
+    // From 960 by 600 up, the format and every option of a PDF are in sight
+    // beside its pages, with nothing to scroll.
+    for (const QSize size : {QSize(960, 600), QSize(1280, 800)}) {
+        window->resize(size);
+        QTRY_COMPARE(window->contentItem()->size(), QSizeF(size));
+        QVERIFY(run(window, "export"));
+        QObject *dialog = shell.object(QStringLiteral("exportDialog"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(dialog->property("format").toString(), QStringLiteral("pdf"));
+        QVERIFY(dialog->property("sideBySide").toBool());
+        auto *frame = dialog->property("background").value<QQuickItem *>();
+        QTRY_VERIFY_WITH_TIMEOUT(shell.item(QStringLiteral("previewPage")) &&
+                                     shell.item(QStringLiteral("previewPage"))->property("ready").toBool(),
+                                 30000);
+        QTest::qWait(50);
+        QQuickItem *body = shell.item(QStringLiteral("exportBody"));
+        QVERIFY(body->property("contentHeight").toReal() <= body->height());
+        QStringList shown;
+        for (QQuickItem *control : visibleItems(window)) {
+            const QString name = control->objectName();
+            if (name != u"exportFormat" && !name.startsWith(u"exportOption-")) continue;
+            QVERIFY2(inSight(control, frame), qPrintable(name));
+            shown.append(name);
+        }
+        for (const QString &name : asked) QVERIFY2(shown.contains(name), qPrintable(name + u' ' + shown.join(u' ')));
+        QVERIFY(inSight(shell.item(QStringLiteral("previewPage")), frame));
+        QVERIFY(inSight(shell.item(QStringLiteral("exportLimitations")), frame));
+        QVERIFY2(unnamedAccessibleItems(window).isEmpty(), qPrintable(unnamedAccessibleItems(window).join(", ")));
+        QStringList problems;
+        QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join("; ")));
+        // The keys reach the pages after the options.
+        QQuickItem *list = shell.item(QStringLiteral("previewPages"));
+        bool reached = false;
+        for (int i = 0; i < 30 && !reached; ++i) {
+            QTest::keyClick(window, Qt::Key_Tab);
+            reached = list->hasActiveFocus();
+        }
+        QVERIFY(reached);
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+    }
+
+    // Narrower, the pages follow the options and scroll with them, and come
+    // into sight as the keys reach them.
+    window->resize(QSize(700, 600));
+    QTRY_COMPARE(window->contentItem()->size(), QSizeF(700, 600));
+    QVERIFY(run(window, "export"));
+    QObject *dialog = shell.object(QStringLiteral("exportDialog"));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QVERIFY(!dialog->property("sideBySide").toBool());
+    auto *frame = dialog->property("background").value<QQuickItem *>();
+    QTRY_VERIFY_WITH_TIMEOUT(shell.item(QStringLiteral("previewPage")) &&
+                                 shell.item(QStringLiteral("previewPage"))->property("ready").toBool(),
+                             30000);
+    QVERIFY(inSight(shell.item(QStringLiteral("exportFormat")), frame));
+    QQuickItem *list = shell.item(QStringLiteral("previewPages"));
+    QVERIFY(!inSight(list, frame));
+    bool reached = false;
+    for (int i = 0; i < 30 && !reached; ++i) {
+        QTest::keyClick(window, Qt::Key_Tab);
+        reached = list->hasActiveFocus();
+    }
+    QVERIFY(reached);
+    QTRY_VERIFY(inSight(list, frame));
+    QStringList problems;
+    QVERIFY2(everyVisibleItemFitsWithin(window, &problems), qPrintable(problems.join("; ")));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+}
+
 void cliExportsEveryFormat()
 {
     QTemporaryDir folder;

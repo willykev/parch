@@ -107,6 +107,7 @@ HEADERS += \
     src/renderrequest.h \
     src/renderservice.h \
     src/scrollsync.h \
+    src/screenshot.h \
     src/session.h \
     src/settings.h \
     src/sourceboundaries.h \
@@ -221,6 +222,7 @@ SOURCES += \
     src/renderrequest.cpp \
     src/renderservice.cpp \
     src/scrollsync.cpp \
+    src/screenshot.cpp \
     src/session.cpp \
     src/settings.cpp \
     src/sourceboundaries.cpp \

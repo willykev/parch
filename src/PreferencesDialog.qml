@@ -60,6 +60,10 @@ ThemedDialog {
             KeysPreferences {
                 width: parent.width
             }
+
+            MarkdownPreferences {
+                width: parent.width
+            }
         }
 
         ScrollBar.vertical: ThemedDialog.Scroller {

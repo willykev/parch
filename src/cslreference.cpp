@@ -593,7 +593,7 @@ BibliographyDatabase BibliographyDatabase::fromFile(const QString &path, Format 
         database.m_diagnostics.append({BibliographyDiagnostic::Severity::Error,
                                        QStringLiteral("Cannot read the bibliography “%1”: %2.")
                                            .arg(QFileInfo(path).fileName(), file.errorString()),
-                                       {}, 0});
+                                       {}, 0, BibliographyDiagnostic::Kind::Unreadable});
         return database;
     }
     return fromData(file.readAll(), format == Format::Auto ? formatForPath(path) : format, path);
@@ -625,7 +625,7 @@ void BibliographyDatabase::add(CslReference reference, int line)
         m_diagnostics.append({BibliographyDiagnostic::Severity::Warning,
                               QStringLiteral("The key “%1” is defined more than once; the first entry is used.")
                                   .arg(reference.id),
-                              reference.id, line});
+                              reference.id, line, BibliographyDiagnostic::Kind::DuplicateKey});
         return;
     }
     m_index.insert(reference.id, m_references.size());

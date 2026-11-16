@@ -147,7 +147,8 @@ enum class NodeType : quint8 {
     MathInline,            // text: the TeX; display for `$$…$$` inside a paragraph
     FootnoteReference,     // label, number, resolved
     InlineNote,            // number; children: the note
-    Citation,              // label (the key), text (the locator), number, resolved; children: further Citations of a group
+    Citation,              // label (the key), text (the locator and what follows it), marker (`-` for `[-@key]`,
+                           // which leaves the author out), number, resolved; children: the Citations of a group
     Variable,              // label (the key), text (the value), resolved
     TaskMarker,            // checked; `[ ]` or `[x]` at the start of a task item
     HeadingLabel,          // label; the `[Label]` that ends a heading, not printed
@@ -294,7 +295,9 @@ struct Footnote {
     QString label;             // empty for an inline note
     int file = 0;
     Range range;               // of the definition, or of the inline note
-    const Node *content = nullptr; // the FootnoteDefinition or the InlineNote whose children are the note
+    // The FootnoteDefinition or the InlineNote whose children are the note;
+    // with Source::citationNotes, the Citation that is the note.
+    const Node *content = nullptr;
     int references = 0;        // how many times the text refers to it
 };
 
@@ -322,6 +325,11 @@ struct Source {
     // Citation keys an external bibliography provides; a citation of one of
     // these is resolved without a definition in the text.
     QSet<QString> externalCitationKeys;
+    // The citation style puts citations in notes: each citation of the
+    // running text is a footnote of its own, numbered with the other notes
+    // in the order a reader meets them, its content the Citation itself.
+    // A citation inside a note stays where it is.
+    bool citationNotes = false;
 };
 
 struct PlainTextOptions {

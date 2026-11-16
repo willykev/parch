@@ -7,6 +7,7 @@
 #include "commandregistry.h"
 #include "document.h"
 #include "documentfind.h"
+#include "documentsettingsstore.h"
 #include "editorbinding.h"
 #include "editordecorations.h"
 #include "fileorganizer.h"
@@ -57,4 +58,6 @@ void registerQmlTypes()
     qmlRegisterUncreatableType<Backend>("Parch", 1, 0, "Backend", QStringLiteral("There is one backend"));
     qmlRegisterUncreatableType<DocumentReview>("Parch", 1, 0, "DocumentReview", QStringLiteral("The backend has one"));
     qmlRegisterUncreatableType<Attachments>("Parch", 1, 0, "Attachments", QStringLiteral("The backend has one"));
+    qmlRegisterUncreatableType<DocumentSettingsStore>("Parch", 1, 0, "DocumentSettingsStore",
+                                                      QStringLiteral("The backend has one"));
 }

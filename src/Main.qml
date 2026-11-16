@@ -31,6 +31,7 @@ ApplicationWindow {
                                        || attachmentDialog.visible || linkCheckDialog.visible
                                        || commandPalette.visible || preferencesDialog.visible || shortcutsDialog.visible
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
+                                       || documentSettingsDialog.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -391,6 +392,7 @@ ApplicationWindow {
         closeConfirmation.close()
         attachmentDialog.close()
         linkCheckDialog.close()
+        documentSettingsDialog.close()
     }
     onWidthChanged: context.size = Qt.size(width, height)
     onHeightChanged: context.size = Qt.size(width, height)
@@ -482,6 +484,7 @@ ApplicationWindow {
         redo: () => editorPane.redo(),
         palette: () => commandPalette.show(),
         preferences: () => preferencesDialog.open(),
+        documentSettings: () => { if (window.document) documentSettingsDialog.show(window.document) },
         shortcuts: () => shortcutsDialog.show()
     })
 
@@ -956,6 +959,12 @@ ApplicationWindow {
     PreferencesDialog {
         id: preferencesDialog
         objectName: "preferencesDialog"
+        onClosed: window.dialogClosed()
+    }
+
+    DocumentSettingsDialog {
+        id: documentSettingsDialog
+        objectName: "documentSettingsDialog"
         onClosed: window.dialogClosed()
     }
 

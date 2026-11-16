@@ -40,9 +40,24 @@
 //   notes             <section class="footnotes"><ol><li id="fn-1">… <a href="#fnref-1" class="footnote-backref">↩</a>
 //   citations         <span class="citation">[<a href="#cite-1">1</a>, p. 23]</span>
 //   bibliography      <section class="bibliography"><ol><li id="cite-1">…
+// With a citation style (HtmlOptions::citations), citations and the
+// bibliography are what the style makes of them; in a note style
+// (Source::citationNotes) a citation of the running text is a note
+// reference, and its note holds the citation.
 // What could not be resolved (a note without a definition, a variable
 // without a value, an include that was not read) is written as its source.
 namespace md {
+
+// Citations as a citation style formats them, for the renderer to write in
+// place of its own numbered ones (see documentcitations.h).
+struct CitationHtml {
+    // The HTML of one citation: a Citation node that stands alone or holds
+    // a group. It must be safe, as the renderer writes it as it is.
+    std::function<QString(const Node &citation)> citation;
+    // The whole bibliography, safe HTML, written after the notes; empty
+    // for none.
+    QString bibliography;
+};
 
 struct HtmlOptions {
     enum class RawHtml {
@@ -59,6 +74,8 @@ struct HtmlOptions {
     // to write. A script URL it returns is still emptied in Safe mode. When
     // unset, every destination is written as the document has it.
     std::function<QString(const Node &node, const QString &destination)> destination;
+    // When set, citations and the bibliography as a citation style made them.
+    std::optional<CitationHtml> citations;
 
     // The plain CommonMark rendering the specification's examples show.
     static HtmlOptions commonMark();

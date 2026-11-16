@@ -6,6 +6,7 @@
 #include "benchmark.h"
 #include "caretrest.h"
 #include "citationtests.h"
+#include "settingstests.h"
 #include "cli.h"
 #include "diskfile.h"
 #include "document.h"
@@ -410,6 +411,24 @@ private slots:
     void citationWriterDefinitions() { CitationTests::writerDefinitions(); }
     void citationFormattingOffTheUiThread() { CitationTests::formattingOffTheUiThread(); }
     void citationCslTestSuite() { CitationTests::cslTestSuite(); }
+    // Document settings, and citations formatted through them; the tests are
+    // in settingstests.cpp.
+    void settingsLayersFollowTheirPrecedence() { SettingsTests::layersFollowTheirPrecedence(); }
+    void settingsFrontMatterChoosesBibliographyAndStyle() { SettingsTests::frontMatterChoosesBibliographyAndStyle(); }
+    void settingsAreKeptBesideTheDocuments() { SettingsTests::settingsAreKeptBesideTheDocuments(); }
+    void settingsOpenDocumentsFollowThem() { SettingsTests::openDocumentsFollowTheirSettings(); }
+    void settingsProfileChangesEveryReading() { SettingsTests::profileChangesEveryReading(); }
+    void settingsLinkUpdatesReadEachFileInItsDialect() { SettingsTests::linkUpdatesReadEachFileInItsDialect(); }
+    void settingsDialogShowsSources() { SettingsTests::documentSettingsDialogShowsSources(); }
+    void settingsPreferencesChooseForEveryDocument() { SettingsTests::preferencesChooseForEveryDocument(); }
+    void citationSuffixesAndSuppressedAuthors() { SettingsTests::citationSuffixesAndSuppressedAuthors(); }
+    void citationsAuthorDateInHtml() { SettingsTests::citationsAuthorDateInHtml(); }
+    void citationsNumericThroughRender() { SettingsTests::citationsNumericThroughRender(); }
+    void citationsInANoteStyleAreNotes() { SettingsTests::citationsInANoteStyleAreNotes(); }
+    void citationsFromEveryBibliographyFormat() { SettingsTests::citationsFromEveryBibliographyFormat(); }
+    void citationsWithAStyleFile() { SettingsTests::citationsWithAStyleFile(); }
+    void citationsWriterAndPandocTogether() { SettingsTests::writerAndPandocCitationsTogether(); }
+    void citationsCheckReportsProblems() { SettingsTests::checkReportsCitationProblems(); }
     void untouchedFilesSaveByteIdentical();
     void invalidUtf8OpensReadOnlyWithBytesKept();
     void saveRefusesWhenDiskChanged();
@@ -10911,7 +10930,7 @@ void ParchTests::writingAidsAreNamedAndReachable()
         for (int i = 0; i < 30 && window->activeFocusItem() != first; ++i) QTest::keyClick(window, Qt::Key_Tab);
         QCOMPARE(window->activeFocusItem(), first);
         QStringList reached;
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 60; ++i) {
             QQuickItem *now = window->activeFocusItem();
             reached << now->objectName();
             QVERIFY2(now->property("visualFocus").toBool(), qPrintable(now->objectName()));
@@ -10920,7 +10939,10 @@ void ParchTests::writingAidsAreNamedAndReachable()
             if (now == close) break;
             QTest::keyClick(window, Qt::Key_Tab);
         }
-        QCOMPARE(reached, (QStringList{"spellingCheck", "focusSentence", "focusParagraph", "vimKeysChoice", "closePreferences"}));
+        // The keys' section, and then Markdown and citations for every document.
+        QCOMPARE(reached.mid(0, 5),
+                 (QStringList{"spellingCheck", "focusSentence", "focusParagraph", "vimKeysChoice", "profileChoice"}));
+        QCOMPARE(reached.last(), QStringLiteral("closePreferences"));
         for (const char *name : {"spellingCheck", "focusSentence", "focusParagraph", "closePreferences"}) {
             QAccessibleInterface *access = QAccessible::queryAccessibleInterface(shell.item(QString::fromLatin1(name)));
             QVERIFY2(access && !access->text(QAccessible::Name).isEmpty(), name);
@@ -14529,8 +14551,10 @@ void ParchTests::closingUnsavableTextKeepsItsTab()
     // Once the draft's own file can be written, trying again saves it and closes the tab.
     QVERIFY(QFile::remove(paths.drafts() + u'/' + draft->id()));
     backend.closeTryingAgain();
+    // The tab's closing let go of the document, so its id is taken first.
+    const QString draftId = draft->id();
     QTRY_COMPARE(tabs->rowCount(), 1);
-    QCOMPARE(readFile(DocumentStore::draftFile(paths, draft->id())), QByteArray("only copy"));
+    QCOMPARE(readFile(DocumentStore::draftFile(paths, draftId)), QByteArray("only copy"));
 }
 
 void ParchTests::windowsReachTabsOnlyThroughTheBackend()

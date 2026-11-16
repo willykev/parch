@@ -70,6 +70,7 @@ QString HtmlExporter::page(const md::Document &document, const ExportRecipe &rec
 {
     md::HtmlOptions options;
     options.destination = destinationsFrom(document, QFileInfo(recipe.output).absolutePath());
+    if (recipe.citations) options.citations = DocumentCitations::html(*recipe.citations);
     const QString body = md::toHtml(document, options);
 
     QString title = recipe.options.value(QStringLiteral("title")).simplified();

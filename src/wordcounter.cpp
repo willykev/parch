@@ -42,16 +42,16 @@ WordCounter::~WordCounter()
     m_pool.waitForDone();
 }
 
-int WordCounter::count(QStringView markdown)
+int WordCounter::count(QStringView markdown, const md::Options &options)
 {
-    return countWords(md::parse(markdown.toString()).plainText());
+    return countWords(md::parse(markdown.toString(), options).plainText());
 }
 
-int WordCounter::count(const QString &markdown, int from, int to)
+int WordCounter::count(const QString &markdown, int from, int to, const md::Options &options)
 {
-    md::PlainTextOptions options;
-    options.range = md::Range{from, to};
-    return countWords(md::parse(markdown).plainText(options));
+    md::PlainTextOptions plain;
+    plain.range = md::Range{from, to};
+    return countWords(md::parse(markdown, options).plainText(plain));
 }
 
 int WordCounter::countWords(QStringView text)
@@ -77,11 +77,17 @@ void WordCounter::setDocument(Document *document)
 {
     if (document == m_document) return;
     disconnect(m_edits);
+    disconnect(m_dialect);
     m_document = document;
     if (document) {
         m_edits = connect(document->buffer(), &SourceBuffer::sourceChanged, this, [this] {
             ++m_generation;
             schedule(DelayMs);
+        });
+        // Read in another dialect, the same text may hold other words.
+        m_dialect = connect(document, &Document::dialectChanged, this, [this] {
+            ++m_generation;
+            schedule(0);
         });
     }
     ++m_generation;
@@ -129,8 +135,9 @@ void WordCounter::start()
     const bool selection = first < last;
     // A selection is read as part of the whole text, so that what it holds
     // means what it means there.
-    const auto counted = [selection, first, last](const QString &text) {
-        return selection ? count(text, first, last) : count(text);
+    const md::Options options = m_document->markdownOptions();
+    const auto counted = [selection, first, last, options](const QString &text) {
+        return selection ? count(text, first, last, options) : count(text, options);
     };
     if (length <= ImmediateUnits) {
         take(counted(text), selection);

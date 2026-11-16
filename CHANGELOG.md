@@ -35,6 +35,19 @@ The first version: a native Markdown writing app for Omarchy.
   at once in every window.
 - A word count and reading time for the document or the selection, of the
   text a reader sees.
+- Document settings for each document, kept by parch and never in the file:
+  the Markdown profile (Writer-compatible or Standard), its extensions, the
+  citation style, the bibliography and the library root, with defaults for a
+  library folder and, in Preferences, for every document. The dialog shows
+  where each setting comes from, and live formatting, spelling, the outline,
+  the word count and Check links read the document as they say.
+- Citations and bibliographies: Writer `[p. 23][#key]` and Pandoc
+  `[@key, p. 23]` citations, `[-@key]` without the author, Writer
+  bibliography entries written in the document, and BibTeX, BibLaTeX, CSL
+  JSON and CSL YAML files, chosen in Document settings or with
+  `bibliography:` and `csl:` in the front matter. Seven bundled CSL styles
+  (APA, Chicago author-date and notes, IEEE, MLA, Harvard, Vancouver) or a
+  `.csl` file of your own; note styles put citations in footnotes.
 - Optional Vim keys, off until chosen: Normal, Insert and Visual modes;
   motions, operators and text objects with counts; registers, `.` and undo by
   whole changes; search; and `:w`, `:q`, `:wq` and `:x`. The status line
@@ -81,5 +94,9 @@ The first version: a native Markdown writing app for Omarchy.
 - Every command needs no display, takes `--json`, and reads the Writer
   profile unless `--profile`, `--extension` or `--use-saved-settings` say
   otherwise.
+- `parch render` and `parch export --to html` format citations and the
+  bibliography in the document's citation style; `--bibliography` and
+  `--csl` choose them, and `parch check` reports missing and duplicate keys,
+  bibliography files that cannot be read, and styles that cannot be used.
 - `parch skill install` installs a skill that teaches coding agents to use
   parch.

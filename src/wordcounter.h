@@ -66,8 +66,9 @@ public:
 
     // The words of a Markdown text, or of what is written from `from` to
     // `to` in it.
-    static int count(QStringView markdown);
-    static int count(const QString &markdown, int from, int to);
+    // `options` is the dialect it is read in (Document::markdownOptions()).
+    static int count(QStringView markdown, const md::Options &options = {});
+    static int count(const QString &markdown, int from, int to, const md::Options &options = {});
     // The words of plain text.
     static int countWords(QStringView text);
 
@@ -83,6 +84,7 @@ private:
 
     QPointer<Document> m_document;
     QMetaObject::Connection m_edits;
+    QMetaObject::Connection m_dialect;
     int m_selectionStart = 0;
     int m_selectionEnd = 0;
     int m_words = 0;

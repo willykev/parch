@@ -1,6 +1,8 @@
 #pragma once
 
 #include "dialectchoice.h"
+#include "documentcitations.h"
+#include "mdhtml.h"
 #include "mdtree.h"
 
 #include <QString>
@@ -12,17 +14,26 @@
 // read; nothing here needs the window or a display.
 namespace DocumentCheck {
 
-// A document as a command reads it: its file, with every file it includes
-// assembled, in the dialect chosen for it.
+// A document as a command reads it (documentreading.h): its file, with every
+// file it includes assembled, in the dialect chosen for it, with its
+// citations formatted in its style.
 struct Loaded {
     QString path; // canonical
     Dialect::Choice dialect;
     md::Document document;
+    DocumentCitations::Setup citations;
+    DocumentCitations::Formatted formatted;
+
+    // The renderer's options, with the citations as the style formats them.
+    md::HtmlOptions htmlOptions(md::HtmlOptions options = {}) const;
 };
 
-// Reads the Markdown file at `path` (absolute) and parses it in `dialect`,
-// its includes read from disk. False, with why, when the file cannot be
-// read: it is missing, a folder, not a regular file, or unreadable.
+// Reads the Markdown file at `path` (absolute) in the dialect its layers and
+// its front matter choose, its includes read from disk. False, with why,
+// when the file cannot be read: it is missing, a folder, not a regular
+// file, or unreadable.
+bool load(const QString &path, const Dialect::Layers &layers, Loaded *loaded, QString *error);
+// The same in a dialect already chosen, front matter and all.
 bool load(const QString &path, const Dialect::Choice &dialect, Loaded *loaded, QString *error);
 
 // A place in a file: its line from 1, and its column from 1 in characters
@@ -45,24 +56,30 @@ private:
 };
 
 struct Problem {
-    int file = 0; // index into md::Document::files
+    int file = 0; // index into md::Document::files, or -1 for a file of its own (`path`)
     md::Range range;
     Position position;
     md::Severity severity = md::Severity::Warning;
     // The engine's diagnostic code, or one of the checks made here:
     // "unresolved-asset" (an image whose file is not there), "broken-link"
     // (a link to a file that is not there) and "broken-link-anchor" (a link
-    // to a heading another Markdown file does not have).
+    // to a heading another Markdown file does not have); or one of the
+    // citation style's (DocumentCitations::Problem).
     QString code;
     // What kind of problem: include, reference, link, asset, footnote,
-    // citation, variable, table, math, front-matter or html.
+    // citation, bibliography, variable, table, math, front-matter or html.
     QString kind;
     QString message;
+    // A bibliography or style the problem is in rather than the document,
+    // with the line in `position` (0 when unknown); or the document itself,
+    // with no place in it, for the bibliography and style as a whole.
+    QString path;
 };
 
 // Everything wrong in a document, in file and source order: the engine's
 // diagnostics, then images whose files are missing and links to files or
-// headings that are not there. Each problem is reported once, even in a
+// headings that are not there, then the problems of its citations, its
+// style and its bibliography. Each problem is reported once, even in a
 // file included twice. Linked Markdown files are read to check the heading a
 // link names, in the document's own dialect.
 std::vector<Problem> problems(const Loaded &loaded);

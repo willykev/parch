@@ -85,6 +85,8 @@ private:
     QHash<quint64, int> inlineNotes; // by file and position, in included files
     int lastFootnote = 0;
     int lastCitation = 0;
+    // How many notes the flow is inside: a citation in one is no note of its own.
+    int noteDepth = 0;
 };
 
 void Assembler::fail(Block *block, DiagnosticCode code, const QString &message)
@@ -536,11 +538,28 @@ void Assembler::flow(Node &node)
         note.content = &node;
         note.references = 1;
         doc.footnotes.push_back(note);
-        break;
+        ++noteDepth;
+        for (Node &child : node.children) flow(child);
+        --noteDepth;
+        return;
     }
     case NodeType::Citation:
+        if (source.citationNotes && noteDepth == 0) {
+            // A note style: the citation is a note of its own, where it stands.
+            Footnote note;
+            note.number = ++lastFootnote;
+            note.file = node.file;
+            note.range = node.range;
+            note.content = &node;
+            note.references = 1;
+            doc.footnotes.push_back(note);
+        }
         if (node.children.empty()) numberCitation(node);
-        break;
+        // The citations of a group are in its note, not notes of their own.
+        ++noteDepth;
+        for (Node &child : node.children) flow(child);
+        --noteDepth;
+        return;
     default:
         break;
     }
@@ -588,6 +607,7 @@ void Assembler::resolve()
     flow(doc.root);
     // The notes, in the order of their numbers: a note may refer to another,
     // which is then numbered after every note the text refers to.
+    ++noteDepth;
     size_t noteIndex = 0, workIndex = 0;
     while (noteIndex < doc.footnotes.size() || workIndex < doc.bibliography.size()) {
         if (noteIndex < doc.footnotes.size()) {
@@ -600,6 +620,7 @@ void Assembler::resolve()
                 for (const Node &child : definition->children) flow(const_cast<Node &>(child));
         }
     }
+    --noteDepth;
     for (Node *node : numbered)
         if (node->number < 0) node->number = 0;
 

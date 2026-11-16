@@ -7,6 +7,7 @@
 #include "commandregistry.h"
 #include "document.h"
 #include "documentreview.h"
+#include "documentsettingsstore.h"
 #include "fileorganizer.h"
 #include "history.h"
 #include "session.h"
@@ -78,6 +79,9 @@ class Backend : public QObject {
     Q_PROPERTY(FileOrganizer *organizer READ organizer CONSTANT)
     // English spelling for every window.
     Q_PROPERTY(SpellChecker *spelling READ spelling CONSTANT)
+    // The Markdown settings of documents, library folders and every
+    // document, which every open document is read in.
+    Q_PROPERTY(DocumentSettingsStore *documentSettings READ documentSettings CONSTANT)
 
 public:
     enum NoticeTone { Failure, Warning, News };
@@ -118,6 +122,7 @@ public:
     QVariantMap recoveryFailures() const;
     Attachments *attachments() const;
     SpellChecker *spelling() const { return m_spelling; }
+    DocumentSettingsStore *documentSettings() const { return m_documentSettings; }
     QList<WindowContext *> windows() const;
     // The window that came to the front last, or the oldest window when none has yet.
     WindowContext *activeWindow() const;
@@ -267,7 +272,14 @@ public:
     // on without a dictionary, it says so.
     Q_INVOKABLE void setSpellchecking(bool on);
 
+    // Asks the desktop's file dialog, for the active window, for a file that
+    // document settings name: "bibliography" (BibTeX, BibLaTeX, CSL JSON or
+    // CSL YAML files, several at once), "style" (a .csl file) or
+    // "libraryRoot" (a folder). The answer is settingsFilesChosen().
+    Q_INVOKABLE void chooseSettingsFiles(const QString &purpose);
+
 signals:
+    void settingsFilesChosen(const QString &purpose, const QStringList &paths);
     void problemChanged();
     void historyPausedChanged();
     void recoveryFailuresChanged();
@@ -389,6 +401,7 @@ private:
     // have closed: at once, or once a save that runs has ended.
     QSet<QString> m_givenUp;
     SpellChecker *m_spelling;
+    DocumentSettingsStore *m_documentSettings;
     // A dictionary that is missing is said once in a run, unless spelling is turned on again.
     bool m_dictionaryMissingSaid = false;
     // Declared last, so that it goes first and its copies end before the

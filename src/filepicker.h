@@ -4,6 +4,7 @@
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 // The desktop's own open and save dialogs. Abstract, so that tests can stand
@@ -27,9 +28,21 @@ public:
     virtual void openFolder() = 0;
     // Where to save a document, starting from the suggested file.
     virtual void saveDocument(const QUrl &suggested) = 0;
+    // Files of one kind to read, such as a bibliography: those `patterns`
+    // match (globs, "*.bib"), named `filterName`, one or several. A picker
+    // that cannot ask says failed().
+    virtual void openFiles(const QString &title, const QString &filterName, const QStringList &patterns, bool multiple)
+    {
+        Q_UNUSED(title);
+        Q_UNUSED(filterName);
+        Q_UNUSED(patterns);
+        Q_UNUSED(multiple);
+        emit failed(tr("The desktop's file dialog cannot choose these files."));
+    }
 
 signals:
     void documentsSelected(const QList<QUrl> &urls);
+    void filesSelected(const QList<QUrl> &urls);
     void folderSelected(const QUrl &url);
     void saveSelected(const QUrl &url);
     void failed(const QString &message);

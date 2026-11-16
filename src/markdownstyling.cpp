@@ -331,6 +331,8 @@ struct MarkdownStyling::Pass {
     // A copy of the text of its own, so that no later edit has to copy the buffer's.
     QString text;
     SourceRange visible{0, 0};
+    // The dialect the text is read in.
+    md::Options options;
     std::vector<Applied> applied;
     std::shared_ptr<std::atomic_bool> cancelled;
     QPointer<MarkdownStyling> owner;
@@ -341,7 +343,7 @@ struct MarkdownStyling::Pass {
 void MarkdownStyling::run(Pass &pass)
 {
     if (pass.cancelled->load()) return;
-    const md::Document document = md::parse(pass.text);
+    const md::Document document = md::parse(pass.text, pass.options);
     if (pass.cancelled->load()) return;
     std::vector<Part> parts = partsOf(document, int(pass.text.size()));
 
@@ -457,10 +459,22 @@ void MarkdownStyling::connectBinding()
     m_bindingConnections.clear();
     m_binding = m_decorations ? m_decorations->binding() : nullptr;
     if (m_binding)
-        m_bindingConnections = {connect(m_binding, &EditorBinding::sourceEdited, this, &MarkdownStyling::edited)};
+        m_bindingConnections = {connect(m_binding, &EditorBinding::sourceEdited, this, &MarkdownStyling::edited),
+                                connect(m_binding, &EditorBinding::documentChanged, this, &MarkdownStyling::watchDialect)};
+    watchDialect();
     m_applied.clear();
     measureFont();
     refresh();
+}
+
+void MarkdownStyling::watchDialect()
+{
+    disconnect(m_dialect);
+    // Read in another dialect, the same text is styled otherwise.
+    if (Document *document = m_binding ? m_binding->document() : nullptr)
+        m_dialect = connect(document, &Document::dialectChanged, this, [this] {
+            if (active()) schedule(0);
+        });
 }
 
 bool MarkdownStyling::active() const
@@ -637,6 +651,7 @@ void MarkdownStyling::start()
         pass->text = QString(shared.constData(), shared.size());
     }
     pass->visible = m_binding->visibleRange();
+    pass->options = m_binding->document()->markdownOptions();
     pass->applied = m_applied;
     pass->cancelled = m_cancelled;
     pass->owner = this;

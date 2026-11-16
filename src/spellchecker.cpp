@@ -87,10 +87,10 @@ void proseWords(QStringView text, int start, int end, QList<SourceRange> &out)
 
 } // namespace
 
-std::vector<md::Range> spellingProse(const QString &text)
+std::vector<md::Range> spellingProse(const QString &text, const md::Options &options)
 {
     std::vector<md::Range> prose;
-    md::parse(text).forEachProseRange(0, [&](md::Range range) {
+    md::parse(text, options).forEachProseRange(0, [&](md::Range range) {
         if (!prose.empty() && prose.back().end >= range.start) prose.back().end = std::max(prose.back().end, range.end);
         else prose.push_back(range);
     });

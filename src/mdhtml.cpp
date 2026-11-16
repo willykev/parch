@@ -31,6 +31,9 @@ public:
         : doc(document), opt(options), safe(options.rawHtml == HtmlOptions::RawHtml::Safe),
           referencesSeen(document.footnotes.size(), 0)
     {
+        // In a note style, a citation of the running text is a note.
+        for (const Footnote &note : document.footnotes)
+            if (note.content && note.content->type == NodeType::Citation) citationNotes.insert(note.content, note.number);
     }
 
     QString run()
@@ -81,7 +84,10 @@ private:
     void htmlBlock(const Node &node);
     void element(const Node &node);
     void citation(const Node &node);
+    // The citation's own text, wherever it stands.
+    void citationText(const Node &node);
     void noteReference(const Node &node);
+    void noteMark(int number);
     void footnotes();
     void bibliography();
 
@@ -90,6 +96,7 @@ private:
     const bool safe;
     QString out;
     std::vector<int> referencesSeen; // per note, how many references are written
+    QHash<const Node *, int> citationNotes; // the citations that are notes, and their numbers
 };
 
 void Writer::block(const Node &node, bool tight)
@@ -364,8 +371,13 @@ void Writer::noteReference(const Node &node)
         esc(doc.source(node));
         return;
     }
-    const int seen = ++referencesSeen[node.number - 1];
-    const QString number = QString::number(node.number);
+    noteMark(node.number);
+}
+
+void Writer::noteMark(int noteNumber)
+{
+    const int seen = ++referencesSeen[noteNumber - 1];
+    const QString number = QString::number(noteNumber);
     lit(QLatin1StringView("<sup class=\"footnote-ref\"><a href=\"#fn-"));
     out.append(number);
     lit(QLatin1StringView("\" id=\"fnref-"));
@@ -381,6 +393,24 @@ void Writer::noteReference(const Node &node)
 
 void Writer::citation(const Node &node)
 {
+    const auto note = citationNotes.constFind(&node);
+    if (note != citationNotes.constEnd() && *note <= int(doc.footnotes.size())) {
+        noteMark(*note);
+        return;
+    }
+    citationText(node);
+}
+
+void Writer::citationText(const Node &node)
+{
+    if (opt.citations && opt.citations->citation) {
+        // Nothing for a citation the style did not format: the engine's own then.
+        const QString formatted = opt.citations->citation(node);
+        if (!formatted.isNull()) {
+            out.append(formatted);
+            return;
+        }
+    }
     auto one = [&](const Node &item) {
         if (item.number <= 0) {
             esc(doc.source(item));
@@ -526,6 +556,11 @@ void Writer::footnotes()
             inlines(note.content->children);
             lit(QLatin1StringView("</p>"));
             cr();
+        } else if (note.content && note.content->type == NodeType::Citation) {
+            lit(QLatin1StringView("<p>"));
+            citationText(*note.content);
+            lit(QLatin1StringView("</p>"));
+            cr();
         } else if (note.content) {
             blocks(note.content->children, false);
             cr();
@@ -559,6 +594,14 @@ void Writer::footnotes()
 
 void Writer::bibliography()
 {
+    if (opt.citations) {
+        if (!opt.citations->bibliography.isEmpty()) {
+            cr();
+            out.append(opt.citations->bibliography);
+            cr();
+        }
+        return;
+    }
     if (doc.bibliography.empty()) return;
     cr();
     lit(QLatin1StringView("<section class=\"bibliography\">"));

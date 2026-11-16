@@ -1,5 +1,6 @@
 #include "clicommands.h"
 
+#include "citations.h"
 #include "cli.h"
 #include "dialectchoice.h"
 #include "documentcheck.h"
@@ -167,6 +168,13 @@ struct Command {
 
 const QString jsonDescription = QStringLiteral("Print the result as JSON");
 
+QStringList bundledStyleNames()
+{
+    QStringList names;
+    for (const CslCatalog::StyleInfo &style : CslCatalog::bundledStyles()) names.append(style.id);
+    return names;
+}
+
 // The options that choose the dialect, shared by the commands that read a document.
 void addDialectOptions(Command &command)
 {
@@ -178,8 +186,17 @@ void addDialectOptions(Command &command)
                  QStringLiteral("NAME")});
     command.add({QStringLiteral("library"), QStringLiteral("The library folder that /rooted includes are found in"),
                  QStringLiteral("DIR")});
+    command.add({QStringLiteral("bibliography"),
+                 QStringLiteral("A BibTeX, BibLaTeX, CSL JSON or CSL YAML file of works to cite; give it again "
+                                "for more"),
+                 QStringLiteral("FILE")});
+    command.add({QStringLiteral("csl"),
+                 QStringLiteral("The citation style: a bundled one (%1) or a .csl file")
+                     .arg(bundledStyleNames().join(QStringLiteral(", "))),
+                 QStringLiteral("STYLE")});
     command.add({QStringLiteral("use-saved-settings"),
-                 QStringLiteral("Read the document in the settings parch keeps for it and its library")});
+                 QStringLiteral("Read the document in the settings parch keeps for it, its library and every "
+                                "document")});
 }
 
 QString dialectNotes()
@@ -197,8 +214,10 @@ QString dialectNotes()
     names += line;
     return QStringLiteral(
                "The dialect is the Writer profile with all of its extensions unless the options say\n"
-               "otherwise. With --use-saved-settings, the settings parch keeps for the document and its\n"
-               "library apply where the options say nothing. Nothing the window was last set to is read.\n") +
+               "otherwise. With --use-saved-settings, the settings parch keeps for the document, its\n"
+               "library and every document apply where the options say nothing. Nothing the window was\n"
+               "last set to is read. The front matter's bibliography: and csl: choose the bibliography\n"
+               "and the citation style unless the options or the document's saved settings do.\n") +
            names;
 }
 
@@ -239,24 +258,45 @@ std::optional<int> readDialectFlags(Command &command, const Context &context, Di
         // Includes are found by canonical paths.
         flags->layer.libraryRoot = QFileInfo(folder).canonicalFilePath();
     }
+    if (parser.isSet(QStringLiteral("bibliography"))) {
+        QStringList files;
+        for (const QString &file : parser.values(QStringLiteral("bibliography"))) {
+            const QString path = absolute(file, context);
+            if (!QFileInfo(path).isFile())
+                return command.usage(QStringLiteral("there is no file %1 for --bibliography").arg(path), context);
+            files.append(path);
+        }
+        flags->layer.bibliography = files;
+    }
+    if (parser.isSet(QStringLiteral("csl"))) {
+        const QString written = parser.value(QStringLiteral("csl"));
+        const QString style = Dialect::styleReference(written, context.workingDirectory);
+        if (Dialect::isStyleFile(style) ? !QFileInfo(style).isFile() : CslCatalog::bundledId(style).isEmpty())
+            return command.usage(QStringLiteral("--csl takes a .csl file or one of %1, not \"%2\"")
+                                     .arg(bundledStyleNames().join(QStringLiteral(", ")), written),
+                                 context);
+        flags->layer.citationStyle = style;
+    }
     flags->useSaved = parser.isSet(QStringLiteral("use-saved-settings"));
     return std::nullopt;
 }
 
-// The dialect for one document: the flags, then what is kept for it when
-// asked for, then the defaults. False, with why, when what is kept cannot
-// be read.
-bool chooseDialect(const QString &path, const DialectFlags &flags, const Context &context, Dialect::Choice *choice,
+// The layers of the dialect for one document: the flags, then what is kept
+// for it when asked for (its own, its library's, every document's); its
+// front matter joins them as it is read. False, with why, when what is kept
+// cannot be read.
+bool dialectLayers(const QString &path, const DialectFlags &flags, const Context &context, Dialect::Layers *layers,
                    QString *error)
 {
-    if (!flags.useSaved) {
-        *choice = Dialect::choose(flags.layer);
-        return true;
-    }
+    *layers = {};
+    layers->flags = flags.layer;
+    if (!flags.useSaved) return true;
     DocumentSettings::Saved saved;
     const QString canonical = QFileInfo(path).canonicalFilePath();
     if (!DocumentSettings::read(context.paths, canonical.isEmpty() ? path : canonical, &saved, error)) return false;
-    *choice = Dialect::choose(flags.layer, saved.document, saved.library);
+    layers->document = saved.document;
+    layers->library = saved.library;
+    layers->application = saved.application;
     return true;
 }
 
@@ -264,9 +304,9 @@ bool chooseDialect(const QString &path, const DialectFlags &flags, const Context
 bool loadDocument(const QString &path, const DialectFlags &flags, const Context &context,
                   DocumentCheck::Loaded *loaded, QString *error)
 {
-    Dialect::Choice choice;
-    if (!chooseDialect(path, flags, context, &choice, error)) return false;
-    return DocumentCheck::load(path, choice, loaded, error);
+    Dialect::Layers layers;
+    if (!dialectLayers(path, flags, context, &layers, error)) return false;
+    return DocumentCheck::load(path, layers, loaded, error);
 }
 
 // Whether a command may write `output`: never one of the document's own
@@ -293,14 +333,29 @@ bool mayWrite(const QString &output, bool force, const md::Document &document, Q
     return true;
 }
 
+// The file a problem is in: one of the document's, or a bibliography or style.
+QString problemFile(const DocumentCheck::Problem &problem, const md::Document &document)
+{
+    if (problem.file < 0) return problem.path;
+    return document.files[size_t(problem.file)].path;
+}
+
+// What the reader of an export misses: images that are not there, and
+// citations, styles and bibliographies that could not be formatted.
+bool missedByReader(const DocumentCheck::Problem &problem)
+{
+    if (problem.kind == u"asset") return true;
+    return (problem.kind == u"citation" || problem.kind == u"bibliography") && problem.severity != md::Severity::Info;
+}
+
 QJsonObject problemJson(const DocumentCheck::Problem &problem, const md::Document &document)
 {
-    const QString path = document.files[size_t(problem.file)].path;
+    const QString path = problemFile(problem, document);
     return QJsonObject{
         {QStringLiteral("file"), path.isEmpty() ? QJsonValue() : QJsonValue(path)},
         {QStringLiteral("line"), problem.position.line},
         {QStringLiteral("column"), problem.position.column},
-        {QStringLiteral("range"), QJsonArray{problem.range.start, problem.range.end}},
+        {QStringLiteral("range"), problem.file < 0 ? QJsonValue() : QJsonValue(QJsonArray{problem.range.start, problem.range.end})},
         {QStringLiteral("severity"), QString::fromLatin1(md::severityName(problem.severity))},
         {QStringLiteral("code"), problem.code},
         {QStringLiteral("kind"), problem.kind},
@@ -310,11 +365,16 @@ QJsonObject problemJson(const DocumentCheck::Problem &problem, const md::Documen
 
 QString problemLine(const DocumentCheck::Problem &problem, const md::Document &document, const Context &context)
 {
+    const QString file = shown(problemFile(problem, document), context);
+    const QString severity = QString::fromLatin1(md::severityName(problem.severity));
+    // A bibliography's problem may have no line.
+    if (problem.position.line <= 0)
+        return QStringLiteral("%1: %2: %3 [%4]").arg(file, severity, problem.message, problem.code);
     return QStringLiteral("%1:%2:%3: %4: %5 [%6]")
-        .arg(shown(document.files[size_t(problem.file)].path, context))
+        .arg(file)
         .arg(problem.position.line)
         .arg(problem.position.column)
-        .arg(QString::fromLatin1(md::severityName(problem.severity)), problem.message, problem.code);
+        .arg(severity, problem.message, problem.code);
 }
 
 QString plural(int count, const char *one, const char *many)
@@ -488,7 +548,7 @@ int render(const QStringList &arguments, const Context &context)
                                    ? QFileInfo(absolute(command.parser.value(QStringLiteral("output")), context)).absolutePath()
                                    : QFileInfo(loaded.path).absolutePath();
         options.destination = HtmlExporter::destinationsFrom(document, folder);
-        text = md::toHtml(document, options);
+        text = md::toHtml(document, loaded.htmlOptions(options));
         result = text;
     } else if (to == u"text") {
         text = document.plainText();
@@ -612,6 +672,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
     const md::Document &document = loaded.document;
     recipe.source = loaded.path;
     recipe.dialect = loaded.dialect;
+    recipe.citations = std::make_shared<const DocumentCitations::Formatted>(loaded.formatted);
     const std::vector<DocumentCheck::Problem> problems = DocumentCheck::problems(loaded);
     if (document.incomplete) {
         line(context.err, QStringLiteral("parch export: %1 is not exported: a file it includes could not be read")
@@ -629,7 +690,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
     // What the reader of the export will miss.
     QStringList warnings;
     for (const DocumentCheck::Problem &problem : problems)
-        if (problem.kind == u"asset") warnings.append(problemLine(problem, document, context));
+        if (missedByReader(problem)) warnings.append(problemLine(problem, document, context));
     if (command.wantsJson()) {
         QJsonObject report = header(QStringLiteral("export"));
         report.insert(QStringLiteral("ok"), true);
@@ -640,7 +701,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
         report.insert(QStringLiteral("limitations"), QJsonArray::fromStringList(result.limitations));
         QJsonArray assets;
         for (const DocumentCheck::Problem &problem : problems)
-            if (problem.kind == u"asset") assets.append(problemJson(problem, document));
+            if (missedByReader(problem)) assets.append(problemJson(problem, document));
         report.insert(QStringLiteral("warnings"), assets);
         report.insert(QStringLiteral("dialect"), loaded.dialect.toJson());
         QJsonObject used = renderers({"markdown"});

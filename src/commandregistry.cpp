@@ -100,6 +100,7 @@ QList<CommandInfo> standardCommands()
         command("nextRegion", "Next part of the window", "View", {QStringLiteral("F6")}),
         command("previousRegion", "Previous part of the window", "View", {QStringLiteral("Shift+F6")}),
         command("preferences", "Preferences…", "Settings", {QStringLiteral("Ctrl+,")}),
+        command("documentSettings", "Document settings…", "Settings", {}, Needs::Document),
         command("shortcuts", "Keyboard shortcuts…", "Settings"),
         command("vimKeys", "Turn Vim keys on or off", "Settings"),
         editing("bold", "Bold", "Format", {QStringLiteral("Ctrl+B")}),

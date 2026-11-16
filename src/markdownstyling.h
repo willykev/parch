@@ -191,6 +191,8 @@ private:
 
     bool active() const;
     void connectBinding();
+    // Styles again when the document in view is read in another dialect.
+    void watchDialect();
     // Takes a colour, and has the layer's formats made again once all have come.
     void setColor(QColor &member, const QColor &color);
     void defineLayer();
@@ -207,6 +209,7 @@ private:
     QPointer<EditorDecorations> m_decorations;
     QPointer<EditorBinding> m_binding;
     QList<QMetaObject::Connection> m_decorationConnections, m_bindingConnections;
+    QMetaObject::Connection m_dialect;
     bool m_enabled = true;
     QFont m_font;
     QColor m_foreground, m_background, m_marker, m_link, m_code, m_codeFill, m_math, m_mark;

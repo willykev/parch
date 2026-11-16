@@ -1,7 +1,10 @@
 #pragma once
 
 #include "dialectchoice.h"
+#include "documentcitations.h"
 #include "mdtree.h"
+
+#include <memory>
 
 #include <QByteArray>
 #include <QHash>
@@ -38,6 +41,9 @@ struct ExportRecipe {
     Dialect::Choice dialect;
     // The format's options that were given; a switch has an empty value.
     QHash<QString, QString> options;
+    // The document's citations as its style formats them, read with the
+    // document; none leaves the engine's own numbering.
+    std::shared_ptr<const DocumentCitations::Formatted> citations;
 
     QJsonObject toJson() const;
 };

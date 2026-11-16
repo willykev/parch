@@ -135,6 +135,14 @@ Document::Document(const QString &id, const QString &path, const QString &text, 
     m_shown = shown();
 }
 
+void Document::setSavedDialect(const Dialect::Layers &layers)
+{
+    if (layers == m_dialect) return;
+    m_dialect = layers;
+    m_choice = Dialect::effective(layers);
+    emit dialectChanged();
+}
+
 QString Document::id() const { return m_id; }
 SourceBuffer *Document::buffer() const { return m_buffer; }
 QString Document::path() const { return m_path; }

@@ -22,7 +22,7 @@ class Hunspell;
 // touch joined into one. Code, math, URLs, comments, front matter, raw
 // HTML, link destinations, labels and keys, and Markdown punctuation are
 // not prose.
-std::vector<md::Range> spellingProse(const QString &text);
+std::vector<md::Range> spellingProse(const QString &text, const md::Options &options = {});
 
 // The words in [from, to) of `text` within the ranges of prose (in order and
 // apart), as Unicode segments them: apostrophes inside a word, accents and

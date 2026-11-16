@@ -75,6 +75,8 @@ private:
     bool active() const;
     void defineLayer();
     void connectBinding();
+    // Checks again when the document in view is read in another dialect.
+    void watchDialect();
     void refresh();
     void schedule(int delayMs);
     void start();
@@ -86,6 +88,7 @@ private:
     QPointer<SpellChecker> m_checker;
     QPointer<EditorBinding> m_binding;
     QList<QMetaObject::Connection> m_decorationConnections, m_bindingConnections, m_checkerConnections;
+    QMetaObject::Connection m_dialect;
     QColor m_color;
     QTimer m_settle;
     quint64 m_check = 0;

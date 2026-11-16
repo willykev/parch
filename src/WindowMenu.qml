@@ -118,6 +118,7 @@ ThemedMenu {
     MenuLine {}
     CommandEntry { command: "palette" }
     CommandEntry { objectName: "preferencesEntry"; command: "preferences" }
+    CommandEntry { objectName: "documentSettingsEntry"; command: "documentSettings" }
     CommandEntry { command: "shortcuts" }
     CommandEntry {
         objectName: "vimKeysEntry"

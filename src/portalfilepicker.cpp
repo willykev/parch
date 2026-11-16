@@ -131,6 +131,21 @@ void PortalFilePicker::openFolder()
     request(QStringLiteral("OpenFile"), tr("Open Folder"), options, Action::Folder);
 }
 
+void PortalFilePicker::openFiles(const QString &title, const QString &filterName, const QStringList &patterns,
+                                 bool multiple)
+{
+    PortalFileFilter kind{filterName, {}};
+    for (const QString &pattern : patterns) kind.rules.append({0, pattern});
+    QVariantMap options;
+    options.insert(QStringLiteral("accept_label"), tr("Choose"));
+    options.insert(QStringLiteral("modal"), true);
+    options.insert(QStringLiteral("multiple"), multiple);
+    options.insert(QStringLiteral("filters"), QVariant::fromValue(PortalFileFilters{kind, allFilter()}));
+    options.insert(QStringLiteral("current_filter"), QVariant::fromValue(kind));
+    if (!startFolder().isEmpty()) options.insert(QStringLiteral("current_folder"), portalPathBytes(startFolder()));
+    request(QStringLiteral("OpenFile"), title, options, Action::Files);
+}
+
 void PortalFilePicker::saveDocument(const QUrl &suggested)
 {
     const QFileInfo target(suggested.toLocalFile());
@@ -268,6 +283,9 @@ void PortalFilePicker::handleResponse(uint response, const QVariantMap &results)
         break;
     case Action::Save:
         emit saveSelected(answer.urls.first());
+        break;
+    case Action::Files:
+        emit filesSelected(answer.urls);
         break;
     case Action::None:
         break;

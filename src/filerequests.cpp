@@ -38,6 +38,7 @@ void FileRequests::setPicker(FilePicker *picker)
     m_request = {};
     if (!picker) return;
     connect(picker, &FilePicker::documentsSelected, this, &FileRequests::documentsPicked);
+    connect(picker, &FilePicker::filesSelected, this, &FileRequests::filesPicked);
     connect(picker, &FilePicker::folderSelected, this, &FileRequests::folderPicked);
     connect(picker, &FilePicker::saveSelected, this, &FileRequests::saveTargetPicked);
     connect(picker, &FilePicker::failed, this, &FileRequests::pickerFailed);
@@ -95,6 +96,32 @@ bool FileRequests::askForName(WindowContext *window, Document *document, bool cl
     return true;
 }
 
+bool FileRequests::askForFiles(WindowContext *window, const QString &purpose, const QString &title,
+                               const QString &filterName, const QStringList &patterns, bool multiple)
+{
+    const bool folder = patterns.isEmpty();
+    if (!ask({folder ? Asked::FolderFor : Asked::Files, window, nullptr, false, purpose})) return false;
+    m_picker->setStartFolder(startFolder());
+    if (folder) m_picker->openFolder();
+    else m_picker->openFiles(title, filterName, patterns, multiple);
+    return true;
+}
+
+void FileRequests::filesPicked(const QList<QUrl> &urls)
+{
+    if (m_request.asked != Asked::Files) return;
+    const Request request = std::exchange(m_request, {});
+    emit answered();
+    QStringList files;
+    for (const QUrl &url : urls)
+        if (url.isLocalFile() && PathText::isFullPath(url.toLocalFile())) files.append(url.toLocalFile());
+    if (files.isEmpty()) {
+        emit problem(tr("No file chosen"), tr("Only local files can be chosen."));
+        return;
+    }
+    emit filesChosen(request.window, request.purpose, files);
+}
+
 bool FileRequests::retryNaming(WindowContext *window, Document *document, bool closeAfter)
 {
     const QString failed = m_failedNames.value(document->id());
@@ -142,6 +169,16 @@ void FileRequests::documentsPicked(const QList<QUrl> &urls)
 
 void FileRequests::folderPicked(const QUrl &url)
 {
+    if (m_request.asked == Asked::FolderFor) {
+        const Request request = std::exchange(m_request, {});
+        emit answered();
+        if (!url.isLocalFile() || !PathText::isFullPath(url.toLocalFile())) {
+            emit problem(tr("No folder chosen"), tr("Only a local folder can be chosen."));
+            return;
+        }
+        emit filesChosen(request.window, request.purpose, {url.toLocalFile()});
+        return;
+    }
     if (m_request.asked != Asked::Folder) return;
     const Request request = std::exchange(m_request, {});
     emit answered();

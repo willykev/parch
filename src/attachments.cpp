@@ -422,12 +422,14 @@ int Attachments::checkLinks(Document *document)
     const QString text = document->buffer()->text();
     const QString path = document->isDraft() ? QString() : document->path();
     const QString folder = documentFolder(document);
-    const QString library = libraryOf(document);
+    // Where its settings find `/rooted` includes, the library holding it by default.
+    const QString library = document->libraryRoot().isEmpty() ? libraryOf(document) : document->libraryRoot();
+    const md::Options options = document->markdownOptions();
     using Found = std::pair<QVariantList, int>;
     run<Found>(
         this,
-        [text, path, folder, library] {
-            const DocumentLinks::Checked checked = DocumentLinks::check(text, path, folder, library);
+        [text, path, folder, library, options] {
+            const DocumentLinks::Checked checked = DocumentLinks::check(text, path, folder, library, options);
             QVariantList missing;
             for (const DocumentLinks::Missing &found : checked.missing) {
                 const DocumentLinks::Link &link = found.link;

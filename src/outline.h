@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mdtree.h"
 #include "sourcetypes.h"
 // The document is a property QML reads, so its type must be complete here.
 #include "document.h"
@@ -33,7 +34,8 @@ namespace Outline {
 // outline that {{TOC}} and anchors are made from: ATX and Setext headings,
 // wherever they stand, quotes and list items too, but never in code, front
 // matter, HTML or comments. Headings with no text are left out.
-QList<Heading> headings(const QString &text);
+// `options` is the dialect the text is read in (Document::markdownOptions()).
+QList<Heading> headings(const QString &text, const md::Options &options = {});
 } // namespace Outline
 
 // The headings of one document, for a list that goes to them: found off the
@@ -92,7 +94,7 @@ private:
         QList<Heading> headings;
         Revision revision = 0;
     };
-    static Scan scanJob(QSharedPointer<const SourceSnapshot> snapshot);
+    static Scan scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options);
     void schedule(int delayMs);
     void scan();
     void take(const QList<Heading> &headings);
@@ -101,6 +103,7 @@ private:
 
     QPointer<Document> m_document;
     QMetaObject::Connection m_edits;
+    QMetaObject::Connection m_dialect;
     bool m_active = false;
     QString m_filter;
     QList<Heading> m_all;

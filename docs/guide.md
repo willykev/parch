@@ -148,7 +148,92 @@ written; whether the formatting toolbar shows; whether spelling is checked;
 and what focus mode keeps bright. A window too
 narrow for the toolbar hides it until you ask for it with **Show toolbar**.
 Every change applies at once in every window. Under **Keys**, **Edit with Vim
-keys** turns on Vim keys.
+keys** turns on Vim keys. Under **Markdown and citations**, the Markdown
+profile, extensions, citation style and bibliography for every document, as
+[Document settings](#document-settings) describes them.
+
+## Document settings
+
+**Document settings…**, in the menu (`F10`) or the command palette, shows how
+the document in front is read, and where each setting comes from:
+
+- **Markdown**: **Writer-compatible**, the default, with the syntax of iA
+  Writer and parch's extensions; or **Standard**, CommonMark 0.31.2 with
+  GFM tables, strikethrough, task lists and bare web addresses as links.
+- **Extensions**: what the Markdown is read with beyond the profile's own,
+  such as footnotes, citations, math, Mermaid diagrams, `//` comment lines,
+  front matter and included files, each on or off.
+- **Citation style** and **Bibliography**, described in
+  [Citations and bibliographies](#citations-and-bibliographies).
+- **Library root**: the folder that includes starting with `/` are found in;
+  the library folder that holds the document unless you choose another.
+
+Each setting is the first of these that has one: the document's own
+settings; its front matter (the bibliography and the citation style only);
+the settings of the library folder that holds it; **Markdown and citations**
+in **Preferences…**, for every document; and the defaults. Under each
+setting the dialog says which it is.
+
+Choose **This document** to change the document alone, or **Every document
+in the library folder** to change every document in it; a setting of the
+document itself still wins over its folder's. **Use the default** gives a
+setting back to the next of these. A change applies at once to live
+formatting, spelling, the outline, the word count and **Check links**. It
+changes how the text is read, never the text: parch keeps these settings
+itself, in `~/.local/share/parch/document-settings.json`, and they follow a
+document when parch renames or moves it. A draft has settings of its own
+from the start, and a library folder once it is saved in one.
+
+## Citations and bibliographies
+
+Cite a work in either of two ways, which can be mixed:
+
+```markdown
+A statement[p. 23][#Doe:2006].          Writer: the locator, then the key
+Another statement [@doe2006, p. 23].    Pandoc: the key, then the locator
+Doe shows [-@doe2006] that it works.    Pandoc, leaving the author out
+Two at once [@doe2006, p. 5; @roe2010].
+
+[#Doe:2006]: John Doe. *A Sample Book*. Example Press, 2006.
+```
+
+A Writer definition, `[#key]: …`, is a bibliography entry written in the
+document itself. Keys of a bibliography file are cited the same way: choose
+the file under **Bibliography** in **Document settings…**, or name it in the
+front matter, with the style:
+
+```yaml
+---
+bibliography: references.bib      # or a list: [books.bib, papers.json]
+csl: chicago-author-date           # a bundled style, or a .csl file
+link-citations: true               # each citation links to its entry
+---
+```
+
+parch reads BibTeX and BibLaTeX (`.bib`), CSL JSON (`.json`) and CSL YAML
+(`.yaml`, `.yml`) files, found from the document's folder when the front
+matter names them, and reads a file again when it changes. The bundled styles
+are APA (`apa`), Chicago author-date (`chicago-author-date`), Chicago notes
+and bibliography (`chicago-notes-bibliography`), IEEE (`ieee`), MLA
+(`modern-language-association`, or `mla`), Cite Them Right Harvard
+(`harvard-cite-them-right`, or `harvard`) and NLM/Vancouver
+(`nlm-citation-sequence`, or `vancouver`); a `.csl` style file of your own
+works as well. A chapter you include can name a bibliography of its own in
+its front matter; one that does not uses the document's.
+
+With a style, `parch render` and the HTML export write each citation as the
+style has it, `(Doe, 2006, p. 23)` or `[1, p. 23]`, and the bibliography after
+the text: the style's entries, then the document's own Writer entries,
+numbered as they are first cited. A note style, such as Chicago notes and
+bibliography, puts each citation of the text in a footnote of its own,
+numbered with your other notes; a citation inside a footnote stays in it.
+Without a style or a bibliography file, Writer citations are numbered as they
+are first cited: `[1, p. 23]`.
+
+`parch check` reports a key that neither the document nor its bibliography
+defines, a key given to two entries of one file or found in two files, a
+bibliography that cannot be read or has errors, with their lines, a style
+that cannot be used, and citations of a bibliography with no style chosen.
 
 ## Vim keys
 
@@ -499,7 +584,9 @@ parch stats book.md                  # Words, characters, reading time, headings
   [code]`: includes that cannot be read, references, footnotes, citations and
   variables that lead nowhere, images whose files are missing, links to files
   or headings that are not there, malformed table rows, unclosed math, front
-  matter it cannot read, and HTML that is shown as text. Notes of severity
+  matter it cannot read, HTML that is shown as text, and what is wrong with
+  citations, bibliography files and citation styles (a problem in a
+  bibliography file is reported at its line there). Notes of severity
   `info` (HTML shown as text, a footnote nothing refers to) are listed but do
   not count as problems.
 - **render** writes the HTML fragment the preview and exports are made from
@@ -512,7 +599,8 @@ parch stats book.md                  # Words, characters, reading time, headings
   out, its footnote and link labels kept apart from the document's, and its
   paths written from the new file's folder), or `html`, a standalone page with
   typography of its own that does not follow the desktop theme (`--title`
-  sets its title). Math and Mermaid diagrams are written as their source in
+  sets its title). Citations and the bibliography are written as the citation
+  style has them. Math and Mermaid diagrams are written as their source in
   the page, and its notes say so. The format follows `-o`'s name unless `--to`
   gives one. PDF, DOCX and EPUB cannot be exported from the terminal yet.
 - **stats** counts the words, characters (with and without spaces) and
@@ -532,12 +620,18 @@ machine. These options change it, the highest first:
 - `--profile writer|standard`, `--extension NAME` and `--no-extension NAME`
   (given again for more); `parch help check` lists the extensions.
 - `--library DIR`: the folder `/rooted` includes are found in.
-- `--use-saved-settings`: read the document as parch keeps it, with the
-  Markdown settings kept for the document and its library folder, and the
-  library folder for `/rooted` includes. What the options say still wins.
+- `--bibliography FILE` (given again for more) and `--csl STYLE`: the
+  bibliography and the citation style, a bundled one or a `.csl` file.
+- `--use-saved-settings`: read the document as the window reads it, with the
+  [document settings](#document-settings) kept for the document, its library
+  folder and every document, and the library folder for `/rooted` includes.
+  What the options say still wins.
 
-JSON results report the profile, the extensions, where each came from, the
-dialect version, and the version of what drew the result.
+The front matter's `bibliography:` and `csl:` choose the bibliography and the
+style unless the options, or with `--use-saved-settings` the document's own
+settings, choose them. JSON results report the profile, the extensions, the
+bibliography and the style, where each came from, the dialect version, and
+the version of what drew the result.
 
 ### Exit codes
 
@@ -566,6 +660,7 @@ alone.
 | `~/.local/share/parch/history/` | Version history, one folder per document |
 | `~/.local/share/parch/documents.json` | Which history belongs to which file |
 | `~/.local/share/parch/dictionary.txt` | Words added to the spelling dictionary |
+| `~/.local/share/parch/document-settings.json` | Document settings, by document, library folder and for every document |
 | `~/.local/state/parch/recovery/` | Text not yet in its file |
 | `~/.local/state/parch/session.json` | Open windows and tabs |
 | `~/.local/state/parch/recent.json` | Recent files |

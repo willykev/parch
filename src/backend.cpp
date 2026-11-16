@@ -69,8 +69,17 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
       m_review(std::make_unique<DocumentReview>(m_store.get())),
       m_positions(std::make_unique<ReadingPositions>(paths)),
       m_organizer(std::make_unique<FileOrganizer>(m_store.get(), m_settings)),
-      m_spelling(new SpellChecker(paths.personalDictionaryFile(), this))
+      m_spelling(new SpellChecker(paths.personalDictionaryFile(), this)),
+      m_documentSettings(new DocumentSettingsStore(paths, this))
 {
+    // Every document is read in the dialect its settings choose, kept
+    // current as they, its place and the library's folders change.
+    m_documentSettings->setLibraryFolders([this] { return m_settings->libraryFolders(); });
+    connect(m_store.get(), &DocumentStore::documentOpened, m_documentSettings, &DocumentSettingsStore::watch);
+    connect(m_settings, &Settings::changed, m_documentSettings, &DocumentSettingsStore::refresh);
+    connect(m_documentSettings, &DocumentSettingsStore::problem, this, &Backend::notify);
+    // Links are found in each file as it is read, when a move updates them.
+    m_organizer->setDialects([this] { return m_documentSettings->dialectsOfFiles(); });
     // Two workers: enough to list a folder while another is slow, and few
     // enough that a folder that never answers costs little.
     m_libraryPool->setMaxThreadCount(2);
@@ -194,6 +203,10 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
         showLibraryFolder(window, path);
         window->raise();
     });
+    connect(m_files.get(), &FileRequests::filesChosen, this,
+            [this](WindowContext *, const QString &purpose, const QStringList &paths) {
+                emit settingsFilesChosen(purpose, paths);
+            });
     connect(m_files.get(), &FileRequests::named, this, [this](WindowContext *window, Document *document, bool closeAfter) {
         if (!closeAfter || !m_windows.contains(window)) return;
         const int index = window->tabs()->indexOf(document);
@@ -865,6 +878,7 @@ void Backend::announce(WindowContext *window)
 
 void Backend::watch(Document *document)
 {
+    m_documentSettings->watch(document);
     m_autosave->watch(document);
     // A file opened in a tab is the newest recent file.
     if (!document->isDraft()) m_recentFiles->note(document->path());
@@ -1251,6 +1265,21 @@ void Backend::followSpelling()
     if (m_spelling->settled() && !m_spelling->available() && m_settings->spellcheck().value_or(false)
         && !m_dictionaryMissingSaid)
         sayDictionaryIsMissing();
+}
+
+void Backend::chooseSettingsFiles(const QString &purpose)
+{
+    WindowContext *window = activeWindow();
+    if (purpose == u"bibliography")
+        m_files->askForFiles(window, purpose, tr("Choose bibliography files"), tr("Bibliographies"),
+                             {QStringLiteral("*.bib"), QStringLiteral("*.json"), QStringLiteral("*.yaml"),
+                              QStringLiteral("*.yml")},
+                             true);
+    else if (purpose == u"style")
+        m_files->askForFiles(window, purpose, tr("Choose a citation style"), tr("Citation styles"),
+                             {QStringLiteral("*.csl")}, false);
+    else if (purpose == u"libraryRoot")
+        m_files->askForFiles(window, purpose, tr("Choose the library root"), {}, {}, false);
 }
 
 void Backend::setSpellchecking(bool on)

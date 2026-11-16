@@ -74,6 +74,14 @@ QList<CslCatalog::StyleInfo> CslCatalog::bundledStyles()
     return styles;
 }
 
+QString CslCatalog::bundledId(const QString &name)
+{
+    const QString canonical = canonicalId(name);
+    for (const BundledStyle &style : bundled)
+        if (canonical == QLatin1String(style.id)) return canonical;
+    return {};
+}
+
 std::shared_ptr<const CslStyle> CslCatalog::bundledStyle(const QString &id, QString *error)
 {
     static QMutex mutex;

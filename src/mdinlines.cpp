@@ -45,6 +45,7 @@ struct INode {
     int targetEnd = 0;
     bool tag = false;    // HtmlInline: an open or closing tag
     bool closing = false;
+    char16_t marker = 0; // Citation: `-` when the author is left out
 };
 
 struct Delimiter {
@@ -1109,7 +1110,9 @@ bool InlineParserPrivate::openBracket()
     const char16_t next = start + 1 < m_len ? s[start + 1].unicode() : 0;
     const Options &o = st.options;
     if (next == u'%' && o.variables && variable()) return true;
-    if (next == u'@' && o.citations && pandocCitation()) return true;
+    // `[@key]`, and `[-@key]`, which leaves the author out.
+    const bool suppressed = next == u'-' && start + 2 < m_len && s[start + 2] == u'@';
+    if ((next == u'@' || suppressed) && o.citations && pandocCitation()) return true;
     const bool note = next == u'^' && o.footnotes && st.writer();
     const int width = note ? 2 : 1;
     flush(start);
@@ -1169,7 +1172,10 @@ bool InlineParserPrivate::variable()
     return true;
 }
 
-// `[@key]`, `[@key, locator]` and `[@one; @two, locator]`.
+// `[@key]`, `[@key, locator]` and `[@one; @two, locator]`, where what
+// follows a locator is a suffix (`[@key, p. 23, emphasis added]`), and
+// `[-@key]`, which leaves the author out, as Pandoc has them. Each item
+// starts with its `@key` (or `-@key`); words before it make no citation.
 bool InlineParserPrivate::pandocCitation()
 {
     const int start = m_pos;
@@ -1179,7 +1185,8 @@ bool InlineParserPrivate::pandocCitation()
     if (close + 1 < m_len && (s[close + 1] == u'(' || s[close + 1] == u'[')) return false;
 
     struct Item {
-        int start, end, keyEnd;
+        int start, end, at, keyEnd;
+        bool suppressAuthor;
         QString key, locator;
     };
     std::vector<Item> items;
@@ -1190,17 +1197,21 @@ bool InlineParserPrivate::pandocCitation()
         int a = i, b = itemEnd;
         while (a < b && s[a].isSpace()) ++a;
         while (b > a && s[b - 1].isSpace()) --b;
-        if (a >= b || s[a] != u'@') return false;
-        int keyEnd = a + 1;
+        const bool suppress = a + 1 < b && s[a] == u'-' && s[a + 1] == u'@';
+        const int at = suppress ? a + 1 : a;
+        if (at >= b || s[at] != u'@') return false;
+        int keyEnd = at + 1;
         while (keyEnd < b && !s[keyEnd].isSpace() && s[keyEnd] != u',') ++keyEnd;
-        if (keyEnd == a + 1) return false;
+        if (keyEnd == at + 1) return false;
         int locator = keyEnd;
         if (locator < b && s[locator] == u',') ++locator;
         Item item;
         item.start = a;
         item.end = b;
+        item.at = at;
         item.keyEnd = keyEnd;
-        item.key = QString(s + a + 1, keyEnd - a - 1);
+        item.suppressAuthor = suppress;
+        item.key = QString(s + at + 1, keyEnd - at - 1);
         item.locator = trimmedView(QStringView(s + locator, b - locator)).toString();
         items.push_back(item);
         i = itemEnd + 1;
@@ -1216,12 +1227,13 @@ bool InlineParserPrivate::pandocCitation()
         const int entry = citation(item.key, &external);
         data(node).label = item.key;
         data(node).text = item.locator;
-        n(node).targetStart = item.start + 1;
+        if (item.suppressAuthor) n(node).marker = u'-';
+        n(node).targetStart = item.at + 1;
         n(node).targetEnd = item.keyEnd;
         n(node).number = -(entry + 1); // until notes are numbered
         if (entry < 0) {
             n(node).resolved = false;
-            diagnose(item.start, item.keyEnd, Severity::Warning, DiagnosticCode::MissingCitation,
+            diagnose(item.at, item.keyEnd, Severity::Warning, DiagnosticCode::MissingCitation,
                      QStringLiteral("No citation is defined for \"%1\"").arg(item.key));
         }
     };
@@ -1230,7 +1242,8 @@ bool InlineParserPrivate::pandocCitation()
     } else {
         for (const Item &item : items) {
             const int node = add(NodeType::Citation, item.start, item.end, group);
-            n(node).openEnd = item.start + 1;
+            // Its `@` (or `-@`) is its marker.
+            n(node).openEnd = item.at + 1;
             fill(node, item);
         }
     }
@@ -1849,6 +1862,7 @@ Node InlineParserPrivate::finish(int index)
     node.display = x.display;
     node.resolved = x.resolved;
     node.number = x.number;
+    if (x.marker) node.marker = QChar(x.marker);
     if (x.payload >= 0) {
         Payload &payload = payloads[x.payload];
         node.text = std::move(payload.text);

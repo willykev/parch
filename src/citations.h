@@ -124,6 +124,9 @@ struct StyleInfo {
 };
 
 QList<StyleInfo> bundledStyles();
+// The id of the bundled style a name stands for, its other names
+// ("vancouver", "mla", "harvard") and any case included; empty for none.
+QString bundledId(const QString &name);
 std::shared_ptr<const CslStyle> bundledStyle(const QString &id, QString *error = nullptr);
 // A style chosen by the writer, from a .csl file.
 std::shared_ptr<const CslStyle> styleFromFile(const QString &path, QString *error = nullptr);

@@ -1,5 +1,6 @@
 #include "documentcheck.h"
 
+#include "documentreading.h"
 #include "mdinclude.h"
 
 #include <QFileInfo>
@@ -161,7 +162,28 @@ private:
 
 } // namespace
 
+md::HtmlOptions Loaded::htmlOptions(md::HtmlOptions options) const
+{
+    options.citations = DocumentCitations::html(formatted);
+    return options;
+}
+
 bool load(const QString &path, const Dialect::Choice &dialect, Loaded *loaded, QString *error)
+{
+    // The choice made is the highest layer, so the front matter changes nothing.
+    Dialect::Layers layers;
+    layers.flags.profile = dialect.options.profile;
+    for (const QString &name : md::Options::extensionNames())
+        layers.flags.extensions.append({name, dialect.options.extension(name)});
+    layers.flags.libraryRoot = dialect.libraryRoot;
+    layers.flags.bibliography = dialect.bibliography;
+    layers.flags.citationStyle = dialect.citationStyle;
+    if (!load(path, layers, loaded, error)) return false;
+    loaded->dialect = dialect;
+    return true;
+}
+
+bool load(const QString &path, const Dialect::Layers &layers, Loaded *loaded, QString *error)
 {
     md::FileIncludeResolver resolver;
     const md::IncludeResolver::File file = resolver.read(path, maxDocumentBytes);
@@ -183,11 +205,13 @@ bool load(const QString &path, const Dialect::Choice &dialect, Loaded *loaded, Q
     }
     md::Source source;
     source.path = file.canonicalPath;
-    source.libraryRoot = dialect.libraryRoot;
     source.resolver = &resolver;
+    DocumentReading::Reading reading = DocumentReading::read(file.text, layers, source);
     loaded->path = file.canonicalPath;
-    loaded->dialect = dialect;
-    loaded->document = md::parse(file.text, dialect.options, source);
+    loaded->dialect = reading.dialect;
+    loaded->document = std::move(reading.document);
+    loaded->citations = std::move(reading.citations);
+    loaded->formatted = std::move(reading.formatted);
     return true;
 }
 
@@ -234,20 +258,48 @@ std::vector<Problem> problems(const Loaded &loaded)
         found.push_back(problem);
     }
     LinkCheck(loaded).walk(document.root, found);
+    // What the citation style, the bibliography and the citations against them say.
+    for (const DocumentCitations::Problem &cited : loaded.formatted.problems) {
+        Problem problem;
+        problem.severity = cited.severity;
+        problem.code = cited.code;
+        problem.message = cited.message;
+        if (cited.file >= 0 && size_t(cited.file) < document.files.size()) {
+            problem.file = cited.file;
+            problem.range = cited.range;
+            problem.kind = QStringLiteral("citation");
+        } else if (!cited.source.isEmpty()) {
+            problem.file = -1;
+            problem.path = cited.source;
+            problem.position = {cited.line, cited.line > 0 ? 1 : 0};
+            problem.kind = cited.code == u"citation-style" ? QStringLiteral("citation") : QStringLiteral("bibliography");
+        } else {
+            // About the document as a whole: its style or its settings.
+            problem.file = 0;
+            problem.kind = QStringLiteral("citation");
+        }
+        found.push_back(problem);
+    }
 
     // A file included twice is in the tree twice; its problems are once.
+    // Those of other files (a bibliography) come last.
     std::stable_sort(found.begin(), found.end(), [](const Problem &a, const Problem &b) {
-        if (a.file != b.file) return a.file < b.file;
+        const unsigned fileA = unsigned(a.file), fileB = unsigned(b.file);
+        if (fileA != fileB) return fileA < fileB;
+        if (a.path != b.path) return a.path < b.path;
+        if (a.file < 0) return a.position.line < b.position.line;
         return a.range.start < b.range.start;
     });
     QSet<QString> seen;
     std::vector<Problem> unique;
     std::vector<std::unique_ptr<LineIndex>> lines(document.files.size());
     for (Problem &problem : found) {
-        const QString key = QStringLiteral("%1:%2:%3:%4")
+        const QString key = QStringLiteral("%1:%2:%3:%4:%5:%6")
                                 .arg(problem.file)
                                 .arg(problem.range.start)
                                 .arg(problem.range.end)
+                                .arg(problem.path)
+                                .arg(problem.position.line)
                                 .arg(problem.code + problem.message);
         if (seen.contains(key)) continue;
         seen.insert(key);

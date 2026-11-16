@@ -23,7 +23,8 @@ errors to stderr.
   with its file, line, column, severity (`error`, `warning`, `info`), a code
   and a kind: includes that cannot be read (`include`), references, notes,
   citations and variables that lead nowhere (`reference`, `footnote`,
-  `citation`, `variable`), images whose files are missing (`asset`), links
+  `citation`, `variable`), bibliography files that cannot be read or give a
+  key twice (`bibliography`), images whose files are missing (`asset`), links
   to files or headings that are not there (`link`), malformed table rows,
   unclosed math, front matter, and HTML shown as text. Exit 0 means nothing
   wrong (info notes alone do not count), 2 means problems were found.
@@ -61,7 +62,12 @@ tables, strikethrough, task lists and bare links, plus:
 - Footnotes `text[^1]` with `[^1]: The note.`, and inline notes
   `text[^A note written in place.]`.
 - Citations `[p. 23][#Doe:2006]` with `[#Doe:2006]: John Doe. *A Book*.`,
-  and Pandoc's `[@key, p. 23]`.
+  and Pandoc's `[@key, p. 23]`, `[@a; @b]` and `[-@key]` (no author). Keys
+  of a BibTeX, BibLaTeX, CSL JSON or CSL YAML file are cited the same way
+  when the front matter names it, `bibliography: refs.bib`, with a style,
+  `csl: apa` (or `chicago-author-date`, `chicago-notes-bibliography`,
+  `ieee`, `mla`, `harvard`, `vancouver`, or a `.csl` file); render and
+  export then format citations and the bibliography in that style.
 - `{{TOC}}` alone in a paragraph: a table of contents of every heading.
 - Includes: a path to a `.md`, `.markdown` or `.txt` file alone in a
   paragraph, such as `chapters/one.md "Chapter one"`, is replaced by that
@@ -77,9 +83,11 @@ tables, strikethrough, task lists and bare links, plus:
 
 `--profile standard` reads plain CommonMark with the GFM extensions only.
 `--extension NAME` and `--no-extension NAME` switch one extension;
-`parch help check` lists them. `--use-saved-settings` reads a document the
-way the person set it up in the window; without it, the result is the same
-on every machine. JSON results say which profile and extensions were used.
+`parch help check` lists them. `--bibliography FILE` and `--csl STYLE`
+choose a bibliography and a citation style over the front matter's.
+`--use-saved-settings` reads a document the way the person set it up in the
+window; without it, the result is the same on every machine. JSON results
+say which profile, extensions, bibliography and style were used.
 
 ## Working with the person
 

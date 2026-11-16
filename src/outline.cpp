@@ -8,9 +8,9 @@
 #include <algorithm>
 #include <utility>
 
-QList<Heading> Outline::headings(const QString &text)
+QList<Heading> Outline::headings(const QString &text, const md::Options &options)
 {
-    const md::Document document = md::parse(text);
+    const md::Document document = md::parse(text, options);
     QList<Heading> found;
     TextSearch::LineCounter lines(text);
     for (const md::Heading &heading : document.headings) {
@@ -77,14 +77,23 @@ void OutlineModel::setDocument(Document *document)
 {
     if (document == m_document) return;
     disconnect(m_edits);
+    disconnect(m_dialect);
     m_document = document;
     ++m_generation;
-    if (document)
+    if (document) {
         m_edits = connect(document->buffer(), &SourceBuffer::sourceChanged, this, [this] {
             if (!m_active) return;
             setReady(false);
             schedule(EditSettleMs);
         });
+        // Read in another dialect, the same text may have other headings.
+        m_dialect = connect(document, &Document::dialectChanged, this, [this] {
+            ++m_generation;
+            if (!m_active) return;
+            setReady(false);
+            schedule(0);
+        });
+    }
     take({});
     setReady(false);
     emit documentChanged();
@@ -141,7 +150,7 @@ void OutlineModel::scan()
     m_running = true;
     m_scanAgain = false;
     const quint64 generation = m_generation;
-    QtConcurrent::run(&m_pool, &OutlineModel::scanJob, m_document->buffer()->snapshot())
+    QtConcurrent::run(&m_pool, &OutlineModel::scanJob, m_document->buffer()->snapshot(), m_document->markdownOptions())
         .then(this, [this, generation](const Scan &result) {
             m_running = false;
             const bool again = std::exchange(m_scanAgain, false);
@@ -156,9 +165,9 @@ void OutlineModel::scan()
         });
 }
 
-OutlineModel::Scan OutlineModel::scanJob(QSharedPointer<const SourceSnapshot> snapshot)
+OutlineModel::Scan OutlineModel::scanJob(QSharedPointer<const SourceSnapshot> snapshot, md::Options options)
 {
-    return {Outline::headings(snapshot->text), snapshot->revision};
+    return {Outline::headings(snapshot->text, options), snapshot->revision};
 }
 
 void OutlineModel::take(const QList<Heading> &headings)

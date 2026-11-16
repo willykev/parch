@@ -43,7 +43,9 @@ struct Link {
 // is the document's folder, `library` the library folder holding it, if any.
 QList<Link> find(const md::Document &document, const QString &folder, const QString &library = {});
 // The same for a text, parsed as a document of its own.
-QList<Link> find(const QString &text, const QString &folder, const QString &library = {});
+// `options` is the dialect it is read in.
+QList<Link> find(const QString &text, const QString &folder, const QString &library = {},
+                 const md::Options &options = {});
 
 // A link that leads nowhere: to a file that is not there, or to a heading
 // (`#slug`, `other.md#slug`) that the document or that Markdown file does
@@ -60,7 +62,10 @@ struct Checked {
 // Parses the document with its includes read from disk, so that headings in
 // included files count, and looks at every link to a local file or heading.
 // `path` is the document's own file, empty for a draft.
-Checked check(const QString &text, const QString &path, const QString &folder, const QString &library = {});
+// `options` is the dialect the document is read in (Document::markdownOptions()),
+// which Markdown files it links to are read in too.
+Checked check(const QString &text, const QString &path, const QString &folder, const QString &library = {},
+              const md::Options &options = {});
 
 // Of these folders, the one that holds the path, the nearest when several
 // do; empty when none does. Paths are compared as given.
@@ -97,6 +102,8 @@ struct Change {
 // < >, quotes, `file:`, percent-encoding of characters beyond ASCII, a
 // fragment and a title; otherwise it is written as md::encodeDestination()
 // writes paths, and an include that takes a space is quoted.
-QList<Change> changes(const QString &text, const QString &path, const QString &library, const QList<Move> &moves);
+// `options` is the dialect the text is read in.
+QList<Change> changes(const QString &text, const QString &path, const QString &library, const QList<Move> &moves,
+                      const md::Options &options = {});
 
 } // namespace DocumentLinks

@@ -45,5 +45,8 @@
         <file>skill.md</file>
         <file>export.css</file>
         <file>KeysPreferences.qml</file>
+        <file>MarkdownPreferences.qml</file>
+        <file>DialectSettingsForm.qml</file>
+        <file>DocumentSettingsDialog.qml</file>
     </qresource>
 </RCC>

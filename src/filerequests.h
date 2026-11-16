@@ -55,6 +55,11 @@ public:
     void saveTo(WindowContext *window, Document *document, const QString &path, bool closeAfter);
     // Names the document again where its last naming failed; false when none did.
     bool retryNaming(WindowContext *window, Document *document, bool closeAfter);
+    // Files to read for a purpose of the asker's own, such as a document's
+    // bibliography, as FilePicker::openFiles() asks for them; or a folder
+    // for one (a folder with `patterns` empty). The answer is filesChosen().
+    bool askForFiles(WindowContext *window, const QString &purpose, const QString &title, const QString &filterName,
+                     const QStringList &patterns, bool multiple);
 
 signals:
     // A question was answered, before what it does.
@@ -62,23 +67,28 @@ signals:
     // The window is the one that asked, or null once it has gone.
     void documentsChosen(WindowContext *window, const QStringList &files);
     void folderChosen(WindowContext *window, const QString &path);
+    // The answer to askForFiles(): local full paths, at least one.
+    void filesChosen(WindowContext *window, const QString &purpose, const QStringList &paths);
     // The document took the name it was given; its tab is to close if asked.
     void named(WindowContext *window, Document *document, bool closeAfter);
     void problem(const QString &problem, const QString &detail);
 
 private:
-    enum class Asked { Nothing, Documents, Folder, SaveTarget };
+    // Files and FolderFor are asked for a purpose of the asker's own.
+    enum class Asked { Nothing, Documents, Folder, SaveTarget, Files, FolderFor };
     struct Request {
         Asked asked = Asked::Nothing;
         QPointer<WindowContext> window;
         QPointer<Document> document;
         // The document's tab closes once it is saved where the dialog says.
         bool closeAfter = false;
+        QString purpose;
     };
 
     bool ask(const Request &request);
     QString suggestedPath(WindowContext *window, Document *document) const;
     void documentsPicked(const QList<QUrl> &urls);
+    void filesPicked(const QList<QUrl> &urls);
     void folderPicked(const QUrl &url);
     void saveTargetPicked(const QUrl &url);
     void pickerFailed(const QString &message);

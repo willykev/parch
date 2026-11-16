@@ -283,6 +283,7 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
     plan.library = libraryOf(from);
     plan.folder = S_ISDIR(state.st_mode);
     plan.documents = plan.folder ? 0 : 1;
+    if (m_dialects) plan.dialects = m_dialects();
     // Only a document or a folder can be what a reference leads to here.
     if (!plan.folder && !LibraryWalk::isTextDocument(name)) {
         if (perform(plan)) finishMove(plan, false, 0, 0);
@@ -321,7 +322,8 @@ FileOrganizer::Plan FileOrganizer::planJob(Plan plan, QHash<std::pair<quint64, q
         const auto opened = open.constFind({found.device, found.inode});
         if (opened != open.cend()) text = *opened;
         else if (!FolderSearch::readText(found.path, found.size, found.modified, &text)) return true;
-        QList<DocumentLinks::Change> changes = DocumentLinks::changes(text, found.path, plan.library, moves);
+        const md::Options options = plan.dialects ? plan.dialects(found.path) : md::Options();
+        QList<DocumentLinks::Change> changes = DocumentLinks::changes(text, found.path, plan.library, moves, options);
         if (!changes.isEmpty()) plan.files.append({found.path, std::move(changes)});
         return true;
     }, cancel.get());
@@ -473,7 +475,8 @@ void FileOrganizer::updateReferences(const Plan &plan)
             }
             SourceBuffer *buffer = open->buffer();
             const QString text = buffer->text();
-            const QList<DocumentLinks::Change> found = DocumentLinks::changes(text, file.path, plan.library, moves);
+            const QList<DocumentLinks::Change> found =
+                DocumentLinks::changes(text, file.path, plan.library, moves, open->markdownOptions());
             if (found.isEmpty()) continue;
             QList<TextSearch::Edit> edits;
             for (const DocumentLinks::Change &change : found) edits.append({change.range, change.after});
@@ -493,7 +496,7 @@ void FileOrganizer::updateReferences(const Plan &plan)
         return;
     }
     setBusy(1);
-    QtConcurrent::run(&m_pool, &FileOrganizer::rewriteJob, closed, plan.library, moves, m_store->history())
+    QtConcurrent::run(&m_pool, &FileOrganizer::rewriteJob, closed, plan.library, moves, m_store->history(), plan.dialects)
         .then(this, [this, plan, changes, files, failed](const Rewritten &rewritten) {
             finishMove(plan, true, changes + rewritten.changes, files + rewritten.files, failed + rewritten.failed);
             setBusy(-1);
@@ -501,7 +504,8 @@ void FileOrganizer::updateReferences(const Plan &plan)
 }
 
 FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString library,
-                                                   QList<DocumentLinks::Move> moves, History *history)
+                                                   QList<DocumentLinks::Move> moves, History *history,
+                                                   Dialects dialects)
 {
     Rewritten done;
     for (const Rewrite &file : files) {
@@ -510,7 +514,9 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString
             done.failed << PathText::fileName(file.path);
             continue;
         }
-        const QList<DocumentLinks::Change> changes = DocumentLinks::changes(loaded.text, file.oldPath, library, moves);
+        const md::Options options = dialects ? dialects(file.oldPath) : md::Options();
+        const QList<DocumentLinks::Change> changes =
+            DocumentLinks::changes(loaded.text, file.oldPath, library, moves, options);
         if (changes.isEmpty()) continue;
         QList<TextSearch::Edit> edits;
         for (const DocumentLinks::Change &change : changes) edits.append({change.range, change.after});

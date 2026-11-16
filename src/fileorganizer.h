@@ -68,6 +68,13 @@ public:
     // Why a name cannot be given to a file or folder, in a few words; empty
     // when it can.
     Q_INVOKABLE QString nameProblem(const QString &name) const;
+
+    // The dialect a Markdown file is read in when its links are found, by
+    // its path; safe on any thread.
+    using Dialects = std::function<md::Options(const QString &path)>;
+    // Asked once at the start of each move, for the documents' settings as
+    // they are then; without it, every file is read in the defaults.
+    void setDialects(std::function<Dialects()> dialects) { m_dialects = std::move(dialects); }
     // Whether the path lies inside one of the library's folders, so that it
     // can be renamed, moved or trashed.
     Q_INVOKABLE bool organizes(const QString &path) const;
@@ -125,6 +132,8 @@ private:
         // The documents the move takes along.
         int documents = 0;
         QList<FilePlan> files;
+        // What each file is read in, as the settings were when the move began.
+        Dialects dialects;
     };
     struct Rewrite {
         QString path;
@@ -143,7 +152,8 @@ private:
     // when it could not.
     bool perform(const Plan &plan);
     void updateReferences(const Plan &plan);
-    static Rewritten rewriteJob(QList<Rewrite> files, QString library, QList<DocumentLinks::Move> moves, History *history);
+    static Rewritten rewriteJob(QList<Rewrite> files, QString library, QList<DocumentLinks::Move> moves, History *history,
+                                Dialects dialects);
     // Says what a move did: what it took along, and what became of the
     // references to what moved.
     void finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed = {});
@@ -154,6 +164,7 @@ private:
 
     DocumentStore *m_store;
     Settings *m_settings;
+    std::function<Dialects()> m_dialects;
     int m_busy = 0;
     std::optional<Plan> m_review;
     QVariantMap m_trashing;

@@ -57,6 +57,8 @@ struct Check {
     std::shared_ptr<std::atomic_bool> cancelled;
     QPointer<SpellingLayer> layer;
     quint64 number;
+    // The dialect the text is read in, which says where its prose is.
+    md::Options options;
 };
 
 } // namespace
@@ -133,9 +135,19 @@ void SpellingLayer::connectBinding()
             connect(m_binding, &EditorBinding::sourceEdited, this, [this] {
                 if (active()) schedule(SettleMs);
             }),
+            connect(m_binding, &EditorBinding::documentChanged, this, &SpellingLayer::watchDialect),
         };
     }
+    watchDialect();
     refresh();
+}
+
+void SpellingLayer::watchDialect()
+{
+    disconnect(m_dialect);
+    // Read in another dialect, other parts of the text are prose.
+    if (Document *document = m_binding ? m_binding->document() : nullptr)
+        m_dialect = connect(document, &Document::dialectChanged, this, [this] { schedule(0); });
 }
 
 bool SpellingLayer::active() const
@@ -193,13 +205,13 @@ void SpellingLayer::start()
         text = QString(shared.constData(), shared.size());
     }
     Check check{buffer->revision(), std::move(text), m_binding->visibleRange(), m_checker->engine(), m_cancelled, this,
-                ++m_check};
+                ++m_check, m_binding->document()->markdownOptions()};
     auto cache = m_cache;
     m_checker->pool()->start([check = std::move(check), cache]() mutable {
         if (check.cancelled->load()) return;
         const Revision revision = check.revision;
         const QString &text = check.text;
-        const std::vector<md::Range> prose = spellingProse(text);
+        const std::vector<md::Range> prose = spellingProse(text, check.options);
         std::vector<SourceRange> paragraphs = paragraphsOf(text);
         // The paragraphs in view first, then the rest in order.
         const int top = check.visible.start, bottom = check.visible.start + check.visible.length;

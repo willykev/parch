@@ -9,6 +9,8 @@ A Markdown writing app for Omarchy. Open it and write: parch keeps every word
 safe and stays out of your way.
 
 - Write Markdown with its punctuation in view, in tabs and separate windows.
+- Cite from your BibTeX or CSL bibliography in APA, Chicago, MLA, IEEE or a
+  style of your own, chosen per document or per library folder.
 - Check your spelling as you write, and dim all but the sentence you are on
   in focus mode.
 - Save as you type, and get your text back after a crash.
@@ -86,7 +88,8 @@ keeps its own things separately:
 - Drafts and version history in `~/.local/share/parch/`.
 - Crash recovery, your open tabs, and recent files in `~/.local/state/parch/`.
 - Words you add to the spelling dictionary in `~/.local/share/parch/dictionary.txt`.
-- Settings in `~/.config/parch/settings.json`.
+- Settings in `~/.config/parch/settings.json`, and document settings in
+  `~/.local/share/parch/document-settings.json`.
 
 A formatted preview and exporting from the window are not included yet; the
 terminal exports Markdown and HTML.

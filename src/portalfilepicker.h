@@ -22,6 +22,7 @@ public:
     void openDocuments() override;
     void openFolder() override;
     void saveDocument(const QUrl &suggested) override;
+    void openFiles(const QString &title, const QString &filterName, const QStringList &patterns, bool multiple) override;
 
     // What the portal's answer to a request means: the files or folder
     // chosen; nothing, for a dialog cancelled or closed through its window;
@@ -38,7 +39,7 @@ private slots:
     void handleResponse(uint response, const QVariantMap &results);
 
 private:
-    enum class Action { None, Documents, Folder, Save };
+    enum class Action { None, Documents, Folder, Save, Files };
 
     void request(const QString &method, const QString &title, QVariantMap options, Action action);
     bool listen(const QString &path);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dialectchoice.h"
 #include "diskfile.h"
 // The buffer is a property QML reads, so its type must be complete here.
 #include "sourcebuffer.h"
@@ -92,6 +93,21 @@ public:
     // since, or undone back to a point the buffer counts as saved while a
     // later save, which landed after the text moved on, is in the file.
     bool differsFromFile() const;
+
+    // The Markdown settings kept for the document, its library and every
+    // document (documentsettings.h), which the window keeps current as they
+    // or the document's place change. Their flags and front matter layers
+    // are empty: the front matter is the text's own, read with the text.
+    Dialect::Layers savedDialect() const { return m_dialect; }
+    // Says dialectChanged() when they differ from those it has.
+    void setSavedDialect(const Dialect::Layers &layers);
+    // What every view of the window parses the text with: the profile and
+    // extensions those layers choose. Read it with the snapshot a worker
+    // parses, and parse again when dialectChanged() says it changed.
+    md::Options markdownOptions() const { return m_choice.options; }
+    // Where the text's `/rooted` includes are found: the library root those
+    // layers choose, the library folder holding it by default; empty for none.
+    QString libraryRoot() const { return m_choice.libraryRoot; }
     // The document was opened again at a path parch recorded as its file,
     // which led to another file by then, and nothing kept its text: it has
     // none of its own. It shows no text and takes none, and has nothing to
@@ -101,6 +117,9 @@ public:
 
 signals:
     void changed();
+    // The settings its text is read in changed (savedDialect()): every view
+    // parses it again.
+    void dialectChanged();
 
 private:
     friend class DocumentStore;
@@ -168,4 +187,6 @@ private:
     // The file may have changed again while a save or a comparison ran.
     bool m_checkAgain = false;
     Shown m_shown;
+    Dialect::Layers m_dialect;
+    Dialect::Choice m_choice;
 };

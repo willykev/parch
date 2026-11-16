@@ -109,6 +109,12 @@ section.footnotes, section.bibliography {
 }
 a.footnote-backref { text-decoration: none; }
 .citation a { text-decoration: none; }
+.csl-bib-body .csl-entry { margin: 0 0 0.6em; }
+.csl-bib-body.hanging-indent .csl-entry { padding-left: 2em; text-indent: -2em; }
+.csl-left-margin { float: left; min-width: 2.5em; padding-right: 0.5em; }
+.csl-right-inline { margin-left: 3em; }
+.csl-block { display: block; }
+.csl-indent { display: block; margin-left: 2em; }
 
 .page-break { break-after: page; }
 

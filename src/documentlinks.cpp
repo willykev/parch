@@ -119,7 +119,7 @@ QString libraryHolding(const QString &path, const QString &library)
 }
 
 // The headings another Markdown document has, by slug, with its own includes.
-QSet<QString> slugsOfFile(const QString &path, const QString &library)
+QSet<QString> slugsOfFile(const QString &path, const QString &library, const md::Options &options)
 {
     md::FileIncludeResolver resolver;
     const md::IncludeResolver::File file = resolver.read(path, maxLinkedBytes);
@@ -128,7 +128,7 @@ QSet<QString> slugsOfFile(const QString &path, const QString &library)
     source.path = file.canonicalPath;
     source.libraryRoot = libraryHolding(file.canonicalPath, library);
     source.resolver = &resolver;
-    return slugsOf(md::parse(file.text, md::Options(), source));
+    return slugsOf(md::parse(file.text, options, source));
 }
 
 // A path written as a destination, percent-encoding characters beyond ASCII
@@ -172,13 +172,14 @@ QList<Link> DocumentLinks::find(const md::Document &document, const QString &fol
     return links;
 }
 
-QList<Link> DocumentLinks::find(const QString &text, const QString &folder, const QString &library)
+QList<Link> DocumentLinks::find(const QString &text, const QString &folder, const QString &library,
+                                const md::Options &options)
 {
-    return find(md::parse(text), folder, library);
+    return find(md::parse(text, options), folder, library);
 }
 
 DocumentLinks::Checked DocumentLinks::check(const QString &text, const QString &path, const QString &folder,
-                                            const QString &library)
+                                            const QString &library, const md::Options &options)
 {
     md::FileIncludeResolver resolver;
     md::Source source;
@@ -186,7 +187,7 @@ DocumentLinks::Checked DocumentLinks::check(const QString &text, const QString &
     source.directory = folder;
     source.libraryRoot = library;
     source.resolver = &resolver;
-    const md::Document document = md::parse(text, md::Options(), source);
+    const md::Document document = md::parse(text, options, source);
     const QSet<QString> own = slugsOf(document);
     const QString self = path.isEmpty() ? QString() : QFileInfo(path).canonicalFilePath();
     QHash<QString, QSet<QString>> others;
@@ -215,7 +216,7 @@ DocumentLinks::Checked DocumentLinks::check(const QString &text, const QString &
             continue;
         }
         auto slugs = others.find(canonical);
-        if (slugs == others.end()) slugs = others.insert(canonical, slugsOfFile(canonical, library));
+        if (slugs == others.end()) slugs = others.insert(canonical, slugsOfFile(canonical, library, options));
         if (!slugs->contains(destination.fragment)) result.missing.append({link, true});
     }
     return result;
@@ -243,13 +244,13 @@ QString DocumentLinks::moved(const QString &path, const QList<Move> &moves)
 }
 
 QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const QString &path, const QString &library,
-                                                    const QList<Move> &moves)
+                                                    const QList<Move> &moves, const md::Options &options)
 {
     QList<Change> found;
     const QString newPath = moved(path, moves);
     const QString folder = PathText::folderOf(path);
     const QString newFolder = PathText::folderOf(newPath);
-    for (const Link &link : find(text, folder, library)) {
+    for (const Link &link : find(text, folder, library, options)) {
         const md::Destination &destination = link.destination;
         if (link.html || destination.kind != md::Destination::Kind::LocalFile || !destination.absolute) continue;
         const bool include = link.kind == Kind::Include;

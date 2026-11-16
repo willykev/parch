@@ -81,6 +81,10 @@ struct BibliographyDiagnostic {
     QString key;
     // A line in the source file, from 1, or 0 when unknown.
     int line = 0;
+    // What kind of problem: a file that cannot be read, a key given to two
+    // entries, or anything else.
+    enum class Kind { Other, Unreadable, DuplicateKey };
+    Kind kind = Kind::Other;
 };
 
 // One bibliography database, read from a BibTeX/BibLaTeX, CSL JSON or CSL

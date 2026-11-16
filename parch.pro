@@ -32,10 +32,13 @@ HEADERS += \
     src/diskfile.h \
     src/document.h \
     src/documentcheck.h \
+    src/documentcitations.h \
     src/documentfind.h \
     src/documentlinks.h \
+    src/documentreading.h \
     src/documentreview.h \
     src/documentsettings.h \
+    src/documentsettingsstore.h \
     src/documentstore.h \
     src/editorbinding.h \
     src/editordecorations.h \
@@ -113,10 +116,13 @@ SOURCES += \
     src/diskfile.cpp \
     src/document.cpp \
     src/documentcheck.cpp \
+    src/documentcitations.cpp \
     src/documentfind.cpp \
     src/documentlinks.cpp \
+    src/documentreading.cpp \
     src/documentreview.cpp \
     src/documentsettings.cpp \
+    src/documentsettingsstore.cpp \
     src/documentstore.cpp \
     src/editorbinding.cpp \
     src/editordecorations.cpp \

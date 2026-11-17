@@ -231,6 +231,14 @@ void readsStopAtTheirLimit()
     QVERIFY(SafeRead::readDescriptor(ends[0], 3000, bytes, error, &tooLarge));
     QCOMPARE(bytes, written);
     ::close(ends[0]);
+
+    // A cross-filesystem copy must account for every byte in the original.
+    QFile sample(large);
+    QVERIFY(sample.open(QIODevice::ReadOnly));
+    QVERIFY(!SafeRead::readForCopy(sample.handle(), sample.size() + 1, bytes, error));
+    QVERIFY(!error.isEmpty() && bytes.isEmpty());
+    QVERIFY(!SafeRead::readForCopy(-1, sample.size(), bytes, error));
+    QVERIFY(!error.isEmpty() && bytes.isEmpty());
     QCOMPARE(release.released(), 0);
 }
 

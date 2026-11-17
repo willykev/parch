@@ -7,6 +7,7 @@
 #include "history.h"
 #include "librarywalk.h"
 #include "pathtext.h"
+#include "saferead.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "textsearch.h"
@@ -14,6 +15,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QtConcurrent>
 #include <cerrno>
@@ -418,19 +420,16 @@ bool FileOrganizer::perform(const Plan &plan)
     if (error == EXDEV && S_ISREG(state.st_mode)) {
         // Another file system: the file is copied there, and the original
         // goes only once the copy is in place.
-        QFile source;
         const int fd = ::open(QFile::encodeName(plan.from).constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) return refuse(tr("“%1” could not be read: %2").arg(name, systemError(errno)));
-        if (!source.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
-            ::close(fd);
-            return refuse(tr("“%1” could not be read: %2").arg(name, source.errorString()));
-        }
+        const auto close = qScopeGuard([fd] { ::close(fd); });
         struct stat opened {};
         if (::fstat(fd, &opened) || !sameFileState(state, opened))
             return refuse(tr("“%1” changed before it could be copied.").arg(name));
-        const QByteArray bytes = source.readAll();
-        if (source.error() != QFileDevice::NoError || bytes.size() != opened.st_size)
-            return refuse(tr("“%1” could not be read in full. The original was kept.").arg(name));
+        QByteArray bytes;
+        QString why;
+        if (!SafeRead::readForCopy(fd, opened.st_size, bytes, why))
+            return refuse(tr("“%1” could not be read in full: %2. The original was kept.").arg(name, why));
         const SaveResult made = DiskFile::create(plan.to, bytes, state.st_mode & 07777);
         if (made.status == SaveStatus::Conflict) error = EEXIST;
         else if (made.status != SaveStatus::Saved)

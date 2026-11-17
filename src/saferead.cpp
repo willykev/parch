@@ -97,6 +97,20 @@ bool readDescriptor(int descriptor, qint64 limit, QByteArray &bytes, QString &er
     return true;
 }
 
+bool readForCopy(int descriptor, qint64 expectedSize, QByteArray &bytes, QString &error)
+{
+    if (expectedSize < 0 || expectedSize >= QByteArray::maxSize()) {
+        bytes.clear();
+        error = tr("the file is too large to copy");
+        return false;
+    }
+    if (!readDescriptor(descriptor, expectedSize, bytes, error, nullptr, expectedSize)) return false;
+    if (bytes.size() == expectedSize) return true;
+    bytes.clear();
+    error = tr("the file ended before its reported size");
+    return false;
+}
+
 namespace {
 
 QString outsideFolders(const QString &canonical, const QStringList &folders)

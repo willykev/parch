@@ -45,6 +45,11 @@ void resizeWindow(QQuickWindow *window, int width);
 // what they own, since delegates and popup contents belong to items without
 // being the window's children.
 QList<QObject *> everyObjectIn(QQuickWindow *window);
+// A parch window makes its menu and dialogs the first time each is asked
+// for: this makes them all, and says whether the window has any.
+bool makePopups(QQuickWindow *window);
+// An object by name; a menu or dialog not made yet, or something in one,
+// is made first.
 QObject *findObject(QQuickWindow *window, const QString &name);
 QString describe(const QObject *object);
 // The items a window shows, depth first: those visible and not faded out.

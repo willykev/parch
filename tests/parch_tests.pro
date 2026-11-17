@@ -120,6 +120,7 @@ HEADERS += \
     ../src/privatefiles.h \
     ../src/previewstyle.h \
     ../src/qmltypes.h \
+    ../src/quiettimer.h \
     ../src/quitsignals.h \
     ../src/readingpositions.h \
     ../src/recentfiles.h \
@@ -260,6 +261,7 @@ SOURCES += \
     ../src/privatefiles.cpp \
     ../src/previewstyle.cpp \
     ../src/qmltypes.cpp \
+    ../src/quiettimer.cpp \
     ../src/quitsignals.cpp \
     ../src/readingpositions.cpp \
     ../src/recentfiles.cpp \

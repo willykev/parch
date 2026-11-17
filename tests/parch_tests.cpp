@@ -5,6 +5,7 @@
 #include "backend.h"
 #include "benchmark.h"
 #include "caretrest.h"
+#include "quiettimer.h"
 #include "citationtests.h"
 #include "hostiletests.h"
 #include "screenshottests.h"
@@ -69,6 +70,7 @@
 #include "windowtesting.h"
 
 #include <QAbstractEventDispatcher>
+#include <QAnimationDriver>
 #include <QStyleHints>
 #include <QAbstractItemModelTester>
 #include <QAccessible>
@@ -810,6 +812,7 @@ private slots:
     void adversarialEditsDrawOnlyNearTheView() { FrameTests::adversarialEditsDrawOnlyNearTheView(); }
     void textIsDrawnWhereverTheViewGoes() { FrameTests::textIsDrawnWhereverTheViewGoes(); }
     void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
+    void newWidthsMoveEachViewOnce() { FrameTests::newWidthsMoveEachViewOnce(); }
     // What parch refuses to reach or write, written in securitytests.cpp.
     void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }
     void exportsAskBeforeReplacingALink() { SecurityTests::exportsAskBeforeReplacingALink(); }
@@ -845,6 +848,7 @@ private slots:
     void editorDrawsFromTheme();
     void caretBlinksThenRestsAndDrawsNothing();
     void caretIsSteadyWithoutMotionOrFlash();
+    void caretNeverStartsQtQuicksAnimations();
     void textFieldsRestTheirCaretToo();
     void columnHoldsTheLineLength();
     void linesSitTheLineHeightApart();
@@ -1028,6 +1032,7 @@ private slots:
     void cancelledPickerChangesNothing();
     void fileDialogClosedByItsWindowIsACancel();
     void closingFailedSaveAsksFirst();
+    void windowMakesItsDialogsWhenFirstAsked();
     void conflictDialogOffersAllChoices();
     void conflictDifferenceIsMarkedByLines();
     void conflictDifferenceFindsEachRun();
@@ -9909,6 +9914,91 @@ void ParchTests::caretIsSteadyWithoutMotionOrFlash()
     steady("reduced motion");
 }
 
+namespace {
+// Qt Quick's animation timer runs on whichever driver is installed; this
+// one counts how often it is started.
+class CountingDriver : public QAnimationDriver {
+public:
+    CountingDriver()
+    {
+        connect(this, &QAnimationDriver::started, this, [this] { ++starts; });
+    }
+    int starts = 0;
+};
+} // namespace
+
+void ParchTests::caretNeverStartsQtQuicksAnimations()
+{
+    // Qt Quick's Timer is one of its animations, and when the last of them
+    // stops, Qt starts and stops its animation driver, which has the
+    // desktop's threaded render loop draw the window once more with nothing
+    // changed. The caret's timers are QuietTimers: blinking and coming to
+    // rest, they never start that driver, and so ask for no frame.
+    CountingDriver driver;
+    driver.install();
+    const auto uninstall = qScopeGuard([&driver] { driver.uninstall(); });
+
+    // A QuietTimer keeps Qt Quick Timer's ways, and starts no driver.
+    QuietTimer once;
+    QSignalSpy fired(&once, &QuietTimer::triggered);
+    QSignalSpy running(&once, &QuietTimer::runningChanged);
+    once.setInterval(20);
+    QVERIFY(!once.repeat());
+    once.start();
+    QVERIFY(once.running());
+    QVERIFY(fired.wait(1000));
+    QVERIFY(!once.running());
+    QCOMPARE(running.count(), 2);
+    QuietTimer again;
+    again.setInterval(10);
+    again.setRepeat(true);
+    QSignalSpy ticks(&again, &QuietTimer::triggered);
+    again.setRunning(true);
+    QTRY_VERIFY(ticks.count() >= 3);
+    QVERIFY(again.running());
+    again.restart();
+    QVERIFY(again.running());
+    again.stop();
+    QVERIFY(!again.running());
+    QCOMPARE(driver.starts, 0);
+
+    // The editor's caret blinks, comes to rest and wakes, and Qt Quick's
+    // animations never run.
+    QStyleHints *hints = QGuiApplication::styleHints();
+    const int flash = hints->cursorFlashTime();
+    const auto restoreFlash = qScopeGuard([hints, flash] { hints->setCursorFlashTime(flash); });
+    hints->setCursorFlashTime(100);
+    EditorFixture fixture;
+    Document *document = fixture.open("quiet.md", QStringLiteral("some text\n"));
+    EditorView view(fixture.engine, document);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.pane->setProperty("caretRestMs", 400);
+    view.window.requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(&view.window));
+    view.editor->forceActiveFocus();
+    QQuickItem *caret = findItem(view.editor, QStringLiteral("caret"));
+    auto *blink = view.pane->findChild<QObject *>(QStringLiteral("caretBlink"));
+    auto *rest = view.pane->findChild<QObject *>(QStringLiteral("caretRest"));
+    QVERIFY(caret && blink && rest);
+    int changes = 0;
+    connect(caret, &QQuickItem::visibleChanged, this, [&changes] { ++changes; });
+    QTest::qWait(50);
+    driver.starts = 0;
+    view.type(QStringLiteral("a"));
+    QVERIFY(blink->property("running").toBool());
+    QVERIFY(rest->property("running").toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(changes >= 2, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(!blink->property("running").toBool(), 2000);
+    QVERIFY(!rest->property("running").toBool());
+    QVERIFY(caret->isVisible());
+    QTest::qWait(100);
+    QTest::keyClick(&view.window, Qt::Key_Left);
+    QVERIFY(blink->property("running").toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(!blink->property("running").toBool(), 2000);
+    QTest::qWait(100);
+    QCOMPARE(driver.starts, 0);
+}
+
 void ParchTests::columnHoldsTheLineLength()
 {
     // The column holds maxLineLength characters at most and stays centred; a
@@ -18431,6 +18521,72 @@ void ParchTests::cancelledPickerChangesNothing()
     QVERIFY(QDir(folder.path()).isEmpty());
 }
 
+void ParchTests::windowMakesItsDialogsWhenFirstAsked()
+{
+    // A window's menu and dialogs are made the first time each is asked
+    // for, not with the window: most windows never open most of them, and
+    // every window made all of them, some five thousand objects, more
+    // memory than its document's text and preview took. Made, each stays,
+    // and the window knows when one is open, as before.
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    const QStringList names{QStringLiteral("windowMenu"),         QStringLiteral("conflictDialog"),
+                            QStringLiteral("historyDialog"),      QStringLiteral("encodingDialog"),
+                            QStringLiteral("closeConfirmation"),  QStringLiteral("attachmentDialog"),
+                            QStringLiteral("linkDialog"),         QStringLiteral("checkDocumentDialog"),
+                            QStringLiteral("commandPalette"),     QStringLiteral("preferencesDialog"),
+                            QStringLiteral("documentSettingsDialog"), QStringLiteral("exportDialog"),
+                            QStringLiteral("exportLinkDialog"),   QStringLiteral("exportReplacePrompt"),
+                            QStringLiteral("shortcutsDialog"),    QStringLiteral("headingsDialog"),
+                            QStringLiteral("folderSearchDialog")};
+    const auto made = [](QQuickWindow *in, const QString &name) { return in->findChild<QObject *>(name); };
+    for (const QString &name : names) QVERIFY2(!made(window, name), qPrintable(name));
+    const qsizetype objects = everyObjectIn(window).size();
+    QVERIFY2(objects < 4000, qPrintable(QString::number(objects)));
+
+    // Asked for, a dialog is made and opens; closed and asked for again, it
+    // is the same dialog.
+    QVERIFY(QMetaObject::invokeMethod(window, "run", Q_ARG(QVariant, QStringLiteral("preferences"))));
+    QObject *preferences = made(window, QStringLiteral("preferencesDialog"));
+    QVERIFY(preferences);
+    QTRY_VERIFY(preferences->property("opened").toBool());
+    QVERIFY(window->property("dialogOpen").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!preferences->property("visible").toBool());
+    QVERIFY(!window->property("dialogOpen").toBool());
+    QVERIFY(QMetaObject::invokeMethod(window, "run", Q_ARG(QVariant, QStringLiteral("preferences"))));
+    QCOMPARE(made(window, QStringLiteral("preferencesDialog")), preferences);
+    QTRY_VERIFY(preferences->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!preferences->property("visible").toBool());
+
+    // The menu, from the keyboard, with its first entry highlighted.
+    QVERIFY(QMetaObject::invokeMethod(window, "openMenu"));
+    QObject *menu = made(window, QStringLiteral("windowMenu"));
+    QVERIFY(menu);
+    QTRY_VERIFY(menu->property("opened").toBool());
+    QCOMPARE(menu->property("currentIndex").toInt(), 0);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    // None of the others was made meanwhile.
+    for (const QString &name : names)
+        if (name != QLatin1String("preferencesDialog") && name != QLatin1String("windowMenu"))
+            QVERIFY2(!made(window, name), qPrintable(name));
+
+    // A second window makes none of them until asked either.
+    shell.backend->newWindow();
+    QQuickWindow *second = shell.windowFor(shell.backend->windows().at(1));
+    QVERIFY(second);
+    for (const QString &name : names) QVERIFY2(!made(second, name), qPrintable(name));
+    QVERIFY(QMetaObject::invokeMethod(second, "run", Q_ARG(QVariant, QStringLiteral("shortcuts"))));
+    QObject *shortcuts = made(second, QStringLiteral("shortcutsDialog"));
+    QVERIFY(shortcuts);
+    QTRY_VERIFY(shortcuts->property("opened").toBool());
+    QVERIFY(!made(window, QStringLiteral("shortcutsDialog")));
+}
+
 void ParchTests::closingFailedSaveAsksFirst()
 {
     ShellFixture shell;
@@ -18554,7 +18710,7 @@ void click(QQuickWindow *window, QQuickItem *control)
 
 QObject *dialogIn(QQuickWindow *window, const char *name)
 {
-    return window->findChild<QObject *>(QString::fromLatin1(name));
+    return findObject(window, QString::fromLatin1(name));
 }
 
 bool isOpen(QObject *dialog)
@@ -21698,6 +21854,8 @@ void ParchTests::benchmarkReportsEveryMeasure()
         ShellFixture shell;
         QVERIFY2(shell.ok(), qPrintable(shell.error));
         resizeWindow(shell.window.get(), 1800);
+        // The idle minute waits for the caret to rest; here it rests sooner.
+        shell.item(QStringLiteral("editorPane"))->setProperty("caretRestMs", 1000);
         const QString output = documents.filePath(QStringLiteral("result.json"));
         Benchmark benchmark(output, QStringLiteral("measured"), quick);
         benchmark.setOptions({QStringLiteral("split"), 2, true});
@@ -21771,6 +21929,12 @@ void ParchTests::benchmarkReportsEveryMeasure()
         QVERIFY(settle["layoutsWhileMoving"].toInt() > 0);
         QVERIFY(result["peakRssMiB"].toDouble() > 0);
         QVERIFY(result["idleWakeups"].toInteger() > 0);
+        // The idle minute began once every view had caught up and the
+        // caret, which the keys just before had woken, had come to rest:
+        // it did not blink in that minute.
+        QVERIFY(result["idleSettled"].toBool());
+        QVERIFY(result["idleSettleMs"].toDouble() > 0);
+        QCOMPARE(result["idleCaretChanges"].toInt(), 0);
         QVERIFY(result["secondWindow"].toObject().contains(QLatin1String("loadMs")));
         // The edits no writer makes, each until every view caught up.
         const QJsonObject edits = result["adversarialEdits"].toObject();

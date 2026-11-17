@@ -336,8 +336,9 @@ ApplicationWindow {
     // The window's menu, from the keyboard: its first entry is highlighted
     // and has the keys, and the arrows and Enter go on from there.
     function openMenu() {
-        windowMenu.open()
-        windowMenu.currentIndex = 0
+        const menu = windowMenu.made()
+        menu.open()
+        menu.currentIndex = 0
     }
 
     // Moves to the next tab, or the previous one for a step of -1, round the ends.
@@ -377,7 +378,7 @@ ApplicationWindow {
     // The document in front's conflict, side by side with its file.
     function reviewConflict() {
         if (document && document.state === Document.Conflict)
-            conflictDialog.review(document)
+            conflictDialog.made().review(document)
     }
 
     // Saves the document in front; one in conflict waits for a choice, so
@@ -450,14 +451,14 @@ ApplicationWindow {
 
     function showHistory() {
         if (document)
-            historyDialog.review(document)
+            historyDialog.made().review(document)
     }
 
     // Everything wrong in the document in front, its links and images
     // that lead nowhere among it.
     function checkDocument() {
         if (document)
-            checkDocumentDialog.check(document)
+            checkDocumentDialog.made().check(document)
     }
 
     // Find, and replace, in the document in front, in the bar above the
@@ -520,7 +521,7 @@ ApplicationWindow {
 
     function goToHeading() {
         if (document)
-            headingsDialog.show(document, editorPane.cursorSource)
+            headingsDialog.made().show(document, editorPane.cursorSource)
     }
 
     // A heading's line at the top of the view, with the caret on it; the
@@ -552,7 +553,7 @@ ApplicationWindow {
     // Search across the library, starting from the selection when it is one line.
     function searchLibrary() {
         const selected = document ? editorPane.selectedText : ""
-        folderSearchDialog.show(selected.indexOf("\u2029") < 0 && selected.indexOf("\n") < 0 ? selected : "")
+        folderSearchDialog.made().show(selected.indexOf("\u2029") < 0 && selected.indexOf("\n") < 0 ? selected : "")
     }
 
     // A folder the library is to show: the library opens on it, beside the
@@ -645,9 +646,9 @@ ApplicationWindow {
                 drawer.close()
             window.focusText()
         }
-        function onCloseConfirmationRequested(document, discarding) { closeConfirmation.ask(document, discarding) }
-        function onEncodingConfirmationRequested(document) { encodingDialog.confirm(document) }
-        function onExportLinkQuestionRequested(output, target) { exportLinkDialog.ask(output, target) }
+        function onCloseConfirmationRequested(document, discarding) { closeConfirmation.made().ask(document, discarding) }
+        function onEncodingConfirmationRequested(document) { encodingDialog.made().confirm(document) }
+        function onExportLinkQuestionRequested(output, target) { exportLinkDialog.made().ask(output, target) }
         function onViewShowRequested() { window.showView() }
     }
 
@@ -740,17 +741,17 @@ ApplicationWindow {
         previousRegion: () => window.stepRegion(-1),
         undo: () => editorPane.undo(),
         redo: () => editorPane.redo(),
-        palette: () => commandPalette.show(),
-        preferences: () => preferencesDialog.open(),
-        documentSettings: () => { if (window.document) documentSettingsDialog.show(window.document) },
-        "export": () => { if (window.document) exportDialog.show(window.document, "export") },
-        "print": () => { if (window.document) exportDialog.show(window.document, "print") },
+        palette: () => commandPalette.made().show(),
+        preferences: () => preferencesDialog.made().open(),
+        documentSettings: () => { if (window.document) documentSettingsDialog.made().show(window.document) },
+        "export": () => { if (window.document) exportDialog.made().show(window.document, "export") },
+        "print": () => { if (window.document) exportDialog.made().show(window.document, "print") },
         newDocumentInFolder: () => libraryPanel.newDocumentBeside(window.tabs.activePath),
         renameDocument: () => libraryPanel.renameDocument(window.tabs.activePath),
         moveDocument: () => libraryPanel.moveDocument(window.tabs.activePath),
         trashDocument: () => libraryPanel.trashDocument(window.tabs.activePath),
-        reopenWithEncoding: () => encodingDialog.choose(window.document),
-        shortcuts: () => shortcutsDialog.show()
+        reopenWithEncoding: () => encodingDialog.made().choose(window.document),
+        shortcuts: () => shortcutsDialog.made().show()
     })
 
     // Runs a command in this window, however it was asked for.
@@ -806,34 +807,40 @@ ApplicationWindow {
             window.run("togglePreview")
             window.focusText()
         }
-        onMenuRequested: windowMenu.open()
+        onMenuRequested: windowMenu.made().open()
     }
 
-    WindowMenu {
+    // The window's menu, made the first time it opens.
+    LazyPopup {
         id: windowMenu
-        objectName: "windowMenu"
-        // The header holds it, or the window while the header is hidden.
-        parent: header.visible ? header : window.contentItem
-        x: header.width - width - Math.round(theme.fontSize / 4)
-        y: header.height
-        commands: window.commands
-        keys: window.keys
-        libraryShown: header.libraryShown
-        toolbarShown: window.toolbarShown
-        outlineShown: settings.outlineShown && header.libraryShown
-        viewMode: window.viewMode
-        focusMode: window.focusMode
-        distractionFree: window.distractionFree
-        spellingWanted: backend.spelling.wanted
-        liveFormatting: settings.liveFormatting
-        canRun: window.canRun
-        // Each command is this window's, whichever window the backend last
-        // heard was in front. Finding a document and showing the outline
-        // give the keys to the library, so they wait until the menu has
-        // closed and given them back to the document.
-        onCommandChosen: (command) => command === "findDocument" || command === "outline"
-                                      ? Qt.callLater(window.run, command) : window.run(command)
-        onClosed: window.returnKeys()
+        owner: window
+        component: Component {
+            WindowMenu {
+                objectName: "windowMenu"
+                // The header holds it, or the window while the header is hidden.
+                parent: header.visible ? header : window.contentItem
+                x: header.width - width - Math.round(theme.fontSize / 4)
+                y: header.height
+                commands: window.commands
+                keys: window.keys
+                libraryShown: header.libraryShown
+                toolbarShown: window.toolbarShown
+                outlineShown: settings.outlineShown && header.libraryShown
+                viewMode: window.viewMode
+                focusMode: window.focusMode
+                distractionFree: window.distractionFree
+                spellingWanted: backend.spelling.wanted
+                liveFormatting: settings.liveFormatting
+                canRun: window.canRun
+                // Each command is this window's, whichever window the backend last
+                // heard was in front. Finding a document and showing the outline
+                // give the keys to the library, so they wait until the menu has
+                // closed and given them back to the document.
+                onCommandChosen: (command) => command === "findDocument" || command === "outline"
+                                              ? Qt.callLater(window.run, command) : window.run(command)
+                onClosed: window.returnKeys()
+            }
+        }
     }
 
     Item {
@@ -982,7 +989,7 @@ ApplicationWindow {
                 }
                 onReopenAs: {
                     backend.activate(window.context)
-                    encodingDialog.choose(window.document)
+                    encodingDialog.made().choose(window.document)
                 }
                 // Saving asks first, in this window.
                 onConfirmEncoding: {
@@ -1124,7 +1131,7 @@ ApplicationWindow {
                         if (heading.length > 0 && (window.document !== from || window.tabs.activePath === path))
                             Qt.callLater(window.showAnchor, heading)
                     }
-                    onLinkAsked: (target, shown, scheme, local) => openLinkDialog.ask(target, shown, scheme, local)
+                    onLinkAsked: (target, shown, scheme, local) => openLinkDialog.made().ask(target, shown, scheme, local)
                     onEscapePressed: window.escapeInText()
                 }
 
@@ -1165,8 +1172,8 @@ ApplicationWindow {
                     focusUnit: settings.focusUnit
                     focusDimming: settings.focusDimming
                     liveFormatting: settings.liveFormatting
-                    onIncludeAsked: (name, canInclude) => attachmentDialog.askInclude(name, canInclude)
-                    onCopyAsked: (names, bytes) => attachmentDialog.askCopy(names, bytes)
+                    onIncludeAsked: (name, canInclude) => attachmentDialog.made().askInclude(name, canInclude)
+                    onCopyAsked: (names, bytes) => attachmentDialog.made().askCopy(names, bytes)
                     // Where the view is goes into the session, but not in a
                     // document of parch's own, which the session never keeps.
                     onViewMoved: if (!window.document || !window.document.scratch) window.context.noteViewMoved()
@@ -1344,151 +1351,232 @@ ApplicationWindow {
         onSelectRequested: (anchor, cursor) => editorPane.selectSource(anchor, cursor)
     }
 
-    // The window's dialogs. Each gives the keys back as it closes, to the
-    // text or to the library open over it, unless another has opened meanwhile.
-    ConflictDialog {
-        id: conflictDialog
-        objectName: "conflictDialog"
-        context: window.context
-        onClosed: window.dialogClosed()
-        onHistoryRequested: (document) => historyDialog.review(document)
+    // The window's menu or one of its dialogs by its object name, made now
+    // if it was not yet; null for any other name.
+    function popupNamed(name) {
+        const popups = {
+            windowMenu: windowMenu, conflictDialog: conflictDialog, historyDialog: historyDialog,
+            encodingDialog: encodingDialog, closeConfirmation: closeConfirmation, attachmentDialog: attachmentDialog,
+            linkDialog: openLinkDialog, checkDocumentDialog: checkDocumentDialog, commandPalette: commandPalette,
+            preferencesDialog: preferencesDialog, documentSettingsDialog: documentSettingsDialog,
+            exportDialog: exportDialog, exportLinkDialog: exportLinkDialog, exportReplacePrompt: exportReplacePrompt,
+            shortcutsDialog: shortcutsDialog, headingsDialog: headingsDialog, folderSearchDialog: folderSearchDialog
+        }
+        return popups[name] ? popups[name].made() : null
     }
 
-    HistoryDialog {
+    // The window's dialogs, each made the first time it is asked for. Each
+    // gives the keys back as it closes, to the text or to the library open
+    // over it, unless another has opened meanwhile.
+    LazyPopup {
+        id: conflictDialog
+        owner: window
+        component: Component {
+            ConflictDialog {
+                objectName: "conflictDialog"
+                context: window.context
+                onClosed: window.dialogClosed()
+                onHistoryRequested: (document) => historyDialog.made().review(document)
+            }
+        }
+    }
+
+    LazyPopup {
         id: historyDialog
-        objectName: "historyDialog"
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            HistoryDialog {
+                objectName: "historyDialog"
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
     // Reopen as…, for a file that is not UTF-8, and the question before
     // such a file is first written as UTF-8.
-    EncodingDialog {
+    LazyPopup {
         id: encodingDialog
-        objectName: "encodingDialog"
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            EncodingDialog {
+                objectName: "encodingDialog"
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    CloseConfirmation {
+    LazyPopup {
         id: closeConfirmation
-        objectName: "closeConfirmation"
-        context: window.context
-        onClosed: window.dialogClosed()
-        onReview: (document) => conflictDialog.review(document)
+        owner: window
+        component: Component {
+            CloseConfirmation {
+                objectName: "closeConfirmation"
+                context: window.context
+                onClosed: window.dialogClosed()
+                onReview: (document) => conflictDialog.made().review(document)
+            }
+        }
     }
 
     // What a drop of files on the text asks, answered to the editor that asked.
-    AttachmentDialog {
+    LazyPopup {
         id: attachmentDialog
-        objectName: "attachmentDialog"
-        onIncludeChosen: (choice) => editorPane.answerInclude(choice)
-        onCopyChosen: (copy) => editorPane.answerCopy(copy)
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            AttachmentDialog {
+                objectName: "attachmentDialog"
+                onIncludeChosen: (choice) => editorPane.answerInclude(choice)
+                onCopyChosen: (copy) => editorPane.answerCopy(copy)
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
     // What a link that leads out of parch asks before it is followed.
-    OpenLinkDialog {
+    LazyPopup {
         id: openLinkDialog
-        objectName: "linkDialog"
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            OpenLinkDialog {
+                objectName: "linkDialog"
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    CheckDocumentDialog {
+    LazyPopup {
         id: checkDocumentDialog
-        objectName: "checkDocumentDialog"
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            CheckDocumentDialog {
+                objectName: "checkDocumentDialog"
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    CommandPalette {
+    LazyPopup {
         id: commandPalette
-        objectName: "commandPalette"
-        commands: window.commands
-        canRun: window.canRun
-        runCommand: window.run
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            CommandPalette {
+                objectName: "commandPalette"
+                commands: window.commands
+                canRun: window.canRun
+                runCommand: window.run
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    PreferencesDialog {
+    LazyPopup {
         id: preferencesDialog
-        objectName: "preferencesDialog"
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            PreferencesDialog {
+                objectName: "preferencesDialog"
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    DocumentSettingsDialog {
+    LazyPopup {
         id: documentSettingsDialog
-        objectName: "documentSettingsDialog"
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            DocumentSettingsDialog {
+                objectName: "documentSettingsDialog"
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    ExportDialog {
+    LazyPopup {
         id: exportDialog
-        objectName: "exportDialog"
-        context: window.context
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            ExportDialog {
+                objectName: "exportDialog"
+                context: window.context
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
     // What an export to a file that is a link asks.
-    ExportLinkDialog {
+    LazyPopup {
         id: exportLinkDialog
-        objectName: "exportLinkDialog"
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            ExportLinkDialog {
+                objectName: "exportLinkDialog"
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
     // An export the file dialog was given a name for without its suffix
     // would write over the file of that name with it, which the file dialog
     // never asked about; this asks, with Cancel in front.
-    ThemedDialog {
+    LazyPopup {
         id: exportReplacePrompt
-        objectName: "exportReplacePrompt"
+        owner: window
+        component: Component {
+            ThemedDialog {
+                id: prompt
+                objectName: "exportReplacePrompt"
 
-        property string path
-        property bool answered: false
-        readonly property string name: path.substring(path.lastIndexOf("/") + 1)
+                property string path
+                property bool answered: false
+                readonly property string name: path.substring(path.lastIndexOf("/") + 1)
 
-        function ask(path) {
-            exportReplacePrompt.path = path
-            exportReplacePrompt.answered = false
-            open()
-        }
+                function ask(path) {
+                    prompt.path = path
+                    prompt.answered = false
+                    open()
+                }
 
-        function answer(replace) {
-            exportReplacePrompt.answered = true
-            backend.exports.answerReplace(replace)
-            close()
-        }
+                function answer(replace) {
+                    prompt.answered = true
+                    backend.exports.answerReplace(replace)
+                    close()
+                }
 
-        title: qsTr("Replace “%1”?").arg(exportReplacePrompt.name)
-        preferredCharacters: 52
-        initialFocus: exportReplaceCancel
-        onClosed: {
-            if (!exportReplacePrompt.answered)
-                backend.exports.answerReplace(false)
-            window.dialogClosed()
-        }
+                title: qsTr("Replace “%1”?").arg(prompt.name)
+                preferredCharacters: 52
+                initialFocus: exportReplaceCancel
+                onClosed: {
+                    if (!prompt.answered)
+                        backend.exports.answerReplace(false)
+                    window.dialogClosed()
+                }
 
-        contentItem: Text {
-            text: qsTr("“%1” is already in %2. Exporting writes over it.")
-                      .arg(exportReplacePrompt.name).arg(backend.folderLabel(exportReplacePrompt.path))
-            textFormat: Text.PlainText
-            font.family: theme.fontFamily
-            font.pixelSize: theme.fontSize
-            color: theme.foreground
-            wrapMode: Text.Wrap
-            Accessible.role: Accessible.StaticText
-            Accessible.name: text
-        }
+                contentItem: Text {
+                    text: qsTr("“%1” is already in %2. Exporting writes over it.")
+                              .arg(prompt.name).arg(backend.folderLabel(prompt.path))
+                    textFormat: Text.PlainText
+                    font.family: theme.fontFamily
+                    font.pixelSize: theme.fontSize
+                    color: theme.foreground
+                    wrapMode: Text.Wrap
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                }
 
-        footer: ThemedDialog.Choices {
-            ThemedDialog.Choice {
-                objectName: "exportReplace"
-                text: qsTr("Replace")
-                textColor: theme.danger
-                onClicked: exportReplacePrompt.answer(true)
-            }
-            ThemedDialog.Choice {
-                id: exportReplaceCancel
-                objectName: "exportReplaceCancel"
-                text: qsTr("Cancel")
-                onClicked: exportReplacePrompt.answer(false)
+                footer: ThemedDialog.Choices {
+                    ThemedDialog.Choice {
+                        objectName: "exportReplace"
+                        text: qsTr("Replace")
+                        textColor: theme.danger
+                        onClicked: prompt.answer(true)
+                    }
+                    ThemedDialog.Choice {
+                        id: exportReplaceCancel
+                        objectName: "exportReplaceCancel"
+                        text: qsTr("Cancel")
+                        onClicked: prompt.answer(false)
+                    }
+                }
             }
         }
     }
@@ -1497,29 +1585,44 @@ ApplicationWindow {
         target: backend.exports
         function onReplaceAsked(asker, path) {
             if (asker === window.context)
-                exportReplacePrompt.ask(path)
+                exportReplacePrompt.made().ask(path)
         }
     }
 
-    ShortcutsDialog {
+    LazyPopup {
         id: shortcutsDialog
-        objectName: "shortcutsDialog"
-        commands: window.commands
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            ShortcutsDialog {
+                objectName: "shortcutsDialog"
+                commands: window.commands
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    HeadingsDialog {
+    LazyPopup {
         id: headingsDialog
-        objectName: "headingsDialog"
-        onChosen: (position) => window.showHeading(position)
-        onIncludedChosen: (path, line) => window.act(() => backend.openAt(path, line, 0))
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            HeadingsDialog {
+                objectName: "headingsDialog"
+                onChosen: (position) => window.showHeading(position)
+                onIncludedChosen: (path, line) => window.act(() => backend.openAt(path, line, 0))
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 
-    FolderSearchDialog {
+    LazyPopup {
         id: folderSearchDialog
-        objectName: "folderSearchDialog"
-        context: window.context
-        onClosed: window.dialogClosed()
+        owner: window
+        component: Component {
+            FolderSearchDialog {
+                objectName: "folderSearchDialog"
+                context: window.context
+                onClosed: window.dialogClosed()
+            }
+        }
     }
 }

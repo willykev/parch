@@ -44,7 +44,8 @@ included chapters and a bibliography. Each run records:
   parses each key costs until every view of the text has caught up;
 - scrolling, jumps and re-wrapping, against a plain control scene, with
   dropped frames;
-- a minute idle: frames besides the caret, CPU ticks and wakeups of every
+- a minute idle, from the moment every view has caught up and the caret has
+  come to rest: frames besides the caret, CPU ticks and wakeups of every
   thread, the helpers parch starts included;
 - memory, with those helpers.
 

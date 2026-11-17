@@ -152,10 +152,43 @@ QList<QObject *> everyObjectIn(QQuickWindow *window)
     return objects;
 }
 
+namespace {
+// The menu and dialogs a parch window makes the first time each is asked
+// for, by their object names.
+const QStringList lazyPopups{
+    QStringLiteral("windowMenu"),          QStringLiteral("conflictDialog"),     QStringLiteral("historyDialog"),
+    QStringLiteral("encodingDialog"),      QStringLiteral("closeConfirmation"),  QStringLiteral("attachmentDialog"),
+    QStringLiteral("linkDialog"),          QStringLiteral("checkDocumentDialog"), QStringLiteral("commandPalette"),
+    QStringLiteral("preferencesDialog"),   QStringLiteral("documentSettingsDialog"), QStringLiteral("exportDialog"),
+    QStringLiteral("exportLinkDialog"),    QStringLiteral("exportReplacePrompt"), QStringLiteral("shortcutsDialog"),
+    QStringLiteral("headingsDialog"),      QStringLiteral("folderSearchDialog")};
+
+QObject *popupNamed(QQuickWindow *window, const QString &name)
+{
+    if (!window || window->metaObject()->indexOfMethod("popupNamed(QVariant)") < 0) return nullptr;
+    QVariant made;
+    QMetaObject::invokeMethod(window, "popupNamed", Q_RETURN_ARG(QVariant, made), Q_ARG(QVariant, name));
+    return made.value<QObject *>();
+}
+} // namespace
+
+bool makePopups(QQuickWindow *window)
+{
+    bool made = false;
+    for (const QString &name : lazyPopups) made = popupNamed(window, name) || made;
+    return made;
+}
+
 QObject *findObject(QQuickWindow *window, const QString &name)
 {
-    for (QObject *object : everyObjectIn(window))
-        if (object->objectName() == name) return object;
+    // A window makes its menu and dialogs the first time they are asked
+    // for, and so when they, or what they hold, are asked for by name.
+    if (QObject *popup = popupNamed(window, name)) return popup;
+    for (int pass = 0; pass < 2; ++pass) {
+        for (QObject *object : everyObjectIn(window))
+            if (object->objectName() == name) return object;
+        if (pass == 0 && !makePopups(window)) break;
+    }
     return nullptr;
 }
 
@@ -576,7 +609,12 @@ bool ShellFixture::ok() const
     return window && item(QStringLiteral("editor")) && item(QStringLiteral("editorPane"));
 }
 
-QQuickItem *ShellFixture::item(const QString &name) const { return findItem(window->contentItem(), name); }
+QQuickItem *ShellFixture::item(const QString &name) const
+{
+    if (QQuickItem *found = findItem(window->contentItem(), name)) return found;
+    // It may be in a menu or dialog the window has not made yet.
+    return makePopups(window.get()) ? findItem(window->contentItem(), name) : nullptr;
+}
 
 QObject *ShellFixture::object(const QString &name) const { return findObject(window.get(), name); }
 

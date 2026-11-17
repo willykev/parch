@@ -557,7 +557,7 @@ void Benchmark::start(QQuickWindow *window)
     const Timing &t = m_timing;
     const qint64 adversarial = m_options.adversarial ? 4 * qint64(t.catchUpMs) + RapidKeys * qint64(t.rapidKeyMs) + 6 * t.placeMs : 0;
     const qint64 total = qint64(t.waitMs) * 4 + t.settleMs + 3 * (2 * t.placeMs + Keys * t.keyMs + t.catchUpMs)
-                         + t.placeMs + 2 * (t.scrollMs + t.rewrapMs) + Jumps * t.jumpMs + t.quietMs + t.idleMs
+                         + t.placeMs + 2 * (t.scrollMs + t.rewrapMs) + Jumps * t.jumpMs + t.catchUpMs + t.quietMs + t.idleMs
                          + adversarial + 10000;
     m_watchdog.start(int(std::min<qint64>(total + 60000, std::numeric_limits<int>::max())));
     m_window->requestActivate();
@@ -779,6 +779,16 @@ bool Benchmark::caughtUp() const
         return true;
     };
     return caught(*m_views) && (!m_second || caught(*m_secondViews));
+}
+
+bool Benchmark::caretsResting() const
+{
+    for (QQuickWindow *window : {m_window.data(), m_second.data()}) {
+        QObject *pane = window ? findNamed(window->contentItem(), QStringLiteral("editorPane")) : nullptr;
+        QObject *blink = pane ? pane->findChild<QObject *>(QStringLiteral("caretBlink")) : nullptr;
+        if (blink && blink->property("running").toBool()) return false;
+    }
+    return true;
 }
 
 bool Benchmark::caughtUpSince(qint64 since) const
@@ -1208,19 +1218,25 @@ void Benchmark::planAdversarial()
                 });
 }
 
-// Idle: the window as it is left, after saving and the session have
-// landed. The caret blinks until the writer has paused for ten seconds,
-// and each time it shows or hides is a frame; after that nothing changes,
-// and no frame is drawn. Every wakeup of every thread counts, and so does
-// the CPU time of the helpers parch started.
+// Idle: the window as it is left once it has settled, after saving and the
+// session have landed. The caret blinks until the writer has paused for ten
+// seconds, and putting it in view counts as moving it, so the minute begins
+// once every view has caught up with the text and the caret has come to
+// rest, and then the saves and the session have landed: from then on
+// nothing changes, and no frame is drawn. Every wakeup of every thread
+// counts, and so does the CPU time of the helpers parch started.
 void Benchmark::planIdle()
 {
     const Timing &t = m_timing;
     then(0, [this] {
         m_out["pssEndMiB"] = pssMiB(QStringLiteral("self"));
         m_out["ownedProcessesEnd"] = ownedProcesses();
-        // The idle window has the caret in view, where typing left it.
+        // The idle window has the caret in view at the end of the text.
         if (m_options.view != QLatin1String("reading")) reveal(1.0);
+    });
+    thenWaitFor([this] { return caughtUp() && caretsResting(); }, t.catchUpMs, [this](qint64 waited, bool gaveUp) {
+        m_out["idleSettleMs"] = toMs(waited);
+        m_out["idleSettled"] = !gaveUp;
     });
     struct Idle {
         qint64 at = 0;

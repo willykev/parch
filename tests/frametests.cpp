@@ -23,6 +23,8 @@
 #include <QTemporaryDir>
 #include <QTextDocument>
 #include <QtTest>
+#include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -418,6 +420,64 @@ void keysBesideThePreviewDoNotWaitForIt()
     QVERIFY(QTest::qWaitFor([&] { return w.preview->current() && !w.preview->working(); }, 10000));
     QVERIFY2(caughtUp.elapsed() <= timeLimit(Preview::PauseMs + 600), qPrintable(QString::number(caughtUp.elapsed())));
     QVERIFY(w.preview->textDocument()->toPlainText().contains(QString(keyCount, u'x')));
+}
+
+void newWidthsMoveEachViewOnce()
+{
+    // As the column narrows and widens a step at a time, the line at the
+    // top of the text stays there and the preview beside it stays with it:
+    // each new width moves the text at most once, and the preview, which
+    // follows it, at most once too. Qt's Flickable rounds a position between
+    // pixels whenever what it shows grows or shrinks. A view left between
+    // pixels moved by itself at each new width, before its line was put back
+    // at the top, and the preview followed it there and back again, drawing
+    // all it showed anew each time, its pictures too.
+    QString text;
+    for (int part = 1; text.size() < 40000; ++part)
+        text += QStringLiteral("## Part %1\n\n").arg(part) + unknownProse(1500) + QStringLiteral("\n\n");
+    AdversarialWindow w(text);
+    QVERIFY2(w.ok(), qPrintable(w.shell ? w.shell->error : QString()));
+    // Lines whose height is not a whole number of pixels.
+    w.shell->settings()->setLineHeight(1.55);
+    w.view(TabModel::Split);
+    QVERIFY(w.settled());
+    QVERIFY(w.surface->flags() & QQuickItem::ItemObservesViewport);
+    QQuickItem *pane = w.shell->item(QStringLiteral("editorPane"));
+    QObject *anchors = pane->property("anchors").value<QObject *>();
+    QVERIFY(pane && anchors);
+    // Narrowed by the room beside the column, so that the column narrows
+    // from the first step, with the text in the middle.
+    const qreal base = std::floor(pane->width() - 2 * pane->property("margin").toReal()
+                                  - pane->property("columnWidth").toReal());
+    anchors->setProperty("rightMargin", base);
+    const int middle = w.document->buffer()->length() / 2;
+    w.binding->restore(middle, middle, middle);
+    QVERIFY(w.settled());
+    QTest::qWait(ScrollSync::HoldMs + 50);
+    const int top = w.binding->topSourcePosition();
+    const qreal previewAt = w.previewView->property("contentY").toReal();
+    QVERIFY(previewAt > 0);
+
+    QSignalSpy textMoves(w.editorView, SIGNAL(contentYChanged()));
+    QSignalSpy previewMoves(w.previewView, SIGNAL(contentYChanged()));
+    int mostText = 0, mostPreview = 0, moved = 0;
+    for (int step = 1; step <= 120; ++step) {
+        textMoves.clear();
+        previewMoves.clear();
+        // Narrower for sixty steps, and then wider again.
+        anchors->setProperty("rightMargin", base + 4 * (step <= 60 ? step : 120 - step));
+        mostText = std::max(mostText, int(textMoves.count()));
+        mostPreview = std::max(mostPreview, int(previewMoves.count()));
+        moved += int(textMoves.count());
+        QCOMPARE(w.binding->topSourcePosition(), top);
+        if (step % 10 == 0) QCoreApplication::processEvents();
+    }
+    QVERIFY2(moved >= 5, qPrintable(QString::number(moved)));
+    QVERIFY2(mostText <= 1, qPrintable(QString::number(mostText)));
+    QVERIFY2(mostPreview <= 1, qPrintable(QString::number(mostPreview)));
+    // Back at its first width, the preview is where it was.
+    QVERIFY(std::abs(w.previewView->property("contentY").toReal() - previewAt) <= 2);
+    anchors->setProperty("rightMargin", 0);
 }
 
 } // namespace FrameTests

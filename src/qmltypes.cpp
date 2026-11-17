@@ -19,6 +19,7 @@
 #include "markdownstyling.h"
 #include "outline.h"
 #include "preview.h"
+#include "quiettimer.h"
 #include "scrollsync.h"
 #include "settings.h"
 #include "sourcebuffer.h"
@@ -41,6 +42,7 @@ void registerQmlTypes()
     qmlRegisterType<FocusMode>("Parch", 1, 0, "FocusMode");
     qmlRegisterUncreatableType<SpellChecker>("Parch", 1, 0, "SpellChecker", QStringLiteral("The backend keeps spelling"));
     qmlRegisterType<CaretRest>("Parch", 1, 0, "CaretRest");
+    qmlRegisterType<QuietTimer>("Parch", 1, 0, "QuietTimer");
     qmlRegisterType<CommandFilter>("Parch", 1, 0, "CommandFilter");
     qmlRegisterType<WordCounter>("Parch", 1, 0, "WordCounter");
     qmlRegisterUncreatableType<CommandRegistry>("Parch", 1, 0, "CommandRegistry",

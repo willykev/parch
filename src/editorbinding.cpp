@@ -18,6 +18,7 @@
 #include <QTextLayout>
 #include <QTimer>
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -548,8 +549,7 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     if (top > 0 && oldEnd <= top) {
         QRectF line;
         m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(top + delta)));
-        const qreal maximum = qMax<qreal>(0, view->property("contentHeight").toReal() - view->height());
-        view->setProperty("contentY", qBound<qreal>(0, m_editor->y() + line.y() + intoTop, maximum));
+        scrollView(view, m_editor->y() + line.y() + intoTop);
     }
 }
 
@@ -1372,6 +1372,13 @@ QQuickItem *EditorBinding::viewport() const
     return nullptr;
 }
 
+void EditorBinding::scrollView(QQuickItem *view, qreal y) const
+{
+    // The end of the text stays exactly where Qt puts it.
+    const qreal maximum = qMax<qreal>(0, view->property("contentHeight").toReal() - view->height());
+    view->setProperty("contentY", std::min(std::round(qMax<qreal>(0, y)), maximum));
+}
+
 void EditorBinding::revealCursor()
 {
     QQuickItem *view = viewport();
@@ -1380,11 +1387,10 @@ void EditorBinding::revealCursor()
     const qreal top = view->property("contentY").toReal();
     const qreal height = view->height();
     qreal target = top;
-    if (caret.top() < top) target = caret.top();
-    else if (caret.bottom() > top + height) target = caret.bottom() - height;
+    if (caret.top() < top) target = std::floor(caret.top());
+    else if (caret.bottom() > top + height) target = std::ceil(caret.bottom() - height);
     if (target == top) return;
-    const qreal maximum = qMax<qreal>(0, view->property("contentHeight").toReal() - height);
-    view->setProperty("contentY", qBound<qreal>(0, target, maximum));
+    scrollView(view, target);
 }
 
 void EditorBinding::keepCursorInView(qreal formerHeight)
@@ -1447,8 +1453,7 @@ void EditorBinding::restore(int cursor, int anchor, int top)
     QRectF line;
     m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(position)));
     // The first line keeps the margin above it in view.
-    const qreal maximum = qMax<qreal>(0, view->property("contentHeight").toReal() - view->height());
-    view->setProperty("contentY", line.y() <= 0 ? 0 : qBound<qreal>(0, m_editor->y() + line.y(), maximum));
+    scrollView(view, line.y() <= 0 ? 0 : m_editor->y() + line.y());
     m_topAnchor = {true, position, view->property("contentY").toReal()};
 }
 

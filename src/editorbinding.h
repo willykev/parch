@@ -323,6 +323,12 @@ private:
     // Selects in the TextEdit without scrolling to the caret.
     void selectEditor(int anchor, int cursor);
     QQuickItem *viewport() const;
+    // Scrolls the view to y, in whole pixels within its range. Qt's Flickable
+    // rounds a position between pixels as soon as the height of what it
+    // shows changes, as it does at every new width of the column: the view
+    // would move by itself between the new width and the line put back at
+    // its top, and the preview beside it would follow there and back.
+    void scrollView(QQuickItem *view, qreal y) const;
     void revealCursor();
 
     QPointer<Document> m_document;

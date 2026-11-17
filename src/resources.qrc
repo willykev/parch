@@ -12,6 +12,7 @@
         <file>StatusLine.qml</file>
         <file>NoticeBar.qml</file>
         <file>ThemedDialog.qml</file>
+        <file>LazyPopup.qml</file>
         <file>ConflictDialog.qml</file>
         <file>HistoryDialog.qml</file>
         <file>CloseConfirmation.qml</file>

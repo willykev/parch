@@ -30,7 +30,8 @@ class WindowContext;
 // column 4 pixels a frame, optionally edits as no writer does
 // (Options::adversarial: a paste of a megabyte and its undo, nesting two
 // hundred deep, and keys faster than any view settles), leaves the window
-// idle for a minute with the caret in view, does the same scroll and
+// idle for a minute with the caret in view, from the moment every view has
+// caught up and the caret has come to rest, does the same scroll and
 // re-wrap over a plain striped item in the editor's place as a control, and
 // finally restores a recovery draft of the text as it is then. As the
 // preview alone shows no text to type in, that view scrolls the preview and
@@ -142,6 +143,9 @@ private:
     bool caughtUp() const;
     // The same, once at least Timing::caughtUpMs has passed since `since`.
     bool caughtUpSince(qint64 since) const;
+    // No editor's caret in any window measured is blinking: each has come
+    // to rest, or is steady.
+    bool caretsResting() const;
     void findViews(QQuickWindow *window, Views &views) const;
     void openSecondWindow();
     bool secondReady() const;

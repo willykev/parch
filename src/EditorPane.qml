@@ -162,6 +162,8 @@ Rectangle {
     // 0, when motion is reduced, and once the writer has paused for
     // caretRestMs, after which a window left alone draws nothing at all.
     // Typing, moving the caret, a click or the focus lights it again at once.
+    // Its timers are QuietTimers: as Qt Quick's Timers stop, the desktop's
+    // render loop draws the window once more for nothing.
     property int caretRestMs: CaretRest.RestMs
     readonly property bool caretFocused: editor.activeFocus && !editor.readOnly
     readonly property bool caretBlinks: !theme.reduceMotion && Qt.styleHints.cursorFlashTime >= 2
@@ -179,14 +181,14 @@ Rectangle {
     onCaretFocusedChanged: wakeCaret()
     onCaretBlinksChanged: wakeCaret()
 
-    Timer {
+    QuietTimer {
         id: caretBlink
         objectName: "caretBlink"
         interval: Math.max(1, Qt.styleHints.cursorFlashTime / 2)
         repeat: true
         onTriggered: pane.caretLit = !pane.caretLit
     }
-    Timer {
+    QuietTimer {
         id: caretRest
         objectName: "caretRest"
         interval: pane.caretRestMs

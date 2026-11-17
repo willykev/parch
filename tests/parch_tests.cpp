@@ -1155,7 +1155,7 @@ void ParchTests::launchParsing()
     QCOMPARE(parseLaunch({"parch", "--help"}).kind, Launch::Help);
     QCOMPARE(parseLaunch({"parch", "--bogus"}).kind, Launch::Invalid);
     QVERIFY(!parseLaunch({"parch", "--bogus"}).error.isEmpty());
-    QCOMPARE(versionLine(), QStringLiteral("parch 0.1.0"));
+    QCOMPARE(versionLine(), QStringLiteral("parch " PARCH_VERSION));
     // A value can follow '='; an option is never taken as another's value.
     QCOMPARE(parseLaunch({"parch", "--theme=nord", "a.md"}).themeDirectory, QStringLiteral("nord"));
     QCOMPARE(parseLaunch({"parch", "--benchmark=out.json", "a.md"}).benchmarkOutput, QStringLiteral("out.json"));

@@ -757,6 +757,7 @@ void Preview::parse()
     m_parsing = true;
     m_parseAgain = false;
     // This read takes in every edit so far; one that takes long says so.
+    m_readWaiting = m_waiting;
     m_waiting.invalidate();
     if (!m_late && !m_lateTimer.isActive()) m_lateTimer.start();
     // The text as it is now, parsed for every view of the document: at
@@ -807,9 +808,16 @@ void Preview::take(const Parsed &result)
         return;
     }
     // Never stale text over newer: the result is for the text as it is, or
-    // it is dropped and the text read again once typing allows.
-    if (result.revision != m_document->buffer()->revision()) {
+    // it is dropped and the text read again once typing allows, as soon as
+    // the first edit it was for has waited MaxWaitMs. Typing that goes on
+    // past that wait is shown as far as the read took it, which is newer
+    // than what is shown, and read again: keys that come quicker than a
+    // read would otherwise keep the preview from following them at all.
+    const bool overdue = m_readWaiting.isValid() && m_readWaiting.elapsed() >= MaxWaitMs;
+    if (result.revision != m_document->buffer()->revision() && (!overdue || result.revision <= m_shownRevision)) {
         ++m_stale;
+        if (m_readWaiting.isValid() && (!m_waiting.isValid() || m_readWaiting.elapsed() > m_waiting.elapsed()))
+            m_waiting = m_readWaiting;
         waitForPause();
         return;
     }

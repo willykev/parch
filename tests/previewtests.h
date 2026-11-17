@@ -20,6 +20,7 @@ void codeIsColouredByLanguage();
 void viewsShowTheTextThePreviewOrBoth();
 void previewFollowsEditsWithoutRebuilding();
 void staleResultsNeverReplaceNewerText();
+void typingQuickerThanReadsIsFollowed();
 void previewSaysWhenItIsBehind();
 void previewAndSourceFindEachOther();
 void includedTextLeadsToItsFile();

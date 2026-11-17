@@ -96,8 +96,9 @@ private:
 // typing, or while typing goes on for MaxWaitMs at most; then the
 // document's parse of the text as it is then (DocumentParse, shared by
 // every view of the document) is read on a worker, and the result is taken
-// only if the text has not changed since, so nothing stale is ever
-// shown over newer text. Of the result, only the parts whose key changed
+// if the text has not changed since, or, while typing has gone on past
+// MaxWaitMs, if it is newer than what is shown; older text is never shown
+// over newer. Of the result, only the parts whose key changed
 // are built again and put in place of the old ones, so the rest of the
 // surface, its selection and its scroll position stay as they were. A large
 // change is built a slice at a time, between frames.
@@ -451,6 +452,8 @@ private:
     QTimer m_release;
     // Since the first edit that no read has begun with; invalid when none waits.
     QElapsedTimer m_waiting;
+    // Since the first edit the read under way takes in.
+    QElapsedTimer m_readWaiting;
     QTimer m_lateTimer;
     bool m_late = false;
     bool m_parsing = false;

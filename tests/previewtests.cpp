@@ -33,6 +33,7 @@
 #include "windowcontext.h"
 #include "windowtesting.h"
 
+#include <algorithm>
 #include <QAbstractTextDocumentLayout>
 #include <QAccessible>
 #include <QBuffer>
@@ -1553,6 +1554,39 @@ void staleResultsNeverReplaceNewerText()
     QCOMPARE(w.preview->document(), other);
     QVERIFY(w.settled());
     QCOMPARE(w.lines(), (QStringList{QString(), QStringLiteral("Another"), QStringLiteral("With its own text.")}));
+}
+
+// Keys that come quicker than the text is read overtake every read; the
+// preview still shows how far each read took it once typing has gone on
+// for MaxWaitMs, newer each time, and the text as it is once typing stops.
+void typingQuickerThanReadsIsFollowed()
+{
+    PreviewWindow w(longText(40));
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    w.run("viewSplit");
+    QVERIFY(w.settled());
+    Preview::setWorkerDelay(60);
+    const auto prompt = qScopeGuard([] { Preview::setWorkerDelay(0); });
+    QList<Revision> shown;
+    QObject::connect(w.preview, &Preview::updated, w.preview, [&] { shown << w.preview->shownRevision(); });
+
+    QElapsedTimer typing;
+    typing.start();
+    int typed = 0;
+    while (typing.elapsed() < 3 * Preview::MaxWaitMs + 100) {
+        w.document->buffer()->replace({0, 0}, QStringLiteral("x"), EditKind::Typing);
+        ++typed;
+        QTest::qWait(20);
+    }
+    QVERIFY2(shown.size() >= 2, qPrintable(QStringLiteral("%1 updates for %2 keys").arg(shown.size()).arg(typed)));
+    QVERIFY(std::is_sorted(shown.cbegin(), shown.cend()));
+    QCOMPARE(std::adjacent_find(shown.cbegin(), shown.cend()), shown.cend());
+    QVERIFY(shown.constLast() < w.document->buffer()->revision());
+    QVERIFY(!w.preview->current());
+
+    QVERIFY(w.settled());
+    QCOMPARE(w.preview->shownRevision(), w.document->buffer()->revision());
+    QVERIFY(w.lines().at(1).startsWith(QString(typed, u'x')));
 }
 
 void previewSaysWhenItIsBehind()

@@ -774,6 +774,7 @@ private slots:
     void viewsShowTheTextThePreviewOrBoth() { PreviewTests::viewsShowTheTextThePreviewOrBoth(); }
     void previewFollowsEditsWithoutRebuilding() { PreviewTests::previewFollowsEditsWithoutRebuilding(); }
     void staleResultsNeverReplaceNewerText() { PreviewTests::staleResultsNeverReplaceNewerText(); }
+    void typingQuickerThanReadsIsFollowed() { PreviewTests::typingQuickerThanReadsIsFollowed(); }
     void previewSaysWhenItIsBehind() { PreviewTests::previewSaysWhenItIsBehind(); }
     void previewAndSourceFindEachOther() { PreviewTests::previewAndSourceFindEachOther(); }
     void includedTextLeadsToItsFile() { PreviewTests::includedTextLeadsToItsFile(); }

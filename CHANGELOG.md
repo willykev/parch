@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-11-16
 
 The first version: a native Markdown writing app for Omarchy.
 

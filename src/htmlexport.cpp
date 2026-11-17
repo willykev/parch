@@ -1,6 +1,7 @@
 #include "htmlexport.h"
 
 #include "mdhtml.h"
+#include "saferead.h"
 #include "svgpaper.h"
 
 #include <QDir>
@@ -22,6 +23,9 @@ void count(const md::Document &document, const md::Node &node, Counts &counts)
     case md::NodeType::MathInline:
     case md::NodeType::MathBlock: ++counts.formulas; break;
     case md::NodeType::MermaidBlock: ++counts.diagrams; break;
+    case md::NodeType::HtmlElement:
+        if (node.label != u"img") break;
+        [[fallthrough]];
     case md::NodeType::Image:
         if (md::classifyDestination(document, node).kind == md::Destination::Kind::LocalFile) ++counts.localImages;
         break;
@@ -81,33 +85,42 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
                 .arg(md::escapeHtml(url), md::escapeHtml(drawn->description), pixels(drawn->size.width()),
                      pixels(drawn->size.height()));
         }
+        case md::NodeType::HtmlElement:
         case md::NodeType::Image: {
+            const bool raw = node.type == md::NodeType::HtmlElement;
+            const QString src = raw ? node.attribute(QLatin1StringView("src")) : node.dest;
+            const QString alt = raw ? node.attribute(QLatin1StringView("alt")) : md::plainText(node);
             const md::Destination target = md::classifyDestination(document, node);
-            const QString alt = md::plainText(node);
-            QString title;
-            if (!node.title.isEmpty()) title = QStringLiteral(" title=\"%1\"").arg(md::escapeHtml(node.title));
+            const auto description = [&] {
+                return QStringLiteral("<span class=\"image-missing\">%1</span>").arg(md::escapeHtml(alt.isEmpty() ? src : alt));
+            };
             if (target.kind == md::Destination::Kind::Remote && !remoteImagesAllowed) {
                 ++result.remoteImages;
-                // A book carries every picture it shows: one from the web is
-                // its description.
-                return QStringLiteral("<span class=\"image-missing\">%1</span>")
-                    .arg(md::escapeHtml(alt.isEmpty() ? node.dest : alt));
+                return description();
             }
             if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return {};
+            QString error;
+            const QString url = assets.file(target.path, document.resourceFolders, &error);
+            if (url.isEmpty()) {
+                const QString detail = QStringLiteral("%1 (%2)").arg(QFileInfo(target.path).fileName(), error);
+                if (!book && SafeRead::pictureRefusal(target.path, document.resourceFolders).isEmpty()) {
+                    result.fallbackLinks.append(detail);
+                    return {};
+                }
+                result.unreadImages.append(detail);
+                return description();
+            }
             if (assets.mode() == Assets::Mode::Link) {
                 ++result.imagesLinked;
                 return {};
             }
-            QString error;
-            const QString url = assets.file(target.path, &error);
-            if (url.isEmpty()) {
-                result.unreadImages.append(QStringLiteral("%1 (%2)").arg(QFileInfo(target.path).fileName(), error));
-                if (!remoteImagesAllowed)
-                    return QStringLiteral("<span class=\"image-missing\">%1</span>")
-                        .arg(md::escapeHtml(alt.isEmpty() ? node.dest : alt));
-                return {};
+            QString img = QStringLiteral("<img src=\"%1\" alt=\"%2\"").arg(md::escapeHtml(url), md::escapeHtml(alt));
+            if (!raw && !node.title.isEmpty()) img += QStringLiteral(" title=\"%1\"").arg(md::escapeHtml(node.title));
+            for (const md::Attribute &a : node.attributes) {
+                if (a.name == u"title" || a.name == u"width" || a.name == u"height")
+                    img += u' ' + a.name + QStringLiteral("=\"") + md::escapeHtml(a.value) + u'"';
             }
-            return QStringLiteral("<img src=\"%1\" alt=\"%2\"%3 />").arg(md::escapeHtml(url), md::escapeHtml(alt), title);
+            return img + QStringLiteral(" />");
         }
         default: return {};
         }
@@ -255,8 +268,11 @@ ExportResult HtmlExporter::write(const md::Document &document, const ExportRecip
                                                  "the page finds them")
                                       .arg(Exporters::count(body.imagesLinked, QStringLiteral("image"),
                                                             QStringLiteral("images"))));
+    if (!body.fallbackLinks.isEmpty())
+        result.limitations.append(QStringLiteral("Images linked in place because they could not be copied or embedded: %1")
+                                      .arg(body.fallbackLinks.join(QStringLiteral(", "))));
     if (!body.unreadImages.isEmpty())
-        result.limitations.append(QStringLiteral("Images that could not be read are linked where they were: %1")
+        result.limitations.append(QStringLiteral("Images that could not be read are left out: %1")
                                       .arg(body.unreadImages.join(QStringLiteral(", "))));
     result.renderers.insert(QStringLiteral("html"), QStringLiteral("parch " PARCH_VERSION));
     if (pictures) {
@@ -267,19 +283,7 @@ ExportResult HtmlExporter::write(const md::Document &document, const ExportRecip
 
     // The page is held back until its pictures are in place, and nothing
     // is written through a link, the folder of pictures included.
-    Exporters::PendingFile file(recipe.output, recipe.replaceLink);
-    if (!file.write(page.toUtf8(), &result.error)) {
-        result.ioFailure = true;
-        return result;
-    }
-    if (assets.mode() == ExportWeb::Assets::Mode::Copy && !assets.assets().isEmpty()) {
-        if (Exporters::isSource(document, folder) || !ExportWeb::replaceFolder(folder, assets.assets(), &result.error)) {
-            if (result.error.isEmpty()) result.error = QStringLiteral("%1 is one of the document's own files").arg(folder);
-            result.ioFailure = true;
-            return result;
-        }
-    }
-    if (!file.commit(&result.error)) {
+    if (!ExportWeb::writePage(document, recipe, page.toUtf8(), folder, assets, &result.error)) {
         result.ioFailure = true;
         return result;
     }

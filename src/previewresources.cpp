@@ -62,10 +62,10 @@ Loaded readBytes(const QByteArray &bytes)
     }
 }
 
-Loaded readFile(const QString &path)
+Loaded readFile(const QString &path, const QStringList &folders)
 {
     try {
-        const SafeRead::Result read = SafeRead::read(path, SafeRead::PictureBytes);
+        const SafeRead::Result read = SafeRead::readPicture(path, folders);
         if (read.missing) return {{}, tr("there is no such file")};
         if (!read.ok) return {{}, read.error};
         return readBytes(read.bytes);
@@ -273,12 +273,12 @@ void PreviewResources::decoded(Entry &entry, const RenderResult &result, const Q
     }
 }
 
-preview::Picture PreviewResources::image(const md::Destination &destination, const QString &written)
+preview::Picture PreviewResources::image(const md::Destination &destination, const QString &written, const QStringList &folders)
 {
     using Kind = md::Destination::Kind;
     const bool remote = destination.kind == Kind::Remote;
     const bool embedded = destination.kind == Kind::OtherScheme && destination.scheme == QLatin1String("data");
-    const QString source = destination.kind == Kind::LocalFile ? destination.path : written;
+    const QString source = destination.kind == Kind::LocalFile ? destination.path + QChar::Null + folders.join(QChar::Null) : written;
     const QString key = QStringLiteral("parch:image/%1").arg(digest(source));
     // Whether pictures may be fetched is asked each time one is shown, and
     // one that was fetched before is not shown while they may not be.
@@ -304,7 +304,9 @@ preview::Picture PreviewResources::image(const md::Destination &destination, con
         if (!destination.absolute) return fail(tr("the document has no folder yet"));
         entry.waiting = true;
         entry.picture.state = preview::Picture::Pending;
-        QtConcurrent::run(&m_pool, readFile, destination.path).then(this, take);
+        entry.imagePath = destination.path;
+        entry.imageFolders = folders;
+        QtConcurrent::run(&m_pool, readFile, destination.path, folders).then(this, take);
     } else if (embedded) {
         if (written.size() > MaxInlineBytes * 2) return fail(tr("it is too large"));
         entry.waiting = true;
@@ -351,14 +353,15 @@ void PreviewResources::loaded(const QString &key, quint64 generation, const QIma
 
 void PreviewResources::reread(const QString &path)
 {
-    const QString key = QStringLiteral("parch:image/%1").arg(digest(path));
-    const auto at = m_entries.find(key);
-    if (at == m_entries.end()) return;
-    at->waiting = true;
     const quint64 generation = m_generation;
-    QtConcurrent::run(&m_pool, readFile, path).then(this, [this, key, generation](const Loaded &loaded) {
-        this->loaded(key, generation, loaded.image, loaded.error);
-    });
+    for (auto it = m_entries.begin(); it != m_entries.end(); ++it) {
+        if (it->imagePath != path) continue;
+        it->waiting = true;
+        QtConcurrent::run(&m_pool, readFile, path, it->imageFolders)
+            .then(this, [this, key = it.key(), generation](const Loaded &loaded) {
+                this->loaded(key, generation, loaded.image, loaded.error);
+            });
+    }
 }
 
 void PreviewResources::keepOnly(const QSet<QString> &keys)

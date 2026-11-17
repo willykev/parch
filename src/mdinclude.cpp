@@ -58,7 +58,7 @@ IncludeResolver::File FileIncludeResolver::read(const QString &path, qint64 maxB
         }
         return result;
     }
-    QStringDecoder decoder(QStringDecoder::Utf8);
+    QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
     result.text = decoder(read.bytes);
     if (decoder.hasError()) {
         result.text.clear();

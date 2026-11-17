@@ -7,6 +7,7 @@
 // function of its own.
 namespace SecurityTests {
 
+void webPictureRequestsKeepTheirHost();
 void webPicturesComeOnlyFromPublicAddresses();
 void exportsAskBeforeReplacingALink();
 void parchKeepsItsFilesToItself();

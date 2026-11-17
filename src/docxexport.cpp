@@ -447,7 +447,7 @@ private:
         QByteArray bytes;
         QString why;
         if (target.kind == md::Destination::Kind::LocalFile && target.absolute) {
-            const SafeRead::Result read = SafeRead::read(target.path, SafeRead::PictureBytes);
+            const SafeRead::Result read = SafeRead::readPicture(target.path, m_doc.resourceFolders);
             if (!read.ok) why = read.missing ? QStringLiteral("there is no such file") : read.error;
             else bytes = read.bytes;
         } else if (target.kind == md::Destination::Kind::OtherScheme && target.scheme == u"data") {
@@ -1531,7 +1531,7 @@ ExportResult DocxExporter::write(const md::Document &document, const ExportRecip
         result.renderers.insert(QStringLiteral("svg"), SvgPaper::version());
     }
     result.renderers.insert(QStringLiteral("docx"), QStringLiteral("parch " PARCH_VERSION));
-    if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.replaceLink)) {
+    if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.existing)) {
         result.ioFailure = true;
         return result;
     }

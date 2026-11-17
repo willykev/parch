@@ -2,6 +2,7 @@
 
 #include "exportweb.h"
 #include "htmlexport.h"
+#include "saferead.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -237,8 +238,8 @@ private:
             break;
         case md::NodeType::Link:
         case md::NodeType::Image:
+            if (node.type == md::NodeType::Image && copyImage(node, edits)) break;
             if (node.label.isEmpty()) {
-                if (node.type == md::NodeType::Image && copied(file, node.target, node.dest, edits)) break;
                 rebase(file, node.target, node.dest, edits);
             } else if (const QString fresh = linkRenames.value(file).value(normalized(node.label));
                        !fresh.isEmpty()) {
@@ -272,14 +273,26 @@ private:
     }
 
     // An image the writer has copied beside the output, at its new place.
-    bool copied(int file, md::Range target, const QString &dest, std::vector<Edit> &edits) const
+    bool copyImage(const md::Node &node, std::vector<Edit> &edits) const
     {
-        if (!imageDestination || target.isEmpty() || dest.isEmpty()) return false;
-        const md::Destination found = md::classifyDestination(dest, doc.files[size_t(file)].directory);
+        if (!imageDestination) return false;
+        const md::Destination found = md::classifyDestination(doc, node);
         if (found.kind != md::Destination::Kind::LocalFile || !found.absolute) return false;
         const QString placed = imageDestination(found.path);
         if (placed.isEmpty()) return false;
-        edits.push_back({target.start, target.end, md::encodeDestination(placed)});
+        QString dest = md::encodeDestination(placed);
+        if (!found.fragment.isEmpty()) dest += u'#' + found.fragment;
+        if (node.label.isEmpty()) {
+            edits.push_back({node.target.start, node.target.end, dest});
+        } else {
+            // Inline only the picture. Ordinary links using the same definition keep their destination.
+            if (!node.title.isEmpty()) {
+                QString title = node.title;
+                title.replace(u'\\', QStringLiteral("\\\\")).replace(u'"', QStringLiteral("\\\""));
+                dest += QStringLiteral(" \"%1\"").arg(title);
+            }
+            edits.push_back({node.close.start, node.close.end, QStringLiteral("](%1)").arg(dest)});
+        }
         return true;
     }
 
@@ -300,8 +313,10 @@ private:
         if (node.label == u"img" && imageDestination && !dest.isEmpty()) {
             const md::Destination found = md::classifyDestination(dest, doc.files[size_t(file)].directory);
             if (found.kind == md::Destination::Kind::LocalFile && found.absolute)
-                if (const QString placed = imageDestination(found.path); !placed.isEmpty())
+                if (const QString placed = imageDestination(found.path); !placed.isEmpty()) {
                     written = QString::fromUtf8(QUrl::toPercentEncoding(placed, "/"));
+                    if (!found.fragment.isEmpty()) written += u'#' + found.fragment;
+                }
         }
         if (written.isEmpty()) written = rebased(file, dest);
         if (written.isEmpty()) return;
@@ -345,12 +360,12 @@ QList<ExportOption> MarkdownExporter::options() const
                       QString()};
     asIs.label = QStringLiteral("Write the text as it is, without its includes in place");
     ExportOption images{QStringLiteral("images"),
-                        QStringLiteral("Lead to local images where they are (link), or copy them into a "
-                                       "folder beside it, NAME_files (copy); the default is link"),
+                        QStringLiteral("Keep images reachable from the new document (auto, the default), "
+                                       "link them in place (link), or copy them all into NAME_files (copy)"),
                         QStringLiteral("HOW")};
     images.label = QStringLiteral("Images");
-    images.choices = {QStringLiteral("link"), QStringLiteral("copy")};
-    images.defaultValue = QStringLiteral("link");
+    images.choices = {QStringLiteral("auto"), QStringLiteral("link"), QStringLiteral("copy")};
+    images.defaultValue = QStringLiteral("auto");
     return {asIs, images};
 }
 
@@ -378,10 +393,12 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     if (run.stopped()) return Exporters::cancelled();
     result.renderers.insert(QStringLiteral("markdown"), QStringLiteral("parch " PARCH_VERSION));
     const QString outputFolder = QFileInfo(recipe.output).absolutePath();
+    const QString folder = HtmlExporter::assetFolder(recipe.output);
+    ExportWeb::Assets assets(ExportWeb::Assets::Mode::Copy, QFileInfo(folder).fileName() + u'/', outputFolder);
     if (recipe.options.contains(QStringLiteral("as-is"))) {
         result.limitations = limitations(document, recipe, {});
         const QString text = document.files.empty() ? QString() : document.files.front().text;
-        if (!Exporters::writeFile(recipe.output, text.toUtf8(), &result.error, recipe.replaceLink)) {
+        if (!ExportWeb::writePage(document, recipe, text.toUtf8(), folder, assets, &result.error)) {
             result.ioFailure = true;
             return result;
         }
@@ -389,15 +406,15 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
         result.ok = true;
         return result;
     }
-    const bool copy = option(recipe, QStringLiteral("images")) == u"copy";
-    const QString folder = HtmlExporter::assetFolder(recipe.output);
-    ExportWeb::Assets assets(ExportWeb::Assets::Mode::Copy, QFileInfo(folder).fileName() + u'/', outputFolder);
+    const QString images = option(recipe, QStringLiteral("images"));
     QStringList unread;
     MarkdownExport::ImageDestination image;
-    if (copy) {
-        image = [&](const QString &path) {
+    if (images != u"link") {
+        const QString root = QFileInfo(outputFolder).canonicalFilePath();
+        image = [&, root](const QString &path) {
+            if (images == u"auto" && SafeRead::pictureRefusal(path, {root}).isEmpty()) return QString();
             QString error;
-            const QString url = assets.file(path, &error);
+            const QString url = assets.file(path, document.resourceFolders, &error);
             if (url.isEmpty()) unread.append(QStringLiteral("%1 (%2)").arg(QFileInfo(path).fileName(), error));
             // The text gives the file's path, not its URL.
             return QUrl::fromPercentEncoding(url.toUtf8());
@@ -410,19 +427,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
                                       .arg(unread.join(QStringLiteral(", "))));
     if (run.stopped()) return Exporters::cancelled();
     // Nothing is written through a link, the folder of pictures included.
-    Exporters::PendingFile file(recipe.output, recipe.replaceLink);
-    if (!file.write(assembled.text.toUtf8(), &result.error)) {
-        result.ioFailure = true;
-        return result;
-    }
-    if (!assets.assets().isEmpty()) {
-        if (Exporters::isSource(document, folder) || !ExportWeb::replaceFolder(folder, assets.assets(), &result.error)) {
-            if (result.error.isEmpty()) result.error = QStringLiteral("%1 is one of the document's own files").arg(folder);
-            result.ioFailure = true;
-            return result;
-        }
-    }
-    if (!file.commit(&result.error)) {
+    if (!ExportWeb::writePage(document, recipe, assembled.text.toUtf8(), folder, assets, &result.error)) {
         result.ioFailure = true;
         return result;
     }

@@ -80,7 +80,7 @@ struct HtmlOptions {
     std::optional<CitationHtml> citations;
     // When set, what is written for a formula, a diagram or an image in
     // place of what the renderer writes: called with the MathInline,
-    // MathBlock, MermaidBlock or Image node, it returns the markup to write,
+    // MathBlock, MermaidBlock, Image or supported img element, it returns the markup to write,
     // which is written as it is and so must be safe; an empty answer writes
     // the usual markup.
     std::function<QString(const Node &node)> picture;

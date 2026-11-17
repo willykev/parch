@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diskfile.h"
 #include "exporter.h"
 #include "exportpictures.h"
 
@@ -27,6 +28,7 @@ public:
         QString name; // within the folder: "a-photo.png"
         QString mediaType;
         QByteArray bytes;
+        DiskVersion existing; // File already compared with these bytes, if any.
     };
 
     // `folder` is how the text reaches the folder: "notes_files/", "images/".
@@ -35,7 +37,7 @@ public:
     Mode mode() const { return m_mode; }
     // The URL the text gives a local file; empty, with why, when it cannot
     // be read (a link gives its path whether or not it is there).
-    QString file(const QString &absolutePath, QString *error = nullptr);
+    QString file(const QString &absolutePath, const QStringList &folders, QString *error);
     // The URL of bytes made for the export, such as a diagram, named after
     // `suggested`.
     QString bytes(const QByteArray &data, const QString &mediaType, const QString &suggested);
@@ -68,12 +70,10 @@ QString formula(const ExportPictures::Picture &picture, const QString &tex, bool
 // run.
 QByteArray diagramSvg(const ExportPictures::Picture &picture);
 
-// Replaces the folder at `target` with the files, written first into a
-// folder of their own beside it, so that a failed export leaves the old one
-// as it was. A folder is only replaced when an earlier export made it,
-// which a mark inside it records; any other is left alone and refused.
-bool replaceFolder(const QString &target, const QList<Assets::Asset> &files, QString *error);
-// The name of that mark.
+// Publishes the page after its pictures are in place. Existing entries in
+// a marked pictures folder are reused only when their bytes match.
+bool writePage(const md::Document &document, const ExportRecipe &recipe, const QByteArray &page, const QString &folder, const Assets &assets, QString *error);
+// The marker used by export folders, including older releases.
 inline constexpr char kFolderMark[] = ".parch-export";
 
 } // namespace ExportWeb

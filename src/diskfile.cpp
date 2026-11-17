@@ -503,6 +503,11 @@ SaveResult writeInPlace(const QString &path, const DiskVersion &expected, const 
 
 namespace DiskFile {
 
+bool stampDescriptor(int descriptor, struct stat &state, FileStamp &stamp)
+{
+    return stamped(descriptor, state, stamp);
+}
+
 DiskVersion fingerprint(const QString &path, const DiskVersion &known)
 {
     DiskVersion version;
@@ -593,10 +598,6 @@ QString cleanPath(const QString &path)
 SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
 {
     SaveResult result;
-    const auto failed = [&result](int number) {
-        result.error = systemError(number);
-        return result;
-    };
     QString folder, leaf;
     if (!splitPath(path, folder, leaf)) {
         result.error = QCoreApplication::translate("DiskFile", "Invalid file path");
@@ -606,12 +607,25 @@ SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
     // every step below is taken in that one folder.
     const int directory = ::open(QFile::encodeName(folder).constData(), O_PATH | O_DIRECTORY | O_CLOEXEC);
     if (directory < 0) {
+        const int reason = errno;
         // The folder is what stops it, so it is named.
         result.error = QCoreApplication::translate("DiskFile", "parch cannot write in “%1” (%2)")
-                           .arg(folder, systemError(errno));
+                           .arg(folder, systemError(reason));
         return result;
     }
     const auto closing = qScopeGuard([directory] { ::close(directory); });
+    return createAt(directory, folder, leaf, bytes, mode);
+}
+
+SaveResult createAt(int directory, const QString &folder, const QString &leaf, const QByteArray &bytes, quint32 mode)
+{
+    SaveResult result;
+    const auto failed = [&result](int number) {
+        result.error = systemError(number);
+        return result;
+    };
+    if (leaf.isEmpty() || leaf == u"." || leaf == u".." || leaf.contains(u'/') || leaf.contains(QChar::Null))
+        return failed(EINVAL);
     const QByteArray name = QFile::encodeName(leaf);
     struct stat there {};
     if (::fstatat(directory, name.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0) {
@@ -662,7 +676,7 @@ SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
         else failure = errno;
     }
     int written = descriptor;
-    if (!named && (!renameWithoutReplacing || failure == EINVAL || failure == ENOSYS)) {
+    if (!named && (!renameWithoutReplacing || failure == EINVAL || failure == ENOSYS || failure == EOPNOTSUPP)) {
         named = linking && ::linkat(directory, temporary.constData(), directory, name.constData(), 0) == 0;
         if (!named) failure = linking ? errno : EINVAL;
         if (!named && failure != EEXIST) {
@@ -700,7 +714,7 @@ SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
     FileStamp stamp;
     if (!stamped(written, made, stamp)) return failed(errno);
     result.status = SaveStatus::Saved;
-    result.version = DiskVersion{literalPath(path), quint64(made.st_dev), quint64(made.st_ino),
+    result.version = DiskVersion{literalPath(folder + u'/' + leaf), quint64(made.st_dev), quint64(made.st_ino),
                                  QCryptographicHash::hash(bytes, QCryptographicHash::Sha256), true, stamp};
     result.version.mode = quint32(made.st_mode & 0777);
     if (afterNaming) afterNaming(folder + u'/' + leaf);

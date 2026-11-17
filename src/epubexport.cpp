@@ -32,6 +32,9 @@ void count(const md::Document &document, const md::Node &node, Counts &counts)
     case md::NodeType::MathBlock: ++counts.formulas; break;
     case md::NodeType::MermaidBlock: ++counts.diagrams; break;
     case md::NodeType::PageBreak: ++counts.pageBreaks; break;
+    case md::NodeType::HtmlElement:
+        if (node.label != u"img") break;
+        [[fallthrough]];
     case md::NodeType::Image:
         if (md::classifyDestination(document, node).kind == md::Destination::Kind::Remote) ++counts.remoteImages;
         break;
@@ -370,7 +373,7 @@ ExportResult EpubExporter::write(const md::Document &document, const ExportRecip
                                       .arg(Exporters::count(counts.pageBreaks, QStringLiteral("page break"),
                                                             QStringLiteral("page breaks"))));
     result.renderers.insert(QStringLiteral("epub"), QStringLiteral("parch " PARCH_VERSION));
-    if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.replaceLink)) {
+    if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.existing)) {
         result.ioFailure = true;
         return result;
     }

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Re-exporting HTML or Markdown preserves files in the pictures folder, including
+  included chapters and pictures edited since the last export. Concurrent CLI
+  exports require `--force` to replace an output.
+- Local pictures follow the same folder limits as includes. HTML and EPUB
+  carry supported `<img>` elements, and web pictures connect to a checked
+  address on every redirect.
+- Headless export works with a GTK desktop theme. Screenshot and benchmark
+  outputs refuse input documents and their aliases. The CLI and includes
+  report incomplete UTF-8 at the end of a file.
+- Cross-filesystem moves check that the whole file was copied before removing
+  the original. Updating links in a closed document keeps its previous bytes
+  in history before writing.
+
 ## 0.1.1 — 2026-11-17
 
 ### Documentation

@@ -1,6 +1,9 @@
 #include "saferead.h"
 
+#include "mdinclude.h"
+
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QScopeGuard>
@@ -94,7 +97,30 @@ bool readDescriptor(int descriptor, qint64 limit, QByteArray &bytes, QString &er
     return true;
 }
 
-Result read(const QString &path, qint64 limit)
+bool readForCopy(int descriptor, qint64 expectedSize, QByteArray &bytes, QString &error)
+{
+    if (expectedSize < 0 || expectedSize >= QByteArray::maxSize()) {
+        bytes.clear();
+        error = tr("the file is too large to copy");
+        return false;
+    }
+    if (!readDescriptor(descriptor, expectedSize, bytes, error, nullptr, expectedSize)) return false;
+    if (bytes.size() == expectedSize) return true;
+    bytes.clear();
+    error = tr("the file ended before its reported size");
+    return false;
+}
+
+namespace {
+
+QString outsideFolders(const QString &canonical, const QStringList &folders)
+{
+    for (const QString &folder : folders)
+        if (md::isWithin(canonical, folder)) return {};
+    return tr("it is outside the document's folder and library");
+}
+
+Result readFile(const QString &path, qint64 limit, const QStringList *folders)
 {
     Result result;
     if (path.isEmpty()) {
@@ -111,7 +137,9 @@ Result read(const QString &path, qint64 limit)
             result.error = result.missing ? systemError(ENOENT) : tr("it is a folder");
             return result;
         }
-        result.canonicalPath = path;
+        result.canonicalPath = QDir::cleanPath(path);
+        if (folders) result.error = outsideFolders(result.canonicalPath, *folders);
+        if (!result.error.isEmpty()) return result;
         result.size = file.size();
         if (result.size > limit) {
             result.tooLarge = true;
@@ -153,6 +181,8 @@ Result read(const QString &path, qint64 limit)
                                                       : systemPathReason(result.canonicalPath);
         return result;
     }
+    if (folders) result.error = outsideFolders(result.canonicalPath, *folders);
+    if (!result.error.isEmpty()) return result;
     if (S_ISDIR(state.st_mode)) {
         result.error = tr("it is a folder");
         return result;
@@ -176,6 +206,45 @@ Result read(const QString &path, qint64 limit)
     result.size = result.bytes.size();
     result.ok = true;
     return result;
+}
+
+} // namespace
+
+Result read(const QString &path, qint64 limit)
+{
+    return readFile(path, limit, nullptr);
+}
+
+Result readPicture(const QString &path, const QStringList &folders)
+{
+    return readFile(path, PictureBytes, &folders);
+}
+
+QString pictureRefusal(const QString &path, const QStringList &folders)
+{
+    QFileInfo info(path);
+    QString canonical = info.canonicalFilePath();
+    if (canonical.isEmpty() && !path.startsWith(QLatin1StringView(":/"))) {
+        // A missing leaf can still be reached through a link in an existing parent.
+        QStringList missing;
+        while (canonical.isEmpty()) {
+            struct stat st {};
+            if (::lstat(QFile::encodeName(info.filePath()).constData(), &st) == 0)
+                return tr("its path cannot be resolved");
+            const int reason = errno;
+            if (reason != ENOENT) return systemError(reason);
+            missing.prepend(info.fileName());
+            const QString parent = info.absolutePath();
+            if (parent == info.filePath()) return tr("its path cannot be resolved");
+            info.setFile(parent);
+            canonical = info.canonicalFilePath();
+        }
+        canonical = QDir(canonical).filePath(missing.join(u'/'));
+    }
+    if (canonical.isEmpty()) canonical = QDir::cleanPath(path);
+    if (isSystemPath(canonical)) return systemPathReason(canonical);
+    if (QFileInfo candidate(path); candidate.exists() && !candidate.isFile()) return tr("it is not a regular file");
+    return outsideFolders(canonical, folders);
 }
 
 } // namespace SafeRead

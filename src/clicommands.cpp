@@ -603,7 +603,8 @@ std::optional<int> deliver(Command &command, const Context &context, const QStri
     QString error;
     if (!mayWrite(*output, command.parser.isSet(QStringLiteral("force")), document, &error))
         return command.fail(Io, error, context);
-    if (!Exporters::writeFile(*output, text.toUtf8(), &error)) return command.fail(Io, error, context);
+    const auto existing = command.parser.isSet(QStringLiteral("force")) ? ExistingOutput::ReplaceFile : ExistingOutput::Refuse;
+    if (!Exporters::writeFile(*output, text.toUtf8(), &error, existing)) return command.fail(Io, error, context);
     return std::nullopt;
 }
 
@@ -839,6 +840,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
     if (!mayWrite(output, parser.isSet(QStringLiteral("force")), document, &error))
         return command.fail(Io, error, context);
 
+    recipe.existing = parser.isSet(QStringLiteral("force")) ? ExistingOutput::ReplaceFile : ExistingOutput::Refuse;
     const ExportResult result = exporter->write(document, recipe);
     if (!result.ok) return command.fail(result.ioFailure ? Io : ExportFailed, result.error, context);
 

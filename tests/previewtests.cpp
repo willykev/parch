@@ -95,7 +95,7 @@ public:
         }
         return picture;
     }
-    Picture image(const md::Destination &destination, const QString &written) override
+    Picture image(const md::Destination &destination, const QString &written, const QStringList &) override
     {
         asked << (destination.kind == md::Destination::Kind::LocalFile ? destination.path : written);
         Picture picture = byWord(written, QStringLiteral("image"));

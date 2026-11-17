@@ -3,6 +3,7 @@
 #include "backend.h"
 #include "document.h"
 #include "editorbinding.h"
+#include "exporter.h"
 #include "exports.h"
 #include "preview.h"
 #include "previewresources.h"
@@ -13,6 +14,7 @@
 #include "tabmodel.h"
 #include "windowcontext.h"
 
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -222,11 +224,18 @@ void Screenshot::poll()
         m_last = now;
         return;
     }
-    QImageWriter writer(m_picture.file);
+    QBuffer encoded;
+    encoded.open(QIODevice::WriteOnly);
+    QImageWriter writer(&encoded, {});
     const QByteArray suffix = QFileInfo(m_picture.file).suffix().toLower().toLatin1();
     writer.setFormat(QImageWriter::supportedImageFormats().contains(suffix) ? suffix : QByteArray("png"));
     if (!writer.write(m_last)) {
         finish(3, tr("cannot write the picture to %1 (%2)").arg(m_picture.file, writer.errorString()));
+        return;
+    }
+    QString error;
+    if (!Exporters::writeFile(m_picture.file, encoded.data(), &error)) {
+        finish(3, tr("cannot write the picture (%1)").arg(error));
         return;
     }
     finish(0, m_picture.file);

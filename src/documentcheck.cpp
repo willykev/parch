@@ -2,6 +2,7 @@
 
 #include "documentreading.h"
 #include "mdinclude.h"
+#include "saferead.h"
 
 #include <QFileInfo>
 #include <QHash>
@@ -100,7 +101,14 @@ private:
     void image(const md::Node &node, const md::Destination &target, const QString &written,
                std::vector<Problem> &found)
     {
-        if (!checkable(target) || QFileInfo::exists(target.path)) return;
+        if (!checkable(target)) return;
+        const QString why = SafeRead::pictureRefusal(target.path, m_loaded.document.resourceFolders);
+        if (!why.isEmpty()) {
+            add(node, QStringLiteral("image-outside-folders"), QStringLiteral("asset"),
+                QStringLiteral("The image \"%1\" cannot be read: %2").arg(written, why), found);
+            return;
+        }
+        if (QFileInfo::exists(target.path)) return;
         add(node, QStringLiteral("unresolved-asset"), QStringLiteral("asset"),
             QStringLiteral("The image \"%1\" is not there (%2)").arg(written, target.path), found);
     }

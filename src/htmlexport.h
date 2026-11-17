@@ -49,6 +49,7 @@ struct Body {
     int imagesLinked = 0;
     int remoteImages = 0;
     QStringList unreadImages;
+    QStringList fallbackLinks;
 };
 Body body(const md::Document &document, const ExportRecipe &recipe, const ExportPictures *pictures, Assets &assets,
           bool book);

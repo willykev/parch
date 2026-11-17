@@ -4,6 +4,7 @@
 #include "benchmark.h"
 #include "cli.h"
 #include "clicommands.h"
+#include "documentsettings.h"
 #include "documentstore.h"
 #include "portalfilepicker.h"
 #include "printportal.h"
@@ -37,11 +38,43 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
+#include <algorithm>
 #include <memory>
 #include <optional>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
+
+bool namesInput(const QString &output, const QStringList &inputs, const AppPaths *settings = nullptr)
+{
+    struct stat target {};
+    const bool exists = ::stat(QFile::encodeName(output).constData(), &target) == 0;
+    const auto matches = [&](const QString &input) {
+        if (QDir::cleanPath(input) == QDir::cleanPath(output)) return true;
+        struct stat source {};
+        return exists && ::stat(QFile::encodeName(input).constData(), &source) == 0
+               && source.st_dev == target.st_dev && source.st_ino == target.st_ino;
+    };
+    for (const QString &input : inputs) {
+        if (matches(input)) return true;
+        if (exists) {
+            Dialect::Layers layers;
+            if (settings) {
+                DocumentSettings::Saved saved;
+                QString why;
+                if (DocumentSettings::read(*settings, QFileInfo(input).canonicalFilePath(), &saved, &why)) {
+                    layers.document = saved.document;
+                    layers.library = saved.library;
+                    layers.application = saved.application;
+                }
+            }
+            const QStringList dependencies = Benchmark::filesRead(input, layers);
+            if (std::any_of(dependencies.cbegin(), dependencies.cend(), matches)) return true;
+        }
+    }
+    return false;
+}
 
 // Shows a file selected in its folder, through the file manager's
 // org.freedesktop.FileManager1 service, without waiting for its answer.
@@ -91,6 +124,7 @@ int main(int argc, char *argv[])
         std::unique_ptr<QCoreApplication> application;
         if (launch.commandArguments.value(1) == u"export") {
             qputenv("QT_QPA_PLATFORM", "offscreen");
+            qputenv("QT_QPA_PLATFORMTHEME", "generic");
             application = std::make_unique<QGuiApplication>(argc, argv);
         } else {
             application = std::make_unique<QCoreApplication>(argc, argv);
@@ -165,6 +199,8 @@ int main(int argc, char *argv[])
         if (files.size() != 1)
             return refused(QCoreApplication::translate("main", "--benchmark measures exactly one FILE"));
         benchmarkOutput = QDir::current().absoluteFilePath(launch.benchmarkOutput);
+        if (namesInput(benchmarkOutput, files))
+            return refused(QCoreApplication::translate("main", "%1 is an input document").arg(benchmarkOutput));
         if (!QFileInfo(QFileInfo(benchmarkOutput).absolutePath()).isDir())
             return refused(QCoreApplication::translate("main", "there is no folder for %1").arg(benchmarkOutput));
         scratchRoot.emplace(QDir::tempPath() + QStringLiteral("/parch-benchmark-XXXXXX"));
@@ -197,6 +233,8 @@ int main(int argc, char *argv[])
             QDir().mkpath(QFileInfo(to).absolutePath());
             if (QFile::copy(from, to)) QFile::setPermissions(to, QFile::ReadOwner | QFile::WriteOwner);
         }
+        if (namesInput(picture.file, files, &paths))
+            return refused(QCoreApplication::translate("main", "%1 is an input document").arg(picture.file));
         qputenv("XDG_CACHE_HOME", QFile::encodeName(scratchRoot->filePath(QStringLiteral("cache"))));
         // Drawn off screen by the processor, with Qt's plainest platform
         // theme: no window shows, and the picture is the same on any machine.

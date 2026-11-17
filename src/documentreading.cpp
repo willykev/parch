@@ -1,8 +1,36 @@
 #include "documentreading.h"
 
 #include "frontmatter.h"
+#include "mdinclude.h"
 
 namespace DocumentReading {
+
+QStringList referencedFiles(const md::Document &document, const Dialect::Choice &dialect, bool includeLinks)
+{
+    QStringList paths = dialect.bibliography;
+    if (Dialect::isStyleFile(dialect.citationStyle)) paths.append(dialect.citationStyle);
+    for (const auto &file : document.files) {
+        paths.append(file.path);
+        if (file.includedFrom >= 0 && file.frontMatter.present && document.options.citations) {
+            const auto layer = Dialect::frontMatterLayer(file.frontMatter, file.directory);
+            if (layer.bibliography) paths.append(*layer.bibliography);
+        }
+    }
+    const auto walk = [&](const auto &visit, const md::Node &node) -> void {
+        if (node.type == md::NodeType::Include && node.includedFile < 0 && node.file >= 0 && size_t(node.file) < document.files.size()) {
+            paths.append(md::includeTarget(node.dest, document.files[size_t(node.file)].directory, dialect.libraryRoot));
+        } else if (node.type == md::NodeType::Image || (includeLinks && node.type == md::NodeType::Link)
+                   || (node.type == md::NodeType::HtmlElement && (node.label == u"img" || (includeLinks && node.label == u"a")))) {
+            const auto dest = md::classifyDestination(document, node);
+            if (dest.kind == md::Destination::Kind::LocalFile && dest.absolute) paths.append(dest.path);
+        }
+        for (const auto &child : node.children) visit(visit, child);
+    };
+    walk(walk, document.root);
+    paths.removeAll(QString());
+    paths.removeDuplicates();
+    return paths;
+}
 
 md::HtmlOptions Reading::htmlOptions(md::HtmlOptions options) const
 {

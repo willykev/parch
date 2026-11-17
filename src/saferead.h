@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 
 // Reading a file that a document names, or that is in a library: the
 // document itself, an included file, a bibliography, a citation style or
@@ -44,6 +45,10 @@ struct Result {
 
 // Reads the file at the path, refusing it, with the reason, as above.
 Result read(const QString &path, qint64 limit);
+Result readPicture(const QString &path, const QStringList &folders);
+// Checks a picture reference for diagnostics and links. Reads check the
+// opened descriptor as well, before consuming any bytes.
+QString pictureRefusal(const QString &path, const QStringList &folders);
 
 // Reads at most `limit` bytes from an open descriptor, in pieces, from where
 // it stands to its end. False, with the reason, when more is there than the
@@ -51,6 +56,10 @@ Result read(const QString &path, qint64 limit);
 // only a hint for the first piece.
 bool readDescriptor(int descriptor, qint64 limit, QByteArray &bytes, QString &error, bool *tooLarge = nullptr,
                     qint64 sizeHint = 0);
+
+// Reads a copy from an open file. A short read, extra bytes or an I/O error
+// leaves no bytes to publish at the destination.
+bool readForCopy(int descriptor, qint64 expectedSize, QByteArray &bytes, QString &error);
 
 // Whether a canonical path is in /proc, /sys or /dev (or is one of them):
 // the system's files, never a document or a picture.

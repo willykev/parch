@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dialectchoice.h"
+
 #include <QJsonObject>
 #include <QObject>
 #include <QPointer>
@@ -80,7 +82,7 @@ public:
     static QString copyIn(const QString &file, const QString &folder, QString *error);
     // The files a document reads besides its text: what it includes, the
     // pictures it and they show, its bibliographies and a style file.
-    static QStringList filesRead(const QString &file);
+    static QStringList filesRead(const QString &file, const Dialect::Layers &layers = {});
 
     void setOptions(const Options &options) { m_options = options; }
     // The application measured: its settings, windows, store and recovery.

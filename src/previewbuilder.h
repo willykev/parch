@@ -120,7 +120,7 @@ public:
     virtual ~Resources() = default;
     virtual Picture math(const QString &tex, bool display, qreal fontSize) = 0;
     virtual Picture diagram(const QString &source) = 0;
-    virtual Picture image(const md::Destination &destination, const QString &written) = 0;
+    virtual Picture image(const md::Destination &destination, const QString &written, const QStringList &folders) = 0;
 };
 
 // Something drawn or placed over the text, where the layout puts its blocks.

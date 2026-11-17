@@ -10,6 +10,7 @@
 #include "previewresources.h"
 #include "previewwatch.h"
 #include "renderrequest.h"
+#include "saferead.h"
 #include "sourcebuffer.h"
 #include "workerfailure.h"
 
@@ -235,7 +236,9 @@ void picturesOf(const md::Document &document, const md::Node &node, QStringList 
     if (!written.isEmpty() && md::detail::isSafeUrl(written, true)) {
         const int file = std::clamp(node.file, 0, int(document.files.size()) - 1);
         const md::Destination target = md::classifyDestination(written, document.files[size_t(file)].directory);
-        if (target.kind == md::Destination::Kind::LocalFile && target.absolute) out.append(target.path);
+        if (target.kind == md::Destination::Kind::LocalFile && target.absolute
+            && SafeRead::pictureRefusal(target.path, document.resourceFolders).isEmpty())
+            out.append(target.path);
         else if (target.kind == md::Destination::Kind::Remote) web = true;
     }
     for (const md::Node &child : node.children) picturesOf(document, child, out, web);

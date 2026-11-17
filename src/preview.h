@@ -92,10 +92,11 @@ private:
 // surface) showing what the document reads as, built from the Markdown
 // engine's tree by preview::Builder in a style taken from the live theme.
 //
-// It follows the document off the typing path. An edit starts a short wait;
-// then the document's parse of the text as it is then (DocumentParse, shared
-// by every view of the document) is read on a worker, and the result is
-// taken only if the text has not changed since, so nothing stale is ever
+// It follows the document off the typing path. Edits wait for a pause in
+// typing, or while typing goes on for MaxWaitMs at most; then the
+// document's parse of the text as it is then (DocumentParse, shared by
+// every view of the document) is read on a worker, and the result is taken
+// only if the text has not changed since, so nothing stale is ever
 // shown over newer text. Of the result, only the parts whose key changed
 // are built again and put in place of the old ones, so the rest of the
 // surface, its selection and its scroll position stay as they were. A large
@@ -140,6 +141,9 @@ class Preview : public QObject {
     Q_PROPERTY(QAbstractItemModel *marks READ marks CONSTANT)
     // What it shows is the text as it is now.
     Q_PROPERTY(bool current READ current NOTIFY currentChanged)
+    // It has been reading and setting the text for longer than a moment
+    // without catching up, which the view says.
+    Q_PROPERTY(bool late READ late NOTIFY lateChanged)
     // There is a place to go back to, after a link inside the document was followed.
     Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY trailChanged)
     // What the text as last read marks as leading nowhere (preview::Unresolved),
@@ -152,13 +156,24 @@ class Preview : public QObject {
     Q_PROPERTY(QString failure READ failure NOTIFY failureChanged)
 
 public:
-    // How long the text rests after an edit before it is parsed again.
-    static constexpr int UpdateDelayMs = 120;
+    // How long typing pauses before the text is read again: keys typed one
+    // after another are drawn without the preview's work in their frames.
+    static constexpr int PauseMs = 180;
+    // While typing goes on, the preview reads the text at the latest this
+    // long after the first edit it has not read, and so keeps up.
+    static constexpr int MaxWaitMs = 750;
+    // Reading and setting the text that takes longer than this is late.
+    static constexpr int LateMs = 300;
     // How long a slice of building, with the layout of what it built, is
     // meant to take before the rest waits for the next turn of the event loop.
     static constexpr int SliceMs = 8;
     // How long a preview nobody sees keeps what it built.
     static constexpr int ReleaseMs = 60000;
+    // A text longer than this, on the surface or in an island, is drawn
+    // only where it is in view, as Qt draws a TextEdit's text property of
+    // that length: the scene then holds what a view shows, however long the
+    // document is.
+    static constexpr int LargeTextUnits = 10000;
 
     explicit Preview(QObject *parent = nullptr);
     ~Preview() override;
@@ -200,6 +215,7 @@ public:
 
     QAbstractItemModel *marks() const { return m_marks; }
     bool current() const { return m_current; }
+    bool late() const { return m_late; }
     bool canGoBack() const { return !m_trail.isEmpty(); }
     QString unresolved() const { return m_unresolved; }
     bool webPictures() const { return m_webPictures; }
@@ -306,6 +322,7 @@ signals:
     void remoteImagesChanged();
     void styleChanged();
     void currentChanged();
+    void lateChanged();
     void trailChanged();
     void unresolvedChanged();
     void webPicturesChanged();
@@ -342,6 +359,10 @@ private:
     void edited();
     void dialectChanged();
     void schedule(int delayMs);
+    // Reads the text once typing pauses, or once the first edit not read
+    // has waited MaxWaitMs.
+    void waitForPause();
+    void setLate(bool late);
     void parse();
     // Reads the document's parse of the text on the worker.
     void read(const ParsedTextPtr &parse);
@@ -360,6 +381,10 @@ private:
     void dropIslands(size_t index);
     void connectServices();
     void trimTop(QTextCursor &cursor);
+    // Has the surface draw only what is in view while its text is long.
+    void drawInView();
+    // Has the surface draw what is in view anew once the next frame is out.
+    void redrawAfterFrame();
 
     int startOf(size_t index) const;
     size_t sectionAt(int position) const;
@@ -424,6 +449,10 @@ private:
     QThreadPool m_pool;
     QTimer m_timer;
     QTimer m_release;
+    // Since the first edit that no read has begun with; invalid when none waits.
+    QElapsedTimer m_waiting;
+    QTimer m_lateTimer;
+    bool m_late = false;
     bool m_parsing = false;
     bool m_parseAgain = false;
     // Results of what was asked for another document, before a clear, or in
@@ -473,4 +502,9 @@ private:
     int m_stale = 0;
     qreal m_longestSlice = 0;
     bool m_refreshing = false;
+    // Where the first block in view started when the work began, and
+    // whether the work took it away.
+    int m_viewStart = -1;
+    bool m_viewRemoved = false;
+    QMetaObject::Connection m_frameSwapped;
 };

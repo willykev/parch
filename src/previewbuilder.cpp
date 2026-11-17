@@ -1533,10 +1533,14 @@ void Builder::note(const Part &part)
     flushMarker(flow);
     m_marker = nullptr;
     m_section.names.append({QStringLiteral("fn-%1").arg(note.number), start, -1});
-    // The way back to each place that refers to the note, after its text.
+    // The way back to each place that refers to the note, after its text;
+    // for a note referred to more often than anyone follows back, to the
+    // first places, and how many more there are, so that the note's
+    // paragraph stays a paragraph however long the document grows.
     if (m_options.interactive && note.references > 0) {
         if (m_out->cursor.block().length() <= 1) openBlock(flow, flow.size, 0, 0, nullptr, bodyChar(flow));
-        for (int i = 1; i <= note.references; ++i) {
+        const int shown = std::min(note.references, MaxWaysBack);
+        for (int i = 1; i <= shown; ++i) {
             Char back = bodyChar(flow);
             text(QStringLiteral(" "), back);
             back.ink = PreviewStyle::Link;
@@ -1544,6 +1548,11 @@ void Builder::note(const Part &part)
                                : QStringLiteral("#fnref-%1-%2").arg(note.number).arg(i);
             back.tip = tr("Back to the text");
             text(i == 1 ? QString(QChar(0x21a9)) : QChar(0x21a9) + QString::number(i), back);
+        }
+        if (note.references > shown) {
+            Char more = bodyChar(flow);
+            more.ink = PreviewStyle::Dim;
+            text(QStringLiteral(" ") + tr("and %1 more").arg(note.references - shown), more);
         }
     }
     raiseBottomMargin(m_style.gap() * 0.5);

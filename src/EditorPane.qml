@@ -83,6 +83,7 @@ Rectangle {
     // device-pixel ratios and uneven at fractional ones, where Qt's own
     // renderer is used instead.
     readonly property bool nativeRendering: Screen.devicePixelRatio % 1 === 0
+    readonly property bool softwareRendering: GraphicsInfo.api === GraphicsInfo.Software
 
     color: theme.background
 
@@ -387,6 +388,11 @@ Rectangle {
                     y: markY
                     width: markWidth
                     height: markHeight
+                    // Qt's software renderer, which draws pictures of the
+                    // window, draws a Shape past the edge of the view that
+                    // clips it: there only those in view are shown.
+                    visible: !pane.softwareRendering
+                             || (y + height >= flickable.contentY - editor.y && y <= flickable.contentY - editor.y + flickable.height)
 
                     ShapePath {
                         strokeColor: wave.markColor

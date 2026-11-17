@@ -322,63 +322,83 @@ Rectangle {
                     Accessible.description: kind === "heading" ? qsTr("Heading level %1").arg(level) : ""
                     Accessible.ignored: !spoken
 
-                    Rectangle {
-                        visible: mark.kind === "bar"
+                    // Only what this kind of mark draws is made; a heading
+                    // and a picture draw nothing.
+                    Loader {
                         anchors.fill: parent
-                        radius: width / 2
-                        color: preview.barColor
+                        sourceComponent: {
+                            switch (mark.kind) {
+                            case "bar": return quoteBar
+                            case "rule":
+                            case "notesRule": return rule
+                            case "pageBreak": return pageBreak
+                            case "island": return island
+                            default: return null
+                            }
+                        }
                     }
 
-                    Rectangle {
-                        visible: mark.kind === "rule" || mark.kind === "notesRule"
-                        width: parent.width
-                        height: Math.max(1, theme.controlBorderWidth)
-                        color: preview.ruleColor
+                    Component {
+                        id: quoteBar
+                        Rectangle {
+                            radius: width / 2
+                            color: preview.barColor
+                        }
+                    }
+
+                    Component {
+                        id: rule
+                        Item {
+                            Rectangle {
+                                width: parent.width
+                                height: Math.max(1, theme.controlBorderWidth)
+                                color: preview.ruleColor
+                            }
+                        }
                     }
 
                     // A page break is said quietly: on screen the text flows on.
-                    Item {
-                        visible: mark.kind === "pageBreak"
-                        anchors.fill: parent
+                    Component {
+                        id: pageBreak
+                        Item {
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width
+                                height: Math.max(1, theme.controlBorderWidth)
+                                color: preview.ruleColor
+                                opacity: 0.6
+                            }
 
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width
-                            height: Math.max(1, theme.controlBorderWidth)
-                            color: preview.ruleColor
-                            opacity: 0.6
-                        }
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: Math.min(parent.width, breakLabel.implicitWidth + theme.fontSize)
+                                height: parent.height
+                                color: theme.background
 
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: Math.min(parent.width, breakLabel.implicitWidth + theme.fontSize)
-                            height: parent.height
-                            color: theme.background
-
-                            Text {
-                                id: breakLabel
-                                anchors.fill: parent
-                                text: qsTr("Page break")
-                                textFormat: Text.PlainText
-                                font.family: theme.fontFamily
-                                font.pixelSize: theme.sizes.caption
-                                color: preview.dimColor
-                                elide: Text.ElideRight
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                Accessible.role: Accessible.StaticText
-                                Accessible.name: text
+                                Text {
+                                    id: breakLabel
+                                    anchors.fill: parent
+                                    text: qsTr("Page break")
+                                    textFormat: Text.PlainText
+                                    font.family: theme.fontFamily
+                                    font.pixelSize: theme.sizes.caption
+                                    color: preview.dimColor
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: text
+                                }
                             }
                         }
                     }
 
                     // A table, a code block or a formula: a document of its
                     // own, which scrolls sideways when it is wider than the column.
-                    Loader {
-                        anchors.fill: parent
-                        active: mark.kind === "island"
+                    Component {
+                        id: island
 
-                        sourceComponent: Rectangle {
+                        Rectangle {
                             id: box
                             objectName: "previewIsland"
 
@@ -514,22 +534,14 @@ Rectangle {
         }
     }
 
-    // A preview that has not caught up with the text for a moment says so,
-    // quietly, so that what it still shows is never taken for the text as
-    // it is now. A quick update never shows it.
+    // A preview that has been reading and setting the text for more than a
+    // moment without catching up says so, quietly, so that what it still
+    // shows is never taken for the text as it is now. A quick update never
+    // shows it, nor does the preview's wait for a pause in typing.
     Rectangle {
         id: behind
-        readonly property bool lagging: pane.active && pane.document !== null && !preview.current
-        property bool due: false
         readonly property real pad: Math.round(theme.fontSize / 3)
-        onLaggingChanged: {
-            due = false
-            if (lagging)
-                wait.restart()
-            else
-                wait.stop()
-        }
-        visible: due && lagging
+        visible: pane.active && pane.document !== null && preview.late
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.margins: Math.round(pane.margin / 2)
@@ -554,12 +566,6 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             Accessible.role: Accessible.StaticText
             Accessible.name: text
-        }
-
-        Timer {
-            id: wait
-            interval: 300
-            onTriggered: behind.due = behind.lagging
         }
     }
 

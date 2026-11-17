@@ -119,9 +119,11 @@ The first version: a native Markdown writing app for Omarchy.
   says why when pointed at, to assistive technology too: an include that
   cannot be read in (a cycle with its chain of files), and a variable, a
   reference, a footnote or a heading link that nothing defines.
-- The preview follows the text as you type, setting again only what changed,
-  and scrolls with it; a book of 100,000 words keeps up. A preview that has
-  not caught up after a moment says Updating….
+- The preview follows the text when you pause, and at least every three
+  quarters of a second while you type, setting again only what changed, and
+  scrolls with it; a book of 100,000 words keeps up without holding up the
+  keys you type. A preview that takes more than a moment to set the text
+  again says Updating….
 - It also follows the files the text uses: a picture, an included file, a
   bibliography or a `.csl` style changed on disk is shown changed, and only
   what uses it is set again.

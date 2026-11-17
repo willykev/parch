@@ -1,0 +1,13 @@
+#pragma once
+
+// The tests of what a frame holds: whatever the document's size, the editor
+// and the preview give the scene graph only what is in view or near it, and
+// keys typed beside the preview reach the screen without waiting for it.
+// ParchTests runs each of them as a test function of its own.
+namespace FrameTests {
+
+void adversarialEditsDrawOnlyNearTheView();
+void textIsDrawnWhereverTheViewGoes();
+void keysBesideThePreviewDoNotWaitForIt();
+
+} // namespace FrameTests

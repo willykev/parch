@@ -262,6 +262,10 @@ struct BuildOptions {
 
 class Builder {
 public:
+    // A note has a way back to each of the first this many places that
+    // refer to it, and says how many more there are.
+    static constexpr int MaxWaysBack = 100;
+
     Builder(const md::Document &document, const PreviewStyle &style, Resources *resources,
             const BuildOptions &options = {});
 

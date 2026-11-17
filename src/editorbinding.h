@@ -169,8 +169,9 @@ public:
     // The projection this view shows, once it shows the document.
     QTextDocument *textDocument() const;
     // The source from the first line in view to the last, which reach past
-    // the top and bottom of the view; empty while nothing is shown.
-    SourceRange visibleRange() const;
+    // the top and bottom of the view; empty while nothing is shown. With
+    // `around`, from that many view heights above the view to as many below.
+    SourceRange visibleRange(qreal around = 0) const;
 
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();

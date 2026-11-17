@@ -21,6 +21,7 @@
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QQuickTextDocument>
+#include <QQuickWindow>
 #include <QRegularExpression>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -265,6 +266,9 @@ Preview::Preview(QObject *parent)
     m_pool.setMaxThreadCount(1);
     m_timer.setSingleShot(true);
     connect(&m_timer, &QTimer::timeout, this, &Preview::parse);
+    m_lateTimer.setSingleShot(true);
+    m_lateTimer.setInterval(LateMs);
+    connect(&m_lateTimer, &QTimer::timeout, this, [this] { setLate(!m_current); });
     m_dirtyTimer.setSingleShot(true);
     connect(&m_dirtyTimer, &QTimer::timeout, this, &Preview::rebuildPictures);
     // Out of sight for a while, a preview lets go of what it built; shown
@@ -341,6 +345,7 @@ void Preview::setActive(bool active)
     emit activeChanged();
     if (!active) {
         m_timer.stop();
+        setLate(false);
         m_release.start();
         return;
     }
@@ -375,6 +380,7 @@ void Preview::setViewport(QQuickItem *viewport)
     if (viewport) {
         connect(viewport, SIGNAL(contentYChanged()), this, SLOT(viewMoved()));
         connect(viewport, &QQuickItem::heightChanged, this, &Preview::viewMoved);
+        connect(viewport, &QQuickItem::widthChanged, this, &Preview::viewMoved);
     }
     emit viewportChanged();
 }
@@ -427,6 +433,7 @@ void Preview::attach()
 {
     if (!m_text) return;
     preview::Builder::prepare(m_text);
+    drawInView();
     connect(m_surface, &QQuickItem::widthChanged, this, &Preview::columnChanged);
     m_column = m_surface->width();
     // The layout changes after the text does, and on its own when the
@@ -548,6 +555,8 @@ void Preview::clear()
 {
     ++m_generation;
     m_timer.stop();
+    m_waiting.invalidate();
+    setLate(false);
     m_dirtyTimer.stop();
     m_work.clear();
     m_dirty.clear();
@@ -580,8 +589,51 @@ void Preview::clear()
         m_refreshing = true;
         preview::Builder::prepare(m_text);
         m_refreshing = false;
+        drawInView();
     }
     setCurrent(false);
+}
+
+// Qt's TextEdit gives the scene graph the nodes of every block of its text
+// unless it observes its view, which it decides for itself only when its
+// text property is set; the surface is built through its document instead,
+// so the preview decides, as the editor's binding does. Observing, the
+// TextEdit makes nodes for the blocks in view, and makes them again as the
+// view moves on. It goes on observing while there is text, however short:
+// the blocks that were out of view have no nodes, and a TextEdit that has
+// stopped observing would not make them when they come into view.
+void Preview::drawInView()
+{
+    if (!m_surface || !m_text) return;
+    const bool observing = m_surface->flags().testFlag(QQuickItem::ItemObservesViewport);
+    if (!observing && m_text->characterCount() > LargeTextUnits)
+        m_surface->setFlag(QQuickItem::ItemObservesViewport, true);
+    else if (observing && m_text->isEmpty())
+        m_surface->setFlag(QQuickItem::ItemObservesViewport, false);
+}
+
+// Observing its view, Qt's TextEdit follows an edit by making nodes again
+// from the first of its nodes that the edit touched. An edit that takes
+// away the first block in view, as undoing a long paste where it is seen
+// does, leaves it no node to start from, and the frame after shows nothing
+// there; once that frame is out, the surface is drawn again from the start
+// of its text, as far as its view reaches.
+void Preview::redrawAfterFrame()
+{
+    QQuickWindow *window = m_surface ? m_surface->window() : nullptr;
+    if (!window || m_frameSwapped) return;
+    m_frameSwapped = connect(
+        window, &QQuickWindow::frameSwapped, this,
+        [this] {
+            disconnect(std::exchange(m_frameSwapped, {}));
+            if (!m_surface) return;
+            // A change of the colour of selected text has the TextEdit make
+            // all of its nodes again; the colour is back before it does.
+            const QColor colour = m_surface->property("selectedTextColor").value<QColor>();
+            m_surface->setProperty("selectedTextColor", QColor::fromRgba(colour.rgba() ^ 1));
+            m_surface->setProperty("selectedTextColor", colour);
+        },
+        Qt::QueuedConnection);
 }
 
 void Preview::setUnresolved(const QStringList &messages)
@@ -606,10 +658,34 @@ void Preview::setCurrent(bool current)
     emit currentChanged();
 }
 
+void Preview::setLate(bool late)
+{
+    if (!late) m_lateTimer.stop();
+    if (late == m_late) return;
+    m_late = late;
+    emit lateChanged();
+}
+
 void Preview::edited()
 {
     setCurrent(false);
-    if (m_active) schedule(UpdateDelayMs);
+    if (!m_waiting.isValid()) m_waiting.start();
+    if (m_active) waitForPause();
+}
+
+// Keys typed one after another are each drawn in a frame of their own,
+// without the preview's reading and setting of the text in it: the text is
+// read once typing pauses for PauseMs. While typing goes on, it is read at
+// the latest MaxWaitMs after the first edit no read has begun with, so that
+// the preview keeps up with the writer.
+void Preview::waitForPause()
+{
+    if (m_parsing) {
+        m_parseAgain = true;
+        return;
+    }
+    const qint64 left = m_waiting.isValid() ? std::max<qint64>(0, MaxWaitMs - m_waiting.elapsed()) : 0;
+    m_timer.start(int(std::min<qint64>(PauseMs, left)));
 }
 
 // The settings the document is read in changed: its Markdown profile, its
@@ -680,6 +756,9 @@ void Preview::parse()
     }
     m_parsing = true;
     m_parseAgain = false;
+    // This read takes in every edit so far; one that takes long says so.
+    m_waiting.invalidate();
+    if (!m_late && !m_lateTimer.isActive()) m_lateTimer.start();
     // The text as it is now, parsed for every view of the document: at
     // once when it is already, or else once it is.
     m_awaiting = true;
@@ -715,8 +794,9 @@ void Preview::failed(const QString &reason)
     if (m_backend)
         m_backend->reportProblem(tr("Preview not updated"),
                                  tr("The preview could not read “%1”: %2.").arg(m_document ? m_document->title() : QString(), why));
+    setLate(false);
     // What was asked meanwhile is read, from the text as it is then.
-    if (std::exchange(m_parseAgain, false) && m_active && m_document && m_text) m_timer.start(UpdateDelayMs);
+    if (std::exchange(m_parseAgain, false) && m_active && m_document && m_text) waitForPause();
 }
 
 void Preview::take(const Parsed &result)
@@ -726,10 +806,11 @@ void Preview::take(const Parsed &result)
         if (m_active && m_document && m_text) m_timer.start(0);
         return;
     }
-    // Never stale text over newer: the result is for the text as it is, or it is dropped.
+    // Never stale text over newer: the result is for the text as it is, or
+    // it is dropped and the text read again once typing allows.
     if (result.revision != m_document->buffer()->revision()) {
         ++m_stale;
-        m_timer.start(UpdateDelayMs);
+        waitForPause();
         return;
     }
     if (!m_failure.isEmpty()) {
@@ -737,7 +818,7 @@ void Preview::take(const Parsed &result)
         emit failureChanged();
     }
     plan(result);
-    if (again) m_timer.start(UpdateDelayMs);
+    if (again) waitForPause();
 }
 
 // Works out which sections go and which parts are built, leaving every
@@ -816,6 +897,10 @@ void Preview::removeSections(QTextCursor &cursor, size_t at, size_t count)
         dropIslands(i);
     }
     if (length > 0) {
+        // The first block in view goes, with what the surface drew of it.
+        if (m_viewStart > start - 1 && m_viewStart < start + length - 1 && m_surface
+            && m_surface->flags().testFlag(QQuickItem::ItemObservesViewport))
+            m_viewRemoved = true;
         // From the end of the block before to the end of the last block that
         // goes, so that the block after stays whole. Whichever format the
         // joined block is left with, the block before gets its own back.
@@ -890,6 +975,7 @@ void Preview::work()
     QElapsedTimer timer;
     timer.start();
     const TopAnchor top = captureTop();
+    m_viewStart = top.valid ? top.cursor.position() : -1;
     m_refreshing = true;
     {
         QTextCursor cursor(m_text);
@@ -922,6 +1008,8 @@ void Preview::work()
         cursor.endEditBlock();
     }
     m_refreshing = false;
+    drawInView();
+    if (std::exchange(m_viewRemoved, false)) redrawAfterFrame();
     restoreTop(top);
     refreshMarks();
     // Once the text is in, the surface lays it out, which takes longer than
@@ -963,6 +1051,7 @@ void Preview::trimTop(QTextCursor &cursor)
 
 void Preview::finishWork()
 {
+    setLate(false);
     m_shownRevision = m_planRevision;
     QSet<QString> pictures;
     for (const Section &section : m_shown)
@@ -1277,9 +1366,14 @@ void Preview::refreshMarks()
     // What is in view, and half a view either side of it.
     const qreal height = std::max<qreal>(viewHeight(), 200);
     const qreal top = viewTop() - height / 2, bottom = viewTop() + height * 1.5;
+    const qreal step = height / 2;
+    const qreal ruleTop = std::floor(top / step) * step, ruleBottom = std::ceil(bottom / step) * step;
     const size_t first = sectionAt(std::max(0, layout->hitTest(QPointF(0, std::max<qreal>(0, top)), Qt::FuzzyHit)));
     const size_t last = sectionAt(std::max(0, layout->hitTest(QPointF(0, std::max<qreal>(0, bottom)), Qt::FuzzyHit)));
     const qreal column = columnWidth();
+    // As far right as the view reaches: the bars of quotes nested deeper
+    // than that could not be seen.
+    const qreal right = m_viewport && m_surface ? m_viewport->width() - m_surface->x() : column;
     const qreal bar = std::max<qreal>(2, std::round(m_style.size / 7));
     QList<PreviewMarks::Row> rows;
     for (size_t i = first; i <= last && i < m_shown.size(); ++i) {
@@ -1319,7 +1413,7 @@ void Preview::refreshMarks()
                 row.text = mark.text;
                 break;
             }
-            if (row.rect.bottom() < top || row.rect.top() > bottom) continue;
+            if (row.rect.bottom() < top || row.rect.top() > bottom || row.rect.left() > right) continue;
             rows.append(row);
         }
         for (size_t k = 0; k < section.islands.size(); ++k) {
@@ -1335,15 +1429,22 @@ void Preview::refreshMarks()
                              : island.kind == Island::Math ? QStringLiteral("math")
                                                            : QStringLiteral("code");
             row.rect = QRectF(island.indent, blockRect(base + island.placeholder).top(), column - island.indent, state->height);
-            if (row.rect.bottom() < top || row.rect.top() > bottom) continue;
+            if (row.rect.bottom() < top || row.rect.top() > bottom || row.rect.left() > right) continue;
             row.text = island.description;
             row.wraps = island.wraps;
             row.contentWidth = state->size.width();
             row.contentHeight = state->size.height();
             row.centered = island.centered;
             row.tinted = island.tinted;
-            row.rules = state->rules;
-            row.headerRule = state->headerRule;
+            // A long table's lines near the view only, in steps of half a
+            // view, so that they are made again only every so often.
+            const qreal textTop = row.rect.top() + (island.tinted ? m_style.padding() : 0);
+            for (qsizetype rule = 0; rule < state->rules.size(); ++rule) {
+                const qreal y = textTop + state->rules.at(rule);
+                if (y < ruleTop || y > ruleBottom) continue;
+                if (rule == state->headerRule) row.headerRule = int(row.rules.size());
+                row.rules.append(state->rules.at(rule));
+            }
             row.position = base + island.placeholder;
             rows.append(row);
         }
@@ -1359,6 +1460,16 @@ void Preview::adopt(quint64 island, QQuickItem *textEdit)
     if (!quick) return;
     if (quick->textDocument() != state->document) quick->setTextDocument(state->document);
     state->view = textEdit;
+    // A long island is drawn only where it is in view, as the surface is.
+    // It scrolls sideways in a Flickable of its own, which passes the
+    // preview's view on to it by observing that view too.
+    const bool large = state->document->characterCount() > LargeTextUnits;
+    textEdit->setFlag(QQuickItem::ItemObservesViewport, large);
+    for (QQuickItem *outer = textEdit->parentItem(); outer && outer != m_surface; outer = outer->parentItem()) {
+        if (!outer->flags().testFlag(QQuickItem::ItemIsViewport)) continue;
+        outer->setFlag(QQuickItem::ItemObservesViewport, large);
+        break;
+    }
 }
 
 // --- Finding each other ------------------------------------------------------------------

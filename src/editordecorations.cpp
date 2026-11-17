@@ -671,10 +671,10 @@ void EditorDecorations::refreshWaves()
     std::vector<DecorationMarks::Mark> marks;
     if (ready() && !m_formatting && wavy()) {
         // The view and as much again above and below it, so that a scroll
-        // finds its underlines there already.
-        const SourceRange shown = visible();
-        const int length = sourceLength();
-        m_waveWindow = {qMax(0, shown.start - shown.length - 1), qMin(length, shown.start + 2 * shown.length + 1)};
+        // finds its underlines there already: as high as the view, however
+        // much or little text lies there.
+        const SourceRange near = m_binding->visibleRange(1);
+        m_waveWindow = {near.start, near.start + near.length};
         const QFont font = m_binding->editor()->property("font").value<QFont>();
         const QFontMetricsF metrics(font);
         const qreal pixels = font.pixelSize() > 0 ? font.pixelSize() : metrics.height();
@@ -691,15 +691,18 @@ void EditorDecorations::refreshWaves()
                 const int start = m_binding->sourceToEditor(span->start);
                 const int end = m_binding->sourceToEditor(span->end);
                 if (start < 0 || end < 0) continue;
-                // One mark for each line the span covers.
+                // One mark for each line the span covers, from the line
+                // it starts on, however long its paragraph is.
                 for (QTextBlock block = m_document->findBlock(start); block.isValid() && block.position() < end;
                      block = block.next()) {
                     QTextLayout *layout = block.layout();
                     if (!layout || layout->lineCount() == 0) continue;
                     const QPointF origin = documentLayout->blockBoundingRect(block).topLeft();
-                    for (int i = 0; i < layout->lineCount(); ++i) {
+                    const QTextLine first = layout->lineForTextPosition(qMax(0, start - block.position()));
+                    for (int i = first.isValid() ? first.lineNumber() : 0; i < layout->lineCount(); ++i) {
                         const QTextLine line = layout->lineAt(i);
                         const int lineStart = block.position() + line.textStart();
+                        if (lineStart >= end) break;
                         const int from = qMax(start, lineStart);
                         const int to = qMin(end, lineStart + line.textLength());
                         if (from >= to) continue;

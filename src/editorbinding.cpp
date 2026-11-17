@@ -1399,17 +1399,18 @@ void EditorBinding::keepCursorInView(qreal formerHeight)
 
 QTextDocument *EditorBinding::textDocument() const { return m_loaded ? m_textDocument.data() : nullptr; }
 
-SourceRange EditorBinding::visibleRange() const
+SourceRange EditorBinding::visibleRange(qreal around) const
 {
     if (!m_loaded) return {0, 0};
     QQuickItem *view = viewport();
     // Without a view that scrolls, the whole text is in view.
     if (!view) return {0, m_buffer->length()};
-    const qreal top = view->property("contentY").toReal() - m_editor->y();
+    const qreal margin = qMax<qreal>(0, around) * view->height();
+    const qreal top = view->property("contentY").toReal() - m_editor->y() - margin;
     int first = 0, last = 0;
     m_positionAt.invoke(m_editor, Q_RETURN_ARG(int, first), Q_ARG(qreal, 0), Q_ARG(qreal, qMax<qreal>(0, top)));
     m_positionAt.invoke(m_editor, Q_RETURN_ARG(int, last), Q_ARG(qreal, m_editor->width()),
-                        Q_ARG(qreal, qMax<qreal>(0, top + view->height())));
+                        Q_ARG(qreal, qMax<qreal>(0, top + view->height() + 2 * margin)));
     const int start = m_pairs.toSource(qMin(first, last));
     return {start, m_pairs.toSource(qMax(first, last)) - start};
 }

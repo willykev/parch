@@ -786,6 +786,21 @@ void previewBuildsNotesCitationsAndContents()
     QCOMPARE(ways.charFormat().anchorHref(), QStringLiteral("#fnref-1"));
     ways = built->find(QString(back) + QStringLiteral("2"));
     QCOMPARE(ways.charFormat().anchorHref(), QStringLiteral("#fnref-1-2"));
+    // A note referred to everywhere keeps the ways back to its first places
+    // and says how many more there are: its paragraph stays a paragraph.
+    {
+        QString everywhere;
+        const int places = preview::Builder::MaxWaysBack + 50;
+        for (int i = 0; i < places; ++i) everywhere += QStringLiteral("A place.[^n]\n\n");
+        const auto often = build(everywhere + QStringLiteral("[^n]: The note.\n"));
+        const QTextBlock note = often->blockOf(QStringLiteral("The note."));
+        QCOMPARE(note.text().count(back), preview::Builder::MaxWaysBack);
+        QVERIFY2(note.text().endsWith(QStringLiteral(" and 50 more")), qPrintable(note.text().right(40)));
+        QVERIFY(note.text().size() < 1000);
+        QCOMPARE(often->formatOf(QStringLiteral("and 50 more")).anchorHref(), QString());
+        QCOMPARE(often->find(QString(back) + QString::number(preview::Builder::MaxWaysBack)).charFormat().anchorHref(),
+                 QStringLiteral("#fnref-1-%1").arg(preview::Builder::MaxWaysBack));
+    }
     // Notes are set smaller than the text.
     QVERIFY(built->formatOf(QStringLiteral("The first note")).intProperty(QTextFormat::FontPixelSize) < 20);
     // The definitions themselves are not part of the text.
@@ -1297,7 +1312,7 @@ void viewsShowTheTextThePreviewOrBoth()
     QVERIFY(!w.previewPane->isVisible());
     QVERIFY(!divider->isVisible());
     QVERIFY(!w.preview->active());
-    QTest::qWait(Preview::UpdateDelayMs + 150);
+    QTest::qWait(Preview::PauseMs + 150);
     QCOMPARE(w.preview->updates(), 0);
     QCOMPARE(w.preview->textDocument()->blockCount(), 1);
 
@@ -1353,7 +1368,7 @@ void viewsShowTheTextThePreviewOrBoth()
     QCOMPARE(w.editorPane->mapToScene(QPointF(0, 0)).y(), readingTop);
     const int updates = w.preview->updates();
     w.document->buffer()->replace({2, 0}, QStringLiteral("x"));
-    QTest::qWait(Preview::UpdateDelayMs + 150);
+    QTest::qWait(Preview::PauseMs + 150);
     QCOMPARE(w.preview->updates(), updates);
     // Shown again, it shows the text as it is now.
     w.run("togglePreview");
@@ -1483,18 +1498,21 @@ void previewFollowsEditsWithoutRebuilding()
     QVERIFY(w.settled());
     QCOMPARE(int(w.preview->sections().size()), sections - 1);
 
-    // Steady typing is followed while it goes on, not only once it stops.
-    // The keys come as fast as the machine is given time to read between them.
+    // Steady typing is followed while it goes on, not only once it stops,
+    // though not key by key. The keys come as fast as the machine is given
+    // time to read between them.
     const int updatesBefore = w.preview->updates();
     QElapsedTimer typing;
     typing.start();
     int typed = 0;
-    while (typing.elapsed() < timeLimit(6 * Preview::UpdateDelayMs)) {
+    while (typing.elapsed() < timeLimit(3 * Preview::MaxWaitMs)) {
         w.document->buffer()->replace({0, 0}, QStringLiteral("x"), EditKind::Typing);
         ++typed;
         QTest::qWait(int(timeLimit(20)));
     }
     QVERIFY(w.preview->updates() - updatesBefore >= 2);
+    QVERIFY2(w.preview->updates() - updatesBefore <= typed / 8,
+             qPrintable(QStringLiteral("%1 updates for %2 keys").arg(w.preview->updates() - updatesBefore).arg(typed)));
     QVERIFY(w.settled());
     QVERIFY(w.lines().at(1).startsWith(QString(typed, u'x')));
 }
@@ -3634,7 +3652,7 @@ void focusModeDimsTheTextAlone()
     QVERIFY(decorations->focusing());
     QCOMPARE(w.editor->property("color").value<QColor>(),
              FocusMode::dimmed(theme.foreground(), theme.background(), FocusMode::Strength::Strong));
-    QTest::qWait(2 * Preview::UpdateDelayMs);
+    QTest::qWait(2 * Preview::PauseMs);
     QCOMPARE(w.surface->property("color").value<QColor>(), reading);
     QCOMPARE(w.preview->textDocument()->toHtml(), html);
     QCOMPARE(w.preview->sectionsBuilt(), built);
@@ -4092,7 +4110,7 @@ void documentSettingsReachThePreview()
     w.run("viewSource");
     QTRY_VERIFY(!w.previewPane->isVisible());
     QVERIFY(settings->setCitationStyle(w.document, QStringLiteral("document"), QStringLiteral("apa")));
-    QTest::qWait(2 * Preview::UpdateDelayMs);
+    QTest::qWait(2 * Preview::PauseMs);
     w.run("viewSplit");
     QTRY_VERIFY2(shows(QStringLiteral("as shown (Doe, 2006, p. 23) and ")), qPrintable(w.lines().join(u'|')));
     QVERIFY(w.settled());

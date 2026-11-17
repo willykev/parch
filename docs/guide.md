@@ -317,11 +317,12 @@ with `Tab` and press `Left` or `Right`, and `Home` to put it back in the
 middle. A window too narrow for both shows one at a time: **Markdown** and
 **Preview** above the text choose which, as does `Ctrl+Alt+E`.
 
-The preview follows the text a moment after you pause, and keeps up while you
-type. Only what changed is set again, so it stays where you were reading.
-While a long document takes more than a moment to set again, the preview
-keeps what it showed and says **Updating…** in its top corner until it has
-caught up. It follows the files the text uses as well: a picture, an included file, a
+The preview follows the text a moment after you pause, and while you keep
+typing it catches up at least every three quarters of a second, so that it
+does not hold up the keys you type. Only what changed is set again,
+so it stays where you were reading. While a long document takes more than a
+moment to set again, the preview keeps what it showed and says **Updating…**
+in its top corner until it has caught up. It follows the files the text uses as well: a picture, an included file, a
 bibliography or a `.csl` style changed on disk is shown changed without an
 edit, and only what uses it is set again.
 

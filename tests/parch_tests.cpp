@@ -37,6 +37,7 @@
 #include "outline.h"
 #include "markdown_tests.h"
 #include "previewtests.h"
+#include "frametests.h"
 #include "securitytests.h"
 #include "pathtext.h"
 #include "portalfilepicker.h"
@@ -804,6 +805,10 @@ private slots:
     void headingLinksAreFoundInTheSharedParse() { PreviewTests::headingLinksAreFoundInTheSharedParse(); }
     void webPicturesWaitUntilAsked() { PreviewTests::webPicturesWaitUntilAsked(); }
     void pathologicalBlocksStayCheapToLayOut() { PreviewTests::pathologicalBlocksStayCheapToLayOut(); }
+    // What a frame holds, written in frametests.cpp.
+    void adversarialEditsDrawOnlyNearTheView() { FrameTests::adversarialEditsDrawOnlyNearTheView(); }
+    void textIsDrawnWhereverTheViewGoes() { FrameTests::textIsDrawnWhereverTheViewGoes(); }
+    void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
     // What parch refuses to reach or write, written in securitytests.cpp.
     void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }
     void exportsAskBeforeReplacingALink() { SecurityTests::exportsAskBeforeReplacingALink(); }

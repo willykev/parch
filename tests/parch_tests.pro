@@ -24,6 +24,7 @@ HEADERS += \
     exporttests.h \
     librarytests.h \
     previewtests.h \
+    frametests.h \
     parsetests.h \
     stylingtests.h \
     rendertesting.h \
@@ -159,6 +160,7 @@ SOURCES += \
     exporttests.cpp \
     librarytests.cpp \
     previewtests.cpp \
+    frametests.cpp \
     parsetests.cpp \
     stylingtests.cpp \
     rendertesting.cpp \

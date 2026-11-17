@@ -18,6 +18,8 @@ TITLE = APP.capitalize()
 # The package's name, which differs from the app's where another package
 # already has that name.
 PACKAGE = re.search(r"^pkgname=(\S+)$", (ROOT / "pkgbuild/PKGBUILD").read_text(), re.M).group(1)
+# The packages' suffix, which the README's install command names.
+PACKAGE_SUFFIX = ".pkg.tar.zst"
 
 
 def run(*args, cwd=ROOT, env=None, capture=False):
@@ -80,7 +82,10 @@ def prepare(version, tag, commit):
     # build tree stays in dist/, which this user owns, rather than in /tmp.
     with tempfile.TemporaryDirectory(prefix=f"{APP}-release-", dir=output.parent) as scratch:
         shutil.copy(output / "PKGBUILD", scratch)
-        env = dict(os.environ, BUILDDIR=scratch, SRCDEST=str(output), PKGDEST=str(output))
+        # The README downloads <package>-<arch>.pkg.tar.zst, whatever compression
+        # this machine's makepkg.conf would choose.
+        env = dict(os.environ, BUILDDIR=scratch, SRCDEST=str(output), PKGDEST=str(output),
+                   PKGEXT=PACKAGE_SUFFIX)
         run("makepkg", "--cleanbuild", "--force", "--nodeps", "--noconfirm", cwd=scratch, env=env)
         checkout = Path(scratch) / "src" / f"{APP}-{version}"
         reported = run(str(checkout / f"build/{APP}"), "--version", capture=True)
@@ -97,7 +102,9 @@ def prepare(version, tag, commit):
             raise RuntimeError("makepkg did not produce the expected packages")
         # The package again under a name without its version, so that
         # releases/latest/download/<package>-<arch>.pkg.tar.zst always finds it.
-        stable = output / f"{PACKAGE}-{os.uname().machine}{''.join(packages[0].suffixes[-3:])}"
+        if not packages[0].name.endswith(PACKAGE_SUFFIX):
+            raise RuntimeError(f"makepkg wrote {packages[0].name}, not a {PACKAGE_SUFFIX} package")
+        stable = output / f"{PACKAGE}-{os.uname().machine}{PACKAGE_SUFFIX}"
         shutil.copyfile(packages[0], stable)
         packages.append(stable)
 

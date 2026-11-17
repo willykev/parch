@@ -14,6 +14,7 @@
 #include "paperdocument.h"
 #include "pdfexport.h"
 #include "pdfoutline.h"
+#include "previewresources.h"
 #include "previewstyle.h"
 #include "printportal.h"
 #include "printpreview.h"
@@ -927,10 +928,10 @@ void htmlCarriesItsPictures()
     QCOMPARE(readFile(folder.path() + QStringLiteral("/out/page_files/square.png")), readFile(folder.path() + QStringLiteral("/square.png")));
     QVERIFY(copied.written.contains(folder.path() + QStringLiteral("/out/page_files/square.png")));
     QVERIFY2(copied.limitations.isEmpty(), qPrintable(copied.limitations.join(u'\n')));
-    // Again: the folder an export made is replaced whole.
+    // Other files may have been put alongside the exported pictures.
     writeFile(folder.path() + QStringLiteral("/out/page_files/stale.png"), "stale");
     QVERIFY(html->write(loaded.document, recipeFor(loaded, QStringLiteral("html"), page), fakeRun(work)).ok);
-    QVERIFY(!QFileInfo::exists(folder.path() + QStringLiteral("/out/page_files/stale.png")));
+    QCOMPARE(readFile(folder.path() + QStringLiteral("/out/page_files/stale.png")), QByteArray("stale"));
     // A folder an export did not make is never replaced, and the page is not written.
     const QString theirs = folder.path() + QStringLiteral("/out/theirs.html");
     writeFile(folder.path() + QStringLiteral("/out/theirs_files/keep.txt"), "keep");
@@ -961,6 +962,127 @@ void htmlCarriesItsPictures()
     QVERIFY(link.limitations.contains(
         QStringLiteral("Math is written as its TeX source (2 formulas): the math helper (render-svg) is not installed")));
     QVERIFY(QString::fromUtf8(readFile(linked)).contains(QStringLiteral("<span class=\"math\">E = mc^2</span>")));
+}
+
+void exportFoldersKeepDocuments()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString document = dir.filePath("book.md");
+    const QByteArray picture = "![Square](square.png)\n";
+    writeFile(document, picture);
+    QImage square(8, 8, QImage::Format_RGB32);
+    square.fill(Qt::green);
+    QVERIFY(square.save(dir.filePath("square.png")));
+    for (const QString &format : {QStringLiteral("html"), QStringLiteral("md")}) {
+        const QString output = dir.filePath("result-" + format + u'.' + format);
+        const QString side = dir.filePath("result-" + format + "_files/");
+        writeFile(document, picture);
+        const auto publish = [&] {
+            const auto loaded = load(document);
+            return Exporters::find(format)->write(loaded.document, recipeFor(loaded, format, output, {{"images", "copy"}}), bareRun());
+        };
+        QVERIFY(publish().ok);
+        QCOMPARE(readFile(side + ".parch-export"), QByteArray("parch\n"));
+        const QByteArray chapter = "The second chapter.\n";
+        writeFile(side + "chapter.md", chapter);
+        writeFile(side + "square.png", "edited picture");
+        writeFile(document, picture + "\nresult-" + format.toUtf8() + "_files/chapter.md\n");
+        const ExportResult updated = publish();
+        QVERIFY2(updated.ok, qPrintable(updated.error));
+        QCOMPARE(readFile(side + "chapter.md"), chapter);
+        QCOMPARE(readFile(side + "square.png"), QByteArray("edited picture"));
+        QCOMPARE(readFile(side + "square-2.png"), readFile(dir.filePath("square.png")));
+        const QByteArray assembled = readFile(output);
+        QVERIFY(assembled.contains("The second chapter.") && assembled.contains("square-2.png"));
+        QVERIFY(!load(document).document.incomplete);
+    }
+}
+
+void exportsReadPicturesWithinTheirFolders()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString document = dir.filePath("library/chapters/one.md");
+    writeFile(document, "<img src=\"../square.png\" alt=\"Green &amp; blue\" width=\"8\" height=\"9\">\n\n"
+                        "![Elsewhere](other.png)\n");
+    const QString allowed = dir.filePath("library/square.png"), elsewhere = dir.filePath("sample.png");
+    QImage image(8, 9, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    QVERIFY(image.save(allowed));
+    image.fill(Qt::blue);
+    QVERIFY(image.save(elsewhere));
+    QVERIFY(QFile::link(elsewhere, dir.filePath("library/chapters/other.png")));
+    Dialect::Layer flags;
+    flags.libraryRoot = dir.filePath("library");
+    DocumentCheck::Loaded loaded;
+    QString error;
+    QVERIFY2(DocumentCheck::load(document, Dialect::choose(flags), &loaded, &error), qPrintable(error));
+    PreviewResources preview;
+    const auto target = md::classifyDestination(allowed, {});
+    const QStringList closedScope{dir.filePath("library/chapters")};
+    preview.image(target, allowed, loaded.document.resourceFolders);
+    preview.image(target, allowed, closedScope);
+    QTRY_COMPARE(preview.pending(), 0);
+    QCOMPARE(preview.image(target, allowed, loaded.document.resourceFolders).state, preview::Picture::Ready);
+    QCOMPARE(preview.image(target, allowed, closedScope).state, preview::Picture::Failed);
+    preview.reread(allowed);
+    QTRY_COMPARE(preview.pending(), 0);
+    QCOMPARE(preview.image(target, allowed, closedScope).state, preview::Picture::Failed);
+
+    const auto problems = DocumentCheck::problems(loaded);
+    QCOMPARE(std::count_if(problems.begin(), problems.end(), [](const DocumentCheck::Problem &p) {
+        return p.code == u"image-outside-folders";
+    }), 1);
+    const auto publish = [&](const QString &format, const QString &mode) {
+        const QString out = dir.filePath("output-" + mode + u'.' + format);
+        const auto recipe = recipeFor(loaded, format, out, mode.isEmpty() ? QHash<QString, QString>{}
+                                                                          : QHash<QString, QString>{{"images", mode}});
+        return Exporters::find(format)->write(loaded.document, recipe, bareRun());
+    };
+    const ExportResult html = publish("html", "embed");
+    QVERIFY2(html.ok, qPrintable(html.error));
+    const QByteArray page = readFile(html.written.first());
+    QVERIFY(page.contains(readFile(allowed).toBase64()));
+    QVERIFY(!page.contains(readFile(elsewhere).toBase64()));
+    QVERIFY(page.contains("alt=\"Green &amp; blue\"") && page.contains("width=\"8\"") && page.contains("height=\"9\""));
+    QVERIFY(!page.contains("src=\"other.png\""));
+    for (const QString &format : {QStringLiteral("md"), QStringLiteral("html")}) {
+        const auto copied = publish(format, "copy");
+        QVERIFY2(copied.ok, qPrintable(copied.error));
+        QCOMPARE(copied.written.size(), 2);
+        QCOMPARE(readFile(copied.written.last()), readFile(allowed));
+    }
+    const ExportResult epub = publish("epub", {});
+    QVERIFY2(epub.ok, qPrintable(epub.error));
+    const auto book = entriesOf(epub.written.first());
+    QCOMPARE(names(book).filter("OEBPS/images/"), QStringList{"OEBPS/images/square.png"});
+    QCOMPARE(entry(book, "OEBPS/images/square.png"), readFile(allowed));
+    QVERIFY(entry(book, "OEBPS/text.xhtml").contains("src=\"images/square.png\""));
+    const ExportResult docx = publish("docx", {});
+    QVERIFY2(docx.ok, qPrintable(docx.error));
+    QCOMPARE(names(entriesOf(docx.written.first())).filter("word/media/").size(), 1);
+}
+
+void exportCreationIsExclusive()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("output.html");
+    Exporters::PendingFile first(path, ExistingOutput::Refuse), second(path, ExistingOutput::Refuse);
+    Exporters::PendingFile illustrated(path, ExistingOutput::Refuse);
+    QString error;
+    QVERIFY2(illustrated.write("illustrated", &error), qPrintable(error));
+    QVERIFY2(first.write("first", &error), qPrintable(error));
+    QVERIFY2(second.write("second", &error), qPrintable(error));
+    QVERIFY2(second.commit(&error), qPrintable(error));
+    QVERIFY(!first.commit(&error));
+    bool publishedPictures = false;
+    QVERIFY(!illustrated.commit(&error, [&] { publishedPictures = true; return true; }));
+    QVERIFY(!publishedPictures);
+    QCOMPARE(readFile(path), QByteArray("second"));
+    QVERIFY(Exporters::writeFile(path, "replacement", &error, ExistingOutput::ReplaceFile));
+    QCOMPARE(readFile(path), QByteArray("replacement"));
 }
 
 void markdownExportsAssembledOrAsIs()

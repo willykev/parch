@@ -1919,7 +1919,7 @@ void Builder::image(const Node &node, const QString &destination, const QString 
     if (md::detail::isSafeUrl(destination, true)) target = md::classifyDestination(destination, base);
     Picture shown;
     shown.state = Picture::Failed;
-    if (m_resources && target.kind != md::Destination::Kind::Empty) shown = m_resources->image(target, destination);
+    if (m_resources && target.kind != md::Destination::Kind::Empty) shown = m_resources->image(target, destination, m_document.resourceFolders);
     uses(shown);
     anchor(node, 0);
     const QString label = alt.simplified();

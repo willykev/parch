@@ -61,7 +61,8 @@ struct Problem {
     Position position;
     md::Severity severity = md::Severity::Warning;
     // The engine's diagnostic code, or one of the checks made here:
-    // "unresolved-asset" (an image whose file is not there), "broken-link"
+    // "unresolved-asset" (a missing image), "image-outside-folders" (an image
+    // beyond the document's folders), "broken-link"
     // (a link to a file that is not there) and "broken-link-anchor" (a link
     // to a heading another Markdown file does not have); one of the
     // citation style's (DocumentCitations::Problem); or one of a formula's

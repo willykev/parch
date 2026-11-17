@@ -240,7 +240,7 @@ ExportResult PdfExporter::write(const md::Document &document, const ExportRecipe
         return result;
     }
     if (run.stopped()) return Exporters::cancelled();
-    if (!Exporters::writeFile(recipe.output, pdf, &result.error, recipe.replaceLink)) {
+    if (!Exporters::writeFile(recipe.output, pdf, &result.error, recipe.existing)) {
         result.ioFailure = true;
         return result;
     }

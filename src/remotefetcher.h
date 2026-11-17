@@ -33,11 +33,8 @@ public:
 // JPEG, GIF, WebP or SVG), at most MaxBytes of it, and the whole fetch,
 // redirects and all, gives up after TimeoutMs.
 //
-// The name a host was resolved by stays in Qt's host cache, which the
-// connection then uses, so that the addresses checked are those connected
-// to; a name whose answer changes within the cache's minute could still
-// lead elsewhere, which only connecting to the checked address itself
-// would rule out.
+// Each connection uses a checked numeric address. HTTP and TLS retain the
+// original host name, and relative redirects resolve against the original URL.
 class NetworkFetcher : public QObject, public RemoteFetcher {
     Q_OBJECT
 
@@ -63,6 +60,8 @@ public:
     void setProxy(const QNetworkProxy &proxy);
     void setTimeout(int milliseconds);
 
+    // The HTTP request for a checked address, with the origin's host and TLS identity.
+    static QNetworkRequest pictureRequest(const QUrl &url, const QHostAddress &address);
     // Whether parch fetches from an address: false for loopback, private
     // (RFC 1918, fc00::/7), link-local, shared (100.64.0.0/10), multicast,
     // broadcast, reserved and unspecified addresses, and for IPv6 addresses
@@ -78,7 +77,7 @@ private:
     struct Job;
     // Resolves the address's host and fetches it once every address is public.
     void visit(const std::shared_ptr<Job> &job, const QUrl &url);
-    void get(const std::shared_ptr<Job> &job, const QUrl &url);
+    void get(const std::shared_ptr<Job> &job, const QUrl &url, QList<QHostAddress> addresses);
     void finish(const std::shared_ptr<Job> &job, const QByteArray &data, const QString &error);
 
     QNetworkAccessManager m_network;

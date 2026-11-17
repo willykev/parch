@@ -47,6 +47,8 @@ struct ExportOption {
     double maximum = 0;
 };
 
+enum class ExistingOutput { Refuse, ReplaceFile, ReplaceLink };
+
 // What an export was asked to do, kept so that it can be done again the
 // same way: the document, the dialect it was read in, the format, its
 // options and where it went.
@@ -60,10 +62,8 @@ struct ExportRecipe {
     // The document's citations as its style formats them, read with the
     // document; none leaves the engine's own numbering.
     std::shared_ptr<const DocumentCitations::Formatted> citations;
-    // The output is a symbolic link the writer chose to replace: the link
-    // itself is replaced by the export, and what it leads to is left as it
-    // is. Otherwise a link at the output is refused (Exporters::writeFile).
-    bool replaceLink = false;
+    // CLI exports require a fresh output unless replacement was requested.
+    ExistingOutput existing = ExistingOutput::ReplaceFile;
 
     QJsonObject toJson() const;
 };
@@ -160,10 +160,10 @@ bool isSource(const md::Document &document, const QString &path);
 
 // Writes a whole file in one step: a temporary file beside it, made anew,
 // renamed over it. Never through a symbolic link: a link at `path` is
-// refused, saying where it leads (linkRefusal()), unless `replaceLink`,
+// refused, saying where it leads (linkRefusal()), unless ReplaceLink is requested,
 // when the link itself is replaced and what it leads to is left as it is.
 // A file replaced keeps its permissions.
-bool writeFile(const QString &path, const QByteArray &bytes, QString *error, bool replaceLink = false);
+bool writeFile(const QString &path, const QByteArray &bytes, QString *error, ExistingOutput existing = ExistingOutput::ReplaceFile);
 // Why an export does not write `path`: it is a symbolic link, "X is a link
 // to Y; parch never writes through a link". Empty when it is not one.
 QString linkRefusal(const QString &path);
@@ -173,18 +173,19 @@ QString linkRefusal(const QString &path);
 // commit() puts it in place. A file never committed is removed.
 class PendingFile {
 public:
-    PendingFile(const QString &path, bool replaceLink = false);
+    PendingFile(const QString &path, ExistingOutput existing = ExistingOutput::ReplaceFile);
     ~PendingFile();
     PendingFile(const PendingFile &) = delete;
     PendingFile &operator=(const PendingFile &) = delete;
     bool write(const QByteArray &bytes, QString *error);
-    bool commit(QString *error);
+    // Publish any accompanying pictures while concurrent commits in this folder wait.
+    bool commit(QString *error, const std::function<bool()> &publishPictures = {});
 
 private:
     bool fail(const QString &why, QString *error);
 
     QString m_path;
-    bool m_replaceLink = false;
+    ExistingOutput m_existing;
     int m_folder = -1;
     QByteArray m_name;
     QByteArray m_temporary;

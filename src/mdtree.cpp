@@ -597,6 +597,8 @@ Destination classifyDestination(const Document &document, const Node &linkOrImag
 {
     const int file = linkOrImage.file;
     const QString base = file >= 0 && file < int(document.files.size()) ? document.files[file].directory : QString();
+    if (linkOrImage.type == NodeType::HtmlElement)
+        return classifyDestination(linkOrImage.attribute(QLatin1StringView(linkOrImage.label == u"img" ? "src" : "href")), base);
     return classifyDestination(linkOrImage.dest, base);
 }
 

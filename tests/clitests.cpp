@@ -302,6 +302,7 @@ Ran runProcess(const Sandbox &box, const QStringList &arguments)
     // A GUI application could not start with this; the commands make none,
     // and an export makes one on Qt's offscreen platform.
     environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("no-such-platform"));
+    environment.insert(QStringLiteral("QT_QPA_PLATFORMTHEME"), QStringLiteral("gtk3"));
     QProcess process;
     process.setProcessEnvironment(environment);
     process.setWorkingDirectory(box.root());
@@ -586,6 +587,15 @@ void checkSaysWhatCannotBeRead()
     const Ran latin1 = box.run({QStringLiteral("check"), QStringLiteral("latin1.md")});
     QCOMPARE(latin1.code, 3);
     QVERIFY(latin1.err.contains(QStringLiteral("UTF-8")));
+
+    writeFile(box.path("truncated.md"), QByteArray("ending \xe2\x82"));
+    box.write("including.md", "truncated.md\n");
+    QCOMPARE(box.run({"check", "truncated.md"}).code, Cli::Io);
+    const Ran incomplete = box.run({"check", "including.md"});
+    QCOMPARE(incomplete.code, Cli::Problems);
+    QVERIFY2(incomplete.said().contains("UTF-8"), qPrintable(incomplete.said()));
+    QCOMPARE(box.run({"export", "including.md", "-o", "result.html"}).code, Cli::Problems);
+    QVERIFY(!QFileInfo::exists(box.path("result.html")));
 
     // Unreadable wins over problems found; the JSON says which is which.
     const Ran both = box.run({"check", "bad.md", "missing.md", "--json"});
@@ -941,8 +951,9 @@ void exportAssemblesMarkdown()
     QVERIFY(elsewhere.contains(QStringLiteral("[up](../book/main.md#book)")));
     // Remote links are not paths.
     QVERIFY(elsewhere.contains(QStringLiteral("[1]: https://example.org/root")));
-    // And the result checks clean where the source does.
-    QCOMPARE(box.run({"check", "out/book.md"}).code, box.run({"check", "book/main.md"}).code);
+    // The rebased pictures belong to the original folder. A shared library includes both.
+    QCOMPARE(box.run({"check", "out/book.md"}).code, Cli::Problems);
+    QCOMPARE(box.run({"check", "out/book.md", "--library", "."}).code, Cli::Ok);
 
     // The JSON report.
     const Ran report = box.run({"export", "book/main.md", "-o", "out/book.md", "--force", "--json"});
@@ -1595,7 +1606,7 @@ void exportNeverWritesThroughALink()
     QVERIFY(!Exporters::writeFile(link, "page", &error));
     QVERIFY2(error.contains(QStringLiteral("is a link to")) && error.contains(box.path(QStringLiteral("victim_rc"))),
              qPrintable(error));
-    QVERIFY(Exporters::writeFile(link, "page", &error, true));
+    QVERIFY(Exporters::writeFile(link, "page", &error, ExistingOutput::ReplaceLink));
     QVERIFY(!QFileInfo(link).isSymLink());
     QCOMPARE(box.read(QStringLiteral("repo/notes.html")), QByteArray("page"));
     QCOMPARE(box.read(QStringLiteral("victim_rc")), QByteArray("kept\n"));

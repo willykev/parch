@@ -395,7 +395,7 @@ void picturesAreReadSafely()
         destination.kind = md::Destination::Kind::LocalFile;
         destination.path = it.key();
         destination.absolute = true;
-        resources.image(destination, it.key());
+        resources.image(destination, it.key(), {base});
     }
     QTRY_COMPARE_WITH_TIMEOUT(resources.pending(), 0, 1000);
     for (auto it = expected.cbegin(); it != expected.cend(); ++it) {
@@ -403,7 +403,7 @@ void picturesAreReadSafely()
         destination.kind = md::Destination::Kind::LocalFile;
         destination.path = it.key();
         destination.absolute = true;
-        const preview::Picture picture = resources.image(destination, it.key());
+        const preview::Picture picture = resources.image(destination, it.key(), {base});
         QCOMPARE(picture.state, preview::Picture::Failed);
         QVERIFY2(picture.diagnostic.contains(it.value()), qPrintable(it.key() + u' ' + picture.diagnostic));
     }
@@ -1007,9 +1007,9 @@ void previewSurvivesAFailedRead()
     destination.kind = md::Destination::Kind::LocalFile;
     destination.path = root + QStringLiteral("/picture.png");
     destination.absolute = true;
-    resources.image(destination, destination.path);
+    resources.image(destination, destination.path, {root});
     QTRY_COMPARE(resources.pending(), 0);
-    const preview::Picture picture = resources.image(destination, destination.path);
+    const preview::Picture picture = resources.image(destination, destination.path, {root});
     QCOMPARE(picture.state, preview::Picture::Failed);
     QVERIFY2(picture.diagnostic.contains(outOfMemory), qPrintable(picture.diagnostic));
 }

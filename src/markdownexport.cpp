@@ -381,7 +381,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     if (recipe.options.contains(QStringLiteral("as-is"))) {
         result.limitations = limitations(document, recipe, {});
         const QString text = document.files.empty() ? QString() : document.files.front().text;
-        if (!Exporters::writeFile(recipe.output, text.toUtf8(), &result.error, recipe.replaceLink)) {
+        if (!Exporters::writeFile(recipe.output, text.toUtf8(), &result.error, recipe.existing)) {
             result.ioFailure = true;
             return result;
         }
@@ -397,7 +397,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     if (copy) {
         image = [&](const QString &path) {
             QString error;
-            const QString url = assets.file(path, &error);
+            const QString url = assets.file(path, document.resourceFolders, &error);
             if (url.isEmpty()) unread.append(QStringLiteral("%1 (%2)").arg(QFileInfo(path).fileName(), error));
             // The text gives the file's path, not its URL.
             return QUrl::fromPercentEncoding(url.toUtf8());
@@ -410,19 +410,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
                                       .arg(unread.join(QStringLiteral(", "))));
     if (run.stopped()) return Exporters::cancelled();
     // Nothing is written through a link, the folder of pictures included.
-    Exporters::PendingFile file(recipe.output, recipe.replaceLink);
-    if (!file.write(assembled.text.toUtf8(), &result.error)) {
-        result.ioFailure = true;
-        return result;
-    }
-    if (!assets.assets().isEmpty()) {
-        if (Exporters::isSource(document, folder) || !ExportWeb::replaceFolder(folder, assets.assets(), &result.error)) {
-            if (result.error.isEmpty()) result.error = QStringLiteral("%1 is one of the document's own files").arg(folder);
-            result.ioFailure = true;
-            return result;
-        }
-    }
-    if (!file.commit(&result.error)) {
+    if (!ExportWeb::writePage(recipe, assembled.text.toUtf8(), folder, assets, &result.error)) {
         result.ioFailure = true;
         return result;
     }

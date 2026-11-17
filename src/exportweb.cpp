@@ -9,9 +9,15 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMimeDatabase>
-#include <QRandomGenerator>
+#include <QScopeGuard>
+#include <QTemporaryDir>
 #include <QRegularExpression>
 #include <QUrl>
+#include <algorithm>
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ExportWeb {
 
@@ -43,6 +49,37 @@ QString safeName(const QString &name)
     return out.isEmpty() ? QStringLiteral("file") : out.left(80);
 }
 
+const QByteArray folderSignature("parch\n");
+enum class Entry { Missing, Same, Occupied, Unavailable };
+
+Entry compareEntry(int folder, const QByteArray &name, const QByteArray &bytes)
+{
+    struct stat existing {};
+    if (::fstatat(folder, name.constData(), &existing, AT_SYMLINK_NOFOLLOW) != 0)
+        return errno == ENOENT ? Entry::Missing : Entry::Unavailable;
+    if (!S_ISREG(existing.st_mode) || existing.st_size != bytes.size()) return Entry::Occupied;
+    const int fd = ::openat(folder, name.constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return Entry::Occupied;
+    const auto close = qScopeGuard([fd] { ::close(fd); });
+    struct stat state {};
+    if (::fstat(fd, &state) || !S_ISREG(state.st_mode) || state.st_size != bytes.size()) return Entry::Occupied;
+    QFile file;
+    if (!file.open(fd, QIODevice::ReadOnly)) return Entry::Occupied;
+    char buffer[16384];
+    for (qsizetype at = 0; at < bytes.size();) {
+        const qint64 count = file.read(buffer, sizeof buffer);
+        if (count <= 0 || count > bytes.size() - at || QByteArrayView(buffer, count) != QByteArrayView(bytes).sliced(at, count))
+            return Entry::Occupied;
+        at += count;
+    }
+    return file.read(buffer, 1) == 0 ? Entry::Same : Entry::Occupied;
+}
+
+int openFolder(const QString &path)
+{
+    return ::open(QFile::encodeName(QDir::cleanPath(path)).constData(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+}
+
 QString number(qreal value)
 {
     return QString::number(value, 'f', 4).remove(QRegularExpression(QStringLiteral("\\.?0+$")));
@@ -66,20 +103,23 @@ QString Assets::mediaType(const QByteArray &data, const QString &name)
     return {};
 }
 
-QString Assets::file(const QString &absolutePath, QString *error)
+QString Assets::file(const QString &absolutePath, const QStringList &folders, QString *error)
 {
-    if (m_mode == Mode::Link)
+    if (m_mode == Mode::Link) {
+        *error = SafeRead::pictureRefusal(absolutePath, folders);
+        if (!error->isEmpty()) return {};
         return QString::fromUtf8(QUrl::toPercentEncoding(Exporters::relativeTo(m_outputFolder, absolutePath), "/"));
+    }
     if (const auto known = m_byPath.constFind(absolutePath); known != m_byPath.cend()) return *known;
-    const SafeRead::Result read = SafeRead::read(absolutePath, SafeRead::PictureBytes);
+    const SafeRead::Result read = SafeRead::readPicture(absolutePath, folders);
     if (!read.ok) {
-        if (error) *error = read.error;
+        *error = read.error;
         return {};
     }
     const QByteArray &data = read.bytes;
     const QString type = mediaType(data, absolutePath);
     if (type.isEmpty()) {
-        if (error) *error = QStringLiteral("not a picture a page can show");
+        *error = QStringLiteral("not a picture a page can show");
         return {};
     }
     const QString url = place(data, type, QFileInfo(absolutePath).fileName());
@@ -103,8 +143,14 @@ QString Assets::place(const QByteArray &data, const QString &mediaType, const QS
     if (stem.isEmpty()) stem = QStringLiteral("picture");
     const QString suffix = suffixFor(mediaType);
     QString name = stem + u'.' + suffix;
-    for (int n = 2; std::any_of(m_assets.cbegin(), m_assets.cend(), [&](const Asset &a) { return a.name == name; }); ++n)
-        name = QStringLiteral("%1-%2.%3").arg(stem).arg(n).arg(suffix);
+    const int folder = m_mode == Mode::Copy ? openFolder(QDir(m_outputFolder).filePath(m_folder)) : -1;
+    const auto close = qScopeGuard([folder] { if (folder >= 0) ::close(folder); });
+    const bool managed = folder >= 0 && compareEntry(folder, kFolderMark, folderSignature) == Entry::Same;
+    const auto occupied = [&] {
+        return std::any_of(m_assets.cbegin(), m_assets.cend(), [&](const Asset &a) { return a.name == name; })
+               || (managed && compareEntry(folder, QFile::encodeName(name), data) == Entry::Occupied);
+    };
+    for (int n = 2; occupied(); ++n) name = QStringLiteral("%1-%2.%3").arg(stem).arg(n).arg(suffix);
     m_assets.append({name, mediaType, data});
     const QString url = m_folder + QString::fromUtf8(QUrl::toPercentEncoding(name));
     m_byHash.insert(hash, url);
@@ -148,50 +194,49 @@ QByteArray diagramSvg(const ExportPictures::Picture &picture)
     return {};
 }
 
-bool replaceFolder(const QString &target, const QList<Assets::Asset> &files, QString *error)
+static bool publishAssets(const QString &target, const QList<Assets::Asset> &files, QString *error)
 {
-    const QFileInfo info(target);
-    const QString mark = QString::fromLatin1(kFolderMark);
-    // A link is never followed: neither replaced nor emptied.
-    if (const QString why = Exporters::linkRefusal(target); !why.isEmpty()) {
-        *error = why;
-        return false;
-    }
-    if (info.exists() && (!info.isDir() || !QFileInfo::exists(target + u'/' + mark))) {
-        *error = QStringLiteral("%1 is already there and an export did not make it; parch leaves it alone").arg(target);
-        return false;
-    }
     if (files.isEmpty()) return true;
-    const QString tag = QString::number(QRandomGenerator::global()->generate(), 16);
-    const QString part = target + QStringLiteral(".part-") + tag;
-    QDir dir;
-    if (!dir.mkpath(part)) {
-        *error = QStringLiteral("cannot make the folder %1").arg(part);
-        return false;
-    }
     const auto fail = [&](const QString &why) {
-        QDir(part).removeRecursively();
         *error = why;
         return false;
     };
+    if (const QString why = Exporters::linkRefusal(target); !why.isEmpty()) return fail(why);
+    QTemporaryDir stage(QFileInfo(target).absolutePath() + QStringLiteral("/.parch-assets-XXXXXX"));
+    const QString part = stage.filePath(QStringLiteral("files"));
+    if (!stage.isValid() || !QDir().mkdir(part)) return fail(QStringLiteral("cannot stage pictures for %1").arg(target));
+    const auto stageFile = [&](const QString &name, const QByteArray &bytes) {
+        QFile file(part + u'/' + name);
+        return file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write(bytes) == bytes.size() && file.flush();
+    };
+    for (const Assets::Asset &asset : files)
+        if (!stageFile(asset.name, asset.bytes)) return fail(QStringLiteral("cannot write picture %1").arg(asset.name));
+    if (!stageFile(QString::fromLatin1(kFolderMark), folderSignature)) return fail(QStringLiteral("cannot mark %1").arg(target));
+
+    if (::renameat2(AT_FDCWD, QFile::encodeName(part).constData(), AT_FDCWD, QFile::encodeName(target).constData(),
+                    RENAME_NOREPLACE) == 0) return true;
+    if (errno != EEXIST && errno != ENOTEMPTY) return fail(QStringLiteral("cannot install pictures in %1").arg(target));
+
+    const int folder = openFolder(target);
+    const auto close = qScopeGuard([folder] { if (folder >= 0) ::close(folder); });
+    if (folder < 0 || compareEntry(folder, kFolderMark, folderSignature) != Entry::Same)
+        return fail(QStringLiteral("%1 is already there and an export did not make it").arg(target));
     for (const Assets::Asset &asset : files) {
-        QFile file(part + u'/' + asset.name);
-        if (!file.open(QIODevice::WriteOnly) || file.write(asset.bytes) != asset.bytes.size() || !file.flush())
-            return fail(QStringLiteral("cannot write %1: %2").arg(file.fileName(), file.errorString()));
+        const QByteArray name = QFile::encodeName(asset.name);
+        const QByteArray staged = QFile::encodeName(part + u'/' + asset.name);
+        if (::renameat2(AT_FDCWD, staged.constData(), folder, name.constData(), RENAME_NOREPLACE) == 0) continue;
+        if (errno == EEXIST && compareEntry(folder, name, asset.bytes) == Entry::Same) continue;
+        return fail(QStringLiteral("cannot install %1 in %2 without replacing an existing file").arg(asset.name, target));
     }
-    QFile marker(part + u'/' + mark);
-    if (!marker.open(QIODevice::WriteOnly) || marker.write("parch\n") != 6 || !marker.flush())
-        return fail(QStringLiteral("cannot write %1").arg(marker.fileName()));
-    marker.close();
-    const QString old = target + QStringLiteral(".old-") + tag;
-    const bool had = info.exists();
-    if (had && !dir.rename(target, old)) return fail(QStringLiteral("cannot replace %1").arg(target));
-    if (!dir.rename(part, target)) {
-        if (had) dir.rename(old, target);
-        return fail(QStringLiteral("cannot replace %1").arg(target));
-    }
-    if (had) QDir(old).removeRecursively();
     return true;
+}
+
+bool writePage(const ExportRecipe &recipe, const QByteArray &page, const QString &folder, const Assets &assets, QString *error)
+{
+    Exporters::PendingFile file(recipe.output, recipe.existing);
+    if (!file.write(page, error)) return false;
+    if (assets.assets().isEmpty()) return file.commit(error);
+    return file.commit(error, [&] { return publishAssets(folder, assets.assets(), error); });
 }
 
 } // namespace ExportWeb

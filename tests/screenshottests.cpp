@@ -34,6 +34,7 @@
 #include <QStyleHints>
 #include <QTemporaryDir>
 #include <QTest>
+#include <unistd.h>
 
 namespace ScreenshotTests {
 namespace {
@@ -589,6 +590,17 @@ void namesWhatCannotBeDone()
     QVERIFY(root.isValid());
     const QString file = root.filePath(QStringLiteral("notes.md"));
     writeFile(file, "# Notes\n");
+    const QString hard = root.filePath("second.md"), sym = root.filePath("link.md");
+    QVERIFY(::link(QFile::encodeName(file).constData(), QFile::encodeName(hard).constData()) == 0);
+    QVERIFY(QFile::link(file, sym));
+    for (const QString &option : {QStringLiteral("--screenshot"), QStringLiteral("--benchmark")}) {
+        for (const QString &out : {file, hard, sym}) {
+            const Ran same = runParch(root.path(), {option, out, file});
+            QCOMPARE(same.code, 1);
+            QVERIFY2(same.said.contains("input document"), qPrintable(same.said));
+            QCOMPARE(readFile(file), QByteArray("# Notes\n"));
+        }
+    }
     // A folder that is not there is said before any window.
     const Ran missing = runParch(root.path(), {QStringLiteral("--screenshot"), QStringLiteral("no-such/shot.png"), file});
     QCOMPARE(missing.code, 1);

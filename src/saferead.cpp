@@ -1,6 +1,9 @@
 #include "saferead.h"
 
+#include "mdinclude.h"
+
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QScopeGuard>
@@ -94,7 +97,16 @@ bool readDescriptor(int descriptor, qint64 limit, QByteArray &bytes, QString &er
     return true;
 }
 
-Result read(const QString &path, qint64 limit)
+namespace {
+
+QString outsideFolders(const QString &canonical, const QStringList &folders)
+{
+    for (const QString &folder : folders)
+        if (md::isWithin(canonical, folder)) return {};
+    return tr("it is outside the document's folder and library");
+}
+
+Result readFile(const QString &path, qint64 limit, const QStringList *folders)
 {
     Result result;
     if (path.isEmpty()) {
@@ -111,7 +123,9 @@ Result read(const QString &path, qint64 limit)
             result.error = result.missing ? systemError(ENOENT) : tr("it is a folder");
             return result;
         }
-        result.canonicalPath = path;
+        result.canonicalPath = QDir::cleanPath(path);
+        if (folders) result.error = outsideFolders(result.canonicalPath, *folders);
+        if (!result.error.isEmpty()) return result;
         result.size = file.size();
         if (result.size > limit) {
             result.tooLarge = true;
@@ -153,6 +167,8 @@ Result read(const QString &path, qint64 limit)
                                                       : systemPathReason(result.canonicalPath);
         return result;
     }
+    if (folders) result.error = outsideFolders(result.canonicalPath, *folders);
+    if (!result.error.isEmpty()) return result;
     if (S_ISDIR(state.st_mode)) {
         result.error = tr("it is a folder");
         return result;
@@ -176,6 +192,26 @@ Result read(const QString &path, qint64 limit)
     result.size = result.bytes.size();
     result.ok = true;
     return result;
+}
+
+} // namespace
+
+Result read(const QString &path, qint64 limit)
+{
+    return readFile(path, limit, nullptr);
+}
+
+Result readPicture(const QString &path, const QStringList &folders)
+{
+    return readFile(path, PictureBytes, &folders);
+}
+
+QString pictureRefusal(const QString &path, const QStringList &folders)
+{
+    QString canonical = QFileInfo(path).canonicalFilePath();
+    if (canonical.isEmpty()) canonical = QDir::cleanPath(path);
+    if (isSystemPath(canonical)) return systemPathReason(canonical);
+    return outsideFolders(canonical, folders);
 }
 
 } // namespace SafeRead

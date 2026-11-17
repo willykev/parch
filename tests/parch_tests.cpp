@@ -397,6 +397,9 @@ private slots:
     void exportDocxOpensInLibreOffice() { ExportTests::docxOpensInLibreOffice(); }
     void exportEpubFollowsTheContainerRules() { ExportTests::epubFollowsTheContainerRules(); }
     void exportEpubSplitsIntoChapters() { ExportTests::epubSplitsIntoChapters(); }
+    void exportFoldersKeepDocuments() { ExportTests::exportFoldersKeepDocuments(); }
+    void exportsReadPicturesWithinTheirFolders() { ExportTests::exportsReadPicturesWithinTheirFolders(); }
+    void exportCreationIsExclusive() { ExportTests::exportCreationIsExclusive(); }
     void exportHtmlCarriesItsPictures() { ExportTests::htmlCarriesItsPictures(); }
     void exportMarkdownAssembledOrAsIs() { ExportTests::markdownExportsAssembledOrAsIs(); }
     void exportsListLimitationsBeforeWriting() { ExportTests::exportsListLimitationsBeforeWriting(); }
@@ -814,6 +817,7 @@ private slots:
     void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
     void newWidthsMoveEachViewOnce() { FrameTests::newWidthsMoveEachViewOnce(); }
     // What parch refuses to reach or write, written in securitytests.cpp.
+    void webPictureRequestsKeepTheirHost() { SecurityTests::webPictureRequestsKeepTheirHost(); }
     void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }
     void exportsAskBeforeReplacingALink() { SecurityTests::exportsAskBeforeReplacingALink(); }
     void parchKeepsItsFilesToItself() { SecurityTests::parchKeepsItsFilesToItself(); }
@@ -1014,6 +1018,8 @@ private slots:
     void movesRewriteRelativeReferences();
     void renamingAnOpenDocumentKeepsItsIdentity();
     void movingADocumentUpdatesTheLinksToIt();
+    void closedLinkUpdatesRequireHistory();
+    void crossDeviceMovesKeepChangedSources();
     void undoTakesAMoveAndItsLinkUpdatesBack();
     void aMoveCanLeaveItsLinksOrNotHappen();
     void movingAFolderTakesItsDocumentsAlong();
@@ -17456,6 +17462,57 @@ void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
     waiting.relocate(f.file(QStringLiteral("Folder")), f.file(QStringLiteral("Moved")));
     QCOMPARE(waiting.viewState(0).path, f.file(QStringLiteral("Moved/x.md")));
     QCOMPARE(waiting.viewState(1).path, f.file(QStringLiteral("other.md")));
+}
+
+void ParchTests::closedLinkUpdatesRequireHistory()
+{
+    OrganizerFixture f;
+    const QString index = f.file("index.md"), alias = f.base + "/other-name.md";
+    const QByteArray original = "[Plan](plan.md)\n";
+    writeFile(index, original);
+    QVERIFY(::link(QFile::encodeName(index).constData(), QFile::encodeName(alias).constData()) == 0);
+    writeFile(f.file("plan.md"), "Plan\n");
+    const QString id = f.backend->store()->documentIdFor(index);
+    writeFile(f.paths.history() + u'/' + id, "occupied");
+    f.organizer()->rename(f.file("plan.md"), "later.md");
+    QTRY_VERIFY(!f.organizer()->review().isEmpty());
+    f.organizer()->confirmMove(true);
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(QFile::exists(f.file("later.md")));
+    QCOMPARE(readFile(index), original);
+    QCOMPARE(readFile(alias), original);
+}
+
+void ParchTests::crossDeviceMovesKeepChangedSources()
+{
+    OrganizerFixture f;
+    struct stat original {};
+    QVERIFY(::stat(QFile::encodeName(f.library).constData(), &original) == 0);
+    std::unique_ptr<QTemporaryDir> other;
+    for (const QString &folder : {QCoreApplication::applicationDirPath(), QStringLiteral("/dev/shm")}) {
+        struct stat location {};
+        if (::stat(QFile::encodeName(folder).constData(), &location) || location.st_dev == original.st_dev) continue;
+        other = std::make_unique<QTemporaryDir>(folder + "/parch-move-XXXXXX");
+        if (other->isValid()) break;
+    }
+    if (!other || !other->isValid()) QSKIP("Needs two writable filesystems");
+    f.backend->settings()->setLibraryFolders({f.library, other->path()});
+    const QString file = f.file("sample.bin"), target = other->filePath("sample.bin");
+    writeFile(file, "complete");
+    f.organizer()->move(file, other->path());
+    QCOMPARE(readFile(target), QByteArray("complete"));
+    QVERIFY(!QFileInfo::exists(file));
+    QVERIFY(QFile::remove(target));
+    writeFile(file, "first version");
+    DiskFile::setBeforeNaming([&](const QString &path) {
+        if (path == target) writeFile(file, "edited during copy");
+    });
+    const auto restore = qScopeGuard([] { DiskFile::setBeforeNaming({}); });
+    QSignalSpy refused(f.organizer(), &FileOrganizer::problem);
+    f.organizer()->move(file, other->path());
+    QCOMPARE(refused.count(), 1);
+    QCOMPARE(readFile(file), QByteArray("edited during copy"));
+    QCOMPARE(readFile(target), QByteArray("first version"));
 }
 
 void ParchTests::movingADocumentUpdatesTheLinksToIt()

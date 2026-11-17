@@ -469,7 +469,7 @@ void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr 
         recipe.dialect = reading->dialect;
         recipe.options = options;
         recipe.citations = std::shared_ptr<const DocumentCitations::Formatted>(read, &read->formatted);
-        recipe.replaceLink = job->replaceLink;
+        recipe.existing = job->replaceLink ? ExistingOutput::ReplaceLink : ExistingOutput::ReplaceFile;
         ExportRun run;
         run.cancelled = [job] { return job->cancelled.load(); };
         run.progress = [job](qreal done, const QString &step) {

@@ -6,11 +6,13 @@
 #include "documentreading.h"
 #include "documentstore.h"
 #include "editorbinding.h"
+#include "exporter.h"
 #include "markdownstyling.h"
 #include "mdinclude.h"
 #include "mdtree.h"
 #include "preview.h"
 #include "recovery.h"
+#include "saferead.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "spellchecker.h"
@@ -33,7 +35,6 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
-#include <QSaveFile>
 #include <QSGRendererInterface>
 #include <QScreen>
 #include <QStyleHints>
@@ -472,7 +473,9 @@ QStringList Benchmark::filesRead(const QString &file)
         if (!written.isEmpty() && node.file >= 0 && size_t(node.file) < reading.document.files.size()) {
             const md::Destination target =
                 md::classifyDestination(written, reading.document.files[size_t(node.file)].directory);
-            if (target.kind == md::Destination::Kind::LocalFile && target.absolute) files.append(target.path);
+            if (target.kind == md::Destination::Kind::LocalFile && target.absolute
+                && SafeRead::pictureRefusal(target.path, reading.document.resourceFolders).isEmpty())
+                files.append(target.path);
         }
         for (const md::Node &child : node.children) walk(child);
     };
@@ -889,9 +892,9 @@ void Benchmark::plan()
         m_out["helperProcesses"] = usage(RUSAGE_CHILDREN);
         m_out["pssEndWithOwnedMiB"] =
             m_out["pssEndMiB"].toDouble() + m_out["ownedProcessesEnd"].toObject()["pssMiB"].toDouble();
-        QSaveFile file(m_output);
-        if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(m_out).toJson()) < 0 || !file.commit()) {
-            fail(tr("cannot write %1: %2").arg(m_output, file.errorString()));
+        QString error;
+        if (!Exporters::writeFile(m_output, QJsonDocument(m_out).toJson(), &error)) {
+            fail(error);
             return;
         }
         m_done = true;

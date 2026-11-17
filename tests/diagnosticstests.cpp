@@ -500,7 +500,7 @@ class WaitingResources : public preview::Resources {
 public:
     preview::Picture math(const QString &tex, bool, qreal) override { return waiting(QStringLiteral("math/") + tex); }
     preview::Picture diagram(const QString &source) override { return waiting(QStringLiteral("diagram/") + source); }
-    preview::Picture image(const md::Destination &, const QString &written) override
+    preview::Picture image(const md::Destination &, const QString &written, const QStringList &) override
     {
         return waiting(QStringLiteral("image/") + written);
     }

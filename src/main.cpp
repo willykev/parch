@@ -39,9 +39,23 @@
 #include <QUrl>
 #include <memory>
 #include <optional>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
+
+bool namesInput(const QString &output, const QStringList &inputs)
+{
+    struct stat target {};
+    const bool exists = ::stat(QFile::encodeName(output).constData(), &target) == 0;
+    for (const QString &input : inputs) {
+        if (QDir::cleanPath(input) == QDir::cleanPath(output)) return true;
+        struct stat source {};
+        if (exists && ::stat(QFile::encodeName(input).constData(), &source) == 0
+            && source.st_dev == target.st_dev && source.st_ino == target.st_ino) return true;
+    }
+    return false;
+}
 
 // Shows a file selected in its folder, through the file manager's
 // org.freedesktop.FileManager1 service, without waiting for its answer.
@@ -91,6 +105,7 @@ int main(int argc, char *argv[])
         std::unique_ptr<QCoreApplication> application;
         if (launch.commandArguments.value(1) == u"export") {
             qputenv("QT_QPA_PLATFORM", "offscreen");
+            qputenv("QT_QPA_PLATFORMTHEME", "generic");
             application = std::make_unique<QGuiApplication>(argc, argv);
         } else {
             application = std::make_unique<QCoreApplication>(argc, argv);
@@ -121,6 +136,8 @@ int main(int argc, char *argv[])
     Picture picture = launch.picture;
     if (picturing) {
         picture.file = QDir::current().absoluteFilePath(picture.file);
+        if (namesInput(picture.file, files))
+            return refused(QCoreApplication::translate("main", "%1 is an input document").arg(picture.file));
         if (!QFileInfo(QFileInfo(picture.file).absolutePath()).isDir())
             return refused(QCoreApplication::translate("main", "there is no folder for %1").arg(picture.file));
     }
@@ -165,6 +182,8 @@ int main(int argc, char *argv[])
         if (files.size() != 1)
             return refused(QCoreApplication::translate("main", "--benchmark measures exactly one FILE"));
         benchmarkOutput = QDir::current().absoluteFilePath(launch.benchmarkOutput);
+        if (namesInput(benchmarkOutput, files))
+            return refused(QCoreApplication::translate("main", "%1 is an input document").arg(benchmarkOutput));
         if (!QFileInfo(QFileInfo(benchmarkOutput).absolutePath()).isDir())
             return refused(QCoreApplication::translate("main", "there is no folder for %1").arg(benchmarkOutput));
         scratchRoot.emplace(QDir::tempPath() + QStringLiteral("/parch-benchmark-XXXXXX"));

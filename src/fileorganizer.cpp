@@ -40,6 +40,12 @@ bool entryAt(const QString &path, struct stat *state = nullptr)
     return there;
 }
 
+bool sameFileState(const struct stat &a, const struct stat &b)
+{
+    return a.st_dev == b.st_dev && a.st_ino == b.st_ino && a.st_size == b.st_size
+           && a.st_ctim.tv_sec == b.st_ctim.tv_sec && a.st_ctim.tv_nsec == b.st_ctim.tv_nsec;
+}
+
 // Renames without replacing anything at the new name; 0, or the error.
 int renameWithoutReplacing(const QString &from, const QString &to)
 {
@@ -412,17 +418,31 @@ bool FileOrganizer::perform(const Plan &plan)
     if (error == EXDEV && S_ISREG(state.st_mode)) {
         // Another file system: the file is copied there, and the original
         // goes only once the copy is in place.
-        QFile source(plan.from);
-        if (!source.open(QIODevice::ReadOnly)) return refuse(tr("“%1” could not be read: %2").arg(name, source.errorString()));
+        QFile source;
+        const int fd = ::open(QFile::encodeName(plan.from).constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) return refuse(tr("“%1” could not be read: %2").arg(name, systemError(errno)));
+        if (!source.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+            ::close(fd);
+            return refuse(tr("“%1” could not be read: %2").arg(name, source.errorString()));
+        }
+        struct stat opened {};
+        if (::fstat(fd, &opened) || !sameFileState(state, opened))
+            return refuse(tr("“%1” changed before it could be copied.").arg(name));
         const QByteArray bytes = source.readAll();
+        if (source.error() != QFileDevice::NoError || bytes.size() != opened.st_size)
+            return refuse(tr("“%1” could not be read in full. The original was kept.").arg(name));
         const SaveResult made = DiskFile::create(plan.to, bytes, state.st_mode & 07777);
         if (made.status == SaveStatus::Conflict) error = EEXIST;
         else if (made.status != SaveStatus::Saved)
             return refuse(tr("“%1” could not be copied to “%2”: %3").arg(name, shownName(PathText::folderOf(plan.to)), made.error));
-        else if (::unlink(QFile::encodeName(plan.from).constData()) != 0) {
-            error = errno;
-            ::unlink(QFile::encodeName(plan.to).constData());
-        } else {
+        else {
+            if (DiskFile::fingerprint(plan.to, made.version) != made.version)
+                return refuse(tr("The copy of “%1” changed. The original was kept.").arg(name));
+            struct stat current {};
+            if (!entryAt(plan.from, &current) || !sameFileState(opened, current))
+                return refuse(tr("“%1” changed during the copy. Both files were kept.").arg(name));
+            if (::unlink(QFile::encodeName(plan.from).constData()) != 0)
+                return refuse(tr("“%1” was copied, but its original could not be removed: %2").arg(name, systemError(errno)));
             error = 0;
             copied = made.version;
         }
@@ -526,9 +546,18 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString
         QString text = loaded.text;
         text.replace(edit.range.start, edit.range.length, edit.text);
         // What the file held stays in its history, from where it can come back.
-        if (history) history->captureUnlessNewest(file.documentId, loaded.originalBytes, History::Reason::Links);
-        const SaveResult saved = DiskFile::save(file.path, DiskFile::encode(text, loaded.convention), loaded.version,
-                                                [](const QByteArray &, QString *) { return true; });
+        History::CaptureStatus status = History::CaptureStatus::Failed;
+        if (history) history->captureUnlessNewest(file.documentId, loaded.originalBytes, History::Reason::Links, &status);
+        if (status != History::CaptureStatus::Recorded && status != History::CaptureStatus::Held) {
+            done.failed << PathText::fileName(file.path);
+            continue;
+        }
+        const auto keep = [&](const QByteArray &current, QString *why) {
+            if (current == loaded.originalBytes) return true;
+            *why = tr("The file changed after its version was kept.");
+            return false;
+        };
+        const SaveResult saved = DiskFile::save(file.path, DiskFile::encode(text, loaded.convention), loaded.version, keep);
         if (saved.status != SaveStatus::Saved) {
             done.failed << PathText::fileName(file.path);
             continue;

@@ -370,7 +370,7 @@ ExportResult EpubExporter::write(const md::Document &document, const ExportRecip
                                       .arg(Exporters::count(counts.pageBreaks, QStringLiteral("page break"),
                                                             QStringLiteral("page breaks"))));
     result.renderers.insert(QStringLiteral("epub"), QStringLiteral("parch " PARCH_VERSION));
-    if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.replaceLink)) {
+    if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.existing)) {
         result.ioFailure = true;
         return result;
     }

@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 
 // Reading a file that a document names, or that is in a library: the
 // document itself, an included file, a bibliography, a citation style or
@@ -44,6 +45,10 @@ struct Result {
 
 // Reads the file at the path, refusing it, with the reason, as above.
 Result read(const QString &path, qint64 limit);
+Result readPicture(const QString &path, const QStringList &folders);
+// Checks a picture reference for diagnostics and links. Reads check the
+// opened descriptor as well, before consuming any bytes.
+QString pictureRefusal(const QString &path, const QStringList &folders);
 
 // Reads at most `limit` bytes from an open descriptor, in pieces, from where
 // it stands to its end. False, with the reason, when more is there than the

@@ -207,7 +207,7 @@ public:
         return picture;
     }
 
-    preview::Picture image(const md::Destination &destination, const QString &written) override
+    preview::Picture image(const md::Destination &destination, const QString &written, const QStringList &folders) override
     {
         preview::Picture picture;
         picture.state = preview::Picture::Failed;
@@ -218,7 +218,7 @@ public:
                 picture.diagnostic = QStringLiteral("the document has no folder to find it in");
                 break;
             }
-            readFile(destination.path, picture);
+            readFile(destination.path, folders, picture);
             break;
         case md::Destination::Kind::OtherScheme:
             if (destination.scheme == u"data") readData(written, picture);
@@ -256,9 +256,9 @@ private:
         return index;
     }
 
-    void readFile(const QString &path, preview::Picture &picture)
+    void readFile(const QString &path, const QStringList &folders, preview::Picture &picture)
     {
-        const SafeRead::Result read = SafeRead::read(path, SafeRead::PictureBytes);
+        const SafeRead::Result read = SafeRead::readPicture(path, folders);
         if (!read.ok) {
             picture.diagnostic = read.missing ? QStringLiteral("there is no such file") : read.error;
             return;

@@ -224,6 +224,13 @@ struct Node {
     std::vector<Range> markers;        // BlockQuote, TableRow
     std::vector<Node> children;
 
+    QString attribute(QLatin1StringView name) const
+    {
+        for (const Attribute &a : attributes)
+            if (a.name == name) return a.value;
+        return {};
+    }
+
     bool isBlock() const { return type < NodeType::Text; }
     bool isInline() const { return type >= NodeType::Text; }
     // Text, Escape and Entity: the three nodes whose `text` is prose.
@@ -355,6 +362,7 @@ public:
 
     Options options;
     std::vector<SourceFile> files;
+    QStringList resourceFolders; // canonical library and root document folders
     Node root;
     std::vector<Heading> headings;
     std::vector<Footnote> footnotes;

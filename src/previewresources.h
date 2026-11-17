@@ -47,7 +47,7 @@ public:
 
     preview::Picture math(const QString &tex, bool display, qreal fontSize) override;
     preview::Picture diagram(const QString &source) override;
-    preview::Picture image(const md::Destination &destination, const QString &written) override;
+    preview::Picture image(const md::Destination &destination, const QString &written, const QStringList &folders) override;
 
     // Reads the local image at this path again, as when it changed on disk:
     // the picture as it was stays until the new one is read, and changed()
@@ -72,6 +72,8 @@ private:
         // What it was drawn with; another value asks for it again.
         QString drawnWith;
         QString askedWith;
+        QString imagePath;
+        QStringList imageFolders;
         quint64 ticket = 0;
         bool waiting = false;
         // The drawing being made into a picture, off the UI thread; 0 for none.

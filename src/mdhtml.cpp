@@ -324,6 +324,13 @@ void Writer::table(const Node &node)
 // A supported element, written afresh from its name and allowed attributes.
 void Writer::element(const Node &node)
 {
+    if (node.label == u"img" && opt.picture) {
+        const QString drawn = opt.picture(node);
+        if (!drawn.isEmpty()) {
+            out.append(drawn);
+            return;
+        }
+    }
     const detail::HtmlTagInfo info = detail::htmlTagInfo(node.label);
     out.append(u'<');
     out.append(node.label);

@@ -19,8 +19,7 @@ struct NetworkFetcher::Job {
 
 NetworkFetcher::NetworkFetcher(QObject *parent) : QObject(parent)
 {
-    // parch follows redirects itself, checking each.
-    m_network.setRedirectPolicy(QNetworkRequest::ManualRedirectPolicy);
+    m_network.setProxy(QNetworkProxy::NoProxy);
 }
 
 NetworkFetcher::~NetworkFetcher() = default;
@@ -63,7 +62,7 @@ void NetworkFetcher::visit(const std::shared_ptr<Job> &job, const QUrl &url)
                 return;
             }
         }
-        get(job, url);
+        get(job, url, addresses);
     };
     const QString host = url.host();
     if (QHostAddress literal; literal.setAddress(host)) {
@@ -79,17 +78,29 @@ void NetworkFetcher::visit(const std::shared_ptr<Job> &job, const QUrl &url)
     });
 }
 
-void NetworkFetcher::get(const std::shared_ptr<Job> &job, const QUrl &url)
+QNetworkRequest NetworkFetcher::pictureRequest(const QUrl &url, const QHostAddress &address)
 {
-    QNetworkRequest request(url);
+    QUrl endpoint = url.adjusted(QUrl::RemoveUserInfo);
+    endpoint.setHost(address.toString());
+    QNetworkRequest request(endpoint);
+    request.setRawHeader("Host", url.adjusted(QUrl::RemoveUserInfo).authority(QUrl::FullyEncoded).toLatin1());
+    // Qt uses this name for TLS and in its connection-pool key.
+    request.setPeerVerifyName(url.host());
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     // Nothing is remembered from one picture to the next.
     request.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
     request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
-    request.setTransferTimeout(m_timeoutMs);
     // A generic name: nothing of the document or its writer goes with the request.
     request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("parch"));
     request.setRawHeader("Accept", "image/png, image/jpeg, image/gif, image/webp, image/svg+xml");
+    return request;
+}
+
+void NetworkFetcher::get(const std::shared_ptr<Job> &job, const QUrl &url, QList<QHostAddress> addresses)
+{
+    QNetworkRequest request = pictureRequest(url, addresses.takeFirst());
+    request.setTransferTimeout(m_timeoutMs);
     QNetworkReply *reply = m_network.get(request);
     job->reply = reply;
     const auto typeOf = [](QNetworkReply *reply) { return reply->rawHeader("Content-Type"); };
@@ -106,14 +117,14 @@ void NetworkFetcher::get(const std::shared_ptr<Job> &job, const QUrl &url)
     connect(reply, &QNetworkReply::downloadProgress, reply, [this, job](qint64 received, qint64 total) {
         if (received > MaxBytes || total > MaxBytes) finish(job, {}, tr("The picture is too large."));
     });
-    connect(reply, &QNetworkReply::finished, this, [this, job, reply, url, typeOf, notAPicture] {
+    connect(reply, &QNetworkReply::finished, this, [this, job, reply, url, addresses, typeOf, notAPicture] {
         if (job->finished) return;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QVariant target = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
-        if (status >= 300 && status < 400 && target.isValid()) {
+        const QByteArray location = reply->rawHeader("Location");
+        if (status >= 300 && status < 400 && !location.isEmpty()) {
             job->reply = nullptr;
             reply->deleteLater();
-            const QUrl next = url.resolved(target.toUrl());
+            const QUrl next = url.resolved(QUrl::fromEncoded(location));
             if (const QString why = redirectRefusal(url, next); !why.isEmpty()) {
                 finish(job, {}, why);
             } else if (++job->redirects > MaxRedirects) {
@@ -121,6 +132,13 @@ void NetworkFetcher::get(const std::shared_ptr<Job> &job, const QUrl &url)
             } else {
                 visit(job, next);
             }
+            return;
+        }
+        if (status == 0 && !addresses.isEmpty() && (reply->error() == QNetworkReply::ConnectionRefusedError
+            || reply->error() == QNetworkReply::TimeoutError || reply->error() == QNetworkReply::HostNotFoundError
+            || reply->error() == QNetworkReply::NetworkSessionFailedError)) {
+            reply->deleteLater();
+            get(job, url, addresses);
             return;
         }
         if (reply->error() != QNetworkReply::NoError) finish(job, {}, reply->errorString());

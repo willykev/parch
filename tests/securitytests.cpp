@@ -84,6 +84,7 @@ public:
     // What was asked for, as the request named it: a path, or a whole
     // address when the server is the fetcher's proxy.
     QList<QByteArray> asked;
+    QList<QByteArray> hosts;
     int connections = 0;
 
 private:
@@ -93,6 +94,8 @@ private:
         pending += socket->readAll();
         if (!pending.contains("\r\n\r\n")) return;
         const QList<QByteArray> words = pending.left(pending.indexOf("\r\n")).split(' ');
+        for (const QByteArray &line : pending.split('\n'))
+            if (line.toLower().startsWith("host:")) hosts << line.mid(5).trimmed();
         m_pending.remove(socket);
         const QByteArray target = words.value(1);
         asked << target;
@@ -532,6 +535,20 @@ void aLongPdfStaysCancellableWhileItIsSet()
     QCOMPARE(setting.last(), 1.0);
 }
 
+void webPictureRequestsKeepTheirHost()
+{
+    const QUrl origin(QStringLiteral("https://pictures.example:8443/figures/one.png?size=2"));
+    for (const QHostAddress &address : {QHostAddress("203.0.113.7"), QHostAddress("2001:db8::7")}) {
+        const QNetworkRequest request = NetworkFetcher::pictureRequest(origin, address);
+        QCOMPARE(QHostAddress(request.url().host()), address);
+        QCOMPARE(request.url().port(), origin.port());
+        QCOMPARE(request.url().path(), origin.path());
+        QCOMPARE(request.url().query(), origin.query());
+        QCOMPARE(request.rawHeader("Host"), QByteArray("pictures.example:8443"));
+        QCOMPARE(request.peerVerifyName(), origin.host());
+    }
+}
+
 void webPicturesComeOnlyFromPublicAddresses()
 {
     PictureServer server;
@@ -607,7 +624,8 @@ void webPicturesComeOnlyFromPublicAddresses()
     QVERIFY2(fetched.done && fetched.error.isEmpty(), qPrintable(fetched.error));
     QCOMPARE(fetched.data, png);
     QCOMPARE(resolved, QStringList{QStringLiteral("public.test")});
-    QCOMPARE(server.asked, QList<QByteArray>{"http://public.test/pic.png"});
+    QCOMPARE(server.asked, QList<QByteArray>{"http://203.0.113.7/pic.png"});
+    QCOMPARE(server.hosts, QList<QByteArray>{"public.test"});
 
     // Only pictures are taken.
     for (const char *path : {"/page.html", "/pic.bmp", "/missing.png"}) {

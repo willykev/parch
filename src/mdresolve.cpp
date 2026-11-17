@@ -7,6 +7,7 @@
 #include "mdparser_p.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QUrl>
 
 #include <algorithm>
@@ -85,11 +86,6 @@ private:
     QStringList chain;              // canonical paths of the files being read
     qint64 expandedBytes = 0;
     int includeCount = 0;
-    // The folders includes are read from, canonical: the library and the
-    // document's own folder; found once, when the first include is read.
-    QStringList reach;
-    bool reachKnown = false;
-
     QSet<QString> slugs;
     QHash<QString, int> nextSuffix;
     std::vector<QString> headingSlugs; // by heading index
@@ -122,15 +118,7 @@ QString Assembler::displayPath(const QString &path) const
 // or the document's folder.
 bool Assembler::inReach(const QString &canonicalPath)
 {
-    if (!reachKnown) {
-        reachKnown = true;
-        for (const QString &folder : {source.libraryRoot, doc.files.front().directory}) {
-            if (folder.isEmpty()) continue;
-            const QString canonical = source.resolver->canonicalPath(folder);
-            reach.append(canonical.isEmpty() ? QDir::cleanPath(folder) : canonical);
-        }
-    }
-    for (const QString &folder : std::as_const(reach))
+    for (const QString &folder : std::as_const(doc.resourceFolders))
         if (isWithin(canonicalPath, folder)) return true;
     return false;
 }
@@ -704,6 +692,11 @@ void Assembler::run(const QString &text)
     rootFile.path = source.path;
     rootFile.directory = source.directory.isEmpty() ? folderOf(source.path) : source.directory;
     rootFile.text = text;
+    for (const QString &folder : {source.libraryRoot, rootFile.directory}) {
+        if (folder.isEmpty()) continue;
+        const QString canonical = source.resolver ? source.resolver->canonicalPath(folder) : QFileInfo(folder).canonicalFilePath();
+        doc.resourceFolders.append(canonical.isEmpty() ? QDir::cleanPath(folder) : canonical);
+    }
     doc.files.push_back(rootFile);
     st.files.emplace_back();
     st.files.back().text = text;

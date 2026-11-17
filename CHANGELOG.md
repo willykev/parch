@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 — 2026-11-17
+
+### Documentation
+
+- The README shows a Mermaid flowchart drawn again as each line of it is
+  typed, and a pie chart beside its source.
+- The example write-up installed in `/usr/share/doc/parch/examples` has a
+  larger flowchart and a pie chart of what the weather station cost.
+
 ## 0.1.0 — 2026-11-16
 
 The first version: a native Markdown writing app for Omarchy.

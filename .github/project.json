@@ -1,11 +1,12 @@
 {
-  "description": "A Markdown writing app for Omarchy, in the spirit of iA Writer",
+  "description": "A Markdown writing app for Omarchy, with a live preview of code, math and Mermaid diagrams",
   "topics": [
     "omarchy",
     "hyprland",
     "linux",
     "qt6",
     "markdown",
+    "mermaid",
     "markdown-editor",
     "writing"
   ]

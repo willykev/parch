@@ -1,10 +1,10 @@
 # parch
 
-parch is a Markdown writing app for Omarchy, in the spirit of iA Writer: you
-write plain Markdown with its punctuation in view, and read it beside the text
-as a preview with coloured code, math, diagrams and citations. It saves as you
-type and brings your text back after a crash. Your writing stays in ordinary
-files on your computer, and there is no account.
+parch is a Markdown writing app for Omarchy. You write plain Markdown with its
+punctuation in view, and read it beside the text as a preview with coloured
+code, math, Mermaid diagrams and citations. It saves as you type and brings
+your text back after a crash. Your writing stays in ordinary files on your
+computer, and there is no account.
 
 [Install](#install) · [Guide](docs/guide.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/willykev/parch/releases)
 
@@ -13,7 +13,10 @@ files on your computer, and there is no account.
 ## Features
 
 - **Preview beside the text.** `Ctrl+Alt+2` shows tables, coloured code,
-  math, Mermaid diagrams and footnotes beside the Markdown, scrolling with it.
+  math and footnotes beside the Markdown, scrolling with it.
+- **Mermaid diagrams.** A `mermaid` block becomes a flowchart, sequence
+  diagram, pie or Gantt chart, or any of 23 kinds, redrawn as you type, in
+  your theme's colours and with no browser.
 - **Citations.** Write `[@key]` against a BibTeX or CSL file, and the preview
   sets the citations and the bibliography in APA, Chicago, IEEE, MLA or a
   style of your own.
@@ -60,10 +63,22 @@ Press `Ctrl+N` and type. The draft is kept from the first key you press;
 `Ctrl+S` gives it a name and a folder, and from then on parch saves it a moment
 after you pause. `Ctrl+Alt+2` puts the preview beside it.
 
-### See code, math and diagrams as they read
+### Draw diagrams as you type
 
-Fenced code is coloured by its language, `$…$` and `$$…$$` become formulas,
-and a `mermaid` block becomes a diagram, all in your theme's colours.
+Write a `mermaid` block, and the preview beside it draws the diagram, and
+draws it again with each line you add.
+
+![A flowchart typed a line at a time in the Markdown on the left, and drawn again in the preview on the right after each line](screenshots/diagram.gif)
+
+Pie charts, sequence diagrams, Gantt charts and the rest of Mermaid's kinds
+are drawn the same way, in your theme's colours.
+
+![A pie chart of what the weather station cost: its Mermaid block on the left and the chart on the right](screenshots/pie-chart.png)
+
+### See code and math as they read
+
+Fenced code is coloured by its language, and `$…$` and `$$…$$` become
+formulas, in your theme's colours.
 
 ![The shell and Python blocks of the write-up, plain in the Markdown on the left and coloured in the preview on the right](screenshots/code.png)
 

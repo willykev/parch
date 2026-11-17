@@ -54,11 +54,27 @@ $$
 
 ## Where the readings go
 
+Every reading goes into a file for the weekly chart, and on a cold night the Pi warns me before the frost comes.
+
 ```mermaid
-flowchart LR
-  S[BME280] -->|I²C| P[Raspberry Pi]
+flowchart TD
+  S[BME280] --> P[Raspberry Pi]
   P --> C[(readings.csv)]
+  P --> F{Frost?}
   C --> W[Weekly chart]
+  F -->|yes| A[Alert my phone]
+```
+
+## What it cost
+
+Most of the money went on the Pi; the screen is two plant-pot saucers and a bolt.
+
+```mermaid
+pie title What it cost (£64)
+  "Raspberry Pi" : 35
+  "BME280 sensor" : 12
+  "Cable and plugs" : 9
+  "Screen" : 8
 ```
 
 +++

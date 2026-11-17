@@ -12,6 +12,9 @@ Run it after changing how parch looks, and before a release. A picture that
 looks the same as the one already there is left alone, so only what changed
 shows up in git. It needs ImageMagick, the helpers that draw formulas and
 diagrams (bin/fetch-helpers), and Omarchy's themes for themes.png.
+
+diagram.gif is drawn the same way, one picture for each line of the
+write-up's flowchart, typed one after another, and joined into a loop.
 """
 import json
 import os
@@ -45,12 +48,22 @@ THEMES = ["catppuccin-latte", "gruvbox"]
 WHOLE = "1280x800"
 CLOSE = "960x600"
 TILE = "960x576"
+# The diagram pictures: wide enough for the preview to draw a diagram at its
+# own size beside the text, and the loop tall enough for the whole flowchart.
+CHART = "1120x700"
+LOOP = "1120x800"
+# How long the loop shows each line of the flowchart, in hundredths of a
+# second: the empty diagram, the first line, the others, and the whole.
+LOOP_HOLDS = (100, 120, 80, 300)
 
 
 def pixels(picture):
-    """A PNG's width and height."""
+    """A PNG's or a GIF's width and height."""
     with open(picture, "rb") as file:
-        return struct.unpack(">II", file.read(24)[16:24])
+        head = file.read(24)
+    if head.startswith(b"GIF"):
+        return struct.unpack("<HH", head[6:10])
+    return struct.unpack(">II", head[16:24])
 
 
 def line_of(text, start):
@@ -105,11 +118,14 @@ class Stage:
         self.draw(probe, "200x150", scale=1)
         self.screen = pixels(probe)[0] / 200
 
-    def draw(self, picture, size, *options, theme=None, scale=2):
-        """One picture of the write-up, on a fresh copy of it. It is `scale`
-        times the window's size in pixels: twice, unless said."""
+    def draw(self, picture, size, *options, theme=None, scale=2, text=None):
+        """One picture of the write-up, on a fresh copy of it, or of `text` in
+        its place. It is `scale` times the window's size in pixels: twice,
+        unless said."""
         shutil.rmtree(self.library, ignore_errors=True)
         shutil.copytree(EXAMPLE, self.library)
+        if text is not None:
+            (self.library / DOCUMENT).write_text(text)
         for name, text in OTHER_NOTES.items():
             (self.library / name).write_text(text)
         look = ["--theme", theme] if theme else ["--default-theme"]
@@ -129,15 +145,55 @@ def themes(stage, picture):
                     "-background", "none", "-depth", "8", "-strip", str(picture)], check=True)
 
 
+def typing(stage, picture):
+    """The write-up's flowchart typed a line at a time beside its preview,
+    which draws the diagram again after each line: a loop."""
+    text = stage.text
+    start = text.index("```mermaid\nflowchart") + len("```mermaid\n")
+    end = text.index("```", start)
+    lines = text[start:end].splitlines(keepends=True)
+    heading = line_of(text, "## Where the readings go")
+    frames = []
+    for count in range(1, len(lines) + 1):
+        typed = "".join(lines[:count])
+        frames.append(stage.scratch / f"typing-{count}.png")
+        # The caret at the end of the line just typed.
+        caret = start + len(typed) - 1
+        stage.draw(frames[-1], LOOP, "--view", "split", "--no-library", "--line", heading,
+                   "--select", f"{caret},{caret}", text=text[:start] + typed + text[end:])
+    first, second, each, last = LOOP_HOLDS
+    holds = [first, second] + [each] * (len(frames) - 3) + [last]
+    sequence = []
+    for frame, hold in zip(frames, holds):
+        sequence += ["-delay", str(hold), str(frame)]
+    subprocess.run(["magick", "-loop", "0", *sequence, "+dither", "-layers", "Optimize", str(picture)], check=True)
+
+
+def same_picture(kept, drawn):
+    """Whether two pictures look the same, frame by frame for a loop."""
+    def frames(picture):
+        if picture.suffix != ".gif":
+            return [picture]
+        folder = Path(tempfile.mkdtemp(dir=drawn.parent))
+        subprocess.run(["magick", str(picture), "-coalesce", str(folder / "%03d.png")], check=True)
+        return sorted(folder.iterdir())
+    old, new = frames(kept), frames(drawn)
+    if len(old) != len(new):
+        return False
+    for a, b in zip(old, new):
+        result = subprocess.run(["magick", "compare", "-metric", "AE", "-fuzz", "2%", str(a), str(b), "null:"],
+                                capture_output=True, text=True)
+        differing = re.search(r"\(([^)]+)\)", result.stderr)
+        if result.returncode not in (0, 1) or not differing or float(differing.group(1)) != 0:
+            return False
+    return True
+
+
 def settle(drawn, kept):
     """Put a newly drawn picture in place, unless the one already there looks
     the same. Says whether it changed."""
-    if kept.exists():
-        result = subprocess.run(["magick", "compare", "-metric", "AE", "-fuzz", "2%", str(kept), str(drawn),
-                                 "null:"], capture_output=True, text=True)
-        differing = re.search(r"\(([^)]+)\)", result.stderr)
-        if result.returncode in (0, 1) and differing and float(differing.group(1)) == 0:
-            return False
+    if kept.exists() and same_picture(kept, drawn):
+        return False
     shutil.move(drawn, kept)
     return True
 
@@ -169,17 +225,22 @@ def main():
         # A cited paragraph, and the notes and bibliography that follow it.
         stage.draw(drawn / "citations.png", CLOSE, "--view", "reading", "--no-library",
                    "--line", line_of(text, "## About the dew point"))
+        # A pie chart from a mermaid block, in the theme's colours, beside it.
+        stage.draw(drawn / "pie-chart.png", CHART, "--view", "split", "--no-library",
+                   "--line", line_of(text, "## What it cost"))
         # Export as PDF: what it leaves out, and its pages.
         stage.draw(drawn / "export.png", CLOSE, "--view", "split", "--no-library",
                    "--line", line_of(text, "## Reading the sensor"), "--show", "export")
         themes(stage, drawn / "themes.png")
-        for picture in sorted(drawn.iterdir()):
+        typing(stage, drawn / "diagram.gif")
+        for picture in sorted(path for path in drawn.iterdir() if path.is_file()):
             kept = OUT / picture.name
             changed = settle(picture, kept)
             width, height = pixels(kept)
             size = kept.stat().st_size // 1024
+            limit = 3000 if kept.suffix == ".gif" else 500
             print(f"{kept.relative_to(ROOT)}  {width}x{height}  {size} KB  {'redrawn' if changed else 'unchanged'}"
-                  + ("  (over 500 KB)" if size > 500 else ""))
+                  + (f"  (over {limit} KB)" if size > limit else ""))
 
 
 if __name__ == "__main__":

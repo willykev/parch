@@ -48,7 +48,8 @@ public:
     using Resolver = std::function<void(const QString &host,
                                         std::function<void(const QList<QHostAddress> &addresses, const QString &error)> answer)>;
 
-    explicit NetworkFetcher(QObject *parent = nullptr);
+    // A supplied network manager must outlive the fetcher.
+    explicit NetworkFetcher(QObject *parent = nullptr, QNetworkAccessManager *network = nullptr);
     ~NetworkFetcher() override;
     void fetch(const QUrl &url, QObject *context,
                std::function<void(const QByteArray &data, const QString &error)> done) override;
@@ -80,7 +81,7 @@ private:
     void get(const std::shared_ptr<Job> &job, const QUrl &url, QList<QHostAddress> addresses);
     void finish(const std::shared_ptr<Job> &job, const QByteArray &data, const QString &error);
 
-    QNetworkAccessManager m_network;
+    QNetworkAccessManager *m_network;
     Resolver m_resolver;
     int m_timeoutMs = TimeoutMs;
 };

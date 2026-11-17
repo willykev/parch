@@ -601,6 +601,24 @@ void namesWhatCannotBeDone()
             QCOMPARE(readFile(file), QByteArray("# Notes\n"));
         }
     }
+    const QString chapter = root.filePath("part.md"), photo = root.filePath("photo.png");
+    writeFile(file, "part.md\n");
+    const QByteArray chapterText = "---\nbibliography: refs.bib\n---\n\n<img src=\"photo.png\" alt=\"Figure\">\n";
+    writeFile(chapter, chapterText);
+    writeFile(photo, "picture bytes");
+    const QString references = root.filePath("refs.bib");
+    writeFile(references, "@book{entry, title={Notes}}");
+    const QString alias = root.filePath("another-name");
+    QVERIFY(::link(QFile::encodeName(photo).constData(), QFile::encodeName(alias).constData()) == 0);
+    for (const QString &option : {QStringLiteral("--screenshot"), QStringLiteral("--benchmark")}) {
+        for (const auto &out : {chapter, photo, alias, references}) {
+            const Ran same = runParch(root.path(), {option, out, file});
+            QCOMPARE(same.code, 1);
+            QVERIFY2(same.said.contains("input document"), qPrintable(same.said));
+        }
+    }
+    QCOMPARE(readFile(chapter), chapterText);
+    QCOMPARE(readFile(photo), QByteArray("picture bytes"));
     // A folder that is not there is said before any window.
     const Ran missing = runParch(root.path(), {QStringLiteral("--screenshot"), QStringLiteral("no-such/shot.png"), file});
     QCOMPARE(missing.code, 1);

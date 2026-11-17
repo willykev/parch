@@ -414,6 +414,11 @@ bool FileOrganizer::perform(const Plan &plan)
         // A save that runs lands first, so that it writes to the file before it moves.
         m_store->waitForSaves(2000);
         if (!m_store->canRelocate(document, &why)) return refuse(why);
+        // Saving can replace the file with a new inode at the same path.
+        struct stat saved {};
+        if (!entryAt(plan.from, &saved) || (saved.st_mode & S_IFMT) != (state.st_mode & S_IFMT))
+            return refuse(tr("“%1” changed before it could be moved.").arg(name));
+        state = saved;
     }
     int error = renameWithoutReplacing(plan.from, plan.to);
     std::optional<DiskVersion> copied;
@@ -421,7 +426,10 @@ bool FileOrganizer::perform(const Plan &plan)
         // Another file system: the file is copied there, and the original
         // goes only once the copy is in place.
         const int fd = ::open(QFile::encodeName(plan.from).constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) return refuse(tr("“%1” could not be read: %2").arg(name, systemError(errno)));
+        if (fd < 0) {
+            const int reason = errno;
+            return refuse(tr("“%1” could not be read: %2").arg(name, systemError(reason)));
+        }
         const auto close = qScopeGuard([fd] { ::close(fd); });
         struct stat opened {};
         if (::fstat(fd, &opened) || !sameFileState(state, opened))
@@ -438,10 +446,23 @@ bool FileOrganizer::perform(const Plan &plan)
             if (DiskFile::fingerprint(plan.to, made.version) != made.version)
                 return refuse(tr("The copy of “%1” changed. The original was kept.").arg(name));
             struct stat current {};
+            const auto undoCopy = [&] {
+                struct stat target {}, checked {}, source {};
+                if (!entryAt(plan.to, &target) || !S_ISREG(target.st_mode) || quint64(target.st_dev) != made.version.device
+                    || quint64(target.st_ino) != made.version.inode || DiskFile::fingerprint(plan.to, made.version) != made.version)
+                    return false;
+                return entryAt(plan.from, &source) && source.st_dev == opened.st_dev && source.st_ino == opened.st_ino
+                       && entryAt(plan.to, &checked) && sameFileState(target, checked)
+                       && ::unlink(QFile::encodeName(plan.to).constData()) == 0;
+            };
             if (!entryAt(plan.from, &current) || !sameFileState(opened, current))
-                return refuse(tr("“%1” changed during the copy. Both files were kept.").arg(name));
-            if (::unlink(QFile::encodeName(plan.from).constData()) != 0)
-                return refuse(tr("“%1” was copied, but its original could not be removed: %2").arg(name, systemError(errno)));
+                return refuse(undoCopy() ? tr("“%1” changed during the copy. The move was cancelled.").arg(name)
+                                         : tr("“%1” changed during the copy. The destination was kept.").arg(name));
+            if (::unlink(QFile::encodeName(plan.from).constData()) != 0) {
+                const int reason = errno;
+                return refuse(undoCopy() ? tr("“%1” could not be moved: %2").arg(name, systemError(reason))
+                                         : tr("“%1” was copied, but its original could not be removed: %2").arg(name, systemError(reason)));
+            }
             error = 0;
             copied = made.version;
         }

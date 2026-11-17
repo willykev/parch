@@ -32,6 +32,7 @@
 #include <QHostAddress>
 #include <QImage>
 #include <QNetworkProxy>
+#include <QNetworkReply>
 #include <QPointer>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -127,6 +128,51 @@ private:
     QTcpServer m_server;
     QHash<QByteArray, Answer> m_answers;
     QHash<QTcpSocket *, QByteArray> m_pending;
+};
+
+// Two checked addresses, without requiring a socket or a route. The first may stall
+// before connecting; the second completes with a known server response.
+class AddressReply : public QNetworkReply {
+public:
+    AddressReply(const QNetworkRequest &request, QNetworkReply::NetworkError error, bool stall, QObject *parent)
+        : QNetworkReply(parent)
+    {
+        setRequest(request);
+        setUrl(request.url());
+        open(QIODevice::ReadOnly);
+        if (!stall) QTimer::singleShot(0, this, [this, error] {
+            if (error == NoError) {
+                setAttribute(QNetworkRequest::HttpStatusCodeAttribute, 200);
+                setRawHeader("Content-Type", "image/png");
+            } else {
+                setError(error, QStringLiteral("connection failed"));
+            }
+            setFinished(true);
+            emit finished();
+        });
+    }
+    void abort() override
+    {
+        if (isFinished()) return;
+        setError(OperationCanceledError, QStringLiteral("cancelled"));
+        setFinished(true);
+        emit finished();
+    }
+    qint64 readData(char *, qint64) override { return -1; }
+};
+
+class AddressNetwork : public QNetworkAccessManager {
+public:
+    QList<QUrl> attempts;
+    bool stall = false;
+    QNetworkReply::NetworkError firstError = QNetworkReply::UnknownNetworkError;
+protected:
+    QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override
+    {
+        attempts.append(request.url());
+        const bool first = attempts.size() == 1;
+        return new AddressReply(request, first ? firstError : QNetworkReply::NoError, first && stall, this);
+    }
 };
 
 struct Fetched {
@@ -547,6 +593,25 @@ void webPictureRequestsKeepTheirHost()
         QCOMPARE(request.rawHeader("Host"), QByteArray("pictures.example:8443"));
         QCOMPARE(request.peerVerifyName(), origin.host());
     }
+    const QList<QHostAddress> checked{QHostAddress("2001:db8::7"), QHostAddress("203.0.113.7")};
+    AddressNetwork network;
+    NetworkFetcher fetcher(nullptr, &network);
+    fetcher.setResolver([&](const QString &, auto answer) { answer(checked, {}); });
+    fetcher.setTimeout(600);
+    for (const bool stall : {false, true}) {
+        network.attempts.clear();
+        network.stall = stall;
+        const Fetched result = fetchNow(fetcher, origin.toString());
+        QVERIFY2(result.done && result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(network.attempts.size(), 2);
+        QCOMPARE(QHostAddress(network.attempts[0].host()), checked[0]);
+        QCOMPARE(QHostAddress(network.attempts[1].host()), checked[1]);
+    }
+    network.stall = false;
+    network.firstError = QNetworkReply::SslHandshakeFailedError;
+    network.attempts.clear();
+    QVERIFY(!fetchNow(fetcher, origin.toString()).error.isEmpty());
+    QCOMPARE(network.attempts.size(), 1);
 }
 
 void webPicturesComeOnlyFromPublicAddresses()

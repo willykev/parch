@@ -17512,7 +17512,50 @@ void ParchTests::crossDeviceMovesKeepChangedSources()
     f.organizer()->move(file, other->path());
     QCOMPARE(refused.count(), 1);
     QCOMPARE(readFile(file), QByteArray("edited during copy"));
-    QCOMPARE(readFile(target), QByteArray("first version"));
+    QVERIFY(!QFileInfo::exists(target));
+    DiskFile::setBeforeNaming({});
+    f.organizer()->move(file, other->path());
+    QCOMPARE(readFile(target), QByteArray("edited during copy"));
+    QVERIFY(!QFileInfo::exists(file));
+
+    // A destination edited by another writer belongs to that writer.
+    QVERIFY(QFile::remove(target));
+    writeFile(file, "original");
+    DiskFile::setAfterNaming([&](const QString &path) {
+        if (path == target) writeFile(target, "changed at destination");
+    });
+    const auto restoreAfter = qScopeGuard([] { DiskFile::setAfterNaming({}); });
+    f.organizer()->move(file, other->path());
+    QCOMPARE(readFile(file), QByteArray("original"));
+    QCOMPARE(readFile(target), QByteArray("changed at destination"));
+    DiskFile::setAfterNaming({});
+
+    // The same move can be retried once the source folder is writable.
+    const QString lockedFolder = f.file("read-only"), locked = lockedFolder + "/kept.bin";
+    const QString copy = other->filePath("kept.bin");
+    writeFile(locked, "whole file");
+    if (::geteuid() != 0) {
+        QVERIFY(::chmod(QFile::encodeName(lockedFolder).constData(), 0555) == 0);
+        const auto unlock = qScopeGuard([&] { ::chmod(QFile::encodeName(lockedFolder).constData(), 0755); });
+        f.organizer()->move(locked, other->path());
+        QCOMPARE(readFile(locked), QByteArray("whole file"));
+        QVERIFY(!QFileInfo::exists(copy));
+    }
+    f.organizer()->move(locked, other->path());
+    QCOMPARE(readFile(copy), QByteArray("whole file"));
+    QVERIFY(!QFileInfo::exists(locked));
+
+    // A pending save can install a new inode before a cross-device move copies the file.
+    const QString saving = f.file("saving.txt");
+    writeFile(saving, "before");
+    Document *open = f.open("saving.txt");
+    open->buffer()->replace({0, 6}, QStringLiteral("after"));
+    f.backend->save();
+    QVERIFY(open->isSaving());
+    f.organizer()->move(saving, other->path());
+    QTRY_COMPARE(open->path(), other->filePath("saving.txt"));
+    QCOMPARE(readFile(open->path()), QByteArray("after"));
+    QVERIFY(!QFileInfo::exists(saving));
 }
 
 void ParchTests::movingADocumentUpdatesTheLinksToIt()

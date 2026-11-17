@@ -32,6 +32,9 @@ void count(const md::Document &document, const md::Node &node, Counts &counts)
     case md::NodeType::MathBlock: ++counts.formulas; break;
     case md::NodeType::MermaidBlock: ++counts.diagrams; break;
     case md::NodeType::PageBreak: ++counts.pageBreaks; break;
+    case md::NodeType::HtmlElement:
+        if (node.label != u"img") break;
+        [[fallthrough]];
     case md::NodeType::Image:
         if (md::classifyDestination(document, node).kind == md::Destination::Kind::Remote) ++counts.remoteImages;
         break;

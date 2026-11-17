@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include <QByteArray>
 #include <QHash>
@@ -169,7 +170,7 @@ bool writeFile(const QString &path, const QByteArray &bytes, QString *error, Exi
 QString linkRefusal(const QString &path);
 
 // writeFile() in two steps, for an export that writes other files between
-// them: write() puts the bytes in the temporary file beside `path`, and
+// them: write() prepares the bytes for publication beside `path`, and
 // commit() puts it in place. A file never committed is removed.
 class PendingFile {
 public:
@@ -179,7 +180,9 @@ public:
     PendingFile &operator=(const PendingFile &) = delete;
     bool write(const QByteArray &bytes, QString *error);
     // Publish any accompanying pictures while concurrent commits in this folder wait.
-    bool commit(QString *error, const std::function<bool()> &publishPictures = {});
+    // afterCommit runs under the same lock once the output has been published.
+    bool commit(QString *error, const std::function<bool(int directory, bool locked)> &publishPictures = {},
+                const std::function<void()> &afterCommit = {});
 
 private:
     bool fail(const QString &why, QString *error);
@@ -189,6 +192,7 @@ private:
     int m_folder = -1;
     QByteArray m_name;
     QByteArray m_temporary;
+    std::optional<QByteArray> m_contents;
 };
 
 // A local file as a link or image in a file written to `outputFolder`

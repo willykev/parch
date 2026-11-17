@@ -5,6 +5,7 @@
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QTimer>
+#include <algorithm>
 #include <span>
 
 struct NetworkFetcher::Job {
@@ -17,15 +18,16 @@ struct NetworkFetcher::Job {
     bool finished = false;
 };
 
-NetworkFetcher::NetworkFetcher(QObject *parent) : QObject(parent)
+NetworkFetcher::NetworkFetcher(QObject *parent, QNetworkAccessManager *network)
+    : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this))
 {
-    m_network.setProxy(QNetworkProxy::NoProxy);
+    m_network->setProxy(QNetworkProxy::NoProxy);
 }
 
 NetworkFetcher::~NetworkFetcher() = default;
 
 void NetworkFetcher::setResolver(Resolver resolver) { m_resolver = std::move(resolver); }
-void NetworkFetcher::setProxy(const QNetworkProxy &proxy) { m_network.setProxy(proxy); }
+void NetworkFetcher::setProxy(const QNetworkProxy &proxy) { m_network->setProxy(proxy); }
 void NetworkFetcher::setTimeout(int milliseconds) { m_timeoutMs = milliseconds; }
 
 void NetworkFetcher::fetch(const QUrl &url, QObject *context,
@@ -101,24 +103,44 @@ void NetworkFetcher::get(const std::shared_ptr<Job> &job, const QUrl &url, QList
 {
     QNetworkRequest request = pictureRequest(url, addresses.takeFirst());
     request.setTransferTimeout(m_timeoutMs);
-    QNetworkReply *reply = m_network.get(request);
+    QNetworkReply *reply = m_network->get(request);
     job->reply = reply;
+    if (!addresses.isEmpty()) {
+        // Leave time for another checked address if this connection stalls. Once the
+        // request is on the wire, the download has the rest of the overall deadline.
+        auto *connectTimer = new QTimer(reply);
+        connectTimer->setSingleShot(true);
+        connect(connectTimer, &QTimer::timeout, this, [this, job, url, addresses, reply] {
+            if (job->finished || job->reply != reply) return;
+            job->reply = nullptr;
+            reply->abort();
+            reply->deleteLater();
+            get(job, url, addresses);
+        });
+        connect(reply, &QNetworkReply::requestSent, connectTimer, &QTimer::stop);
+        connect(reply, &QNetworkReply::metaDataChanged, connectTimer, &QTimer::stop);
+        connect(reply, &QNetworkReply::finished, connectTimer, &QTimer::stop);
+        const int share = job->deadline.remainingTime() / (int(addresses.size()) + 1);
+        connectTimer->start(std::clamp(share, 1, 2000));
+    }
     const auto typeOf = [](QNetworkReply *reply) { return reply->rawHeader("Content-Type"); };
     const auto notAPicture = [](const QByteArray &type) {
         return type.isEmpty() ? tr("It is not a picture: the server did not say what it is.")
                               : tr("It is not a picture: the server sent %1.").arg(QString::fromLatin1(type.left(80)));
     };
     // What is not a picture is given up as soon as the server says so.
-    connect(reply, &QNetworkReply::metaDataChanged, reply, [this, job, reply, typeOf, notAPicture] {
+    connect(reply, &QNetworkReply::metaDataChanged, this, [this, job, reply, typeOf, notAPicture] {
+        if (job->reply != reply) return;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status >= 200 && status < 300 && !isPictureType(typeOf(reply))) finish(job, {}, notAPicture(typeOf(reply)));
     });
     // An answer larger than any picture parch would show is given up.
-    connect(reply, &QNetworkReply::downloadProgress, reply, [this, job](qint64 received, qint64 total) {
+    connect(reply, &QNetworkReply::downloadProgress, this, [this, job, reply](qint64 received, qint64 total) {
+        if (job->reply != reply) return;
         if (received > MaxBytes || total > MaxBytes) finish(job, {}, tr("The picture is too large."));
     });
     connect(reply, &QNetworkReply::finished, this, [this, job, reply, url, addresses, typeOf, notAPicture] {
-        if (job->finished) return;
+        if (job->finished || job->reply != reply) return;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray location = reply->rawHeader("Location");
         if (status >= 300 && status < 400 && !location.isEmpty()) {
@@ -136,7 +158,8 @@ void NetworkFetcher::get(const std::shared_ptr<Job> &job, const QUrl &url, QList
         }
         if (status == 0 && !addresses.isEmpty() && (reply->error() == QNetworkReply::ConnectionRefusedError
             || reply->error() == QNetworkReply::TimeoutError || reply->error() == QNetworkReply::HostNotFoundError
-            || reply->error() == QNetworkReply::NetworkSessionFailedError)) {
+            || reply->error() == QNetworkReply::NetworkSessionFailedError || reply->error() == QNetworkReply::UnknownNetworkError
+            || reply->error() == QNetworkReply::TemporaryNetworkFailureError)) {
             reply->deleteLater();
             get(job, url, addresses);
             return;

@@ -36,6 +36,10 @@ struct Reading {
 // choose reads front matter at all.
 Dialect::Layers withFrontMatter(Dialect::Layers layers, const QString &text, const QString &folder);
 
+// Local files named by the document and its dialect, including unexpanded include paths.
+// includeLinks also keeps ordinary hyperlink targets when retiring exported pictures.
+QStringList referencedFiles(const md::Document &document, const Dialect::Choice &dialect, bool includeLinks = false);
+
 // Reads a text: `source` says where it lives and how its includes are read;
 // its library root, unless set, is the dialect's, and its include limits
 // are always the dialect's.

@@ -222,9 +222,28 @@ Result readPicture(const QString &path, const QStringList &folders)
 
 QString pictureRefusal(const QString &path, const QStringList &folders)
 {
-    QString canonical = QFileInfo(path).canonicalFilePath();
+    QFileInfo info(path);
+    QString canonical = info.canonicalFilePath();
+    if (canonical.isEmpty() && !path.startsWith(QLatin1StringView(":/"))) {
+        // A missing leaf can still be reached through a link in an existing parent.
+        QStringList missing;
+        while (canonical.isEmpty()) {
+            struct stat st {};
+            if (::lstat(QFile::encodeName(info.filePath()).constData(), &st) == 0)
+                return tr("its path cannot be resolved");
+            const int reason = errno;
+            if (reason != ENOENT) return systemError(reason);
+            missing.prepend(info.fileName());
+            const QString parent = info.absolutePath();
+            if (parent == info.filePath()) return tr("its path cannot be resolved");
+            info.setFile(parent);
+            canonical = info.canonicalFilePath();
+        }
+        canonical = QDir(canonical).filePath(missing.join(u'/'));
+    }
     if (canonical.isEmpty()) canonical = QDir::cleanPath(path);
     if (isSystemPath(canonical)) return systemPathReason(canonical);
+    if (QFileInfo candidate(path); candidate.exists() && !candidate.isFile()) return tr("it is not a regular file");
     return outsideFolders(canonical, folders);
 }
 

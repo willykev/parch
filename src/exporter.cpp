@@ -1,5 +1,6 @@
 #include "exporter.h"
 
+#include "diskfile.h"
 #include "docxexport.h"
 #include "epubexport.h"
 #include "exportpictures.h"
@@ -127,6 +128,10 @@ bool PendingFile::write(const QByteArray &bytes, QString *error)
     const bool exists = ::fstatat(m_folder, m_name.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0;
     if (exists && m_existing == ExistingOutput::Refuse) return fail(QStringLiteral("already exists"), error);
     if (exists && S_ISDIR(there.st_mode)) return fail(QStringLiteral("it is a folder"), error);
+    if (m_existing == ExistingOutput::Refuse) {
+        m_contents = bytes;
+        return true;
+    }
     // The temporary file is made anew, never through anything already there.
     int fd = -1;
     for (int attempt = 0; attempt < 16 && fd < 0; ++attempt) {
@@ -151,15 +156,21 @@ bool PendingFile::write(const QByteArray &bytes, QString *error)
     return true;
 }
 
-bool PendingFile::commit(QString *error, const std::function<bool()> &publishPictures)
+bool PendingFile::commit(QString *error, const std::function<bool(int, bool)> &publishPictures,
+                         const std::function<void()> &afterCommit)
 {
-    if (m_temporary.isEmpty()) return fail(QStringLiteral("nothing was written"), error);
+    if (!m_contents && m_temporary.isEmpty()) return fail(QStringLiteral("nothing was written"), error);
     // An export with pictures publishes them and its page together with
     // respect to other exports. Plain files can commit in parallel.
-    while (::flock(m_folder, publishPictures ? LOCK_EX : LOCK_SH) != 0) {
-        if (errno != EINTR) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    bool locked = false;
+    while (!(locked = ::flock(m_folder, publishPictures ? LOCK_EX : LOCK_SH) == 0)) {
+        const int reason = errno;
+        if (reason == EINTR) continue;
+        // Some mounts cannot lock a directory. Exclusive creation still protects each new name.
+        if (reason == EOPNOTSUPP || reason == ENOSYS || reason == EINVAL || reason == EBADF || reason == ENOLCK) break;
+        return fail(QString::fromLocal8Bit(std::strerror(reason)), error);
     }
-    const auto unlock = qScopeGuard([this] { ::flock(m_folder, LOCK_UN); });
+    const auto unlock = qScopeGuard([&] { if (locked) ::flock(m_folder, LOCK_UN); });
     // A link that took the file's place meanwhile is refused as before.
     if (m_existing != ExistingOutput::ReplaceLink) {
         if (const QString why = linkRefusal(m_path); !why.isEmpty()) {
@@ -171,21 +182,18 @@ bool PendingFile::commit(QString *error, const std::function<bool()> &publishPic
         struct stat current {};
         if (m_existing == ExistingOutput::Refuse && ::fstatat(m_folder, m_name.constData(), &current, AT_SYMLINK_NOFOLLOW) == 0)
             return fail(QStringLiteral("already exists"), error);
-        if (!publishPictures()) return false;
+        if (!publishPictures(m_folder, locked)) return false;
     }
     if (m_existing == ExistingOutput::Refuse) {
-        if (::renameat2(m_folder, m_temporary.constData(), m_folder, m_name.constData(), RENAME_NOREPLACE) != 0) {
-            // Some filesystems support hard links but not RENAME_NOREPLACE.
-            if (errno == EOPNOTSUPP || errno == ENOSYS || errno == EINVAL) {
-                if (::linkat(m_folder, m_temporary.constData(), m_folder, m_name.constData(), 0) == 0)
-                    return true; // the destructor removes the temporary name
-            }
-            return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
-        }
+        const SaveResult made = DiskFile::createAt(m_folder, QFileInfo(m_path).absolutePath(), QFile::decodeName(m_name), *m_contents);
+        if (made.status != SaveStatus::Saved)
+            return fail(made.status == SaveStatus::Conflict ? QStringLiteral("already exists") : made.error, error);
     } else if (::renameat(m_folder, m_temporary.constData(), m_folder, m_name.constData()) != 0) {
         return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
     }
     m_temporary.clear();
+    m_contents.reset();
+    if (locked && afterCommit) afterCommit();
     return true;
 }
 

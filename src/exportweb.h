@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diskfile.h"
 #include "exporter.h"
 #include "exportpictures.h"
 
@@ -27,6 +28,7 @@ public:
         QString name; // within the folder: "a-photo.png"
         QString mediaType;
         QByteArray bytes;
+        DiskVersion existing; // File already compared with these bytes, if any.
     };
 
     // `folder` is how the text reaches the folder: "notes_files/", "images/".
@@ -70,7 +72,7 @@ QByteArray diagramSvg(const ExportPictures::Picture &picture);
 
 // Publishes the page after its pictures are in place. Existing entries in
 // a marked pictures folder are reused only when their bytes match.
-bool writePage(const ExportRecipe &recipe, const QByteArray &page, const QString &folder, const Assets &assets, QString *error);
+bool writePage(const md::Document &document, const ExportRecipe &recipe, const QByteArray &page, const QString &folder, const Assets &assets, QString *error);
 // The marker used by export folders, including older releases.
 inline constexpr char kFolderMark[] = ".parch-export";
 

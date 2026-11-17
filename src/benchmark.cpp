@@ -1,7 +1,7 @@
 #include "benchmark.h"
 
 #include "backend.h"
-#include "dialectchoice.h"
+#include "diskfile.h"
 #include "document.h"
 #include "documentreading.h"
 #include "documentstore.h"
@@ -12,7 +12,6 @@
 #include "mdtree.h"
 #include "preview.h"
 #include "recovery.h"
-#include "saferead.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "spellchecker.h"
@@ -437,9 +436,11 @@ QString Benchmark::copyIn(const QString &file, const QString &folder, QString *e
     QFile::setPermissions(copy, QFile::ReadOwner | QFile::WriteOwner);
     // What it reads beside it comes along, where it is beside it.
     const QDir from(source.absolutePath());
+    const QString root = from.canonicalPath();
     for (const QString &read : filesRead(source.absoluteFilePath())) {
         const QString relative = from.relativeFilePath(read);
-        if (relative.startsWith(QLatin1String("..")) || QDir::isAbsolutePath(relative) || !QFileInfo(read).isFile()) continue;
+        if (relative == u".." || relative.startsWith(QLatin1String("../")) || QDir::isAbsolutePath(relative)
+            || !QFileInfo(read).isFile() || !md::isWithin(QFileInfo(read).canonicalFilePath(), root)) continue;
         const QString target = folder + u'/' + relative;
         if (QFileInfo::exists(target)) continue;
         if (!QDir().mkpath(QFileInfo(target).absolutePath()) || !QFile::copy(read, target)) {
@@ -450,38 +451,17 @@ QString Benchmark::copyIn(const QString &file, const QString &folder, QString *e
     return copy;
 }
 
-QStringList Benchmark::filesRead(const QString &file)
+QStringList Benchmark::filesRead(const QString &file, const Dialect::Layers &layers)
 {
-    QFile in(file);
-    if (!in.open(QIODevice::ReadOnly)) return {};
+    const LoadedFile root = DiskFile::load(file);
+    if (!root.ok) return {};
     md::FileIncludeResolver resolver;
     md::Source source;
-    source.path = QFileInfo(file).canonicalFilePath();
+    source.path = root.version.canonicalPath;
     source.resolver = &resolver;
-    const DocumentReading::Reading reading = DocumentReading::read(QString::fromUtf8(in.readAll()), {}, source);
-    QStringList files;
-    for (size_t i = 1; i < reading.document.files.size(); ++i) files.append(reading.document.files[i].path);
-    files.append(reading.dialect.bibliography);
-    if (Dialect::isStyleFile(reading.dialect.citationStyle)) files.append(reading.dialect.citationStyle);
-    // The pictures of every file, found from that file's own folder.
-    const std::function<void(const md::Node &)> walk = [&](const md::Node &node) {
-        QString written;
-        if (node.type == md::NodeType::Image) written = node.dest;
-        else if (node.type == md::NodeType::HtmlElement && node.label == QLatin1StringView("img"))
-            for (const md::Attribute &attribute : node.attributes)
-                if (attribute.name == QLatin1StringView("src")) written = attribute.value;
-        if (!written.isEmpty() && node.file >= 0 && size_t(node.file) < reading.document.files.size()) {
-            const md::Destination target =
-                md::classifyDestination(written, reading.document.files[size_t(node.file)].directory);
-            if (target.kind == md::Destination::Kind::LocalFile && target.absolute
-                && SafeRead::pictureRefusal(target.path, reading.document.resourceFolders).isEmpty())
-                files.append(target.path);
-        }
-        for (const md::Node &child : node.children) walk(child);
-    };
-    walk(reading.document.root);
-    for (QString &read : files) read = QDir::cleanPath(read);
-    files.removeDuplicates();
+    const auto reading = DocumentReading::parse(root.text, layers, source);
+    QStringList files = DocumentReading::referencedFiles(reading.document, reading.dialect);
+    files.removeAll(source.path);
     return files;
 }
 

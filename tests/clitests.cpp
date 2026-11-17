@@ -241,8 +241,12 @@ void writeBook(const Sandbox &box)
                              "[1]: https://example.org/one\n"
                              "[home]: https://example.org/one-home\n"));
     box.write(QStringLiteral("book/chapters/two.md"), QStringLiteral("## Two\n\nLast[^1].\n\n```\nunclosed fence"));
-    box.write(QStringLiteral("book/images/cover.png"), QStringLiteral("png"));
-    box.write(QStringLiteral("book/chapters/fig.png"), QStringLiteral("png"));
+    QDir().mkpath(box.path(QStringLiteral("book/images")));
+    QImage picture(2, 2, QImage::Format_RGB32);
+    picture.fill(Qt::green);
+    QVERIFY(picture.save(box.path(QStringLiteral("book/images/cover.png"))));
+    picture.fill(Qt::blue);
+    QVERIFY(picture.save(box.path(QStringLiteral("book/chapters/fig.png"))));
 }
 
 // What a reader takes from a document: its text, headings, notes and where
@@ -942,18 +946,22 @@ void exportAssemblesMarkdown()
     QVERIFY(text.contains(QStringLiteral("[^1]: Root note.")));
     QVERIFY(text.contains(QStringLiteral("[#Doe]: Jane Doe. *A Book*.")));
 
-    // Written elsewhere, the paths lead back to the same files.
+    // Written elsewhere, pictures travel with the new document and ordinary links lead back.
     QDir().mkpath(box.path(QStringLiteral("out")));
     QCOMPARE(box.run({"export", "book/main.md", "-o", "out/book.md"}).code, 0);
     const QString elsewhere = QString::fromUtf8(box.read(QStringLiteral("out/book.md")));
-    QVERIFY(elsewhere.contains(QStringLiteral("![cover](../book/images/cover.png)")));
-    QVERIFY(elsewhere.contains(QStringLiteral("![fig](../book/chapters/fig.png)")));
+    QVERIFY(elsewhere.contains(QStringLiteral("![cover](book_files/cover.png)")));
+    QVERIFY(elsewhere.contains(QStringLiteral("![fig](book_files/fig.png)")));
     QVERIFY(elsewhere.contains(QStringLiteral("[up](../book/main.md#book)")));
     // Remote links are not paths.
     QVERIFY(elsewhere.contains(QStringLiteral("[1]: https://example.org/root")));
-    // The rebased pictures belong to the original folder. A shared library includes both.
-    QCOMPARE(box.run({"check", "out/book.md"}).code, Cli::Problems);
-    QCOMPARE(box.run({"check", "out/book.md", "--library", "."}).code, Cli::Ok);
+    QCOMPARE(box.run({"check", "out/book.md"}).code, Cli::Ok);
+    QCOMPARE(box.read("out/book_files/cover.png"), box.read("book/images/cover.png"));
+    QCOMPARE(box.read("out/book_files/fig.png"), box.read("book/chapters/fig.png"));
+    QCOMPARE(box.run({"export", "book/main.md", "-o", "out/linked.md", "--images", "link"}).code, Cli::Ok);
+    QVERIFY(box.read("out/linked.md").contains("![cover](../book/images/cover.png)"));
+    QCOMPARE(box.run({"check", "out/linked.md"}).code, Cli::Problems);
+    QCOMPARE(box.run({"check", "out/linked.md", "--library", "."}).code, Cli::Ok);
 
     // The JSON report.
     const Ran report = box.run({"export", "book/main.md", "-o", "out/book.md", "--force", "--json"});
@@ -962,7 +970,8 @@ void exportAssemblesMarkdown()
     QCOMPARE(headerProblem(result, QStringLiteral("export")), QString());
     QCOMPARE(result.value(QStringLiteral("format")).toString(), QStringLiteral("md"));
     QCOMPARE(result.value(QStringLiteral("output")).toString(), box.path(QStringLiteral("out/book.md")));
-    QCOMPARE(result.value(QStringLiteral("written")).toArray(), QJsonArray{box.path(QStringLiteral("out/book.md"))});
+    QCOMPARE(result.value(QStringLiteral("written")).toArray(),
+             (QJsonArray{box.path("out/book.md"), box.path("out/book_files/cover.png"), box.path("out/book_files/fig.png")}));
     QVERIFY(result.value(QStringLiteral("limitations")).toArray().isEmpty());
     QVERIFY(result.value(QStringLiteral("warnings")).toArray().isEmpty());
     const QJsonObject recipe = result.value(QStringLiteral("recipe")).toObject();
@@ -996,7 +1005,7 @@ void exportAssemblyKeepsMeaning()
 
     for (const char *output : {"book/assembled.md", "out/deep/assembled.md"}) {
         QDir().mkpath(QFileInfo(box.path(QLatin1StringView(output))).absolutePath());
-        const Ran ran = box.run({"export", "book/main.md", "-o", QLatin1StringView(output), "--force"});
+        const Ran ran = box.run({"export", "book/main.md", "-o", QLatin1StringView(output), "--force", "--images", "link"});
         QVERIFY2(ran.code == 0, qPrintable(ran.said()));
         const DocumentCheck::Loaded assembled = loadedFrom(box.path(QLatin1StringView(output)));
         QCOMPARE(assembled.document.files.size(), size_t(1));

@@ -4,6 +4,7 @@
 #include "benchmark.h"
 #include "cli.h"
 #include "clicommands.h"
+#include "documentsettings.h"
 #include "documentstore.h"
 #include "portalfilepicker.h"
 #include "printportal.h"
@@ -37,6 +38,7 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <sys/stat.h>
@@ -44,15 +46,32 @@
 
 namespace {
 
-bool namesInput(const QString &output, const QStringList &inputs)
+bool namesInput(const QString &output, const QStringList &inputs, const AppPaths *settings = nullptr)
 {
     struct stat target {};
     const bool exists = ::stat(QFile::encodeName(output).constData(), &target) == 0;
-    for (const QString &input : inputs) {
+    const auto matches = [&](const QString &input) {
         if (QDir::cleanPath(input) == QDir::cleanPath(output)) return true;
         struct stat source {};
-        if (exists && ::stat(QFile::encodeName(input).constData(), &source) == 0
-            && source.st_dev == target.st_dev && source.st_ino == target.st_ino) return true;
+        return exists && ::stat(QFile::encodeName(input).constData(), &source) == 0
+               && source.st_dev == target.st_dev && source.st_ino == target.st_ino;
+    };
+    for (const QString &input : inputs) {
+        if (matches(input)) return true;
+        if (exists) {
+            Dialect::Layers layers;
+            if (settings) {
+                DocumentSettings::Saved saved;
+                QString why;
+                if (DocumentSettings::read(*settings, QFileInfo(input).canonicalFilePath(), &saved, &why)) {
+                    layers.document = saved.document;
+                    layers.library = saved.library;
+                    layers.application = saved.application;
+                }
+            }
+            const QStringList dependencies = Benchmark::filesRead(input, layers);
+            if (std::any_of(dependencies.cbegin(), dependencies.cend(), matches)) return true;
+        }
     }
     return false;
 }
@@ -136,8 +155,6 @@ int main(int argc, char *argv[])
     Picture picture = launch.picture;
     if (picturing) {
         picture.file = QDir::current().absoluteFilePath(picture.file);
-        if (namesInput(picture.file, files))
-            return refused(QCoreApplication::translate("main", "%1 is an input document").arg(picture.file));
         if (!QFileInfo(QFileInfo(picture.file).absolutePath()).isDir())
             return refused(QCoreApplication::translate("main", "there is no folder for %1").arg(picture.file));
     }
@@ -216,6 +233,8 @@ int main(int argc, char *argv[])
             QDir().mkpath(QFileInfo(to).absolutePath());
             if (QFile::copy(from, to)) QFile::setPermissions(to, QFile::ReadOwner | QFile::WriteOwner);
         }
+        if (namesInput(picture.file, files, &paths))
+            return refused(QCoreApplication::translate("main", "%1 is an input document").arg(picture.file));
         qputenv("XDG_CACHE_HOME", QFile::encodeName(scratchRoot->filePath(QStringLiteral("cache"))));
         // Drawn off screen by the processor, with Qt's plainest platform
         // theme: no window shows, and the picture is the same on any machine.

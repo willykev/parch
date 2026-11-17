@@ -3,7 +3,7 @@
 #include <QByteArray>
 #include <QString>
 #include <functional>
-#include <sys/types.h>
+#include <sys/stat.h>
 
 // What stat says of a file, in nanoseconds, enough to know that it has not
 // been written since: every write moves its ctime, as does a rename into
@@ -122,6 +122,9 @@ class QThreadPool;
 // error ("File name too long"): it is neither read nor written, and never
 // cut short to fit.
 namespace DiskFile {
+
+// Take an identity and time stamp before comparing a file's contents.
+bool stampDescriptor(int descriptor, struct stat &state, FileStamp &stamp);
 // Keeps the bytes a file holds before a save writes over them in place, as
 // history does, when they need keeping; false, with the reason, when they
 // could not be kept.
@@ -206,6 +209,8 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
 // beside it and takes the name only while nothing has it, so a name taken
 // meanwhile fails the same way.
 SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode = 0);
+// Create in the already-open directory. folder gives its name for messages and the returned version.
+SaveResult createAt(int directory, const QString &folder, const QString &leaf, const QByteArray &bytes, quint32 mode = 0);
 // Puts the bytes at the path's very name, in its folder resolved, as a new
 // file written beside it that then takes the name, in place of a link
 // there, which is never followed: the file a link led to is never opened.

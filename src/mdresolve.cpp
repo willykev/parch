@@ -57,6 +57,8 @@ private:
     void fail(Block *block, DiagnosticCode code, const QString &message);
     void expandIncludes(Block *container, int depth);
     void include(Block *block, int depth);
+    void prepareResourceFolders();
+    bool foldersReady = false;
     bool inReach(const QString &canonicalPath);
     QString displayPath(const QString &path) const;
 
@@ -114,10 +116,22 @@ QString Assembler::displayPath(const QString &path) const
     return path;
 }
 
+void Assembler::prepareResourceFolders()
+{
+    if (foldersReady) return;
+    foldersReady = true;
+    for (const QString &folder : {source.libraryRoot, doc.files.front().directory}) {
+        if (folder.isEmpty()) continue;
+        const QString canonical = source.resolver ? source.resolver->canonicalPath(folder) : QFileInfo(folder).canonicalFilePath();
+        doc.resourceFolders.append(canonical.isEmpty() ? QDir::cleanPath(folder) : canonical);
+    }
+}
+
 // Whether an include's file, by its canonical path, lies within the library
 // or the document's folder.
 bool Assembler::inReach(const QString &canonicalPath)
 {
+    prepareResourceFolders();
     for (const QString &folder : std::as_const(doc.resourceFolders))
         if (isWithin(canonicalPath, folder)) return true;
     return false;
@@ -438,6 +452,12 @@ void Assembler::convert(Block *block, Node &node)
 void Assembler::structure(Node &node)
 {
     switch (node.type) {
+    case NodeType::HtmlElement:
+        if (node.label != u"img") break;
+        [[fallthrough]];
+    case NodeType::Image:
+        if (classifyDestination(doc, node).kind == Destination::Kind::LocalFile) prepareResourceFolders();
+        break;
     case NodeType::Heading: {
         Heading heading;
         heading.level = node.level;
@@ -692,11 +712,6 @@ void Assembler::run(const QString &text)
     rootFile.path = source.path;
     rootFile.directory = source.directory.isEmpty() ? folderOf(source.path) : source.directory;
     rootFile.text = text;
-    for (const QString &folder : {source.libraryRoot, rootFile.directory}) {
-        if (folder.isEmpty()) continue;
-        const QString canonical = source.resolver ? source.resolver->canonicalPath(folder) : QFileInfo(folder).canonicalFilePath();
-        doc.resourceFolders.append(canonical.isEmpty() ? QDir::cleanPath(folder) : canonical);
-    }
     doc.files.push_back(rootFile);
     st.files.emplace_back();
     st.files.back().text = text;

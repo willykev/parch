@@ -1905,7 +1905,11 @@ void variables()
 
 void includes()
 {
-    md::MemoryIncludeResolver files;
+    class CountingResolver : public md::MemoryIncludeResolver {
+    public:
+        QString canonicalPath(const QString &path) override { ++lookups; return md::MemoryIncludeResolver::canonicalPath(path); }
+        int lookups = 0;
+    } files;
     files.add(QStringLiteral("/lib/book/chapters/one.md"), QStringLiteral("## Chapter one\n\nText of *one*.\n"));
     files.add(QStringLiteral("/lib/shared/two.md"), QStringLiteral("## Chapter two\n\nText of two.\n"));
     files.add(QStringLiteral("/lib/book/my notes.txt"), QStringLiteral("Plain *notes*.\n"));
@@ -1919,6 +1923,11 @@ void includes()
     source.path = QStringLiteral("/lib/book/main.md");
     source.libraryRoot = QStringLiteral("/lib");
     source.resolver = &files;
+
+    QCOMPARE(md::parse(QStringLiteral("An ordinary paragraph."), writer(), source).resourceFolders.size(), 0);
+    QCOMPARE(files.lookups, 0);
+    QCOMPARE(md::parse(QStringLiteral("<img src=\"local.png\"> ![other](local.png)"), writer(), source).resourceFolders.size(), 2);
+    QCOMPARE(files.lookups, 2);
 
     // Relative to the document, rooted at the library, with ./ and with a
     // quoted path; with and without a caption.

@@ -587,10 +587,15 @@ page to page.
   meanwhile. Its progress shows above the text, with **Cancel**. When it
   ends, the notice says what was written and what was left out, or why
   nothing was.
-- An export never writes over the document or a file it includes, and
-  writes its file in one step: when it fails or is cancelled, a file that was
-  there is as it was. A folder of pictures beside an HTML page or a Markdown
-  file is replaced only when an earlier export made it.
+- An export protects the document and its included files. If an export
+  fails or you cancel it, an existing output keeps its previous contents.
+- When exporting again, parch reuses identical pictures in the folder it
+  made beside the output. If a name is taken by different content, the new
+  picture gets a number such as `figure-2.png`. After the export succeeds,
+  parch removes unused copies it can still identify as its own. It keeps
+  files you added or edited, pictures shared by exports, and older copies
+  whose ownership the filesystem cannot verify. To publish just the current
+  pictures, export into an empty folder.
 - An export never writes through a link. When the file it would write is a
   symbolic link, parch says where the link leads and asks: **Export as…**
   chooses another file, and **Replace the link** puts the export in place
@@ -604,12 +609,16 @@ page to page.
 
 What each format holds:
 
-- **Markdown**: the document as one file with its includes in place, its
-  images linked where they are or copied into a folder beside it
-  (`NAME_files`); or the document's own text as it is.
+- **Markdown** assembles the document and its includes into one file. The
+  default image setting, **auto**, links pictures within the new document’s
+  folder and copies other readable pictures into `NAME_files` beside it.
+  Choose **copy** to carry all its pictures, **link** to point back to the
+  originals, or **Write the text as it is** to keep the source text.
 - **HTML**: a page of its own, in typography that does not follow the
   desktop theme. Images are copied into a folder beside it (`NAME_files`),
-  written into the page, or linked where they are. Formulas are SVG, named by
+  written into the page, or linked where they are. If an allowed picture is
+  missing or in a format parch cannot copy, HTML links to its original
+  location and the export report names it. Formulas are SVG, named by
   their TeX for screen readers, and diagrams are SVG pictures described by
   their words.
 - **PDF**: pages of the size and margins you choose (A4 and 20 mm unless you
@@ -1149,8 +1158,10 @@ parch stats book.md                  # Words, characters, reading time, headings
   as one file with each include in place (an included file's front matter
   left out and its variables written out, its footnote and link labels kept
   apart from the document's, and its paths written from the new file's
-  folder; `--as-is` writes its own text instead, and `--images copy` copies
-  its images beside it); `html`, a standalone page; `pdf`, set on pages;
+  folder. Markdown’s `--images auto` copies pictures that would otherwise
+  be outside the exported document’s folder. Use `--images copy` to copy
+  all pictures, `--images link` to keep their original locations, or
+  `--as-is` to write the original text); `html`, a standalone page; `pdf`, set on pages;
   `docx`, a Word document; or `epub`, a book. Each format's options are in
   `parch help export`, such as `--page-size`, `--margins`, `--font` and
   `--font-size` for PDF, `--notes endnotes` for DOCX and `--images
@@ -1175,7 +1186,8 @@ machine. These options change it, the highest first:
 
 - `--profile writer|standard`, `--extension NAME` and `--no-extension NAME`
   (given again for more); `parch help check` lists the extensions.
-- `--library DIR`: the folder `/rooted` includes are found in.
+- `--library DIR` sets the root for `/rooted` includes and gives the
+  document access to pictures in that folder and its subfolders.
 - `--bibliography FILE` (given again for more) and `--csl STYLE`: the
   bibliography and the citation style, a bundled one or a `.csl` file.
 - `--max-include-depth N`, `--max-include-size SIZE` (bytes, or with `K`,
@@ -1312,7 +1324,9 @@ shared addresses, whatever name a document gives them, and it checks every
 address a name leads to, again after each redirect. It follows at most
 three redirects, never from `https` to `http`, takes only PNG, JPEG, GIF,
 WebP and SVG pictures, at most 32 MiB of one, and gives up on a picture
-that takes more than 30 seconds.
+that takes more than 30 seconds. The preview connects directly to a checked
+address. On a proxy-only network, save the picture beside the document
+and use its local path.
 
 parch's own folders, which hold copies of what you write (drafts, history
 and recovery) and what you were doing (open tabs, recent files, settings),
@@ -1372,9 +1386,10 @@ room under **History** in **Preferences…**. Saving carries on meanwhile.
 network connection and **Show them** above the preview, or **Fetch pictures
 from the web** turned on in **Preferences…**; one on your own computer or
 local network is never fetched, nor one that is not a PNG, JPEG, GIF, WebP
-or SVG picture. A local
-picture is read from the document's folder; **Check document** lists any
-whose file is missing.
+or SVG picture. Local pictures must be inside the document's folder or its
+library, including after following symbolic links. For a shared `../images`
+folder, add the common parent as a library or pass `--library DIR` to the
+terminal command. **Check document** lists missing and out-of-scope pictures.
 
 **An included file is not shown.** It cannot be found, it includes itself, it
 is outside the library or the document's folder (see [Includes](#includes)),

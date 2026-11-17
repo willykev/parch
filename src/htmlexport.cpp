@@ -1,6 +1,7 @@
 #include "htmlexport.h"
 
 #include "mdhtml.h"
+#include "saferead.h"
 #include "svgpaper.h"
 
 #include <QDir>
@@ -101,7 +102,12 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
             QString error;
             const QString url = assets.file(target.path, document.resourceFolders, &error);
             if (url.isEmpty()) {
-                result.unreadImages.append(QStringLiteral("%1 (%2)").arg(QFileInfo(target.path).fileName(), error));
+                const QString detail = QStringLiteral("%1 (%2)").arg(QFileInfo(target.path).fileName(), error);
+                if (!book && SafeRead::pictureRefusal(target.path, document.resourceFolders).isEmpty()) {
+                    result.fallbackLinks.append(detail);
+                    return {};
+                }
+                result.unreadImages.append(detail);
                 return description();
             }
             if (assets.mode() == Assets::Mode::Link) {
@@ -262,6 +268,9 @@ ExportResult HtmlExporter::write(const md::Document &document, const ExportRecip
                                                  "the page finds them")
                                       .arg(Exporters::count(body.imagesLinked, QStringLiteral("image"),
                                                             QStringLiteral("images"))));
+    if (!body.fallbackLinks.isEmpty())
+        result.limitations.append(QStringLiteral("Images linked in place because they could not be copied or embedded: %1")
+                                      .arg(body.fallbackLinks.join(QStringLiteral(", "))));
     if (!body.unreadImages.isEmpty())
         result.limitations.append(QStringLiteral("Images that could not be read are left out: %1")
                                       .arg(body.unreadImages.join(QStringLiteral(", "))));
@@ -274,7 +283,7 @@ ExportResult HtmlExporter::write(const md::Document &document, const ExportRecip
 
     // The page is held back until its pictures are in place, and nothing
     // is written through a link, the folder of pictures included.
-    if (!ExportWeb::writePage(recipe, page.toUtf8(), folder, assets, &result.error)) {
+    if (!ExportWeb::writePage(document, recipe, page.toUtf8(), folder, assets, &result.error)) {
         result.ioFailure = true;
         return result;
     }

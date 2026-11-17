@@ -7,6 +7,7 @@
 #include "commandregistry.h"
 #include "document.h"
 #include "documentcheck.h"
+#include "diskfile.h"
 #include "exporter.h"
 #include "exportpictures.h"
 #include "exports.h"
@@ -46,6 +47,7 @@
 #include <QTextBlock>
 #include <QTimer>
 #include <QXmlStreamReader>
+#include <sys/xattr.h>
 
 #include <thread>
 
@@ -974,6 +976,8 @@ void exportFoldersKeepDocuments()
     QImage square(8, 8, QImage::Format_RGB32);
     square.fill(Qt::green);
     QVERIFY(square.save(dir.filePath("square.png")));
+    const QByteArray root = QFile::encodeName(dir.path());
+    const bool tracksOwnership = ::setxattr(root.constData(), "user.parch.test", "x", 1, 0) == 0;
     for (const QString &format : {QStringLiteral("html"), QStringLiteral("md")}) {
         const QString output = dir.filePath("result-" + format + u'.' + format);
         const QString side = dir.filePath("result-" + format + "_files/");
@@ -996,7 +1000,31 @@ void exportFoldersKeepDocuments()
         const QByteArray assembled = readFile(output);
         QVERIFY(assembled.contains("The second chapter.") && assembled.contains("square-2.png"));
         QVERIFY(!load(document).document.incomplete);
+
+        square.fill(format == u"html" ? Qt::blue : Qt::red);
+        QVERIFY(square.save(dir.filePath("square.png")));
+        QVERIFY(publish().ok);
+        QCOMPARE(QFileInfo::exists(side + "square-2.png"), !tracksOwnership);
+        QCOMPARE(readFile(side + "square-3.png"), readFile(dir.filePath("square.png")));
+        writeFile(document, "No pictures.\n");
+        QVERIFY(publish().ok);
+        QCOMPARE(QFileInfo::exists(side + "square-3.png"), !tracksOwnership);
+        QCOMPARE(readFile(side + "chapter.md"), chapter);
+        QCOMPARE(readFile(side + "square.png"), QByteArray("edited picture"));
     }
+
+    // HTML and Markdown can share a folder and the same picture.
+    const auto share = [&](const QString &format) {
+        const auto loaded = load(document);
+        const auto recipe = recipeFor(loaded, format, dir.filePath("shared." + format), {{"images", "copy"}});
+        return Exporters::find(format)->write(loaded.document, recipe, bareRun());
+    };
+    writeFile(document, picture);
+    QVERIFY(share("html").ok);
+    QVERIFY(share("md").ok);
+    writeFile(document, "No pictures.\n");
+    QVERIFY(share("html").ok);
+    QCOMPARE(readFile(dir.filePath("shared_files/square.png")), readFile(dir.filePath("square.png")));
 }
 
 void exportsReadPicturesWithinTheirFolders()
@@ -1062,12 +1090,41 @@ void exportsReadPicturesWithinTheirFolders()
     const ExportResult docx = publish("docx", {});
     QVERIFY2(docx.ok, qPrintable(docx.error));
     QCOMPARE(names(entriesOf(docx.written.first())).filter("word/media/").size(), 1);
+
+    writeFile(document, "![Bitmap](chart.bmp) ![Future](later.png)\n\n"
+                        "<img src=\"https://pictures.example/cover.png\" alt=\"Remote\">\n");
+    QVERIFY(image.save(dir.filePath("library/chapters/chart.bmp")));
+    QVERIFY(DocumentCheck::load(document, Dialect::choose(flags), &loaded, &error));
+    for (const QString &mode : {QStringLiteral("copy"), QStringLiteral("embed")}) {
+        const auto fallback = publish("html", mode);
+        QVERIFY2(fallback.ok, qPrintable(fallback.error));
+        const QByteArray html = readFile(fallback.written.first());
+        QVERIFY(html.contains("src=\"library/chapters/chart.bmp\""));
+        QVERIFY(html.contains("src=\"library/chapters/later.png\""));
+        QVERIFY(fallback.limitations.join(' ').contains("linked in place"));
+    }
+    const auto epubRecipe = recipeFor(loaded, "epub", dir.filePath("raw.epub"));
+    const auto epubWriter = Exporters::find("epub");
+    const QStringList before = epubWriter->limitations(loaded.document, epubRecipe, {});
+    const auto after = epubWriter->write(loaded.document, epubRecipe, bareRun());
+    QVERIFY(after.ok);
+    const auto counted = before.filter("web");
+    QCOMPARE(counted.size(), 1);
+    QVERIFY(counted.first().contains("1 image"));
+    QVERIFY(after.limitations.contains(counted.first()));
 }
 
 void exportCreationIsExclusive()
 {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
+    DiskFile::setRenameWithoutReplacing(false);
+    DiskFile::setLinking(false);
+    const auto restore = qScopeGuard([] {
+        DiskFile::setRenameWithoutReplacing(true);
+        DiskFile::setLinking(true);
+        DiskFile::setDirectWriteFailure({});
+    });
     const QString path = dir.filePath("output.html");
     Exporters::PendingFile first(path, ExistingOutput::Refuse), second(path, ExistingOutput::Refuse);
     Exporters::PendingFile illustrated(path, ExistingOutput::Refuse);
@@ -1078,11 +1135,28 @@ void exportCreationIsExclusive()
     QVERIFY2(second.commit(&error), qPrintable(error));
     QVERIFY(!first.commit(&error));
     bool publishedPictures = false;
-    QVERIFY(!illustrated.commit(&error, [&] { publishedPictures = true; return true; }));
+    QVERIFY(!illustrated.commit(&error, [&](int, bool) { publishedPictures = true; return true; }));
     QVERIFY(!publishedPictures);
     QCOMPARE(readFile(path), QByteArray("second"));
     QVERIFY(Exporters::writeFile(path, "replacement", &error, ExistingOutput::ReplaceFile));
     QCOMPARE(readFile(path), QByteArray("replacement"));
+
+    const QString page = dir.filePath("book.html"), source = dir.filePath("document.md");
+    writeFile(source, "![fig](square.png)");
+    QImage picture(2, 2, QImage::Format_RGB32);
+    picture.fill(Qt::green);
+    QVERIFY(picture.save(dir.filePath("square.png")));
+    const auto loaded = load(source);
+    auto recipe = recipeFor(loaded, "html", page);
+    recipe.existing = ExistingOutput::Refuse;
+    const auto html = Exporters::find("html");
+    DiskFile::setDirectWriteFailure([&](const QString &name) { return name == page ? ENOSPC : 0; });
+    QVERIFY(!html->write(loaded.document, recipe, bareRun()).ok);
+    QVERIFY(!QFileInfo::exists(page));
+    DiskFile::setDirectWriteFailure({});
+    QVERIFY(html->write(loaded.document, recipe, bareRun()).ok);
+    QCOMPARE(readFile(dir.filePath("book_files/square.png")), readFile(dir.filePath("square.png")));
+    QVERIFY(!html->write(loaded.document, recipe, bareRun()).ok);
 }
 
 void markdownExportsAssembledOrAsIs()
@@ -1109,6 +1183,15 @@ void markdownExportsAssembledOrAsIs()
     QVERIFY2(whole.ok, qPrintable(whole.error));
     QCOMPARE(readFile(assembled), QByteArray("# Main\n\n![pic](assembled_files/p.png)\n\nChapter text.\n"));
     QVERIFY(QFileInfo::exists(folder.path() + QStringLiteral("/out/assembled_files/p.png")));
+
+    const QString source = folder.filePath("doc/reference.md");
+    writeFile(source, "![Figure][asset] and [original][asset].\n\n[asset]: pics/p.png \"Caption\"\n");
+    const auto referenced = load(source);
+    const QString output = folder.filePath("out/reference.md");
+    QVERIFY(markdown->write(referenced.document, recipeFor(referenced, "md", output)).ok);
+    const QByteArray text = readFile(output);
+    QVERIFY2(text.contains("![Figure](reference_files/p.png \"Caption\") and [original][asset]"), text);
+    QVERIFY(text.contains("[asset]: ../doc/pics/p.png"));
 }
 
 void exportsListLimitationsBeforeWriting()
@@ -1824,7 +1907,7 @@ void cliExportsEveryFormat()
     const Ran images = runCli(folder.path(), {QStringLiteral("export"), QStringLiteral("rich.md"), QStringLiteral("-o"),
                                               QStringLiteral("a.md"), QStringLiteral("--images"), QStringLiteral("embed")});
     QCOMPARE(images.code, 1);
-    QVERIFY(images.err.contains(QStringLiteral("--images takes link, copy, not \"embed\"")));
+    QVERIFY(images.err.contains(QStringLiteral("--images takes auto, link, copy, not \"embed\"")));
     // A shared option is one option; its help names every format that has it.
     const Ran help = runCli(folder.path(), {QStringLiteral("help"), QStringLiteral("export")});
     QVERIFY(help.out.contains(QStringLiteral("--title TEXT")));

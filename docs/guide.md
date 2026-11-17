@@ -1480,6 +1480,9 @@ report each of these as a note.
   description instead; an HTML page links to it.
 - **Come packaged for other systems.** The packages are for Arch Linux and
   Omarchy.
+- **Keep up as quickly in one enormous paragraph.** A key typed in a single
+  paragraph of 10,000 words takes about 60 ms to show, against 4 ms when the
+  same words are split into paragraphs; break such text up as you write.
 - **Lay out text no one could read.** A word longer than 10,000 characters,
   with no space or hyphen in it, makes the editor wrap that document at any
   character rather than between words, since breaking such a word between

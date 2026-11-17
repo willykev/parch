@@ -125,19 +125,32 @@ parch skill install                     # teach your coding agents to use parch
 Add `--json` for scripts. `parch --help` lists everything, and
 `parch help COMMAND` one command's options.
 
+## Performance
+
+- Opens a 10,000-word document ready to type in 0.31 seconds.
+- A keystroke shows on screen within 4 ms in that document, and within 11 ms
+  in a 100,000-word book with its preview beside it.
+- Uses 108 MiB of memory with that document open, 118 MiB with its preview.
+- Left alone, it draws nothing once the caret stops blinking, and uses about
+  30 ms of processor time a minute.
+
+One paragraph of 10,000 words is the slow case: there a keystroke takes about
+60 ms to show.
+
+Measured on an Apple M3 Max running Asahi Linux, Hyprland 0.56.2 and Qt 6.12
+at 120 Hz, parch 0.1.0, with `bin/benchmark`: medians of three warm starts,
+key times at the 95th percentile, spelling and live formatting on.
+
 ## Your data
 
 Your documents are ordinary Markdown files, saved where you put them. parch
 keeps drafts and history in `~/.local/share/parch/`, unsaved text and open
 tabs in `~/.local/state/parch/`, and settings in `~/.config/parch/`; back
-those up with your documents. There is no account and no cloud. parch
-uses the network only to show a picture a document names by web address,
-and only once you ask: a document with such pictures says so above its
-preview, with **Show them** for that document, and **Preferences** shows
-them in every document. Even then, nothing is fetched from your own computer
-or your local network. Web and mail links you click open in your browser or
-mail program; any other link asks first. Spelling is checked in English
-only.
+those up with your documents. There is no account and no cloud. The network
+is used only for pictures a document names by web address, once you choose
+**Show them** above its preview or turn on **Fetch pictures from the web**
+in **Preferences**, and never to reach your own computer or local network.
+Spelling is checked in English only.
 
 ## More
 

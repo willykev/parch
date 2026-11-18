@@ -4,6 +4,7 @@
 #include "theme.h"
 
 #include <QBuffer>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QImageReader>
@@ -67,7 +68,21 @@ QString fcString(FcPattern *pattern, const char *object)
     return QString::fromUtf8(reinterpret_cast<const char *>(value));
 }
 
-// The font fontconfig gives for a family in one style. The caller destroys it.
+// Whether the diagram helper can read a font file: TrueType or OpenType as
+// it is on disk, not packed for the web (WOFF, WOFF2), which fontconfig
+// lists beside them and may well match first.
+bool readableFont(const FcPattern *pattern)
+{
+    FcChar8 *path = nullptr;
+    if (FcPatternGetString(pattern, FC_FILE, 0, &path) != FcResultMatch || !path) return false;
+    QFile file(QFile::decodeName(reinterpret_cast<const char *>(path)));
+    if (!file.open(QIODevice::ReadOnly)) return false;
+    const QByteArray magic = file.read(4);
+    return magic != "wOFF" && magic != "wOF2";
+}
+
+// The font fontconfig gives for a family in one style, or the next best that
+// the helper can read. The caller destroys it.
 FcPattern *matchStyle(const QString &family, int weight, int slant)
 {
     FcPattern *pattern = FcPatternCreate();
@@ -79,6 +94,15 @@ FcPattern *matchStyle(const QString &family, int weight, int slant)
     FcDefaultSubstitute(pattern);
     FcResult result = FcResultNoMatch;
     FcPattern *match = FcFontMatch(nullptr, pattern, &result);
+    if (match && !readableFont(match)) {
+        FcPatternDestroy(match);
+        match = nullptr;
+        if (FcFontSet *sorted = FcFontSort(nullptr, pattern, FcFalse, nullptr, &result)) {
+            for (int i = 0; i < sorted->nfont && !match; ++i)
+                if (readableFont(sorted->fonts[i])) match = FcFontRenderPrepare(nullptr, pattern, sorted->fonts[i]);
+            FcFontSetDestroy(sorted);
+        }
+    }
     FcPatternDestroy(pattern);
     return match;
 }
@@ -106,7 +130,7 @@ FcPattern *coverFor(char32_t character, const char *language, const char *family
         for (int i = 0; i < sorted->nfont && !found; ++i) {
             FcCharSet *has = nullptr;
             if (FcPatternGetCharSet(sorted->fonts[i], FC_CHARSET, 0, &has) == FcResultMatch &&
-                FcCharSetHasChar(has, character)) {
+                FcCharSetHasChar(has, character) && readableFont(sorted->fonts[i])) {
                 FcPatternReference(sorted->fonts[i]);
                 found = sorted->fonts[i];
             }

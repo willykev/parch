@@ -4,6 +4,7 @@
 #include <QHostAddress>
 #include <QList>
 #include <QNetworkAccessManager>
+#include <QNetworkInterface>
 #include <QNetworkProxy>
 #include <QObject>
 #include <QString>
@@ -58,6 +59,10 @@ public:
     // lookup, unless given), a proxy every request goes through, and a
     // shorter time for the whole fetch.
     void setResolver(Resolver resolver);
+    // For tests: this computer's addresses and the networks they are on
+    // (the system's interfaces, unless given).
+    using Networks = std::function<QList<QNetworkAddressEntry>()>;
+    void setLocalNetworks(Networks networks);
     void setProxy(const QNetworkProxy &proxy);
     void setTimeout(int milliseconds);
 
@@ -68,6 +73,12 @@ public:
     // broadcast, reserved and unspecified addresses, and for IPv6 addresses
     // that carry such an IPv4 address.
     static bool isPublic(const QHostAddress &address);
+    // Whether an address is one of this computer's own, or on a network one
+    // of them is directly on, whatever its range: a public address given to
+    // this computer, or a globally routed IPv6 network at home, is reached
+    // there and not on the internet. `networks` are the computer's addresses
+    // with their prefixes.
+    static bool onLocalNetwork(const QHostAddress &address, const QList<QNetworkAddressEntry> &networks);
     // Why a redirect from one address to another is not followed, or
     // nothing when it is.
     static QString redirectRefusal(const QUrl &from, const QUrl &to);
@@ -83,5 +94,6 @@ private:
 
     QNetworkAccessManager *m_network;
     Resolver m_resolver;
+    Networks m_localNetworks;
     int m_timeoutMs = TimeoutMs;
 };

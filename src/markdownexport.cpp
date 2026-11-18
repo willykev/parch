@@ -1,10 +1,12 @@
 #include "markdownexport.h"
 
+#include "dialectchoice.h"
 #include "exportweb.h"
 #include "htmlexport.h"
 #include "saferead.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
@@ -32,6 +34,38 @@ QString escaped(QStringView text)
         if (c.unicode() < 128 && c.isPunct()) out.append(u'\\');
         else if (c.unicode() < 128 && c.isSymbol()) out.append(u'\\');
         out.append(c);
+    }
+    return out;
+}
+
+// A YAML scalar that reads back as `text`, whatever it holds.
+QString yamlQuoted(const QString &text)
+{
+    QString out = text;
+    out.replace(u'\\', QStringLiteral("\\\\")).replace(u'"', QStringLiteral("\\\""));
+    return u'"' + out + u'"';
+}
+
+// The YAML without its top-level entries for `keys`: each key's line and the
+// lines that carry on its value (indented, or a list item, blank or a comment
+// among them).
+QString withoutKeys(const QString &yaml, const QStringList &keys)
+{
+    static const QRegularExpression entry(QStringLiteral("^[\"']?([^\\s:\"'#][^:\"']*)[\"']?\\s*:(\\s|$)"));
+    QString out;
+    bool dropping = false;
+    const QStringList lines = yaml.split(u'\n');
+    for (qsizetype i = 0; i < lines.size(); ++i) {
+        const QString &line = lines[i];
+        const bool goesOn = line.isEmpty() || line.front().isSpace() || line.startsWith(u'#')
+                            || line.startsWith(QLatin1String("- ")) || line == u"-" || line == u"\r";
+        if (!goesOn) {
+            const QRegularExpressionMatch key = entry.match(line);
+            dropping = key.hasMatch() && keys.contains(key.captured(1).trimmed(), Qt::CaseInsensitive);
+        }
+        if (dropping) continue;
+        out += line;
+        if (i + 1 < lines.size()) out += u'\n';
     }
     return out;
 }
@@ -73,8 +107,9 @@ QString applied(const QString &text, std::vector<Edit> edits)
 
 class Assembler {
 public:
-    Assembler(const md::Document &document, const QString &outputFolder, const ImageDestination &image)
-        : doc(document), folder(QDir::cleanPath(outputFolder)), imageDestination(image)
+    Assembler(const md::Document &document, const QString &outputFolder, const ImageDestination &image,
+              const FileDestination &citationFile)
+        : doc(document), folder(QDir::cleanPath(outputFolder)), imageDestination(image), citationDestination(citationFile)
     {
     }
 
@@ -93,6 +128,64 @@ public:
                         .arg(it.key()));
         }
         return {assemble(0, doc.root), limitations};
+    }
+
+    // What the front matter says of the files citations are formatted with,
+    // as the folder written to reaches them, and every bibliography an
+    // included file names beside the document's own: the assembled text has
+    // no included file of its own to name it. Nothing when nothing changes.
+    std::optional<Edit> citationFiles() const
+    {
+        if (!doc.options.frontMatter || doc.files.empty()) return std::nullopt;
+        const md::SourceFile &root = doc.files.front();
+        if (root.directory.isEmpty()) return std::nullopt;
+        const Dialect::Layer own = Dialect::frontMatterLayer(root.frontMatter, root.directory);
+        QStringList bibliography = own.bibliography.value_or(QStringList());
+        bool added = false;
+        if (doc.options.citations)
+            for (size_t i = 1; i < doc.files.size(); ++i) {
+                const md::SourceFile &file = doc.files[i];
+                if (!file.frontMatter.present || file.directory.isEmpty()) continue;
+                const Dialect::Layer layer = Dialect::frontMatterLayer(file.frontMatter, file.directory);
+                for (const QString &path : layer.bibliography.value_or(QStringList()))
+                    if (!bibliography.contains(path)) {
+                        bibliography.append(path);
+                        added = true;
+                    }
+            }
+        const bool moved = QDir::cleanPath(root.directory) != folder;
+        const bool styleFile = Dialect::isStyleFile(own.citationStyle);
+        if (!added && !(moved && (own.bibliography || styleFile))) return std::nullopt;
+
+        // Front matter names files within its document's folder alone: one
+        // the folder written to does not hold goes along with the text, as
+        // its pictures do.
+        const auto written = [&](const QString &path) {
+            const QString relative = Exporters::relativeTo(folder, path);
+            const bool within = !QDir::isAbsolutePath(relative) && relative != u".." && !relative.startsWith(QLatin1String("../"));
+            if (within || !citationDestination) return relative;
+            const QString placed = citationDestination(path);
+            return placed.isEmpty() ? relative : placed;
+        };
+        QStringList keys;
+        QString entries;
+        if (!bibliography.isEmpty()) {
+            keys.append(QStringLiteral("bibliography"));
+            entries += QStringLiteral("bibliography:\n");
+            for (const QString &path : std::as_const(bibliography))
+                entries += QStringLiteral("  - %1\n").arg(yamlQuoted(written(path)));
+        }
+        if (styleFile) {
+            keys.append(QStringLiteral("csl"));
+            entries += QStringLiteral("csl: %1\n").arg(yamlQuoted(written(own.citationStyle)));
+        }
+        if (!root.frontMatter.present) {
+            const int start = root.text.startsWith(QChar(0xfeff)) ? 1 : 0;
+            return Edit{start, start, QStringLiteral("---\n") + entries + QStringLiteral("---\n\n")};
+        }
+        QString yaml = withoutKeys(root.frontMatter.source, keys);
+        if (!yaml.isEmpty() && !yaml.endsWith(u'\n')) yaml += u'\n';
+        return Edit{root.frontMatter.contentStart, root.frontMatter.contentEnd, yaml + entries};
     }
 
 private:
@@ -169,6 +262,8 @@ private:
     QString assemble(int file, const md::Node &container)
     {
         std::vector<Edit> edits;
+        if (file == 0)
+            if (const std::optional<Edit> front = citationFiles()) edits.push_back(*front);
         collect(file, container, edits);
         return applied(doc.files[size_t(file)].text, std::move(edits));
     }
@@ -239,7 +334,14 @@ private:
         case md::NodeType::Link:
         case md::NodeType::Image:
             if (node.type == md::NodeType::Image && copyImage(node, edits)) break;
-            if (node.label.isEmpty()) {
+            if (node.label.isEmpty() && file != 0 && node.type == md::NodeType::Link && node.dest.startsWith(u'#')
+                && !node.target.isEmpty()) {
+                // An anchor of the included file's own, under the name it
+                // has in the whole document (see md::anchorInFile()).
+                const QStringView written = doc.source(file, node.target);
+                if (QUrl::fromPercentEncoding(written.toString().mid(1).toUtf8()) != node.dest.mid(1))
+                    edits.push_back({node.target.start, node.target.end, node.dest});
+            } else if (node.label.isEmpty()) {
                 rebase(file, node.target, node.dest, edits);
             } else if (const QString fresh = linkRenames.value(file).value(normalized(node.label));
                        !fresh.isEmpty()) {
@@ -336,6 +438,7 @@ private:
     const md::Document &doc;
     const QString folder;
     const ImageDestination imageDestination;
+    const FileDestination citationDestination;
     Definitions noteDefinitions, linkDefinitions;
     QSet<QString> noteLabels, linkLabels;
     Renames noteRenames, linkRenames;
@@ -345,9 +448,10 @@ private:
 
 } // namespace
 
-Assembled assemble(const md::Document &document, const QString &outputFolder, const ImageDestination &image)
+Assembled assemble(const md::Document &document, const QString &outputFolder, const ImageDestination &image,
+                   const FileDestination &citationFile)
 {
-    return Assembler(document, outputFolder, image).run();
+    return Assembler(document, outputFolder, image, citationFile).run();
 }
 
 } // namespace MarkdownExport
@@ -420,11 +524,26 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
             return QUrl::fromPercentEncoding(url.toUtf8());
         };
     }
-    const MarkdownExport::Assembled assembled = MarkdownExport::assemble(document, outputFolder, image);
+    // A bibliography or style the new folder cannot reach goes along with
+    // the text, beside its pictures.
+    QStringList uncopied;
+    const MarkdownExport::FileDestination citationFile = [&](const QString &path) {
+        QFile file(path);
+        if (!QFileInfo(path).isFile() || QFileInfo(path).size() > (qint64(64) << 20) || !file.open(QIODevice::ReadOnly)) {
+            uncopied.append(QFileInfo(path).fileName());
+            return QString();
+        }
+        return QUrl::fromPercentEncoding(assets.copy(file.readAll(), QFileInfo(path).fileName()).toUtf8());
+    };
+    const MarkdownExport::Assembled assembled = MarkdownExport::assemble(document, outputFolder, image, citationFile);
     result.limitations = assembled.limitations;
     if (!unread.isEmpty())
         result.limitations.append(QStringLiteral("Images that could not be read are linked where they were: %1")
                                       .arg(unread.join(QStringLiteral(", "))));
+    if (!uncopied.isEmpty())
+        result.limitations.append(QStringLiteral("Citation files that could not be copied are named where they were, "
+                                                 "which the new folder may not read: %1")
+                                      .arg(uncopied.join(QStringLiteral(", "))));
     if (run.stopped()) return Exporters::cancelled();
     // Nothing is written through a link, the folder of pictures included.
     if (!ExportWeb::writePage(document, recipe, assembled.text.toUtf8(), folder, assets, &result.error)) {

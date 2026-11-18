@@ -155,9 +155,10 @@ const Exporter *find(const QString &format);
 // The format a file name's suffix stands for, if any: "notes.html" is html.
 const Exporter *forFile(const QString &path);
 
-// Whether `path` is the document or one of the files it includes, which no
-// export may write.
-bool isSource(const md::Document &document, const QString &path);
+// Whether `path` is the document or a file it is made from, which no export
+// may write: one it includes, its bibliographies and citation style, and the
+// pictures it shows, as `dialect` and the front matter name them.
+bool isSource(const md::Document &document, const Dialect::Choice &dialect, const QString &path);
 
 // Writes a whole file in one step: a temporary file beside it, made anew,
 // renamed over it. Never through a symbolic link: a link at `path` is

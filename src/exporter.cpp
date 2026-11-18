@@ -1,6 +1,7 @@
 #include "exporter.h"
 
 #include "diskfile.h"
+#include "documentreading.h"
 #include "docxexport.h"
 #include "epubexport.h"
 #include "exportpictures.h"
@@ -18,6 +19,7 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 QJsonObject ExportRecipe::toJson() const
@@ -77,14 +79,46 @@ const Exporter *forFile(const QString &path)
     return nullptr;
 }
 
-bool isSource(const md::Document &document, const QString &path)
+namespace {
+
+// What replaces `file` is readable by whom it was: its group, and its
+// extended attributes, the access control list among them, as far as the
+// system lets this user give them. The mode is set beforehand, and an ACL
+// set after it agrees with it.
+void keepAccess(const QByteArray &file, const struct stat &there, int replacement)
+{
+    if (there.st_gid != ::getegid()) (void)::fchown(replacement, uid_t(-1), there.st_gid);
+    if (::fchmod(replacement, there.st_mode & 07777) != 0) return;
+    ssize_t size = ::llistxattr(file.constData(), nullptr, 0);
+    if (size <= 0) return;
+    QByteArray names(size, '\0');
+    size = ::llistxattr(file.constData(), names.data(), size_t(names.size()));
+    if (size <= 0) return;
+    for (const QByteArray &name : names.left(size).split('\0')) {
+        if (name.isEmpty()) continue;
+        const ssize_t length = ::lgetxattr(file.constData(), name.constData(), nullptr, 0);
+        if (length < 0) continue;
+        QByteArray value(length, '\0');
+        const ssize_t read = ::lgetxattr(file.constData(), name.constData(), value.data(), size_t(value.size()));
+        if (read >= 0) (void)::fsetxattr(replacement, name.constData(), value.constData(), size_t(read), 0);
+    }
+}
+
+} // namespace
+
+bool isSource(const md::Document &document, const Dialect::Choice &dialect, const QString &path)
 {
     // The file it would replace, through any link, or the path itself when
-    // nothing is there yet.
-    const QFileInfo info(path);
-    const QString target = info.exists() ? info.canonicalFilePath() : QDir::cleanPath(info.absoluteFilePath());
+    // nothing is there yet; and each file the document is made from the same.
+    const auto resolved = [](const QString &file) {
+        const QFileInfo info(file);
+        return info.exists() ? info.canonicalFilePath() : QDir::cleanPath(info.absoluteFilePath());
+    };
+    const QString target = resolved(path);
     for (const md::SourceFile &file : document.files)
         if (!file.path.isEmpty() && file.path == target) return true;
+    for (const QString &file : DocumentReading::referencedFiles(document, dialect))
+        if (!file.isEmpty() && QDir::isAbsolutePath(file) && resolved(file) == target) return true;
     return false;
 }
 
@@ -141,9 +175,13 @@ bool PendingFile::write(const QByteArray &bytes, QString *error)
         else if (errno != EEXIST) break;
     }
     if (fd < 0) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
-    // A file replaced keeps its permissions; a new one has the usual.
+    // A file replaced keeps its permissions, group and extended attributes;
+    // a new one has the usual.
     int why = 0;
-    if (exists && S_ISREG(there.st_mode) && ::fchmod(fd, there.st_mode & 07777) != 0) why = errno;
+    if (exists && S_ISREG(there.st_mode)) {
+        if (::fchmod(fd, there.st_mode & 07777) != 0) why = errno;
+        else keepAccess(QFile::encodeName(info.absoluteFilePath()), there, fd);
+    }
     for (qsizetype done = 0; why == 0 && done < bytes.size();) {
         const ssize_t wrote = ::write(fd, bytes.constData() + done, size_t(bytes.size() - done));
         if (wrote < 0 && errno == EINTR) continue;

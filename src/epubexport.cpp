@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QUrl>
 #include <QTimeZone>
 #include <QUuid>
 
@@ -234,7 +235,9 @@ QList<EpubExporter::Chapter> EpubExporter::chapters(const QString &body, const m
         qsizetype at = 0;
         for (auto match = link.globalMatch(chapter.html); match.hasNext();) {
             const QRegularExpressionMatch found = match.next();
-            const QString file = files.value(found.captured(1));
+            // A link is written percent-encoded ("#caf%C3%A9"), its target's
+            // id as it is ("café").
+            const QString file = files.value(QUrl::fromPercentEncoding(found.captured(1).toUtf8()));
             if (file.isEmpty() || file == chapter.name) continue;
             out += QStringView(chapter.html).sliced(at, found.capturedStart() - at);
             out += QStringLiteral("href=\"%1#%2\"").arg(file, found.captured(1));

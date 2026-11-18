@@ -457,8 +457,8 @@ void Exports::exportParsed(const std::shared_ptr<Job> &job, const ParsedTextPtr 
             outcome.result.error = QStringLiteral("a file it includes could not be read, so it is not exported as if it were whole");
             return outcome;
         }
-        if (!printing && Exporters::isSource(reading->document, output)) {
-            outcome.result.error = QStringLiteral("%1 is the document or a file it includes, which an export never writes over")
+        if (!printing && Exporters::isSource(reading->document, reading->dialect, output)) {
+            outcome.result.error = QStringLiteral("%1 is the document or a file it is made from, which an export never writes over")
                                        .arg(output);
             return outcome;
         }

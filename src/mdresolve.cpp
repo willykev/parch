@@ -689,6 +689,11 @@ void Assembler::resolve()
     for (const auto &[link, heading] : headingLinks)
         link->dest = u'#' + headingSlugs[heading];
     for (Node *link : anchorLinks) {
+        // An included file was written on its own: a `#anchor` in it means a
+        // heading of its own when it has one so named, wherever that heading
+        // is numbered in the whole document.
+        if (link->file > 0)
+            if (const QString own = anchorInFile(doc, link->file, link->dest.mid(1)); !own.isEmpty()) link->dest = u'#' + own;
         const QString slug = QUrl::fromPercentEncoding(link->dest.mid(1).toUtf8());
         if (slugs.contains(slug)) continue;
         link->resolved = false;

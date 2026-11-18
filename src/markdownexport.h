@@ -24,7 +24,12 @@ struct Assembled {
 // a path relative to the output's folder, or empty to lead where it is.
 using ImageDestination = std::function<QString(const QString &absolutePath)>;
 
-Assembled assemble(const md::Document &document, const QString &outputFolder, const ImageDestination &image = {});
+// Where a file the front matter names (a bibliography, a citation style) is
+// put for the assembled text when the folder written to cannot reach it
+// where it is: its path from that folder, or nothing when it is not copied.
+using FileDestination = std::function<QString(const QString &absolutePath)>;
+Assembled assemble(const md::Document &document, const QString &outputFolder, const ImageDestination &image = {},
+                   const FileDestination &citationFile = {});
 
 } // namespace MarkdownExport
 

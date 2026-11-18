@@ -20,6 +20,8 @@ void exportAssemblesMarkdown();
 void exportAssemblyKeepsMeaning();
 void exportWritesAStandalonePage();
 void exportRefusesWhatItMustNot();
+void nothingADocumentIsMadeFromIsWrittenOver();
+void assembledMarkdownKeepsItsCitations();
 void exportLeavesTheSourceAlone();
 void exportFormatsPlugInThroughOneInterface();
 void statsCountWhatAReaderReads();

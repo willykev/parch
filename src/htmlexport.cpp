@@ -114,7 +114,13 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
                 ++result.imagesLinked;
                 return {};
             }
-            QString img = QStringLiteral("<img src=\"%1\" alt=\"%2\"").arg(md::escapeHtml(url), md::escapeHtml(alt));
+            // One file shown at several of its views (`icons.svg#home`,
+            // `icons.svg#svgView(viewBox(...))`) is copied once, each picture
+            // still at its own view.
+            QString shown = url;
+            if (!target.fragment.isEmpty())
+                shown += u'#' + QString::fromUtf8(QUrl::toPercentEncoding(target.fragment, "!$&'()*+,;=:@/?~"));
+            QString img = QStringLiteral("<img src=\"%1\" alt=\"%2\"").arg(md::escapeHtml(shown), md::escapeHtml(alt));
             if (!raw && !node.title.isEmpty()) img += QStringLiteral(" title=\"%1\"").arg(md::escapeHtml(node.title));
             for (const md::Attribute &a : node.attributes) {
                 if (a.name == u"title" || a.name == u"width" || a.name == u"height")
@@ -196,9 +202,20 @@ std::function<QString(const md::Node &, const QString &)> HtmlExporter::destinat
                                                                                         const QString &folder)
 {
     return [&document, folder = QDir::cleanPath(folder)](const md::Node &node, const QString &dest) -> QString {
-        if (dest.isEmpty() || dest.startsWith(u'/') || dest.startsWith(u'#')) return dest;
+        if (dest.isEmpty() || dest.startsWith(u'#')) return dest;
         if (node.file < 0 || size_t(node.file) >= document.files.size()) return dest;
         const QString &directory = document.files[size_t(node.file)].directory;
+        // A link to a file the document includes leads to where that file is
+        // in the export, not to the file, which its reader does not have.
+        const bool link = node.type == md::NodeType::Link || node.type == md::NodeType::Autolink
+                          || (node.type == md::NodeType::HtmlElement && node.label == u"a");
+        if (link) {
+            const md::Destination target = md::classifyDestination(dest, directory);
+            if (target.kind == md::Destination::Kind::LocalFile && target.absolute)
+                if (const QString anchor = md::includedAnchor(document, target.path, target.fragment); !anchor.isEmpty())
+                    return u'#' + anchor;
+        }
+        if (dest.startsWith(u'/')) return dest;
         if (directory.isEmpty() || QDir::cleanPath(directory) == folder) return dest;
         const md::Destination target = md::classifyDestination(dest, directory);
         if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return dest;

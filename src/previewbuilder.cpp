@@ -470,6 +470,18 @@ QString Builder::taskImageName(bool checked)
 
 QString Builder::taskLink(int offset) { return QStringLiteral("parch:task/%1").arg(offset); }
 
+QString Builder::localHref(const md::Destination &target, const QString &written) const
+{
+    if (!target.absolute) return written;
+    if (m_options.portableLinks) {
+        const QString anchor = md::includedAnchor(m_document, target.path, target.fragment);
+        return anchor.isEmpty() ? written : u'#' + anchor;
+    }
+    QUrl url = QUrl::fromLocalFile(target.path);
+    if (!target.fragment.isEmpty()) url.setFragment(target.fragment);
+    return url.toString();
+}
+
 QImage Builder::taskImage(const PreviewStyle &style, bool checked, qreal size)
 {
     const qreal scale = std::max<qreal>(1, style.scale);
@@ -1773,13 +1785,7 @@ void Builder::inl(const Node &node, const Char &given)
             inner.href = u'#' + target.fragment;
             break;
         case md::Destination::Kind::LocalFile:
-            if (target.absolute) {
-                QUrl url = QUrl::fromLocalFile(target.path);
-                if (!target.fragment.isEmpty()) url.setFragment(target.fragment);
-                inner.href = url.toString();
-            } else {
-                inner.href = node.dest;
-            }
+            inner.href = localHref(target, node.dest);
             break;
         default:
             inner.href = node.dest;
@@ -1875,7 +1881,7 @@ void Builder::htmlInline(const Node &node, const Char &state)
             target = md::classifyDestination(
                 href, m_document.files[size_t(std::clamp(node.file, 0, int(m_document.files.size()) - 1))].directory);
         if (target.kind == md::Destination::Kind::Anchor) inner.href = u'#' + target.fragment;
-        else if (target.kind == md::Destination::Kind::LocalFile && target.absolute) inner.href = QUrl::fromLocalFile(target.path).toString();
+        else if (target.kind == md::Destination::Kind::LocalFile) inner.href = localHref(target, href);
         else if (target.kind != md::Destination::Kind::Empty) inner.href = href;
         if (!inner.href.isEmpty()) {
             inner.ink = PreviewStyle::Link;

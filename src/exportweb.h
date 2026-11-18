@@ -38,6 +38,9 @@ public:
     // The URL the text gives a local file; empty, with why, when it cannot
     // be read (a link gives its path whether or not it is there).
     QString file(const QString &absolutePath, const QStringList &folders, QString *error);
+    // The same of a file that is no picture, such as a bibliography the
+    // text names, kept under its own name and suffix in the folder.
+    QString copy(const QByteArray &data, const QString &name);
     // The URL of bytes made for the export, such as a diagram, named after
     // `suggested`.
     QString bytes(const QByteArray &data, const QString &mediaType, const QString &suggested);

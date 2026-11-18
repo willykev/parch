@@ -142,6 +142,11 @@ QString Assets::bytes(const QByteArray &data, const QString &mediaType, const QS
     return place(data, mediaType, suggested);
 }
 
+QString Assets::copy(const QByteArray &data, const QString &name)
+{
+    return place(data, QString(), name);
+}
+
 QString Assets::place(const QByteArray &data, const QString &mediaType, const QString &suggested)
 {
     if (m_mode == Mode::Embed || m_mode == Mode::Link)
@@ -151,7 +156,9 @@ QString Assets::place(const QByteArray &data, const QString &mediaType, const QS
     QFileInfo info(safeName(suggested));
     QString stem = info.completeBaseName();
     if (stem.isEmpty()) stem = QStringLiteral("picture");
-    const QString suffix = suffixFor(mediaType);
+    // A file that is no picture keeps its own suffix: refs.json, style.csl.
+    const QString own = info.suffix().toLower();
+    const QString suffix = !mediaType.isEmpty() ? suffixFor(mediaType) : own.isEmpty() ? QStringLiteral("bin") : own;
     QString name = stem + u'.' + suffix;
     const int folder = m_mode == Mode::Copy ? openFolder(QDir(m_outputFolder).filePath(m_folder)) : -1;
     const auto close = qScopeGuard([folder] { if (folder >= 0) ::close(folder); });
@@ -163,7 +170,9 @@ QString Assets::place(const QByteArray &data, const QString &mediaType, const QS
     };
     for (int n = 2; occupied(); ++n) name = QStringLiteral("%1-%2.%3").arg(stem).arg(n).arg(suffix);
     m_assets.append({name, mediaType, data, matched});
-    const QString url = m_folder + QString::fromUtf8(QUrl::toPercentEncoding(name));
+    // The folder's name is a path in the URL too: a `#`, `?` or `%` in it
+    // (an output named "notes#2.html") must not end the path there.
+    const QString url = QString::fromUtf8(QUrl::toPercentEncoding(m_folder, "/") + QUrl::toPercentEncoding(name));
     m_byHash.insert(hash, url);
     return url;
 }

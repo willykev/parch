@@ -364,6 +364,8 @@ private slots:
     void cliExportAssemblyKeepsMeaning() { CliTests::exportAssemblyKeepsMeaning(); }
     void cliExportWritesAStandalonePage() { CliTests::exportWritesAStandalonePage(); }
     void cliExportRefusesWhatItMustNot() { CliTests::exportRefusesWhatItMustNot(); }
+    void cliNothingADocumentIsMadeFromIsWrittenOver() { CliTests::nothingADocumentIsMadeFromIsWrittenOver(); }
+    void cliAssembledMarkdownKeepsItsCitations() { CliTests::assembledMarkdownKeepsItsCitations(); }
     void cliExportLeavesTheSourceAlone() { CliTests::exportLeavesTheSourceAlone(); }
     void cliExportFormatsPlugInThroughOneInterface() { CliTests::exportFormatsPlugInThroughOneInterface(); }
     void cliStatsCountWhatAReaderReads() { CliTests::statsCountWhatAReaderReads(); }
@@ -406,6 +408,9 @@ private slots:
     void exportsStopWhenCancelled() { ExportTests::exportsStopWhenCancelled(); }
     void exportsFailWithAReasonAndKeepTheOldFile() { ExportTests::exportsFailWithAReasonAndKeepTheOldFile(); }
     void exportsNeverTouchTheSource() { ExportTests::exportsNeverTouchTheSource(); }
+    void exportsLinkIncludedFilesWithinThemselves() { ExportTests::exportsLinkIncludedFilesWithinThemselves(); }
+    void htmlPicturesKeepTheirViewsAndOddFolderNames() { ExportTests::htmlPicturesKeepTheirViewsAndOddFolderNames(); }
+    void aReplacedExportKeepsWhoMayReadIt() { ExportTests::aReplacedExportKeepsWhoMayReadIt(); }
     void exportDialogListsLimitationsAndExportsInTheBackground()
     {
         ExportTests::exportDialogListsLimitationsAndExportsInTheBackground();
@@ -819,6 +824,7 @@ private slots:
     // What parch refuses to reach or write, written in securitytests.cpp.
     void webPictureRequestsKeepTheirHost() { SecurityTests::webPictureRequestsKeepTheirHost(); }
     void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }
+    void webPicturesNeverComeFromThisComputersNetworks() { SecurityTests::webPicturesNeverComeFromThisComputersNetworks(); }
     void exportsAskBeforeReplacingALink() { SecurityTests::exportsAskBeforeReplacingALink(); }
     void parchKeepsItsFilesToItself() { SecurityTests::parchKeepsItsFilesToItself(); }
     void helpersRunWithinLimits() { SecurityTests::helpersRunWithinLimits(); }

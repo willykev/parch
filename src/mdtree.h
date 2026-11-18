@@ -429,6 +429,18 @@ struct Destination {
 Destination classifyDestination(const QString &destination, const QString &baseDirectory);
 Destination classifyDestination(const Document &document, const Node &linkOrImage);
 
+// Where in `document` a link to the file `path`, at `fragment`, leads when
+// that file is the document or one it includes: its heading whose anchor,
+// as the file read on its own would number it, is `fragment` (and the
+// file's first heading when there is no fragment, or none matches), as that
+// heading's slug in the whole document. Empty when the file is not part of
+// the document, or holds no heading. An export that holds the whole document
+// links there, not to a file its reader does not have.
+QString includedAnchor(const Document &document, const QString &path, const QString &fragment);
+// The same by the file's index in Document::files, without falling back to
+// its first heading: empty when no heading of the file has that anchor.
+QString anchorInFile(const Document &document, int file, const QString &fragment);
+
 // A file path as a link or image destination can carry it: spaces,
 // parentheses, angle brackets, `#`, `%`, `&` (which could start an entity),
 // `:` (which could end a scheme), `\`, `"` and control characters are

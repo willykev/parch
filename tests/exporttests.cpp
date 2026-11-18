@@ -39,6 +39,7 @@
 #include <QPdfWriter>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QUrl>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -1323,7 +1324,109 @@ void exportsNeverTouchTheSource()
     after.remove(QStringLiteral("beside_files/square.png"));
     after.remove(QStringLiteral("beside_files/.parch-export"));
     QCOMPARE(after, before);
-    QVERIFY(Exporters::isSource(loaded.document, book + QStringLiteral("/chapter.md")));
+    QVERIFY(Exporters::isSource(loaded.document, loaded.dialect, book + QStringLiteral("/chapter.md")));
+}
+
+void exportsLinkIncludedFilesWithinThemselves()
+{
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    // Two headings called Café, one in the book and one in a chapter it
+    // includes, each linked: the chapter's by its own file, and from within
+    // the chapter as the chapter alone names it.
+    writeFile(folder.path() + QStringLiteral("/chapter.md"),
+              QStringLiteral("## Café\n\nChapter café. Back to [its own Café](#café).\n").toUtf8());
+    writeFile(folder.path() + QStringLiteral("/book.md"),
+              QStringLiteral("# Book\n\n## Café\n\nBook café.\n\nchapter.md\n\n## After\n\n"
+                             "See [the chapter's Café](chapter.md#café) and [the chapter](chapter.md).\n")
+                  .toUtf8());
+    const DocumentCheck::Loaded loaded = load(canonical(folder.path() + QStringLiteral("/book.md")));
+    QCOMPARE(loaded.document.files.size(), size_t(2));
+    QString chapterCafe;
+    for (const md::Heading &heading : loaded.document.headings)
+        if (heading.file == 1) chapterCafe = heading.slug;
+    QVERIFY(!chapterCafe.isEmpty());
+    QCOMPARE(md::includedAnchor(loaded.document, canonical(folder.path() + QStringLiteral("/chapter.md")), QStringLiteral("café")),
+             chapterCafe);
+
+    // In a book, every link leads to a file the book has and an id there.
+    const QString output = folder.path() + QStringLiteral("/book.epub");
+    const ExportResult result =
+        Exporters::find(QStringLiteral("epub"))->write(loaded.document, recipeFor(loaded, QStringLiteral("epub"), output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const QList<ZipPackage::Entry> entries = entriesOf(output);
+    QHash<QString, QString> chapters;
+    for (const ZipPackage::Entry &each : entries)
+        if (each.name.startsWith(QLatin1String("OEBPS/chapter-")))
+            chapters.insert(each.name.mid(6), QString::fromUtf8(each.data));
+    QVERIFY(!chapters.isEmpty());
+    static const QRegularExpression href(QStringLiteral("<a [^>]*href=\"([^\"]*)\"[^>]*>([^<]*)</a>"));
+    QHash<QString, QString> targets; // link text -> chapter#id
+    for (auto it = chapters.cbegin(); it != chapters.cend(); ++it) {
+        for (const QRegularExpressionMatch &match : href.globalMatch(it.value())) {
+            const QString link = match.captured(1);
+            QVERIFY2(!link.contains(QLatin1String(".md")), qPrintable(link));
+            const qsizetype hash = link.indexOf(u'#');
+            if (hash < 0) continue;
+            const QString file = hash == 0 ? it.key() : link.left(hash);
+            const QString id = QUrl::fromPercentEncoding(link.mid(hash + 1).toUtf8());
+            QVERIFY2(chapters.contains(file), qPrintable(link));
+            QVERIFY2(chapters.value(file).contains(QStringLiteral(" id=\"%1\"").arg(id)), qPrintable(link));
+            targets.insert(match.captured(2), file + u'#' + id);
+        }
+    }
+    // Both links to the chapter's Café reach the chapter's heading, not the book's.
+    QVERIFY(targets.value(QStringLiteral("the chapter's Café")).endsWith(u'#' + chapterCafe));
+    QVERIFY(targets.value(QStringLiteral("its own Café")).endsWith(u'#' + chapterCafe));
+
+    // A PDF leads there too, and names no folder of this computer.
+    const QString pdf = folder.path() + QStringLiteral("/book.pdf");
+    const ExportResult paper =
+        Exporters::find(QStringLiteral("pdf"))->write(loaded.document, recipeFor(loaded, QStringLiteral("pdf"), pdf), bareRun());
+    QVERIFY2(paper.ok, qPrintable(paper.error));
+    const QByteArray bytes = readFile(pdf);
+    QVERIFY(!bytes.contains("file:"));
+    QVERIFY(!bytes.contains(QFile::encodeName(canonical(folder.path()))));
+}
+
+void htmlPicturesKeepTheirViewsAndOddFolderNames()
+{
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    writeFile(folder.path() + QStringLiteral("/icons.svg"),
+              "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 20 10\">"
+              "<view id=\"left\" viewBox=\"0 0 10 10\"/><view id=\"right\" viewBox=\"10 0 10 10\"/>"
+              "<rect width=\"10\" height=\"10\" fill=\"red\"/><rect x=\"10\" width=\"10\" height=\"10\" fill=\"blue\"/></svg>");
+    writeFile(folder.path() + QStringLiteral("/doc.md"), "![Left](icons.svg#left) ![Right](icons.svg#right)\n");
+    const DocumentCheck::Loaded loaded = load(canonical(folder.path() + QStringLiteral("/doc.md")));
+    // An output named with a `#`: its pictures' folder is a path, not a fragment.
+    const QString page = folder.path() + QStringLiteral("/notes#2.html");
+    const ExportResult result =
+        Exporters::find(QStringLiteral("html"))->write(loaded.document, recipeFor(loaded, QStringLiteral("html"), page), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const QString shown = QString::fromUtf8(readFile(page));
+    QVERIFY2(shown.contains(QStringLiteral("<img src=\"notes%232_files/icons.svg#left\" alt=\"Left\" />")), qPrintable(shown));
+    QVERIFY2(shown.contains(QStringLiteral("<img src=\"notes%232_files/icons.svg#right\" alt=\"Right\" />")), qPrintable(shown));
+    QCOMPARE(readFile(folder.path() + QStringLiteral("/notes#2_files/icons.svg")), readFile(folder.path() + QStringLiteral("/icons.svg")));
+}
+
+void aReplacedExportKeepsWhoMayReadIt()
+{
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString path = folder.path() + QStringLiteral("/shared.html");
+    QString error;
+    QVERIFY2(Exporters::writeFile(path, "first", &error), qPrintable(error));
+    const QByteArray name = QFile::encodeName(path);
+    if (::setxattr(name.constData(), "user.comment", "for the team", 12, 0) != 0)
+        QSKIP("This folder keeps no extended attributes.");
+    QVERIFY(QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup));
+    QVERIFY2(Exporters::writeFile(path, "second", &error), qPrintable(error));
+    QCOMPARE(readFile(path), QByteArray("second"));
+    char value[32] = {};
+    QCOMPARE(int(::getxattr(name.constData(), "user.comment", value, sizeof value)), 12);
+    QCOMPARE(QByteArray(value, 12), QByteArray("for the team"));
+    QCOMPARE(QFileInfo(path).permissions() & (QFile::ReadGroup | QFile::ReadOther), QFile::Permissions(QFile::ReadGroup));
 }
 
 void exportDialogListsLimitationsAndExportsInTheBackground()

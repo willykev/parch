@@ -14,6 +14,24 @@
 - Cross-filesystem moves check that the whole file was copied before removing
   the original. Updating links in a closed document keeps its previous bytes
   in history before writing.
+- No render or export writes over a file the document is made from: its
+  bibliographies and citation style, and the pictures it shows, as well as
+  the files it includes.
+- PDFs, EPUBs, HTML and DOCX lead links to an included chapter to that
+  chapter inside them, at the heading the link names, and a PDF never turns
+  a link into a `file://` address with the writer's folders in it. A `#link`
+  in an included chapter reaches that chapter's own heading, and EPUB
+  chapters route links to headings with accented names.
+- Assembled Markdown keeps its citations working from wherever it is written:
+  the bibliography and style paths are rewritten for its folder, and the
+  bibliographies of included chapters are added to its own.
+- Replacing an export keeps the old file's group and extended attributes,
+  its access control list among them, as well as its mode.
+- Web pictures are never fetched from this computer's own addresses or from
+  a network it is directly on, public or not.
+- HTML pictures load when the output's name has a `#`, `?` or `%` in it, each
+  picture keeps its SVG view (`icons.svg#home`), and diagrams no longer fail
+  when the default font is a WOFF or WOFF2 file.
 
 ## 0.1.1 — 2026-11-17
 

@@ -28,6 +28,7 @@ NetworkFetcher::~NetworkFetcher() = default;
 
 void NetworkFetcher::setResolver(Resolver resolver) { m_resolver = std::move(resolver); }
 void NetworkFetcher::setProxy(const QNetworkProxy &proxy) { m_network->setProxy(proxy); }
+void NetworkFetcher::setLocalNetworks(Networks networks) { m_localNetworks = std::move(networks); }
 void NetworkFetcher::setTimeout(int milliseconds) { m_timeoutMs = milliseconds; }
 
 void NetworkFetcher::fetch(const QUrl &url, QObject *context,
@@ -58,8 +59,15 @@ void NetworkFetcher::visit(const std::shared_ptr<Job> &job, const QUrl &url)
             return;
         }
         // Every address the name has, since any of them may be the one connected to.
+        QList<QNetworkAddressEntry> local;
+        if (m_localNetworks) {
+            local = m_localNetworks();
+        } else {
+            for (const QNetworkInterface &interface : QNetworkInterface::allInterfaces())
+                if (interface.flags().testFlag(QNetworkInterface::IsUp)) local += interface.addressEntries();
+        }
         for (const QHostAddress &address : addresses) {
-            if (!isPublic(address)) {
+            if (!isPublic(address) || onLocalNetwork(address, local)) {
                 finish(job, {}, tr("Its address is on this computer or a private network, which parch never fetches from."));
                 return;
             }
@@ -220,6 +228,24 @@ bool NetworkFetcher::isPublic(const QHostAddress &given)
     for (const Net &net : four ? std::span<const Net>(closed4) : std::span<const Net>(closed6))
         if (address.isInSubnet(QHostAddress(QString::fromLatin1(net.address)), net.bits)) return false;
     return true;
+}
+
+bool NetworkFetcher::onLocalNetwork(const QHostAddress &given, const QList<QNetworkAddressEntry> &networks)
+{
+    // An IPv6 address that carries an IPv4 one is that address.
+    QHostAddress address = given;
+    bool four = false;
+    const quint32 v4 = address.toIPv4Address(&four);
+    if (four) address = QHostAddress(v4);
+    for (const QNetworkAddressEntry &entry : networks) {
+        const QHostAddress own = entry.ip();
+        if (own.isNull() || own.protocol() != address.protocol()) continue;
+        if (own.isEqual(address, QHostAddress::TolerantConversion)) return true;
+        // A network of no width would be every address; there is none.
+        const int bits = entry.prefixLength();
+        if (bits > 0 && address.isInSubnet(own, bits)) return true;
+    }
+    return false;
 }
 
 QString NetworkFetcher::redirectRefusal(const QUrl &from, const QUrl &to)

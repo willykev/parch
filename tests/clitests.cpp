@@ -1247,10 +1247,69 @@ void exportFormatsPlugInThroughOneInterface()
     box.write(QStringLiteral("a.md"), QStringLiteral("b.md\n"));
     box.write(QStringLiteral("b.md"), QStringLiteral("B.\n"));
     const DocumentCheck::Loaded loaded = loadedFrom(box.path(QStringLiteral("a.md")));
-    QVERIFY(Exporters::isSource(loaded.document, box.path(QStringLiteral("a.md"))));
-    QVERIFY(Exporters::isSource(loaded.document, box.path(QStringLiteral("b.md"))));
-    QVERIFY(Exporters::isSource(loaded.document, box.path(QStringLiteral("x/../b.md"))));
-    QVERIFY(!Exporters::isSource(loaded.document, box.path(QStringLiteral("c.md"))));
+    QVERIFY(Exporters::isSource(loaded.document, loaded.dialect, box.path(QStringLiteral("a.md"))));
+    QVERIFY(Exporters::isSource(loaded.document, loaded.dialect, box.path(QStringLiteral("b.md"))));
+    QVERIFY(Exporters::isSource(loaded.document, loaded.dialect, box.path(QStringLiteral("x/../b.md"))));
+    QVERIFY(!Exporters::isSource(loaded.document, loaded.dialect, box.path(QStringLiteral("c.md"))));
+}
+
+void nothingADocumentIsMadeFromIsWrittenOver()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    const QString refs = QStringLiteral("[{\"id\":\"doe\",\"type\":\"book\",\"title\":\"Tides\","
+                                        "\"author\":[{\"family\":\"Doe\"}],\"issued\":{\"date-parts\":[[2020]]}}]");
+    box.write(QStringLiteral("refs.json"), refs);
+    box.write(QStringLiteral("style.csl"), QStringLiteral("<style/>"));
+    box.write(QStringLiteral("pic.png"), QStringLiteral("not looked at"));
+    box.write(QStringLiteral("doc.md"), QStringLiteral("---\nbibliography: refs.json\n---\n\nAs [@doe] says.\n\n![A](pic.png)\n"));
+    const int before = box.run({"check", "doc.md"}).code;
+    // Not its bibliography, not a picture it shows: even a forced render or
+    // export of its tree is refused, and its bibliography stays its own.
+    for (const char *output : {"refs.json", "pic.png"}) {
+        const Ran render = box.run({"render", "doc.md", "--to", "json-tree", "-o", QLatin1StringView(output), "--force"});
+        QVERIFY2(render.code == 3, qPrintable(render.said()));
+        QVERIFY(render.err.contains(QStringLiteral("parch never writes over it")));
+        const Ran exported = box.run({"export", "doc.md", "--to", "md", "-o", QLatin1StringView(output), "--force"});
+        QVERIFY2(exported.code == 3, qPrintable(exported.said()));
+    }
+    QCOMPARE(box.read(QStringLiteral("refs.json")), refs.toUtf8());
+    QCOMPARE(box.run({"check", "doc.md"}).code, before);
+    // Its style the same.
+    box.write(QStringLiteral("styled.md"), QStringLiteral("---\ncsl: style.csl\n---\n\nText.\n"));
+    QCOMPARE(box.run({"render", "styled.md", "-o", "style.csl", "--force"}).code, 3);
+    QCOMPARE(box.read(QStringLiteral("style.csl")), QByteArray("<style/>"));
+}
+
+void assembledMarkdownKeepsItsCitations()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    const auto entry = [](const char *key, const char *family) {
+        return QStringLiteral("[{\"id\":\"%1\",\"type\":\"book\",\"title\":\"T\",\"author\":[{\"family\":\"%2\"}],"
+                              "\"issued\":{\"date-parts\":[[2020]]}}]")
+            .arg(QLatin1StringView(key), QLatin1StringView(family));
+    };
+    QDir().mkpath(box.path(QStringLiteral("src")));
+    QDir().mkpath(box.path(QStringLiteral("out")));
+    box.write(QStringLiteral("src/refs.json"), entry("doe", "Doe"));
+    box.write(QStringLiteral("src/chapter.json"), entry("roe", "Roe"));
+    // The book's bibliography is beside it; its chapter names one of its own.
+    box.write(QStringLiteral("src/chapter.md"), QStringLiteral("---\nbibliography: chapter.json\n---\n\nAs [@roe] says.\n"));
+    box.write(QStringLiteral("src/book.md"),
+              QStringLiteral("---\ntitle: Book\nbibliography: refs.json\n---\n\nAs [@doe] says.\n\nchapter.md\n"));
+    const Ran clean = box.run({"check", "src/book.md"});
+    QVERIFY2(clean.code == 0, qPrintable(clean.said()));
+    // Assembled somewhere else, and beside the book: each reads as the book did.
+    for (const char *output : {"out/book.md", "src/whole.md"}) {
+        const Ran exported = box.run({"export", "src/book.md", "--to", "md", "-o", QLatin1StringView(output)});
+        QVERIFY2(exported.code == 0, qPrintable(exported.said()));
+        const Ran checked = box.run({"check", QLatin1StringView(output)});
+        QVERIFY2(checked.code == 0 && !checked.said().contains(QStringLiteral("missing-citation")),
+                 qPrintable(checked.said() + u'\n' + QString::fromUtf8(box.read(QLatin1StringView(output)))));
+        // What else the front matter says stays.
+        QVERIFY(box.read(QLatin1StringView(output)).startsWith("---\ntitle: Book\n"));
+    }
 }
 
 void statsCountWhatAReaderReads()

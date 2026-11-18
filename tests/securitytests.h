@@ -9,6 +9,7 @@ namespace SecurityTests {
 
 void webPictureRequestsKeepTheirHost();
 void webPicturesComeOnlyFromPublicAddresses();
+void webPicturesNeverComeFromThisComputersNetworks();
 void exportsAskBeforeReplacingALink();
 void parchKeepsItsFilesToItself();
 void helpersRunWithinLimits();

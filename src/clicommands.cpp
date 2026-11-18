@@ -353,11 +353,14 @@ bool loadDocument(const QString &path, const DialectFlags &flags, const Context 
 // Whether a command may write `output`: never one of the document's own
 // files, never through a symbolic link, even with --force, and a file that
 // is there only with --force.
-bool mayWrite(const QString &output, bool force, const md::Document &document, QString *error)
+bool mayWrite(const QString &output, bool force, const md::Document &document, const Dialect::Choice &dialect,
+              QString *error)
 {
     const QFileInfo info(output);
-    if (Exporters::isSource(document, output)) {
-        *error = QStringLiteral("%1 is the document or a file it includes; parch never writes over it").arg(output);
+    if (Exporters::isSource(document, dialect, output)) {
+        *error = QStringLiteral("%1 is the document or a file it is made from (one it includes, its bibliography or "
+                                "style, or a picture it shows); parch never writes over it")
+                     .arg(output);
         return false;
     }
     if (const QString why = Exporters::linkRefusal(output); !why.isEmpty()) {
@@ -593,7 +596,7 @@ int check(const QStringList &arguments, const Context &context)
 
 // Writes a result to -o, or to the standard output.
 std::optional<int> deliver(Command &command, const Context &context, const QString &text,
-                           const md::Document &document, QString *output)
+                           const md::Document &document, const Dialect::Choice &dialect, QString *output)
 {
     if (!command.parser.isSet(QStringLiteral("output"))) {
         if (!command.wantsJson()) write(context.out, text);
@@ -601,7 +604,7 @@ std::optional<int> deliver(Command &command, const Context &context, const QStri
     }
     *output = absolute(command.parser.value(QStringLiteral("output")), context);
     QString error;
-    if (!mayWrite(*output, command.parser.isSet(QStringLiteral("force")), document, &error))
+    if (!mayWrite(*output, command.parser.isSet(QStringLiteral("force")), document, dialect, &error))
         return command.fail(Io, error, context);
     const auto existing = command.parser.isSet(QStringLiteral("force")) ? ExistingOutput::ReplaceFile : ExistingOutput::Refuse;
     if (!Exporters::writeFile(*output, text.toUtf8(), &error, existing)) return command.fail(Io, error, context);
@@ -680,7 +683,7 @@ int render(const QStringList &arguments, const Context &context)
     }
 
     QString output;
-    if (const auto done = deliver(command, context, text, document, &output)) return *done;
+    if (const auto done = deliver(command, context, text, document, loaded.dialect, &output)) return *done;
     if (command.wantsJson()) {
         QJsonObject report = header(QStringLiteral("render"));
         report.insert(QStringLiteral("file"), loaded.path);
@@ -837,7 +840,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
             if (problem.kind == u"include") line(context.err, problemLine(problem, document, context));
         return Problems;
     }
-    if (!mayWrite(output, parser.isSet(QStringLiteral("force")), document, &error))
+    if (!mayWrite(output, parser.isSet(QStringLiteral("force")), document, loaded.dialect, &error))
         return command.fail(Io, error, context);
 
     recipe.existing = parser.isSet(QStringLiteral("force")) ? ExistingOutput::ReplaceFile : ExistingOutput::Refuse;

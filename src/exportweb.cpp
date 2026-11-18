@@ -163,7 +163,9 @@ QString Assets::place(const QByteArray &data, const QString &mediaType, const QS
     };
     for (int n = 2; occupied(); ++n) name = QStringLiteral("%1-%2.%3").arg(stem).arg(n).arg(suffix);
     m_assets.append({name, mediaType, data, matched});
-    const QString url = m_folder + QString::fromUtf8(QUrl::toPercentEncoding(name));
+    // The folder's name is a path in the URL too: a `#`, `?` or `%` in it
+    // (an output named "notes#2.html") must not end the path there.
+    const QString url = QString::fromUtf8(QUrl::toPercentEncoding(m_folder, "/") + QUrl::toPercentEncoding(name));
     m_byHash.insert(hash, url);
     return url;
 }

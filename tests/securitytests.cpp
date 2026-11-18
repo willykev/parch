@@ -614,6 +614,42 @@ void webPictureRequestsKeepTheirHost()
     QCOMPARE(network.attempts.size(), 1);
 }
 
+void webPicturesNeverComeFromThisComputersNetworks()
+{
+    // This computer's own address, public or not, and any address on a
+    // network it is directly on, IPv6 ones at home among them.
+    QList<QNetworkAddressEntry> networks;
+    const auto add = [&](const char *address, int prefix) {
+        QNetworkAddressEntry entry;
+        entry.setIp(QHostAddress(QString::fromLatin1(address)));
+        entry.setPrefixLength(prefix);
+        networks.append(entry);
+    };
+    add("203.0.113.5", 24);
+    add("2001:db8:1::5", 64);
+    add("198.51.100.9", 0);
+    for (const char *address : {"203.0.113.5", "203.0.113.77", "2001:db8:1::99", "::ffff:203.0.113.9", "198.51.100.9"})
+        QVERIFY2(NetworkFetcher::onLocalNetwork(QHostAddress(QString::fromLatin1(address)), networks), address);
+    for (const char *address : {"203.0.114.1", "2001:db8:2::1", "198.51.100.10"})
+        QVERIFY2(!NetworkFetcher::onLocalNetwork(QHostAddress(QString::fromLatin1(address)), networks), address);
+
+    // Such an address is refused before anything is asked of it.
+    PictureServer server;
+    QVERIFY(server.listening());
+    server.answer("/pic.png", {200, "image/png", pngBytes(), {}, 0});
+    NetworkFetcher fetcher;
+    fetcher.setProxy(QNetworkProxy(QNetworkProxy::HttpProxy, QStringLiteral("127.0.0.1"), server.port()));
+    fetcher.setLocalNetworks([&] { return networks; });
+    fetcher.setResolver([](const QString &host, std::function<void(const QList<QHostAddress> &, const QString &)> answer) {
+        answer({QHostAddress(host == u"home.test" ? QStringLiteral("2001:db8:1::42") : QStringLiteral("203.0.113.7"))}, {});
+    });
+    for (const char *url : {"http://neighbour.test/pic.png", "http://home.test/pic.png"}) {
+        const Fetched fetched = fetchNow(fetcher, QString::fromLatin1(url));
+        QVERIFY2(fetched.done && !fetched.error.isEmpty() && fetched.data.isEmpty(), url);
+    }
+    QCOMPARE(server.connections, 0);
+}
+
 void webPicturesComeOnlyFromPublicAddresses()
 {
     PictureServer server;

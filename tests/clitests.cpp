@@ -1297,7 +1297,7 @@ void assembledMarkdownKeepsItsCitations()
     // The book's bibliography is beside it; its chapter names one of its own.
     box.write(QStringLiteral("src/chapter.md"), QStringLiteral("---\nbibliography: chapter.json\n---\n\nAs [@roe] says.\n"));
     box.write(QStringLiteral("src/book.md"),
-              QStringLiteral("---\ntitle: Book\nbibliography: refs.json\n---\n\nAs [@doe] says.\n\nchapter.md\n"));
+              QStringLiteral("---\ntitle: Book\nbibliography: refs.json\ncsl: apa\n---\n\nAs [@doe] says.\n\nchapter.md\n"));
     const Ran clean = box.run({"check", "src/book.md"});
     QVERIFY2(clean.code == 0, qPrintable(clean.said()));
     // Assembled somewhere else, and beside the book: each reads as the book did.
@@ -1310,6 +1310,9 @@ void assembledMarkdownKeepsItsCitations()
         // What else the front matter says stays.
         QVERIFY(box.read(QLatin1StringView(output)).startsWith("---\ntitle: Book\n"));
     }
+    // Written elsewhere, it carries its bibliographies along, as its pictures.
+    QCOMPARE(box.read(QStringLiteral("out/book_files/refs.json")), entry("doe", "Doe").toUtf8());
+    QCOMPARE(box.read(QStringLiteral("out/book_files/chapter.json")), entry("roe", "Roe").toUtf8());
 }
 
 void statsCountWhatAReaderReads()

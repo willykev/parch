@@ -830,6 +830,32 @@ void deadKeysKeepPendingCharacterCommands()
         QTest::simulateEvent(&view.window, true, key, Qt::NoModifier, {}, false, 0);
         QTest::simulateEvent(&view.window, false, key, Qt::NoModifier, {}, false, 0);
     };
+    view.load(QStringLiteral("‸cafe and more"));
+    view.keys(QStringLiteral("0lr"));
+    deadKey(Qt::Key_Dead_Acute);
+    QCOMPARE(view.vim->pending(), QStringLiteral("r"));
+    view.keys(QStringLiteral("e"));
+    QCOMPARE(view.text(), QStringLiteral("céfe and more"));
+    view.keys(QStringLiteral("u"));
+    QCOMPARE(view.text(), QStringLiteral("cafe and more"));
+
+    // A dead key with no precomposed result cancels without an edit. The
+    // next command, after the cancellation, takes its argument as usual.
+    view.keys(QStringLiteral("0lr"));
+    deadKey(Qt::Key_Dead_Acute);
+    view.keys(QStringLiteral("q"));
+    QCOMPARE(view.text(), QStringLiteral("cafe and more"));
+    QVERIFY(view.vim->pending().isEmpty());
+    view.keys(QStringLiteral("rx"));
+    QCOMPARE(view.text(), QStringLiteral("cxfe and more"));
+
+    // A key already composed by the platform takes its character once.
+    view.load(QStringLiteral("c‸afe"));
+    view.keys(QStringLiteral("r"));
+    deadKey(Qt::Key_Dead_Acute);
+    view.keys(QStringLiteral("é"));
+    QCOMPARE(view.text(), QStringLiteral("céfe"));
+
     for (auto key : {Qt::Key_Dead_Acute, Qt::Key_Dead_Grave, Qt::Key_Dead_Diaeresis, Qt::Key_Dead_Circumflex,
                      Qt::Key_Dead_Tilde}) {
         view.load(QStringLiteral("caf‸e"));
@@ -842,7 +868,7 @@ void deadKeysKeepPendingCharacterCommands()
         QCOMPARE(view.text(), QStringLiteral("café"));
     }
     for (const QString &command : {QStringLiteral("f"), QStringLiteral("t")}) {
-        view.load(QStringLiteral("‸a c"));
+        view.load(QStringLiteral("‸a e é"));
         view.keys(command);
         QVERIFY(!(view.window.activeFocusItem()->flags() & QQuickItem::ItemAcceptsInputMethod));
         QInputMethodEvent preedit(QStringLiteral("ci"), {});
@@ -850,8 +876,8 @@ void deadKeysKeepPendingCharacterCommands()
         QCOMPARE(view.vim->pending(), command);
         deadKey(Qt::Key_Dead_Acute);
         QCOMPARE(view.vim->pending(), command);
-        view.keys(QStringLiteral("c"));
-        QCOMPARE(view.vim->cursor(), command == u"f" ? 2 : 1);
+        view.keys(QStringLiteral("e"));
+        QCOMPARE(view.vim->cursor(), command == u"f" ? 4 : 3);
     }
     view.load(QStringLiteral("‸cafe"));
     view.keys(QStringLiteral("r"));

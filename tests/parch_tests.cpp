@@ -17579,6 +17579,8 @@ void ParchTests::renameKeepsQuotedIncludesWorking_data()
     QTest::newRow("quote") << QStringLiteral("\"old.md\"") << QStringLiteral("Writer's \"draft\".md");
     QTest::newRow("brackets with a space") << QStringLiteral("old.md") << QStringLiteral("[draft] one.md");
     QTest::newRow("brackets without a space") << QStringLiteral("old.md") << QStringLiteral("[draft].md");
+    QTest::newRow("web-like filename") << QStringLiteral("\"old.md\"") << QStringLiteral("www.point.md");
+    QTest::newRow("scheme-like filename") << QStringLiteral("old.md") << QStringLiteral("mailto:x.md");
 }
 
 void ParchTests::renameKeepsQuotedIncludesWorking()

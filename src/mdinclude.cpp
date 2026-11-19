@@ -11,16 +11,19 @@
 
 namespace md {
 
+bool isUrlSpelling(QStringView path)
+{
+    if (path.startsWith(u"www.", Qt::CaseInsensitive) || path.contains(u"://")) return true;
+    static const QRegularExpression scheme(QStringLiteral("^[A-Za-z][A-Za-z0-9+.-]+:"));
+    return path.contains(u':') && scheme.matchView(path).hasMatch();
+}
+
 bool isBareIncludePath(QStringView path)
 {
-    if (path.isEmpty() || QStringView(u"\"'#!(=").contains(path.front()) || path.startsWith(u"~~~")
-        || path.startsWith(u"www.", Qt::CaseInsensitive))
-        return false;
+    if (path.isEmpty() || QStringView(u"\"'#!(=").contains(path.front()) || path.startsWith(u"~~~")) return false;
     for (const QChar ch : path)
         if (ch <= u' ' || QStringView(u"<>[]*`|\\").contains(ch)) return false;
-    // A scheme before the first slash marks a URL.
-    static const QRegularExpression scheme(QStringLiteral("^[a-z][a-z0-9+.-]+:"), QRegularExpression::CaseInsensitiveOption);
-    return !path.contains(u':') || !scheme.matchView(path).hasMatch();
+    return true;
 }
 
 QString includeTarget(const QString &written, const QString &includingDirectory, const QString &libraryRoot)

@@ -1492,9 +1492,7 @@ bool BlockParser::includeLine(Block *block, int from, int to)
     const bool known = written.endsWith(QLatin1StringView(".md"), Qt::CaseInsensitive)
         || written.endsWith(QLatin1StringView(".markdown"), Qt::CaseInsensitive)
         || written.endsWith(QLatin1StringView(".txt"), Qt::CaseInsensitive);
-    if (!known || written.size() < 4) return false;
-    // A URL is a link, not a file to include.
-    if (written.contains(u"://") || (!quoted && !isBareIncludePath(written))) return false;
+    if (!known || written.size() < 4 || isUrlSpelling(written) || (!quoted && !isBareIncludePath(written))) return false;
     QString path;
     path.reserve(written.size());
     for (qsizetype k = 0; k < written.size(); ++k) {

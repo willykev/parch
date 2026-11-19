@@ -287,6 +287,7 @@ QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const Q
                 relative.prepend(QStringLiteral("./"));
         }
         if (plain.endsWith(u'/') && !relative.endsWith(u'/')) relative.append(u'/');
+        if (include && md::isUrlSpelling(relative)) relative.prepend(QStringLiteral("./"));
         if (relative == plain) continue;
         QString after;
         if (include) {

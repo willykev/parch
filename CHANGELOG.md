@@ -4,15 +4,16 @@
 
 - Recovery keeps the text shown in an unresolved conflict, even if an
   externally deleted file quickly returns with different contents.
-- Vim commands survive modifier presses, and character commands keep
-  waiting through dead keys without enabling an input method. `Ctrl+R`
-  redoes edits or cancels a pending command in the focused, editable Vim
-  editor. It opens Go to heading in read-only documents.
+- Vim commands survive modifier presses. Character commands compose dead
+  accents without enabling an input method and cancel if there is no single
+  composed character. `Ctrl+R` redoes edits or cancels a pending command in
+  the focused, editable Vim editor. It opens Go to heading in read-only
+  documents.
 - Library moves and renames keep closed documents' version history.
   Link updates preserve encoded names, quoted includes and local file URLs.
-  Quoted includes accept Markdown punctuation in filenames. The Move to
-  picker opens on an enabled folder, and heading labels show literal
-  percent placeholders.
+  Quoted includes accept Markdown punctuation in filenames. Quoted
+  addresses stay as text or links. The Move to picker opens on an enabled
+  folder, and heading labels show literal percent placeholders.
 - File renders refuse incomplete documents and preserve an existing output.
   Assembled Markdown preserves heading targets and list boundaries. DOCX
   links use internal bookmarks, and HTML and EPUB give

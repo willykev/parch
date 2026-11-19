@@ -555,7 +555,8 @@ paragraph, puts that file's text in its place, in the preview, `parch check`,
 library root; any other beside the file that names it.
 Put a path with spaces or Markdown punctuation such as brackets in single
 or double quotes. Within that path, escape the matching quote or a literal
-backslash with a backslash.
+backslash with a backslash. Quoted addresses remain text or links. To
+include a file whose name looks like an address, write `./www.point.md`.
 
 parch reads an include only from within the document's library, or, for a
 document in no library, from its folder and the folders in it. An include
@@ -835,8 +836,9 @@ Insert mode types exactly as parch does without Vim keys: lists continue on
 `Enter`, `Tab` indents, `Shift+Enter` breaks the line, input methods compose,
 and paste converts rich text. `Esc` or `Ctrl+[` returns to Normal mode, one
 character to the left. Outside Insert mode the editor takes keystrokes
-directly. After `f`, `t` or `r`, a dead key leaves the command waiting for
-the next printable character.
+directly. Character commands such as `f`, `t` and `r` can combine a dead
+accent with the next printable key. The command cancels if that sequence
+has no single composed character.
 
 ### Visual mode
 

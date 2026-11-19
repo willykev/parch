@@ -223,6 +223,7 @@ private:
     QChar m_operator;
     Await m_await = Await::None;
     QString m_awaitFor;
+    int m_deadKey = 0;
     QStringList m_keys;
     QString m_typed;
     // The size of the Visual area a command acts on, for ".".

@@ -815,6 +815,50 @@ bool isComposeKey(int key)
     return key == Qt::Key_Multi_key || (key >= Qt::Key_Dead_Grave && key <= Qt::Key_Dead_Longsolidusoverlay);
 }
 
+QString composeAccent(int deadKey, const QString &text)
+{
+    static const QHash<int, char16_t> marks{
+        {Qt::Key_Dead_Grave, u'\u0300'},
+        {Qt::Key_Dead_Acute, u'\u0301'},
+        {Qt::Key_Dead_Circumflex, u'\u0302'},
+        {Qt::Key_Dead_Tilde, u'\u0303'},
+        {Qt::Key_Dead_Macron, u'\u0304'},
+        {Qt::Key_Dead_Breve, u'\u0306'},
+        {Qt::Key_Dead_Abovedot, u'\u0307'},
+        {Qt::Key_Dead_Diaeresis, u'\u0308'},
+        {Qt::Key_Dead_Abovering, u'\u030a'},
+        {Qt::Key_Dead_Doubleacute, u'\u030b'},
+        {Qt::Key_Dead_Caron, u'\u030c'},
+        {Qt::Key_Dead_Cedilla, u'\u0327'},
+        {Qt::Key_Dead_Ogonek, u'\u0328'},
+        {Qt::Key_Dead_Iota, u'\u0345'},
+        {Qt::Key_Dead_Voiced_Sound, u'\u3099'},
+        {Qt::Key_Dead_Semivoiced_Sound, u'\u309a'},
+        {Qt::Key_Dead_Belowdot, u'\u0323'},
+        {Qt::Key_Dead_Hook, u'\u0309'},
+        {Qt::Key_Dead_Horn, u'\u031b'},
+        {Qt::Key_Dead_Abovecomma, u'\u0313'},
+        {Qt::Key_Dead_Abovereversedcomma, u'\u0314'},
+        {Qt::Key_Dead_Doublegrave, u'\u030f'},
+        {Qt::Key_Dead_Belowring, u'\u0325'},
+        {Qt::Key_Dead_Belowmacron, u'\u0331'},
+        {Qt::Key_Dead_Belowcircumflex, u'\u032d'},
+        {Qt::Key_Dead_Belowtilde, u'\u0330'},
+        {Qt::Key_Dead_Belowbreve, u'\u032e'},
+        {Qt::Key_Dead_Belowdiaeresis, u'\u0324'},
+        {Qt::Key_Dead_Invertedbreve, u'\u0311'},
+        {Qt::Key_Dead_Belowcomma, u'\u0326'},
+    };
+    const QChar mark(marks.value(deadKey));
+    if (mark.isNull() || isNamedKey(text)) return {};
+    QString letters = text.normalized(QString::NormalizationForm_D);
+    // The platform may already have supplied the accented character.
+    if (!letters.contains(mark)) letters += mark;
+    const QString composed = letters.normalized(QString::NormalizationForm_C);
+    const auto codepoints = composed.toUcs4();
+    return codepoints.size() == 1 && !QChar::isMark(codepoints.front()) ? composed : QString();
+}
+
 // Moves the view's cursor without that counting as a move from outside.
 struct Moving {
     int &depth;
@@ -1141,9 +1185,12 @@ bool VimMode::handleKey(QKeyEvent *event)
         if (!token.isEmpty() && token != u"<ignore>") run(token);
         return true;
     }
-    // A dead key can precede the printable argument. The platform's
-    // input method still stays off so ordinary letters arrive as keys.
-    if (m_await == Await::Char && isComposeKey(event->key())) return false;
+    if (m_await == Await::Char && isComposeKey(event->key())) {
+        // Compose a single dead accent locally. A longer sequence can
+        // still finish if the platform delivers a commit.
+        m_deadKey = m_deadKey ? Qt::Key_Multi_key : event->key();
+        return true;
+    }
     if (token.isEmpty()) {
         if (isModifier(*event)) return false;
         // Keys Vim keys leave to the view, such as Ctrl+C or Page Down,
@@ -1152,6 +1199,12 @@ bool VimMode::handleKey(QKeyEvent *event)
         return false;
     }
     if (token == u"<ignore>") return true;
+    if (m_deadKey && token != u"<Esc>" && token != u"<C-r>") {
+        const QString character = composeAccent(m_deadKey, token);
+        if (!character.isEmpty()) return run(character);
+        cancel();
+        return true;
+    }
     return run(token);
 }
 
@@ -1274,6 +1327,7 @@ void VimMode::cancel()
     m_operator = QChar();
     m_await = Await::None;
     m_awaitFor.clear();
+    m_deadKey = 0;
     m_keys.clear();
     m_typed.clear();
     m_visualSize = {};
@@ -2387,6 +2441,7 @@ void VimMode::awaited(const QString &k)
     const QString command = m_awaitFor;
     m_await = Await::None;
     m_awaitFor.clear();
+    m_deadKey = 0;
     if (await == Await::Register) {
         const QChar name = k.size() == 1 ? k[0] : QChar();
         if (!isRegisterName(name)) {

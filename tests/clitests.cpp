@@ -1021,6 +1021,13 @@ void exportAssemblesMarkdown()
     QCOMPARE(recipe.value(QStringLiteral("format")).toString(), QStringLiteral("md"));
     QCOMPARE(dialectProblem(recipe.value(QStringLiteral("dialect")).toObject()), QString());
     QCOMPARE(dialectProblem(result.value(QStringLiteral("dialect")).toObject()), QString());
+
+    // Quoted addresses ending in a Markdown extension remain paragraphs.
+    const QString addresses = QStringLiteral("# Sites\n\n\"www.point.md\"\n\n'mailto:x.md'\n");
+    box.write(QStringLiteral("sites.md"), addresses);
+    const Ran sites = box.run({"export", "sites.md", "-o", "sites-export.md"});
+    QVERIFY2(sites.code == Cli::Ok, qPrintable(sites.said()));
+    QCOMPARE(box.read(QStringLiteral("sites-export.md")), addresses.toUtf8());
 }
 
 void exportAssemblyKeepsMeaning()

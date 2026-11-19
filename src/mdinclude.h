@@ -82,7 +82,10 @@ private:
     int m_reads = 0;
 };
 
-// Whether a path can be written alone on an include line without quotes.
+// A URL spelling reserved in include lines, with or without quotes.
+bool isUrlSpelling(QStringView path);
+
+// Whether a local path can be written on an include line without quotes.
 bool isBareIncludePath(QStringView path);
 
 // The absolute path an include line points at, or an empty string when the

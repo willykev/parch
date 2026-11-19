@@ -48,7 +48,8 @@ Result read(const QString &path, qint64 limit);
 Result readPicture(const QString &path, const QStringList &folders);
 // Checks a picture reference for diagnostics and links. Reads check the
 // opened descriptor as well, before consuming any bytes.
-QString pictureRefusal(const QString &path, const QStringList &folders);
+enum class PictureProblem { Unreadable, OutsideFolders };
+QString pictureRefusal(const QString &path, const QStringList &folders, PictureProblem *problem = nullptr);
 
 // Reads at most `limit` bytes from an open descriptor, in pieces, from where
 // it stands to its end. False, with the reason, when more is there than the

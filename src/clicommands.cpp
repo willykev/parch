@@ -594,6 +594,16 @@ int check(const QStringList &arguments, const Context &context)
     return code;
 }
 
+// An incomplete document can be previewed on stdout, but cannot be published to a file.
+int incompleteOutput(const Command &command, const DocumentCheck::Loaded &loaded, const Context &context)
+{
+    const int code = command.fail(Problems, QStringLiteral("%1 cannot be written: an included file could not be read")
+                                                .arg(shown(loaded.path, context)), context);
+    for (const auto &problem : DocumentCheck::problems(loaded))
+        if (problem.kind == u"include") line(context.err, problemLine(problem, loaded.document, context));
+    return code;
+}
+
 // Writes a result to -o, or to the standard output.
 std::optional<int> deliver(Command &command, const Context &context, const QString &text,
                            const md::Document &document, const Dialect::Choice &dialect, QString *output)
@@ -631,7 +641,10 @@ int render(const QStringList &arguments, const Context &context)
                                    "document's,\nwhichever file they are written in. The tree keeps them as written. "
                                    "Ranges in json-tree\nare UTF-16 offsets into each file, start included and end "
                                    "not; lines count from 1.\n\n"
-                                   "Exit status: 0 written, 1 a wrong command line, 3 a file could not be read or "
+                                   "A render to a file refuses a document with an unreadable include. A render to stdout "
+                                   "can preview it.\n\n"
+                                   "Exit status: 0 written, 1 a wrong command line, 2 the document is incomplete "
+                                   "for file output, 3 a file could not be read or "
                                    "written.");
     if (const auto done = command.parse(arguments, context)) return *done;
     const QStringList files = command.parser.positionalArguments();
@@ -650,6 +663,8 @@ int render(const QStringList &arguments, const Context &context)
     if (!loadDocument(absolute(files.first(), context), flags, context, &loaded, &error))
         return command.fail(Io, error, context);
     const md::Document &document = loaded.document;
+    if (document.incomplete && command.parser.isSet(QStringLiteral("output")))
+        return incompleteOutput(command, loaded, context);
 
     QString text;
     QJsonValue result;
@@ -832,14 +847,8 @@ int exportDocument(const QStringList &arguments, const Context &context)
     recipe.source = loaded.path;
     recipe.dialect = loaded.dialect;
     recipe.citations = std::make_shared<const DocumentCitations::Formatted>(loaded.formatted);
+    if (document.incomplete) return incompleteOutput(command, loaded, context);
     const std::vector<DocumentCheck::Problem> problems = DocumentCheck::problems(loaded);
-    if (document.incomplete) {
-        line(context.err, QStringLiteral("parch export: %1 is not exported: a file it includes could not be read")
-                              .arg(shown(loaded.path, context)));
-        for (const DocumentCheck::Problem &problem : problems)
-            if (problem.kind == u"include") line(context.err, problemLine(problem, document, context));
-        return Problems;
-    }
     if (!mayWrite(output, parser.isSet(QStringLiteral("force")), document, loaded.dialect, &error))
         return command.fail(Io, error, context);
 
@@ -904,7 +913,7 @@ int stats(const QStringList &arguments, const Context &context)
     const md::Document &document = loaded.document;
 
     const QString text = document.plainText();
-    const int words = WordCounter::count(text);
+    const int words = WordCounter::countWords(text);
     const int minutes = (words + WordCounter::WordsPerMinute - 1) / WordCounter::WordsPerMinute;
     int characters = 0, visible = 0;
     QTextBoundaryFinder graphemes(QTextBoundaryFinder::Grapheme, text);

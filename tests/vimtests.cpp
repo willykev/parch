@@ -780,6 +780,114 @@ void undoTakesBackWholeChanges()
     QCOMPARE(reloaded.text(), QStringLiteral("x"));
 }
 
+void modifierPressesKeepPendingCommands()
+{
+    Editor view(QStringLiteral("abc"));
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.load(QStringLiteral("a‸bc"));
+    view.keys(QStringLiteral("d"));
+    QTest::keyPress(&view.window, Qt::Key_Shift);
+    QCOMPARE(view.vim->pending(), QStringLiteral("d"));
+    QTest::simulateEvent(&view.window, true, Qt::Key_Dollar, Qt::ShiftModifier, QStringLiteral("$"), false, 0);
+    QTest::simulateEvent(&view.window, false, Qt::Key_Dollar, Qt::ShiftModifier, QStringLiteral("$"), false, 0);
+    QTest::keyRelease(&view.window, Qt::Key_Shift);
+    QCOMPARE(view.text(), QStringLiteral("a"));
+
+    for (Qt::Key key : {Qt::Key_Control, Qt::Key_Alt, Qt::Key_AltGr, Qt::Key_Meta, Qt::Key_Super_L, Qt::Key_Super_R,
+                        Qt::Key_Hyper_L, Qt::Key_CapsLock, Qt::Key_NumLock, Qt::Key_Mode_switch}) {
+        view.load(QStringLiteral("a‸bc"));
+        view.keys(QStringLiteral("d"));
+        QTest::simulateEvent(&view.window, true, key, Qt::NoModifier, {}, false, 0);
+        QCOMPARE(view.vim->pending(), QStringLiteral("d"));
+        QTest::simulateEvent(&view.window, false, key, Qt::NoModifier, {}, false, 0);
+        view.keys(QStringLiteral("w"));
+        QCOMPARE(view.text(), QStringLiteral("a"));
+    }
+#ifdef Q_OS_LINUX
+    for (quint32 keysym : {0xfe03u, 0xfe11u}) { // XKB ISO_Level3_Shift and ISO_Level5_Shift
+        view.load(QStringLiteral("a‸bc"));
+        view.keys(QStringLiteral("d"));
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_unknown, Qt::GroupSwitchModifier, 0, keysym, 0);
+        QCoreApplication::sendEvent(view.window.activeFocusItem(), &press);
+        QCOMPARE(view.vim->pending(), QStringLiteral("d"));
+    }
+#endif
+    // A printable AltGr key still acts on the pending command.
+    view.load(QStringLiteral("a‸bc"));
+    view.keys(QStringLiteral("r"));
+    QTest::simulateEvent(&view.window, true, Qt::Key_AltGr, Qt::GroupSwitchModifier, {}, false, 0);
+    QTest::simulateEvent(&view.window, true, Qt::Key_At, Qt::GroupSwitchModifier, QStringLiteral("@"), false, 0);
+    QTest::simulateEvent(&view.window, false, Qt::Key_At, Qt::GroupSwitchModifier, QStringLiteral("@"), false, 0);
+    QTest::simulateEvent(&view.window, false, Qt::Key_AltGr, Qt::GroupSwitchModifier, {}, false, 0);
+    QCOMPARE(view.text(), QStringLiteral("a@c"));
+}
+
+void deadKeysKeepPendingCharacterCommands()
+{
+    Editor view(QStringLiteral("cafe"));
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    const auto deadKey = [&](Qt::Key key) {
+        QTest::simulateEvent(&view.window, true, key, Qt::NoModifier, {}, false, 0);
+        QTest::simulateEvent(&view.window, false, key, Qt::NoModifier, {}, false, 0);
+    };
+    for (auto key : {Qt::Key_Dead_Acute, Qt::Key_Dead_Grave, Qt::Key_Dead_Diaeresis, Qt::Key_Dead_Circumflex,
+                     Qt::Key_Dead_Tilde}) {
+        view.load(QStringLiteral("caf‸e"));
+        view.keys(QStringLiteral("r"));
+        deadKey(key);
+        QCOMPARE(view.vim->pending(), QStringLiteral("r"));
+        QInputMethodEvent commit;
+        commit.setCommitString(QStringLiteral("é"));
+        QCoreApplication::sendEvent(view.window.activeFocusItem(), &commit);
+        QCOMPARE(view.text(), QStringLiteral("café"));
+    }
+    for (const QString &command : {QStringLiteral("f"), QStringLiteral("t")}) {
+        view.load(QStringLiteral("‸a c"));
+        view.keys(command);
+        deadKey(Qt::Key_Dead_Acute);
+        QCOMPARE(view.vim->pending(), command);
+        view.keys(QStringLiteral("c"));
+        QCOMPARE(view.vim->cursor(), command == u"f" ? 2 : 1);
+    }
+}
+
+void controlRRedoesWithVimEditorFocus()
+{
+    ShellOptions options;
+    options.settings = R"({"vimKeys":true})";
+    ShellFixture shell(options);
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    editor->forceActiveFocus();
+    QObject *headings = shell.object(QStringLiteral("headingsDialog"));
+    QVERIFY(headings);
+    SourceBuffer *buffer = shell.document()->buffer();
+    const auto readyToRedo = [&] {
+        press(window, QStringLiteral("<Esc>"));
+        buffer->replace({0, buffer->length()}, QStringLiteral("# Title\none\n"));
+        selectRange(editor, 8, 8);
+        press(window, QStringLiteral("xx2u"));
+    };
+    for (const QString &mode : {QString(), QStringLiteral("v"), QStringLiteral("V")}) {
+        readyToRedo();
+        QCOMPARE(buffer->text(), QStringLiteral("# Title\none\n"));
+        press(window, mode + QStringLiteral("2<C-r>"));
+        QCOMPARE(buffer->text(), QStringLiteral("# Title\ne\n"));
+        QVERIFY(!headings->property("visible").toBool());
+    }
+    readyToRedo();
+    press(window, QStringLiteral("i<C-r>"));
+    QTRY_VERIFY(headings->property("opened").toBool());
+    QCOMPARE(buffer->text(), QStringLiteral("# Title\none\n"));
+    press(window, QStringLiteral("<Esc><Esc>"));
+    shell.settings()->setVimKeys(false);
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    press(window, QStringLiteral("<C-r>"));
+    QTRY_VERIFY(headings->property("opened").toBool());
+}
+
 void escapeAlwaysReachesNormalMode()
 {
     Editor view;

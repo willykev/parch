@@ -30,6 +30,7 @@
 #include "focusmode.h"
 #include "foldersearch.h"
 #include "history.h"
+#include "mdinclude.h"
 #include "htmlmarkdown.h"
 #include "hyprland.h"
 #include "librarymodel.h"
@@ -356,19 +357,31 @@ private slots:
     void cliCheckReportsEveryKindOfProblem() { CliTests::checkReportsEveryKindOfProblem(); }
     void cliCheckPassesACleanDocument() { CliTests::checkPassesACleanDocument(); }
     void cliCheckSaysWhatCannotBeRead() { CliTests::checkSaysWhatCannotBeRead(); }
+    void cliRejectsNonUtf8FileNames() { CliTests::rejectsNonUtf8FileNames(); }
+    void cliDistinguishesNonregularPictures() { CliTests::distinguishesNonregularPictures(); }
     void cliProfileAndExtensionsFollowTheFlags() { CliTests::profileAndExtensionsFollowTheFlags(); }
     void cliSavedSettingsApplyOnlyWhenAsked() { CliTests::savedSettingsApplyOnlyWhenAsked(); }
     void cliRenderWritesEveryForm() { CliTests::renderWritesEveryForm(); }
     void cliRenderWritesFilesOnlyWhereAllowed() { CliTests::renderWritesFilesOnlyWhereAllowed(); }
+    void cliRenderPreservesOutputWithAMissingInclude() { CliTests::renderPreservesOutputWithAMissingInclude(); }
     void cliExportAssemblesMarkdown() { CliTests::exportAssemblesMarkdown(); }
     void cliExportAssemblyKeepsMeaning() { CliTests::exportAssemblyKeepsMeaning(); }
+    void cliAssembledHeadingLinksKeepTheirTarget() { CliTests::assembledHeadingLinksKeepTheirTarget(); }
+    void cliAssembledListsKeepTheirNumbering() { CliTests::assembledListsKeepTheirNumbering(); }
+    void cliHtmlHeadingLinksResolveInTheirChapter() { CliTests::htmlHeadingLinksResolveInTheirChapter(); }
+    void cliInheritedReferencesUseTheirDefinitionFolder() { CliTests::inheritedReferencesUseTheirDefinitionFolder(); }
+    void cliHtmlAndEpubUseDistinctFootnoteIds() { CliTests::htmlAndEpubUseDistinctFootnoteIds(); }
+    void cliDocxLinksUseExistingBookmarks() { CliTests::docxLinksUseExistingBookmarks(); }
     void cliExportWritesAStandalonePage() { CliTests::exportWritesAStandalonePage(); }
     void cliExportRefusesWhatItMustNot() { CliTests::exportRefusesWhatItMustNot(); }
     void cliNothingADocumentIsMadeFromIsWrittenOver() { CliTests::nothingADocumentIsMadeFromIsWrittenOver(); }
     void cliAssembledMarkdownKeepsItsCitations() { CliTests::assembledMarkdownKeepsItsCitations(); }
+    void cliAssembledMarkdownKeepsEffectiveBibliography() { CliTests::assembledMarkdownKeepsEffectiveBibliography(); }
     void cliExportLeavesTheSourceAlone() { CliTests::exportLeavesTheSourceAlone(); }
     void cliExportFormatsPlugInThroughOneInterface() { CliTests::exportFormatsPlugInThroughOneInterface(); }
     void cliStatsCountWhatAReaderReads() { CliTests::statsCountWhatAReaderReads(); }
+    void cliStatsCountVisibleCodeOnce() { CliTests::statsCountVisibleCodeOnce(); }
+    void cliReadingTextOmitsUnusedNotes() { CliTests::readingTextOmitsUnusedNotes(); }
     void cliSkillPrintsAndInstalls() { CliTests::skillPrintsAndInstalls(); }
     void cliSkillLeavesOtherFilesAlone() { CliTests::skillLeavesOtherFilesAlone(); }
     void cliJsonAndTextAreSafeToPrint() { CliTests::jsonAndTextAreSafeToPrint(); }
@@ -657,6 +670,7 @@ private slots:
     void saveAgainNamesAFolderThatIsGone();
     void saveAgainNeverFollowsALinkWhereTheFileWas();
     void conflictOverMissingFileKeepsRecovery();
+    void fastReplacementKeepsConflictTextInRecovery();
     void reappearingFileRefreshesTheReason();
     void fileBackAsItWasLeavesTheConflict();
     void aCheckForAClosedDocumentIsDropped();
@@ -850,6 +864,9 @@ private slots:
     void registersKeepYanksAndPuts() { VimTests::registersKeepYanksAndPuts(); }
     void dotRepeatsTheLastChange() { VimTests::dotRepeatsTheLastChange(); }
     void undoTakesBackWholeChanges() { VimTests::undoTakesBackWholeChanges(); }
+    void modifierPressesKeepPendingCommands() { VimTests::modifierPressesKeepPendingCommands(); }
+    void deadKeysKeepPendingCharacterCommands() { VimTests::deadKeysKeepPendingCharacterCommands(); }
+    void controlRRedoesWithVimEditorFocus() { VimTests::controlRRedoesWithVimEditorFocus(); }
     void escapeAlwaysReachesNormalMode() { VimTests::escapeAlwaysReachesNormalMode(); }
     void insertTypesAsWithoutVimKeys() { VimTests::insertTypesAsWithoutVimKeys(); }
     void commandLineRunsWindowCommands() { VimTests::commandLineRunsWindowCommands(); }
@@ -1023,6 +1040,10 @@ private slots:
     void referencesAreFoundOutsideCode();
     void movesRewriteRelativeReferences();
     void renamingAnOpenDocumentKeepsItsIdentity();
+    void movingClosedDocumentsKeepsTheirHistory();
+    void renameRewritesEncodedDestinations_data();
+    void renameRewritesEncodedDestinations();
+    void renameKeepsQuotedIncludesWorking();
     void movingADocumentUpdatesTheLinksToIt();
     void closedLinkUpdatesRequireHistory();
     void crossDeviceMovesKeepChangedSources();
@@ -1034,6 +1055,8 @@ private slots:
     void readingPositionsFollowFilesAndRestarts();
     void findBarFindsAndReplacesFromTheKeys();
     void goToHeadingAndTheOutlineMoveTheCaret();
+    void filteredHeadingsKeepTheirContext();
+    void destinationsKeepTheCurrentFolderInTheTree();
     void searchAcrossTheLibraryOpensTheMatch();
     void searchOfTenThousandDocumentsKeepsTheWindowResponsive();
     void libraryMenusAndKeysOrganizeFiles();
@@ -7365,6 +7388,45 @@ void ParchTests::conflictOverMissingFileKeepsRecovery()
     QVERIFY(!document->buffer()->modified());
     QTRY_COMPARE_WITH_TIMEOUT(recovery.pending().size(), 1, Autosave::RecoveryMaxMs + 2000);
     QCOMPARE(recovery.pending().first().text, QStringLiteral("only copy\n"));
+}
+
+void ParchTests::fastReplacementKeepsConflictTextInRecovery()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.filePath(QStringLiteral("app")));
+    const QString path = root.filePath(QStringLiteral("a.md"));
+    writeFile(path, "the original\n");
+    Recovery recovery(paths);
+    {
+        bool replaced = false;
+        DocumentStore store(paths);
+        Autosave autosave(&store, &recovery);
+        Document *document = store.open(path);
+        QVERIFY(document);
+        autosave.watch(document);
+        connect(document, &Document::changed, document, [&] {
+            if (replaced || !document->fileMissing()) return;
+            replaced = true;
+            writeFile(path, "different text\n");
+        });
+        QVERIFY(QFile::remove(path));
+        QTRY_VERIFY(replaced && !document->fileMissing());
+        QCOMPARE(document->state(), Document::State::Conflict);
+        QCOMPARE(document->buffer()->text(), QStringLiteral("the original\n"));
+        QVERIFY(!document->differsFromFile());
+        QTRY_COMPARE_WITH_TIMEOUT(recovery.pending().size(), 1, Autosave::RecoveryMaxMs + 500);
+        QCOMPARE(recovery.pending().first().text, QStringLiteral("the original\n"));
+        // Leave without the normal shutdown flush and reopen from the on-disk snapshot.
+    }
+    DocumentStore reopened(paths);
+    const auto entries = recovery.pending();
+    QCOMPARE(entries.size(), 1);
+    Document *restored = reopened.restore(entries.first());
+    QVERIFY(restored);
+    QCOMPARE(restored->state(), Document::State::Conflict);
+    QCOMPARE(restored->buffer()->text(), QStringLiteral("the original\n"));
+    QCOMPARE(readFile(path), QByteArray("different text\n"));
 }
 
 void ParchTests::reappearingFileRefreshesTheReason()
@@ -17420,6 +17482,117 @@ void ParchTests::movesRewriteRelativeReferences()
     }
 }
 
+void ParchTests::movingClosedDocumentsKeepsTheirHistory()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const AppPaths paths = AppPaths::under(root.filePath(QStringLiteral("app")));
+    const QString library = root.filePath(QStringLiteral("library"));
+    const QString old = library + QStringLiteral("/notes/a.md");
+    const QString newFolder = library + QStringLiteral("/archive");
+    const QString renamed = library + QStringLiteral("/draft/a.md");
+    const QString moved = newFolder + QStringLiteral("/a.md");
+    writeFile(old, "original\n");
+    QVERIFY(QDir().mkpath(newFolder));
+    QString id, version;
+    {
+        DocumentStore store(paths);
+        Settings settings(paths.settingsFile());
+        settings.setLibraryFolders({library});
+        FileOrganizer organizer(&store, &settings);
+        Document *document = store.open(old);
+        QVERIFY(document);
+        store.retain(document);
+        id = document->id();
+        version = store.history()->capture(id, "named text\n", QStringLiteral("Milestone"));
+        QVERIFY(!version.isEmpty());
+        store.release(document);
+        QVERIFY(store.documents().isEmpty());
+        QSignalSpy finished(&organizer, &FileOrganizer::moved);
+        organizer.rename(QFileInfo(old).absolutePath(), QStringLiteral("draft"));
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(store.documentIdFor(renamed), id);
+        organizer.move(renamed, newFolder);
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(readFile(moved), QByteArray("original\n"));
+        // The old name can now be given to a different file.
+        writeFile(renamed, "other\n");
+        QVERIFY(store.documentIdFor(renamed) != id);
+    }
+    DocumentStore reopened(paths);
+    Document *document = reopened.open(moved);
+    QVERIFY(document);
+    QCOMPARE(document->id(), id);
+    QCOMPARE(reopened.history()->read(id, version), QByteArray("named text\n"));
+    QCOMPARE(reopened.history()->versions(id).first().name, QStringLiteral("Milestone"));
+}
+
+void ParchTests::renameRewritesEncodedDestinations_data()
+{
+    QTest::addColumn<QString>("oldName");
+    QTest::addColumn<QString>("newName");
+    QTest::addColumn<QString>("before");
+    QTest::addColumn<QString>("after");
+    QTest::newRow("UTF-8 code point") << QStringLiteral("café.md") << QStringLiteral("🦊.md")
+        << QStringLiteral("[Chapter](caf%C3%A9.md#point)") << QStringLiteral("[Chapter](%F0%9F%A6%8A.md#point)");
+    QTest::newRow("angle path") << QStringLiteral("old.md") << QStringLiteral("Plan%20B#2.md")
+        << QStringLiteral("[Chapter](<old.md#point> \"Title\")")
+        << QStringLiteral("[Chapter](<Plan%2520B%232.md#point> \"Title\")");
+    QTest::newRow("file URL") << QStringLiteral("old.md") << QStringLiteral("What?Now#2.md")
+        << QStringLiteral("[Chapter](file://LIBRARY/old.md#point)")
+        << QStringLiteral("[Chapter](file://LIBRARY/What%3FNow%232.md#point)");
+}
+
+void ParchTests::renameRewritesEncodedDestinations()
+{
+    QFETCH(QString, oldName);
+    QFETCH(QString, newName);
+    QFETCH(QString, before);
+    QFETCH(QString, after);
+    OrganizerFixture f;
+    before.replace(QStringLiteral("LIBRARY"), f.library);
+    after.replace(QStringLiteral("LIBRARY"), f.library);
+    writeFile(f.file(oldName), "# Point\n");
+    const QString index = f.file(QStringLiteral("index.md"));
+    writeFile(index, before.toUtf8());
+    QSignalSpy finished(f.organizer(), &FileOrganizer::moved);
+    f.organizer()->rename(f.file(oldName), newName);
+    QTRY_COMPARE(f.organizer()->review().value(QStringLiteral("changes")).toInt(), 1);
+    f.organizer()->confirmMove(true);
+    QTRY_COMPARE(finished.size(), 1);
+    QCOMPARE(QString::fromUtf8(readFile(index)), after);
+    const auto links = DocumentLinks::check(after, index, f.library);
+    QCOMPARE(links.checked, 1);
+    QVERIFY(links.missing.isEmpty());
+}
+
+void ParchTests::renameKeepsQuotedIncludesWorking()
+{
+    OrganizerFixture f;
+    const QString index = f.file(QStringLiteral("index.md"));
+    const QString old = f.file(QStringLiteral("old.md"));
+    const QString renamed = QStringLiteral("Writer's \"draft\".md");
+    writeFile(index, "# Book\n\n\"old.md\" \"Chapter title\"\n");
+    writeFile(old, "# Chapter\n\nIncluded text.\n");
+    QSignalSpy finished(f.organizer(), &FileOrganizer::moved);
+    f.organizer()->rename(old, renamed);
+    QTRY_COMPARE(f.organizer()->review().value(QStringLiteral("changes")).toInt(), 1);
+    f.organizer()->confirmMove(true);
+    QTRY_COMPARE(finished.size(), 1);
+    md::FileIncludeResolver resolver;
+    md::Source source;
+    source.path = index;
+    source.directory = f.library;
+    source.libraryRoot = f.library;
+    source.resolver = &resolver;
+    const md::Document book = md::parse(QString::fromUtf8(readFile(index)), {}, source);
+    QVERIFY(!book.incomplete);
+    QCOMPARE(book.files.size(), std::size_t(2));
+    QCOMPARE(book.files[1].path, f.file(renamed));
+    QVERIFY(book.plainText().contains(QStringLiteral("Included text.")));
+    QCOMPARE(book.root.children.back().title, QStringLiteral("Chapter title"));
+}
+
 void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
 {
     OrganizerFixture f;
@@ -18076,6 +18249,70 @@ void ParchTests::goToHeadingAndTheOutlineMoveTheCaret()
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(first));
     QTRY_COMPARE(binding->cursorSource(), 0);
     QTRY_COMPARE(window->activeFocusItem(), editor);
+}
+
+void ParchTests::filteredHeadingsKeepTheirContext()
+{
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    resizeWindow(window, 1200);
+    const QString text = QStringLiteral("# Status East\n## Status entry\n# West\n## Status entry\n# Archive\n## Status appendix\n");
+    shell.document()->buffer()->replace({0, 0}, text);
+    QTest::keyClick(window, Qt::Key_R, Qt::ControlModifier);
+    QQuickItem *filter = shell.item(QStringLiteral("headingsFilter"));
+    QTRY_COMPARE(window->activeFocusItem(), filter);
+    typeText(window, QStringLiteral("status"));
+    QObject *list = shell.object(QStringLiteral("headingsList"));
+    QTRY_COMPARE(list->property("count").toInt(), 4);
+    const auto label = [&](int index) {
+        for (QQuickItem *item : visibleItems(window))
+            if (item->objectName() == u"headingRow" && item->property("index").toInt() == index)
+                return item->property("text").toString();
+        return QString();
+    };
+    QTRY_VERIFY(label(1).contains(QStringLiteral("Status East")));
+    QVERIFY(label(2).contains(QStringLiteral("West")));
+    QVERIFY(label(3).contains(QStringLiteral("Archive")));
+    QTest::keyClick(window, Qt::Key_Down);
+    QTest::keyClick(window, Qt::Key_Down);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(shell.binding()->cursorSource(), text.lastIndexOf(QStringLiteral("## Status entry")));
+}
+
+void ParchTests::destinationsKeepTheCurrentFolderInTheTree()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString library = root.filePath(QStringLiteral("library"));
+    const QString file = library + QStringLiteral("/odd/notes.md");
+    QVERIFY(QDir().mkpath(library + QStringLiteral("/lib")));
+    QVERIFY(QDir().mkpath(library + QStringLiteral("/odd/realsub")));
+    writeFile(file, "Notes.\n");
+    ShellOptions options;
+    options.files = {file};
+    ShellFixture shell(options);
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    shell.settings()->setLibraryFolders({library});
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    runCommand(window, "moveDocument");
+    auto *mover = shell.object(QStringLiteral("libraryMoveDialog"));
+    QTRY_VERIFY(mover->property("opened").toBool());
+    const auto row = [&](const QString &path) -> QQuickItem * {
+        for (QQuickItem *item : visibleItems(window))
+            if (item->objectName() == u"moveFolder" && item->property("modelData").toMap().value(QStringLiteral("path")) == path)
+                return item;
+        return nullptr;
+    };
+    QTRY_VERIFY(row(library + QStringLiteral("/odd")));
+    QVERIFY(!row(library + QStringLiteral("/odd"))->isEnabled());
+    QVERIFY(row(library + QStringLiteral("/odd/realsub"))->isEnabled());
+    typeText(window, QStringLiteral("realsub"));
+    QTRY_COMPARE(shell.object(QStringLiteral("moveFolders"))->property("count").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(shell.document()->path(), library + QStringLiteral("/odd/realsub/notes.md"));
 }
 
 void ParchTests::searchAcrossTheLibraryOpensTheMatch()
@@ -20226,6 +20463,12 @@ void ParchTests::suggestedNamesAreSafeFileNames()
     QCOMPARE(Document::suggestedFileName(QStringLiteral("Some words first\n\n## Plans ##\n")), QStringLiteral("Plans.md"));
     QCOMPARE(Document::suggestedFileName(QStringLiteral("```\n# a comment\n```\n\n# Real\r\n")), QStringLiteral("Real.md"));
     QCOMPARE(Document::suggestedFileName(QStringLiteral("#hashtag only\n")), QStringLiteral("hashtag only.md"));
+    QCOMPARE(Document::suggestedFileName(QStringLiteral("**Plan**\n")), QStringLiteral("Plan.md"));
+    QCOMPARE(Document::suggestedFileName(QStringLiteral("1. Make a plan\n")), QStringLiteral("Make a plan.md"));
+    QCOMPARE(Document::suggestedFileName(QStringLiteral("> Quoted plan\n")), QStringLiteral("Quoted plan.md"));
+    QCOMPARE(Document::suggestedFileName(QStringLiteral("| Name | Note |\n")), QStringLiteral("Name Note.md"));
+    QCOMPARE(Document::suggestedFileName(QStringLiteral("# `A:B*?C \"D\" <E> F|G H\\I`\n")),
+             QStringLiteral("A B C D E F G H I.md"));
     // Nothing reaches another folder or hides the file.
     QCOMPARE(Document::suggestedFileName(QStringLiteral("# Notes/Ideas\n")), QStringLiteral("Notes-Ideas.md"));
     QCOMPARE(Document::suggestedFileName(QStringLiteral("# ../../etc\n")), QStringLiteral("-..-etc.md"));

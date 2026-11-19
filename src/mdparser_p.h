@@ -195,6 +195,7 @@ struct Block {
 struct LinkReference {
     QString dest;
     QString title;
+    int file = 0;
 };
 
 struct NoteEntry {

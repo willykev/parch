@@ -1877,9 +1877,7 @@ void Builder::htmlInline(const Node &node, const Char &state)
     } else if (tag == QLatin1StringView("a")) {
         const QString href = attribute(QLatin1StringView("href"));
         md::Destination target;
-        if (md::detail::isSafeUrl(href, false))
-            target = md::classifyDestination(
-                href, m_document.files[size_t(std::clamp(node.file, 0, int(m_document.files.size()) - 1))].directory);
+        if (md::detail::isSafeUrl(href, false)) target = md::classifyDestination(m_document, node);
         if (target.kind == md::Destination::Kind::Anchor) inner.href = u'#' + target.fragment;
         else if (target.kind == md::Destination::Kind::LocalFile) inner.href = localHref(target, href);
         else if (target.kind != md::Destination::Kind::Empty) inner.href = href;
@@ -1920,9 +1918,8 @@ void Builder::picture(const Picture &picture, const QSizeF &size, QTextCharForma
 void Builder::image(const Node &node, const QString &destination, const QString &alt, const QString &title,
                     const Char &state)
 {
-    const QString base = m_document.files[size_t(std::clamp(node.file, 0, int(m_document.files.size()) - 1))].directory;
     md::Destination target;
-    if (md::detail::isSafeUrl(destination, true)) target = md::classifyDestination(destination, base);
+    if (md::detail::isSafeUrl(destination, true)) target = md::classifyDestination(m_document, node);
     Picture shown;
     shown.state = Picture::Failed;
     if (m_resources && target.kind != md::Destination::Kind::Empty) shown = m_resources->image(target, destination, m_document.resourceFolders);

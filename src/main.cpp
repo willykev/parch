@@ -31,6 +31,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
+#include <QStringDecoder>
 #include <QScopeGuard>
 #include <QSocketNotifier>
 #include <QStyleHints>
@@ -103,8 +104,16 @@ int main(int argc, char *argv[])
     // Version, help and usage errors are answered before any GUI application
     // exists so that they work without a display, as in a build check or CI.
     QStringList arguments;
-    for (int i = 0; i < argc; ++i)
-        arguments.append(QString::fromLocal8Bit(argv[i]));
+    for (int i = 0; i < argc; ++i) {
+        QStringDecoder decode(QStringDecoder::Utf8, QStringConverter::Flag::Stateless | QStringConverter::Flag::ConvertInitialBom);
+        const QString argument = decode(QByteArrayView(argv[i]));
+        if (i > 0 && decode.hasError()) {
+            QTextStream(stderr) << QCoreApplication::translate("main", "parch: argument %1 is not valid UTF-8").arg(i)
+                                << Qt::endl;
+            return Cli::Io;
+        }
+        arguments.append(argument);
+    }
     const Launch launch = parseLaunch(arguments);
     switch (launch.kind) {
     case Launch::Version:

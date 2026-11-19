@@ -53,9 +53,10 @@ bool Autosave::needsRecovery(const Document *document)
     // differs from the file, which it also does when the file is ahead.
     case Document::State::SaveFailed:
         return document->differsFromFile();
-    // With the file gone, the text in memory is the only copy, modified or not.
+    // In a conflict the editor may hold the only copy of the text it shows,
+    // even if it was never edited and a different file is now at its path.
     case Document::State::Conflict:
-        return document->differsFromFile() || document->fileMissing();
+        return true;
     case Document::State::Clean:
     case Document::State::ReadOnly:
         return false;
@@ -130,8 +131,10 @@ void Autosave::changed(Watch *watch)
             snapshotNow(watch);
             return;
         }
-        // A conflict over a vanished file needs its snapshot even though no edit made it.
-        if (document->fileMissing() && watch->queued != document->buffer()->revision()) edited(watch);
+        // A conflict needs its snapshot even when there was no edit to start the timers.
+        if (document->state() == Document::State::Conflict && watch->queued != document->buffer()->revision()
+            && !watch->recoveryMax->isActive())
+            edited(watch);
         return;
     }
     if (document->state() != Document::State::Clean) return;

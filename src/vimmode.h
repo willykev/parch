@@ -93,6 +93,8 @@ public:
     // A key the view received: true when Vim keys took it, false when it
     // goes on as it would without them, as typing in Insert mode does.
     bool handleKey(QKeyEvent *event);
+    // Whether this key chord belongs to Vim before a window shortcut sees it.
+    bool takesShortcut(const QKeyEvent *event) const;
     // The same for an input method's text: outside Insert mode it is
     // taken as keys, never typed.
     bool handleInputMethod(QInputMethodEvent *event);
@@ -144,6 +146,7 @@ private:
     enum class InsertKind { Plain, OpenBelow, OpenAbove };
 
     QString tokenOf(const QKeyEvent *event) const;
+    void setAwait(Await await);
     // One key from the view, a whole command or part of one; true when taken.
     bool run(const QString &token);
     bool press(const QString &token);

@@ -781,6 +781,40 @@ QString shown(const QString &key)
 
 bool isNamedKey(const QString &key) { return key.size() > 2 && key.startsWith(u'<') && key.endsWith(u'>'); }
 
+bool isModifier(const QKeyEvent &event)
+{
+    if (!event.text().isEmpty()) return false;
+    switch (event.key()) {
+    case Qt::Key_Shift:
+    case Qt::Key_Control:
+    case Qt::Key_Alt:
+    case Qt::Key_AltGr:
+    case Qt::Key_Meta:
+    case Qt::Key_Super_L:
+    case Qt::Key_Super_R:
+    case Qt::Key_Hyper_L:
+    case Qt::Key_Hyper_R:
+    case Qt::Key_CapsLock:
+    case Qt::Key_NumLock:
+    case Qt::Key_ScrollLock:
+    case Qt::Key_Mode_switch:
+        return true;
+    default:
+        break;
+    }
+#ifdef Q_OS_LINUX
+    // Some Wayland/X11 keymaps expose these XKB keysyms without a Qt key.
+    return event.nativeVirtualKey() == 0xfe03 || event.nativeVirtualKey() == 0xfe11; // ISO_Level3_Shift / ISO_Level5_Shift
+#else
+    return false;
+#endif
+}
+
+bool isComposeKey(int key)
+{
+    return key == Qt::Key_Multi_key || (key >= Qt::Key_Dead_Grave && key <= Qt::Key_Dead_Longsolidusoverlay);
+}
+
 // Moves the view's cursor without that counting as a move from outside.
 struct Moving {
     int &depth;
@@ -898,8 +932,18 @@ void VimMode::setMode(Mode mode)
 {
     if (mode == m_mode) return;
     m_mode = mode;
-    m_host->setInputMethodEnabled(mode == Insert);
+    m_host->setInputMethodEnabled(mode == Insert || m_await == Await::Char);
     emit modeChanged();
+}
+
+void VimMode::setAwait(Await await)
+{
+    const bool wasChoosingCharacter = m_await == Await::Char;
+    m_await = await;
+    // Let the platform compose a character argument the same way it composes
+    // typed text. Preedit never goes into the source in a command mode.
+    if (m_active && m_mode != Insert && wasChoosingCharacter != (await == Await::Char))
+        m_host->setInputMethodEnabled(await == Await::Char);
 }
 
 int VimMode::clamped(int position) const
@@ -1026,8 +1070,10 @@ void VimMode::selectionMoved()
 
 QString VimMode::tokenOf(const QKeyEvent *event) const
 {
-    const Qt::KeyboardModifiers modifiers =
+    Qt::KeyboardModifiers modifiers =
         event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
+    if (event->modifiers() & Qt::GroupSwitchModifier)
+        modifiers &= ~(Qt::ControlModifier | Qt::AltModifier);
     const int key = event->key();
     const QString text = event->text();
     if (key == Qt::Key_Escape || text == QStringLiteral("\x1b")
@@ -1079,6 +1125,12 @@ QString VimMode::tokenOf(const QKeyEvent *event) const
     return text;
 }
 
+bool VimMode::takesShortcut(const QKeyEvent *event) const
+{
+    return m_active && m_host->document() && m_mode != Insert && m_commandLine.isEmpty()
+           && event->key() == Qt::Key_R && tokenOf(event) == u"<C-r>";
+}
+
 bool VimMode::handleKey(QKeyEvent *event)
 {
     if (!m_active || !m_host->document()) return false;
@@ -1100,6 +1152,7 @@ bool VimMode::handleKey(QKeyEvent *event)
         return true;
     }
     if (token.isEmpty()) {
+        if (isModifier(*event) || (m_await == Await::Char && isComposeKey(event->key()))) return false;
         // Keys Vim keys leave to the view, such as Ctrl+C or Page Down,
         // act as without them; a command half typed is dropped.
         if (!m_typed.isEmpty() || !m_operator.isNull() || hasCount() || m_await != Await::None) cancel();
@@ -1116,7 +1169,7 @@ bool VimMode::handleInputMethod(QInputMethodEvent *event)
         if (!m_replaying && !event->commitString().isEmpty()) recordInsert({0, {}, event->commitString(), true});
         return false;
     }
-    // Outside Insert mode nothing is composed; committed text is keys.
+    // Outside Insert mode only committed characters act as keys.
     event->accept();
     const QString commit = event->commitString();
     if (!m_commandLine.isEmpty()) {
@@ -1124,7 +1177,8 @@ bool VimMode::handleInputMethod(QInputMethodEvent *event)
         return true;
     }
     for (qsizetype i = 0; i < commit.size(); ++i) {
-        const qsizetype length = commit[i].isHighSurrogate() && i + 1 < commit.size() ? 2 : 1;
+        qsizetype length = commit[i].isHighSurrogate() && i + 1 < commit.size() ? 2 : 1;
+        if (m_await == Await::Char) length = nextSourceGrapheme(commit, int(i)) - i;
         run(commit.mid(i, length));
         i += length - 1;
         // A command that began Insert mode leaves the rest to be typed.
@@ -1176,6 +1230,12 @@ bool VimMode::press(const QString &k)
         return true;
     }
     if (k == u"<Esc>") return escape();
+    if (k == u"<C-r>") {
+        if (!m_operator.isNull() || m_await != Await::None) cancel();
+        if (m_mode == Visual || m_mode == VisualLine) leaveVisual();
+        undo(true);
+        return true;
+    }
     if (m_await != Await::None) {
         awaited(k);
         return true;
@@ -1215,7 +1275,7 @@ void VimMode::cancel()
     m_count1 = m_count2 = 0;
     m_register = QChar();
     m_operator = QChar();
-    m_await = Await::None;
+    setAwait(Await::None);
     m_awaitFor.clear();
     m_keys.clear();
     m_typed.clear();
@@ -2147,7 +2207,7 @@ void VimMode::normalKey(const QString &k)
         return;
     }
     if (c == u'f' || c == u't' || c == u'F' || c == u'T' || c == u'r') {
-        m_await = Await::Char;
+        setAwait(Await::Char);
         m_awaitFor = k;
         showTyped(k);
         return;
@@ -2157,8 +2217,8 @@ void VimMode::normalKey(const QString &k)
         showTyped(k);
         return;
     }
-    if (k == u"u" || k == u"<C-r>") {
-        undo(k == u"<C-r>");
+    if (k == u"u") {
+        undo(false);
         return;
     }
     if (k == u".") {
@@ -2289,7 +2349,7 @@ void VimMode::operatorKey(const QString &k)
         return;
     }
     if (c == u'f' || c == u't' || c == u'F' || c == u'T') {
-        m_await = Await::Char;
+        setAwait(Await::Char);
         m_awaitFor = k;
         showTyped(k);
         return;
@@ -2328,7 +2388,7 @@ void VimMode::awaited(const QString &k)
 {
     const Await await = m_await;
     const QString command = m_awaitFor;
-    m_await = Await::None;
+    setAwait(Await::None);
     m_awaitFor.clear();
     if (await == Await::Register) {
         const QChar name = k.size() == 1 ? k[0] : QChar();
@@ -2567,7 +2627,7 @@ void VimMode::visualKey(const QString &k)
     }
     const QChar c = k.size() == 1 ? k[0] : QChar();
     if (c == u'f' || c == u't' || c == u'F' || c == u'T' || c == u'r') {
-        m_await = Await::Char;
+        setAwait(Await::Char);
         m_awaitFor = k;
         showTyped(k);
         return;

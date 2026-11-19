@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Recovery keeps the text shown in an unresolved conflict, even if an
+  externally deleted file quickly returns with different contents.
+- Vim commands survive modifier presses and accept composed character
+  arguments. `Ctrl+R` redoes edits in the focused Vim editor in Normal
+  and Visual modes.
+- Library moves and renames keep closed documents' version history.
+  Link updates preserve encoded names, quoted includes and local file URLs.
+  The Move to and heading pickers show which folder or section a row belongs to.
+- File renders refuse incomplete documents and preserve an existing output.
+  Assembled Markdown preserves effective bibliographies, heading targets and
+  list boundaries. DOCX links use internal bookmarks, and HTML and EPUB give
+  footnotes their own IDs.
+- Links inherited from a root document resolve from their definition.
+  HTML heading links follow the same anchor rules as Markdown links.
+  Plain text omits unused notes, and stats counts visible code as text.
+- Draft filenames use the visible text and portable filename characters.
+  The CLI reports invalid UTF-8 arguments and distinguishes unreadable
+  pictures from pictures outside the allowed folders.
+
 - Re-exporting HTML or Markdown preserves files in the pictures folder, including
   included chapters and pictures edited since the last export. Concurrent CLI
   exports require `--force` to replace an output.

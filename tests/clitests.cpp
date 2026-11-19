@@ -287,7 +287,7 @@ Meaning meaningOf(const md::Document &document)
 // parch run as a process, with nothing of a desktop to reach.
 const QString parchBinary = QStringLiteral(PARCH_SOURCE_DIR "/build/parch");
 
-Ran runProcess(const Sandbox &box, const QStringList &arguments)
+Ran runProcess(const Sandbox &box, const QStringList &arguments, const QString &program = parchBinary)
 {
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     for (const char *name : {"HYPRLAND_INSTANCE_SIGNATURE", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "DISPLAY",
@@ -310,7 +310,7 @@ Ran runProcess(const Sandbox &box, const QStringList &arguments)
     QProcess process;
     process.setProcessEnvironment(environment);
     process.setWorkingDirectory(box.root());
-    process.start(parchBinary, arguments);
+    process.start(program, arguments);
     Ran ran;
     if (!process.waitForFinished(30000)) {
         process.kill();
@@ -612,6 +612,34 @@ void checkSaysWhatCannotBeRead()
     QCOMPARE(box.run({"render", "missing.md"}).code, 3);
     QCOMPARE(box.run({"stats", "missing.md"}).code, 3);
     QCOMPARE(box.run({"export", "missing.md", "-o", "x.html"}).code, 3);
+}
+
+void rejectsNonUtf8FileNames()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    // The Linux shell can pass a name with a raw byte QProcess cannot put in a QString.
+    // A valid filename with a replacement character is a different file.
+    box.write(QStringLiteral("bad\ufffd.md"), QStringLiteral("# Another file\n"));
+    const Ran ran = runProcess(box,
+                               {"-c", "name=$(printf 'bad\\377.md'); trap 'rm -f -- \"$name\"' EXIT; "
+                                      "printf '# Original\\n' > \"$name\"; \"$1\" check \"$name\"", "sh", parchBinary},
+                               QStringLiteral("/bin/sh"));
+    QCOMPARE(ran.code, Cli::Io);
+    QVERIFY2(ran.err.contains(QStringLiteral("not valid UTF-8")), qPrintable(ran.said()));
+    QCOMPARE(runProcess(box, {"check", QStringLiteral("bad\ufffd.md")}).code, 0);
+}
+
+void distinguishesNonregularPictures()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), QStringLiteral("![Picture](image.png)\n"));
+    QCOMPARE(::mkfifo(QFile::encodeName(box.path(QStringLiteral("image.png"))).constData(), 0600), 0);
+    const Ran ran = box.run({"check", "doc.md", "--json"});
+    QCOMPARE(ran.code, Cli::Problems);
+    const QJsonObject document = ran.json().value(QStringLiteral("documents")).toArray().first().toObject();
+    QCOMPARE(codesOf(document), (QStringList{"image-unreadable"}));
 }
 
 void profileAndExtensionsFollowTheFlags()
@@ -918,6 +946,20 @@ void renderWritesFilesOnlyWhereAllowed()
              QJsonValue(QStringLiteral("render")));
 }
 
+void renderPreservesOutputWithAMissingInclude()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), QStringLiteral("# Book\n\nmissing.md\n"));
+    box.write(QStringLiteral("book.html"), QStringLiteral("Complete edition\n"));
+    const Ran ran = box.run({"render", "doc.md", "-o", "book.html", "--force"});
+    QCOMPARE(ran.code, Cli::Problems);
+    QVERIFY2(ran.err.contains(QStringLiteral("include-not-found")), qPrintable(ran.said()));
+    QCOMPARE(box.read(QStringLiteral("book.html")), QByteArray("Complete edition\n"));
+    QCOMPARE(box.run({"render", "doc.md", "--to", "text", "-o", "book.txt", "--json"}).code, Cli::Problems);
+    QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("book.txt"))));
+}
+
 void exportAssemblesMarkdown()
 {
     Sandbox box;
@@ -1024,6 +1066,129 @@ void exportAssemblyKeepsMeaning()
     QVERIFY2(clash.json().value(QStringLiteral("limitations")).toArray().first().toString().contains(
                  QStringLiteral("[#doe]")),
              qPrintable(clash.out));
+}
+
+void assembledHeadingLinksKeepTheirTarget()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("book.md"), QStringLiteral("# Overview\n\nchapter.md\n"));
+    box.write(QStringLiteral("chapter.md"), QStringLiteral("# Overview\n\n[Chapter jump][Overview]\n"));
+    const Ran source = box.run({"render", "book.md"});
+    QVERIFY2(source.out.contains(QStringLiteral("<a href=\"#overview-2\">Chapter jump</a>")), qPrintable(source.said()));
+    QCOMPARE(box.run({"export", "book.md", "-o", "assembled.md"}).code, 0);
+    const Ran assembled = box.run({"render", "assembled.md"});
+    QCOMPARE(assembled.out, source.out);
+    QCOMPARE(box.run({"check", "assembled.md"}).code, 0);
+}
+
+void assembledListsKeepTheirNumbering()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("book.md"),
+              QStringLiteral("1. Question\n\nanswers.md\n\nmore.md\n\n1. Last question\n"));
+    box.write(QStringLiteral("answers.md"), QStringLiteral("1. First answer\n"));
+    box.write(QStringLiteral("more.md"), QStringLiteral("1. Second answer\n"));
+    const Ran source = box.run({"render", "book.md"});
+    QCOMPARE(source.out.count(QStringLiteral("<ol>")), 4);
+    QCOMPARE(box.run({"export", "book.md", "-o", "assembled.md"}).code, 0);
+    QCOMPARE(box.run({"render", "assembled.md"}).out, source.out);
+}
+
+void htmlHeadingLinksResolveInTheirChapter()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("book.md"), QStringLiteral("# Overview\n\nchapter.md\n"));
+    box.write(QStringLiteral("chapter.md"),
+              QStringLiteral("# Overview\n\n<a href=\"#overview\">Html jump</a> and [Markdown jump](#overview).\n"));
+    const Ran source = box.run({"render", "book.md"});
+    QVERIFY2(source.out.contains(QStringLiteral("<a href=\"#overview-2\">Html jump</a>")), qPrintable(source.said()));
+    QCOMPARE(box.run({"export", "book.md", "-o", "assembled.md"}).code, 0);
+    QCOMPARE(box.run({"render", "assembled.md"}).out, source.out);
+    box.write(QStringLiteral("missing.md"), QStringLiteral("<a href=\"#absent\">Missing</a>\n"));
+    const Ran checked = box.run({"check", "missing.md", "--json"});
+    QCOMPARE(checked.code, Cli::Problems);
+    QCOMPARE(codesOf(checked.json().value(QStringLiteral("documents")).toArray().first().toObject()),
+             (QStringList{"unresolved-anchor"}));
+}
+
+void inheritedReferencesUseTheirDefinitionFolder()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("book.md"),
+              QStringLiteral("# Overview\n\n[Root][shared]\n\nchapters/chapter.md\n\n[shared]: cover.txt\n"
+                             "[picture]: cover.svg\n[up]: #overview\n"));
+    box.write(QStringLiteral("chapters/chapter.md"),
+              QStringLiteral("# Overview\n\n[Chapter][shared] ![Cover][picture] [Root heading][up] [This heading][here]\n"
+                             "\n[here]: #overview\n"));
+    box.write(QStringLiteral("cover.txt"), QStringLiteral("Cover text.\n"));
+    box.write(QStringLiteral("cover.svg"), QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\"/>\n"));
+    QCOMPARE(box.run({"check", "book.md"}).code, 0);
+    const Ran rendered = box.run({"render", "book.md"});
+    QVERIFY2(rendered.out.contains(QStringLiteral("<a href=\"cover.txt\">Chapter</a>")), qPrintable(rendered.said()));
+    QVERIFY(rendered.out.contains(QStringLiteral("<img src=\"cover.svg\" alt=\"Cover\"")));
+    QVERIFY(rendered.out.contains(QStringLiteral("<a href=\"#overview\">Root heading</a>")));
+    QVERIFY(rendered.out.contains(QStringLiteral("<a href=\"#overview-2\">This heading</a>")));
+    QCOMPARE(box.run({"export", "book.md", "-o", "assembled.md", "--images", "link"}).code, 0);
+    QCOMPARE(box.run({"render", "assembled.md"}).out, rendered.out);
+}
+
+void htmlAndEpubUseDistinctFootnoteIds()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("notes.md"), QStringLiteral("# FN 1\n\nText[^note].\n\n# FNREF 1\n\nAgain[^note].\n\n"
+                                                         "# FNREF 1 2\n\n[^note]: A note.\n"));
+    const auto verify = [](const QString &html) {
+        QCOMPARE(html.count(QStringLiteral("id=\"fn-1\"")), 1);
+        QCOMPARE(html.count(QStringLiteral("id=\"fnref-1\"")), 1);
+        QCOMPARE(html.count(QStringLiteral("id=\"fnref-1-2\"")), 1);
+        const QRegularExpression marker(QStringLiteral("class=\"footnote-ref\"><a href=\"[^\"]*#([^\"]+)\" id=\"([^\"]+)\""));
+        int references = 0;
+        for (auto matches = marker.globalMatch(html); matches.hasNext(); ++references) {
+            const auto match = matches.next();
+            QVERIFY(html.contains(QStringLiteral("<li id=\"%1\"").arg(match.captured(1))));
+            QVERIFY(html.contains(QStringLiteral("#%1\" class=\"footnote-backref\"").arg(match.captured(2))));
+        }
+        QCOMPARE(references, 2);
+    };
+    const Ran rendered = box.run({"render", "notes.md"});
+    QCOMPARE(rendered.code, 0);
+    verify(rendered.out);
+    QCOMPARE(box.run({"export", "notes.md", "-o", "notes.epub"}).code, 0);
+    QList<ZipPackage::Entry> entries;
+    QVERIFY(ZipPackage::read(box.read(QStringLiteral("notes.epub")), &entries));
+    QString chapters;
+    for (const auto &entry : std::as_const(entries))
+        if (entry.name.endsWith(QStringLiteral(".xhtml")) && !entry.name.endsWith(QStringLiteral("nav.xhtml")))
+            chapters += QString::fromUtf8(entry.data);
+    verify(chapters);
+}
+
+void docxLinksUseExistingBookmarks()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("book.md"),
+              QStringLiteral("# Café\n\n[Encoded](#caf%C3%A9)\n\nchapter.md\n\n[Chapter](chapter.md#results)\n"));
+    box.write(QStringLiteral("chapter.md"), QStringLiteral("# Results\n"));
+    QCOMPARE(box.run({"export", "book.md", "-o", "book.docx"}).code, 0);
+    QList<ZipPackage::Entry> entries;
+    QVERIFY(ZipPackage::read(box.read(QStringLiteral("book.docx")), &entries));
+    QString xml;
+    for (const auto &entry : std::as_const(entries))
+        if (entry.name == u"word/document.xml") xml = QString::fromUtf8(entry.data);
+    const QRegularExpression link(QStringLiteral("<w:hyperlink w:anchor=\"([^\"]+)\""));
+    QSet<QString> anchors;
+    for (auto matches = link.globalMatch(xml); matches.hasNext();) {
+        const QString anchor = matches.next().captured(1);
+        QVERIFY2(xml.contains(QStringLiteral("w:name=\"%1\"").arg(anchor)), qPrintable(anchor));
+        anchors.insert(anchor);
+    }
+    QCOMPARE(anchors.size(), 2);
 }
 
 void exportWritesAStandalonePage()
@@ -1315,6 +1480,23 @@ void assembledMarkdownKeepsItsCitations()
     QCOMPARE(box.read(QStringLiteral("out/book_files/chapter.json")), entry("roe", "Roe").toUtf8());
 }
 
+void assembledMarkdownKeepsEffectiveBibliography()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("original.bib"), QStringLiteral("@book{same, author={Brown}, title={Old}, year={1901}}\n"));
+    box.write(QStringLiteral("chosen.bib"), QStringLiteral("@book{same, author={Gray}, title={New}, year={2020}}\n"));
+    box.write(QStringLiteral("book.md"), QStringLiteral("---\nbibliography: original.bib\ncsl: apa\n---\n\nSee [@same].\n"));
+    const Ran source = box.run({"render", "book.md", "--bibliography", "chosen.bib"});
+    QVERIFY2(source.out.contains(QStringLiteral("Gray, 2020")), qPrintable(source.said()));
+    for (const QString &output : {QStringLiteral("assembled.md"), QStringLiteral("print/assembled.md")}) {
+        QVERIFY(QDir().mkpath(QFileInfo(box.path(output)).absolutePath()));
+        const Ran exported = box.run({"export", "book.md", "-o", output, "--bibliography", "chosen.bib"});
+        QVERIFY2(exported.code == 0, qPrintable(exported.said()));
+        QCOMPARE(box.run({"render", output}).out, source.out);
+    }
+}
+
 void statsCountWhatAReaderReads()
 {
     Sandbox box;
@@ -1356,6 +1538,27 @@ void statsCountWhatAReaderReads()
     box.write(QStringLiteral("empty.md"), QString());
     QCOMPARE(box.run({"stats", "empty.md", "--json"}).json().value(QStringLiteral("words")).toInt(), 0);
     QVERIFY(box.run({"stats", "empty.md"}).out.contains(QStringLiteral("nothing to read")));
+}
+
+void statsCountVisibleCodeOnce()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("code.md"), QStringLiteral("`<!-- blue whale -->`\n"));
+    const Ran ran = box.run({"stats", "code.md", "--json"});
+    QCOMPARE(ran.code, 0);
+    QCOMPARE(ran.json().value(QStringLiteral("words")).toInt(), 2);
+}
+
+void readingTextOmitsUnusedNotes()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("notes.md"), QStringLiteral("Read this[^used].\n\n[^unused]: Hidden note.\n\n[^used]: Useful note.\n"));
+    const Ran text = box.run({"render", "notes.md", "--to", "text"});
+    QCOMPARE(text.code, 0);
+    QCOMPARE(text.out, QStringLiteral("Read this.\nUseful note."));
+    QCOMPARE(box.run({"stats", "notes.md", "--json"}).json().value(QStringLiteral("words")).toInt(), 4);
 }
 
 void skillPrintsAndInstalls()

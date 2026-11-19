@@ -36,7 +36,7 @@ QList<Heading> headingsOf(const QString &text, const md::Document &document)
         if (heading.text.isEmpty()) continue;
         if (heading.file == 0) {
             const int line = lines.lineOf(heading.range.start);
-            found.append({heading.level, heading.text, lines.lineStart(), line, heading.slug, heading.label});
+            found.append({heading.level, heading.text, lines.lineStart(), line, heading.slug, heading.label, {}, -1, {}});
             continue;
         }
         const auto place = places.constFind(heading.node);
@@ -45,7 +45,7 @@ QList<Heading> headingsOf(const QString &text, const md::Document &document)
         if (file.path.isEmpty()) continue;
         const int line = lines.lineOf(*place);
         found.append({heading.level, heading.text, lines.lineStart(), line, heading.slug, heading.label, file.path,
-                      TextSearch::LineCounter(file.text).lineOf(heading.range.start)});
+                      TextSearch::LineCounter(file.text).lineOf(heading.range.start), {}});
     }
     return found;
 }
@@ -105,6 +105,8 @@ QVariant OutlineModel::data(const QModelIndex &index, int role) const
         return heading.file;
     case FileLineRole:
         return heading.fileLine;
+    case ParentPathRole:
+        return heading.parentPath;
     default:
         return {};
     }
@@ -114,7 +116,7 @@ QHash<int, QByteArray> OutlineModel::roleNames() const
 {
     return {{TextRole, "heading"}, {LevelRole, "level"}, {PositionRole, "position"},
             {LineRole, "line"},     {SlugRole, "slug"},   {LabelRole, "label"},
-            {FileRole, "file"},     {FileLineRole, "fileLine"}};
+            {FileRole, "file"},     {FileLineRole, "fileLine"}, {ParentPathRole, "parentPath"}};
 }
 
 Document *OutlineModel::document() const { return m_document; }
@@ -262,8 +264,21 @@ void OutlineModel::take(const QList<Heading> &headings)
 void OutlineModel::show()
 {
     QList<Heading> next;
-    for (const Heading &heading : std::as_const(m_all))
-        if (m_filter.isEmpty() || heading.text.contains(m_filter, Qt::CaseInsensitive)) next.append(heading);
+    if (m_filter.isEmpty()) {
+        next = m_all;
+    } else {
+        QList<const Heading *> parents;
+        for (const Heading &heading : std::as_const(m_all)) {
+            while (!parents.isEmpty() && parents.last()->level >= heading.level) parents.removeLast();
+            if (heading.text.contains(m_filter, Qt::CaseInsensitive)) {
+                QStringList path;
+                for (const Heading *parent : parents) path.append(parent->text);
+                next.append(heading);
+                next.last().parentPath = path.join(QStringLiteral(" › "));
+            }
+            parents.append(&heading);
+        }
+    }
     // Only the rows that came or went are announced, so that a list keeps
     // its place while headings above and below it stay; the rest may have
     // moved in the text, which a change of their data says.

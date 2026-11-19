@@ -157,6 +157,7 @@ ThemedDialog {
                 required property int index
                 required property string heading
                 required property int level
+                required property string parentPath
 
                 readonly property bool current: ListView.isCurrentItem
 
@@ -164,14 +165,14 @@ ThemedDialog {
                 height: dialog.rowHeight
                 focusPolicy: Qt.NoFocus
                 hoverEnabled: true
-                leftPadding: Math.round(theme.fontSize / 2) + (level - 1) * dialog.indent
+                leftPadding: Math.round(theme.fontSize / 2) + (field.text.length > 0 ? 0 : (level - 1) * dialog.indent)
                 rightPadding: Math.round(theme.fontSize / 2)
                 font.family: theme.fontFamily
                 font.pixelSize: theme.fontSize
                 font.weight: level <= 2 ? Font.DemiBold : Font.Normal
                 Accessible.role: Accessible.ListItem
-                text: heading
-                Accessible.name: qsTr("%1, level %2").arg(heading).arg(level)
+                text: parentPath.length > 0 ? qsTr("%1 › %2").arg(parentPath).arg(heading) : heading
+                Accessible.name: qsTr("%1, level %2").arg(text).arg(level)
                 Accessible.selected: current
                 onClicked: dialog.go(index)
 
@@ -180,7 +181,7 @@ ThemedDialog {
                     textFormat: Text.PlainText
                     font: entry.font
                     color: entry.current ? theme.bright : theme.foreground
-                    elide: Text.ElideRight
+                    elide: field.text.length > 0 ? Text.ElideMiddle : Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                 }
 

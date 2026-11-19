@@ -234,8 +234,7 @@ void picturesOf(const md::Document &document, const md::Node &node, QStringList 
             if (attribute.name == QLatin1StringView("src")) written = attribute.value;
     }
     if (!written.isEmpty() && md::detail::isSafeUrl(written, true)) {
-        const int file = std::clamp(node.file, 0, int(document.files.size()) - 1);
-        const md::Destination target = md::classifyDestination(written, document.files[size_t(file)].directory);
+        const md::Destination target = md::classifyDestination(document, node);
         if (target.kind == md::Destination::Kind::LocalFile && target.absolute
             && SafeRead::pictureRefusal(target.path, document.resourceFolders).isEmpty())
             out.append(target.path);

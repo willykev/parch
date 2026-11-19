@@ -1460,7 +1460,7 @@ void BlockParser::consumeReferences(Block *block)
         def->target = {toSource(pos + match.dest.start), toSource(pos + match.dest.start) + match.dest.length()};
         insertBefore(block, def);
         const QString key = normalizeLabel(label);
-        if (!fs.references.contains(key)) fs.references.insert(key, {def->dest, def->title});
+        if (!fs.references.contains(key)) fs.references.insert(key, {def->dest, def->title, fileId});
         pos = defEnd;
         consumed = last + 1;
     }
@@ -1476,18 +1476,24 @@ bool BlockParser::includeLine(Block *block, int from, int to)
     const char16_t first = s[i].unicode();
     if (first == u'"' || first == u'\'') {
         pathStart = ++i;
-        while (i < to && s[i].unicode() != first) ++i;
+        while (i < to && s[i].unicode() != first) {
+            if (s[i] == u'\\' && i + 1 < to && s[i + 1] == first) ++i;
+            ++i;
+        }
         if (i >= to) return false;
         pathEnd = i++;
     } else {
         while (i < to && !isSpaceOrTab(s[i].unicode())) ++i;
         pathEnd = i;
     }
-    const QStringView path(s + pathStart, pathEnd - pathStart);
-    const bool known = path.endsWith(QLatin1StringView(".md"), Qt::CaseInsensitive)
-        || path.endsWith(QLatin1StringView(".markdown"), Qt::CaseInsensitive)
-        || path.endsWith(QLatin1StringView(".txt"), Qt::CaseInsensitive);
-    if (!known || path.size() < 4) return false;
+    const QStringView written(s + pathStart, pathEnd - pathStart);
+    const bool known = written.endsWith(QLatin1StringView(".md"), Qt::CaseInsensitive)
+        || written.endsWith(QLatin1StringView(".markdown"), Qt::CaseInsensitive)
+        || written.endsWith(QLatin1StringView(".txt"), Qt::CaseInsensitive);
+    if (!known || written.size() < 4) return false;
+    QString path = written.toString();
+    // Inside a quoted path, a backslash may escape its closing quote.
+    if (first == u'"' || first == u'\'') path.replace(u'\\' + QString(QChar(first)), QString(QChar(first)));
     // A URL is a link, not a file to include.
     if (path.contains(QLatin1StringView("://")) || path.startsWith(QLatin1StringView("www."), Qt::CaseInsensitive))
         return false;
@@ -1517,7 +1523,7 @@ bool BlockParser::includeLine(Block *block, int from, int to)
         caption = QStringView(s + i + 1, to - i - 2).toString();
     }
     block->type = NodeType::Include;
-    block->dest = path.toString();
+    block->dest = path;
     block->title = caption;
     block->target = {pathStart, pathEnd};
     block->resolved = false;

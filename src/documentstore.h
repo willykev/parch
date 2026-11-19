@@ -201,6 +201,8 @@ public:
     // file is the same file unless `version` says what it is now, as for a
     // copy made on another file system.
     void relocate(Document *document, const QString &canonicalPath, const std::optional<DiskVersion> &version = {});
+    // Moves the remaining path registrations after the open documents have followed their files.
+    void relocateClosedPaths(const QString &from, const QString &to, bool folder);
     // The id history keeps a file's versions under, as opening it would
     // give it, given now if it has none yet.
     QString documentIdFor(const QString &canonicalPath);

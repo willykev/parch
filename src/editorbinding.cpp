@@ -1343,6 +1343,11 @@ bool EditorBinding::eventFilter(QObject *watched, QEvent *event)
         return true;
     }
     if (watched == m_editor && !m_dispatching && m_loaded) {
+        if (event->type() == QEvent::ShortcutOverride && !m_blocked
+            && m_vim->takesShortcut(static_cast<QKeyEvent *>(event))) {
+            event->accept();
+            return true;
+        }
         // A write into the projection that waits is taken in first, so that
         // the key or the input method acts on the text it left.
         if (m_foreign.pending && (event->type() == QEvent::InputMethod || event->type() == QEvent::KeyPress))

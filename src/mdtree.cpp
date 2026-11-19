@@ -159,7 +159,7 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
         return;
     }
     case NodeType::FootnoteDefinition:
-        if (!options.notes) return;
+        if (!options.notes || node.number == 0) return;
         break;
     case NodeType::HtmlBlock: {
         QString text;
@@ -596,10 +596,15 @@ QString encodeDestination(QStringView path)
     return out;
 }
 
+QString destinationDirectory(const Document &document, const Node &linkOrImage)
+{
+    const int file = linkOrImage.destinationFile >= 0 ? linkOrImage.destinationFile : linkOrImage.file;
+    return file >= 0 && file < int(document.files.size()) ? document.files[size_t(file)].directory : QString();
+}
+
 Destination classifyDestination(const Document &document, const Node &linkOrImage)
 {
-    const int file = linkOrImage.file;
-    const QString base = file >= 0 && file < int(document.files.size()) ? document.files[file].directory : QString();
+    const QString base = destinationDirectory(document, linkOrImage);
     if (linkOrImage.type == NodeType::HtmlElement)
         return classifyDestination(linkOrImage.attribute(QLatin1StringView(linkOrImage.label == u"img" ? "src" : "href")), base);
     return classifyDestination(linkOrImage.dest, base);

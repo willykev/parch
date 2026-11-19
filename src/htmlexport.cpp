@@ -204,7 +204,7 @@ std::function<QString(const md::Node &, const QString &)> HtmlExporter::destinat
     return [&document, folder = QDir::cleanPath(folder)](const md::Node &node, const QString &dest) -> QString {
         if (dest.isEmpty() || dest.startsWith(u'#')) return dest;
         if (node.file < 0 || size_t(node.file) >= document.files.size()) return dest;
-        const QString &directory = document.files[size_t(node.file)].directory;
+        const QString directory = md::destinationDirectory(document, node);
         // A link to a file the document includes leads to where that file is
         // in the export, not to the file, which its reader does not have.
         const bool link = node.type == md::NodeType::Link || node.type == md::NodeType::Autolink

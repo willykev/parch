@@ -1544,7 +1544,7 @@ void Builder::note(const Part &part)
     }
     flushMarker(flow);
     m_marker = nullptr;
-    m_section.names.append({QStringLiteral("fn-%1").arg(note.number), start, -1});
+    m_section.names.append({QStringLiteral("~fn-%1").arg(note.number), start, -1});
     // The way back to each place that refers to the note, after its text;
     // for a note referred to more often than anyone follows back, to the
     // first places, and how many more there are, so that the note's
@@ -1556,8 +1556,8 @@ void Builder::note(const Part &part)
             Char back = bodyChar(flow);
             text(QStringLiteral(" "), back);
             back.ink = PreviewStyle::Link;
-            back.href = i == 1 ? QStringLiteral("#fnref-%1").arg(note.number)
-                               : QStringLiteral("#fnref-%1-%2").arg(note.number).arg(i);
+            back.href = i == 1 ? QStringLiteral("#~fnref-%1").arg(note.number)
+                               : QStringLiteral("#~fnref-%1-%2").arg(note.number).arg(i);
             back.tip = tr("Back to the text");
             text(i == 1 ? QString(QChar(0x21a9)) : QChar(0x21a9) + QString::number(i), back);
         }
@@ -1616,8 +1616,8 @@ void Builder::styledEntry(const Part &part)
         }
         styledText(work.text, state, true);
     }
-    m_section.names.append({DocumentCitations::entryId(work.key), start, -1});
-    if (work.number > 0) m_section.names.append({QStringLiteral("cite-%1").arg(work.number), start, -1});
+    m_section.names.append({u'~' + DocumentCitations::entryId(work.key), start, -1});
+    if (work.number > 0) m_section.names.append({QStringLiteral("~cite-%1").arg(work.number), start, -1});
     raiseBottomMargin(m_style.gap() * 0.5 * std::clamp(citations.layout.entrySpacing, 0.0, 3.0));
 }
 
@@ -1656,7 +1656,7 @@ void Builder::entry(const Part &part)
     }
     flushMarker(flow);
     m_marker = nullptr;
-    m_section.names.append({QStringLiteral("cite-%1").arg(work.number), start, -1});
+    m_section.names.append({QStringLiteral("~cite-%1").arg(work.number), start, -1});
     raiseBottomMargin(m_style.gap() * 0.5);
 }
 
@@ -1877,9 +1877,7 @@ void Builder::htmlInline(const Node &node, const Char &state)
     } else if (tag == QLatin1StringView("a")) {
         const QString href = attribute(QLatin1StringView("href"));
         md::Destination target;
-        if (md::detail::isSafeUrl(href, false))
-            target = md::classifyDestination(
-                href, m_document.files[size_t(std::clamp(node.file, 0, int(m_document.files.size()) - 1))].directory);
+        if (md::detail::isSafeUrl(href, false)) target = md::classifyDestination(m_document, node);
         if (target.kind == md::Destination::Kind::Anchor) inner.href = u'#' + target.fragment;
         else if (target.kind == md::Destination::Kind::LocalFile) inner.href = localHref(target, href);
         else if (target.kind != md::Destination::Kind::Empty) inner.href = href;
@@ -1920,9 +1918,8 @@ void Builder::picture(const Picture &picture, const QSizeF &size, QTextCharForma
 void Builder::image(const Node &node, const QString &destination, const QString &alt, const QString &title,
                     const Char &state)
 {
-    const QString base = m_document.files[size_t(std::clamp(node.file, 0, int(m_document.files.size()) - 1))].directory;
     md::Destination target;
-    if (md::detail::isSafeUrl(destination, true)) target = md::classifyDestination(destination, base);
+    if (md::detail::isSafeUrl(destination, true)) target = md::classifyDestination(m_document, node);
     Picture shown;
     shown.state = Picture::Failed;
     if (m_resources && target.kind != md::Destination::Kind::Empty) shown = m_resources->image(target, destination, m_document.resourceFolders);
@@ -2022,11 +2019,11 @@ void Builder::noteReference(const Node &node, const Char &state)
 
 void Builder::noteMark(int number, const Char &state)
 {
-    name(QStringLiteral("fnref-%1").arg(number));
+    name(QStringLiteral("~fnref-%1").arg(number));
     Char mark = state;
     mark.script = 1;
     mark.ink = PreviewStyle::Link;
-    mark.href = QStringLiteral("#fn-%1").arg(number);
+    mark.href = QStringLiteral("#~fn-%1").arg(number);
     mark.tip = tr("Note %1").arg(number);
     mark.italic = false;
     text(QString::number(number), mark);
@@ -2109,7 +2106,7 @@ void Builder::citationText(const Node &node, const Char &state)
                 const bool linked = std::any_of(words->text.spans().cbegin(), words->text.spans().cend(),
                                                 [](const CslSpan &span) { return !span.format.link.isEmpty(); });
                 if (listed && !linked) {
-                    run.href = u'#' + DocumentCitations::entryId(key);
+                    run.href = QStringLiteral("#~") + DocumentCitations::entryId(key);
                     run.ink = PreviewStyle::Link;
                 }
             }
@@ -2140,7 +2137,7 @@ void Builder::citationText(const Node &node, const Char &state)
         if (!item.title.isEmpty()) text(item.title + u' ', state);
         Char link = state;
         link.ink = PreviewStyle::Link;
-        link.href = QStringLiteral("#cite-%1").arg(item.number);
+        link.href = QStringLiteral("#~cite-%1").arg(item.number);
         link.tip = item.label;
         text(QString::number(item.number), link);
         if (!item.text.isEmpty()) text(QStringLiteral(", ") + item.text, state);

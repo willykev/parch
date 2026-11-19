@@ -138,7 +138,8 @@ parch ~/weather-station/weather-station.md
   folder from the first keystroke, so it survives closing the window and
   restarting. It is listed under **Drafts** in the library.
 - **Save** (`Ctrl+S`) on a draft asks where to put it, suggesting a name from
-  its first heading or its first words. From then on it is an ordinary file.
+  the visible text of its first heading or its first line. From then on it
+  is an ordinary file.
 - **Open** (`Ctrl+O`) uses your desktop's file dialog. Opening a file that is
   already open shows its tab instead of opening it twice.
 - Opening a document replaces an empty draft you have not typed in.
@@ -552,6 +553,10 @@ A line that names another Markdown file, `chapters/one.md`, alone in its
 paragraph, puts that file's text in its place, in the preview, `parch check`,
 `parch render` and every export. A path that starts with `/` is found in the
 library root; any other beside the file that names it.
+Put a path with spaces or Markdown punctuation such as brackets in single
+or double quotes. Within that path, escape the matching quote or a literal
+backslash with a backslash. Quoted addresses remain text or links. To
+include a file whose name looks like an address, write `./www.point.md`.
 
 parch reads an include only from within the document's library, or, for a
 document in no library, from its folder and the folders in it. An include
@@ -614,6 +619,9 @@ What each format holds:
   folder and copies other readable pictures into `NAME_files` beside it.
   Choose **copy** to carry all its pictures, **link** to point back to the
   originals, or **Write the text as it is** to keep the source text.
+  Assembled Markdown carries the effective bibliography and style when the
+  text uses citations. It omits citation files the source's front matter
+  names outside its allowed folders and reports them as omitted.
 - **HTML**: a page of its own, in typography that does not follow the
   desktop theme. Images are copied into a folder beside it (`NAME_files`),
   written into the page, or linked where they are. If an allowed picture is
@@ -681,6 +689,8 @@ several documents at once (see [Command line](#command-line)).
   are found, grouped by document, with the line around each; choosing one
   opens the document there.
 - **Go to heading…** (`Ctrl+R`) lists the document's headings to jump to.
+  Searching shows the parent headings of each match. The focused editor uses
+  this key for redo in Vim Normal or Visual mode.
 
 Each document opens again where you were in it last time.
 
@@ -775,9 +785,12 @@ view shows no mode.
 Insert or Visual mode, the command line or a command half typed. The command
 palette (`Ctrl+Shift+P`) and the menu (`F10`) work in every mode, and
 **Turn off Vim keys** in either, or the box in **Preferences**, turns them off
-at once. Keys with `Ctrl` keep their meaning in parch in every mode: `Ctrl+S`
-saves, `Ctrl+Z` undoes, `Ctrl+C`, `Ctrl+X` and `Ctrl+V` copy, cut and paste,
-and so on. Vim's own `Ctrl` keys are only `Ctrl+R` (redo) and `Ctrl+[`.
+at once. The usual shortcuts such as `Ctrl+S` and `Ctrl+Z` still save and
+undo. `Ctrl+R` redoes a change in the focused, editable Vim editor in Normal
+or Visual mode. With a command partly typed, it cancels the command. In a
+read-only document, in Insert mode or with a Vim command line open, `Ctrl+R`
+opens Go to heading. A modifier key by itself leaves a partly typed command
+pending.
 
 ### Normal mode
 
@@ -822,8 +835,10 @@ Keys that are no command here do nothing and type nothing.
 Insert mode types exactly as parch does without Vim keys: lists continue on
 `Enter`, `Tab` indents, `Shift+Enter` breaks the line, input methods compose,
 and paste converts rich text. `Esc` or `Ctrl+[` returns to Normal mode, one
-character to the left. Outside Insert mode the editor takes no input method,
-so that every key is a command.
+character to the left. Outside Insert mode the editor takes keystrokes
+directly. Character commands such as `f`, `t` and `r` can combine a dead
+accent with the next printable key. The command cancels if that sequence
+has no single composed character.
 
 ### Visual mode
 
@@ -911,7 +926,8 @@ every five seconds while you keep going. `Ctrl+S` saves at once.
 Text that is not in its file yet is copied to recovery within half a second
 of a pause. If parch or the computer stops, the next launch brings the text
 back and says so. Recovery for a document is cleared once its file holds the
-text.
+text. An unresolved conflict keeps the text shown in the editor in recovery
+while you decide what to do with the file on disk.
 
 ### History
 
@@ -1024,7 +1040,7 @@ another command has can be swapped. **Remove** leaves a command without keys,
 | `Ctrl+F` / `Ctrl+H` | Find / find and replace |
 | `F3` / `Shift+F3` | Next / previous match |
 | `Ctrl+Shift+F` | Search the library |
-| `Ctrl+R` | Go to heading |
+| `Ctrl+R` | Go to heading. Redo or cancel a pending command in the focused, editable Vim editor in Normal or Visual mode |
 | `Ctrl+S` | Save now |
 | `Ctrl+Shift+S` | Save as |
 | `Ctrl+Shift+E` | Export |
@@ -1176,7 +1192,8 @@ An export never writes over the document or a file it includes, never
 writes through a symbolic link, even with `--force`, replaces a file that
 is there only with `--force`, and is not made at all when a file the
 document includes cannot be read. `--quiet` prints nothing but errors.
-`render -o` follows the same rules.
+`render -o` follows the same file rules. `render` to standard output can
+preview an incomplete document and reports that an include could not be read.
 
 ### The dialect
 
@@ -1210,8 +1227,8 @@ dialect version, and the version of what drew the result.
 | --- | --- |
 | 0 | Done, and nothing wrong |
 | 1 | The command line is wrong |
-| 2 | `check` found problems; `export` was given a document whose includes cannot all be read |
-| 3 | A file could not be read or written, or is there and `--force` was not given |
+| 2 | `check` found problems, or `export` or `render -o` could not read an include |
+| 3 | A file could not be read or written, an argument was invalid UTF-8, or an output needs `--force` |
 | 4 | The export could not be made |
 
 ### Pictures of the window

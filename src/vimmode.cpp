@@ -781,6 +781,84 @@ QString shown(const QString &key)
 
 bool isNamedKey(const QString &key) { return key.size() > 2 && key.startsWith(u'<') && key.endsWith(u'>'); }
 
+bool isModifier(const QKeyEvent &event)
+{
+    if (!event.text().isEmpty()) return false;
+    switch (event.key()) {
+    case Qt::Key_Shift:
+    case Qt::Key_Control:
+    case Qt::Key_Alt:
+    case Qt::Key_AltGr:
+    case Qt::Key_Meta:
+    case Qt::Key_Super_L:
+    case Qt::Key_Super_R:
+    case Qt::Key_Hyper_L:
+    case Qt::Key_Hyper_R:
+    case Qt::Key_CapsLock:
+    case Qt::Key_NumLock:
+    case Qt::Key_ScrollLock:
+    case Qt::Key_Mode_switch:
+        return true;
+    default:
+        break;
+    }
+#ifdef Q_OS_LINUX
+    // Some Wayland/X11 keymaps expose these XKB keysyms without a Qt key.
+    return event.nativeVirtualKey() == 0xfe03 || event.nativeVirtualKey() == 0xfe11; // ISO_Level3_Shift / ISO_Level5_Shift
+#else
+    return false;
+#endif
+}
+
+bool isComposeKey(int key)
+{
+    return key == Qt::Key_Multi_key || (key >= Qt::Key_Dead_Grave && key <= Qt::Key_Dead_Longsolidusoverlay);
+}
+
+QString composeAccent(int deadKey, const QString &text)
+{
+    static const QHash<int, char16_t> marks{
+        {Qt::Key_Dead_Grave, u'\u0300'},
+        {Qt::Key_Dead_Acute, u'\u0301'},
+        {Qt::Key_Dead_Circumflex, u'\u0302'},
+        {Qt::Key_Dead_Tilde, u'\u0303'},
+        {Qt::Key_Dead_Macron, u'\u0304'},
+        {Qt::Key_Dead_Breve, u'\u0306'},
+        {Qt::Key_Dead_Abovedot, u'\u0307'},
+        {Qt::Key_Dead_Diaeresis, u'\u0308'},
+        {Qt::Key_Dead_Abovering, u'\u030a'},
+        {Qt::Key_Dead_Doubleacute, u'\u030b'},
+        {Qt::Key_Dead_Caron, u'\u030c'},
+        {Qt::Key_Dead_Cedilla, u'\u0327'},
+        {Qt::Key_Dead_Ogonek, u'\u0328'},
+        {Qt::Key_Dead_Iota, u'\u0345'},
+        {Qt::Key_Dead_Voiced_Sound, u'\u3099'},
+        {Qt::Key_Dead_Semivoiced_Sound, u'\u309a'},
+        {Qt::Key_Dead_Belowdot, u'\u0323'},
+        {Qt::Key_Dead_Hook, u'\u0309'},
+        {Qt::Key_Dead_Horn, u'\u031b'},
+        {Qt::Key_Dead_Abovecomma, u'\u0313'},
+        {Qt::Key_Dead_Abovereversedcomma, u'\u0314'},
+        {Qt::Key_Dead_Doublegrave, u'\u030f'},
+        {Qt::Key_Dead_Belowring, u'\u0325'},
+        {Qt::Key_Dead_Belowmacron, u'\u0331'},
+        {Qt::Key_Dead_Belowcircumflex, u'\u032d'},
+        {Qt::Key_Dead_Belowtilde, u'\u0330'},
+        {Qt::Key_Dead_Belowbreve, u'\u032e'},
+        {Qt::Key_Dead_Belowdiaeresis, u'\u0324'},
+        {Qt::Key_Dead_Invertedbreve, u'\u0311'},
+        {Qt::Key_Dead_Belowcomma, u'\u0326'},
+    };
+    const QChar mark(marks.value(deadKey));
+    if (mark.isNull() || isNamedKey(text)) return {};
+    QString letters = text.normalized(QString::NormalizationForm_D);
+    // The platform may already have supplied the accented character.
+    if (!letters.contains(mark)) letters += mark;
+    const QString composed = letters.normalized(QString::NormalizationForm_C);
+    const auto codepoints = composed.toUcs4();
+    return codepoints.size() == 1 && !QChar::isMark(codepoints.front()) ? composed : QString();
+}
+
 // Moves the view's cursor without that counting as a move from outside.
 struct Moving {
     int &depth;
@@ -1026,8 +1104,10 @@ void VimMode::selectionMoved()
 
 QString VimMode::tokenOf(const QKeyEvent *event) const
 {
-    const Qt::KeyboardModifiers modifiers =
+    Qt::KeyboardModifiers modifiers =
         event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
+    if (event->modifiers() & Qt::GroupSwitchModifier)
+        modifiers &= ~(Qt::ControlModifier | Qt::AltModifier);
     const int key = event->key();
     const QString text = event->text();
     if (key == Qt::Key_Escape || text == QStringLiteral("\x1b")
@@ -1079,6 +1159,12 @@ QString VimMode::tokenOf(const QKeyEvent *event) const
     return text;
 }
 
+bool VimMode::takesShortcut(const QKeyEvent *event) const
+{
+    return m_active && m_host->document() && m_host->editable() && m_mode != Insert && m_commandLine.isEmpty()
+           && event->key() == Qt::Key_R && tokenOf(event) == u"<C-r>";
+}
+
 bool VimMode::handleKey(QKeyEvent *event)
 {
     if (!m_active || !m_host->document()) return false;
@@ -1099,13 +1185,26 @@ bool VimMode::handleKey(QKeyEvent *event)
         if (!token.isEmpty() && token != u"<ignore>") run(token);
         return true;
     }
+    if (m_await == Await::Char && isComposeKey(event->key())) {
+        // Compose a single dead accent locally. A longer sequence can
+        // still finish if the platform delivers a commit.
+        m_deadKey = m_deadKey ? Qt::Key_Multi_key : event->key();
+        return true;
+    }
     if (token.isEmpty()) {
+        if (isModifier(*event)) return false;
         // Keys Vim keys leave to the view, such as Ctrl+C or Page Down,
         // act as without them; a command half typed is dropped.
         if (!m_typed.isEmpty() || !m_operator.isNull() || hasCount() || m_await != Await::None) cancel();
         return false;
     }
     if (token == u"<ignore>") return true;
+    if (m_deadKey && token != u"<Esc>" && token != u"<C-r>") {
+        const QString character = composeAccent(m_deadKey, token);
+        if (!character.isEmpty()) return run(character);
+        cancel();
+        return true;
+    }
     return run(token);
 }
 
@@ -1116,7 +1215,7 @@ bool VimMode::handleInputMethod(QInputMethodEvent *event)
         if (!m_replaying && !event->commitString().isEmpty()) recordInsert({0, {}, event->commitString(), true});
         return false;
     }
-    // Outside Insert mode nothing is composed; committed text is keys.
+    // Outside Insert mode only committed characters act as keys.
     event->accept();
     const QString commit = event->commitString();
     if (!m_commandLine.isEmpty()) {
@@ -1124,7 +1223,8 @@ bool VimMode::handleInputMethod(QInputMethodEvent *event)
         return true;
     }
     for (qsizetype i = 0; i < commit.size(); ++i) {
-        const qsizetype length = commit[i].isHighSurrogate() && i + 1 < commit.size() ? 2 : 1;
+        qsizetype length = commit[i].isHighSurrogate() && i + 1 < commit.size() ? 2 : 1;
+        if (m_await == Await::Char) length = nextSourceGrapheme(commit, int(i)) - i;
         run(commit.mid(i, length));
         i += length - 1;
         // A command that began Insert mode leaves the rest to be typed.
@@ -1176,6 +1276,16 @@ bool VimMode::press(const QString &k)
         return true;
     }
     if (k == u"<Esc>") return escape();
+    if (k == u"<C-r>") {
+        if (!m_host->editable()) return false;
+        if (!m_operator.isNull() || m_await != Await::None || !m_register.isNull()) {
+            cancel();
+            return true;
+        }
+        if (m_mode == Visual || m_mode == VisualLine) leaveVisual();
+        undo(true);
+        return true;
+    }
     if (m_await != Await::None) {
         awaited(k);
         return true;
@@ -1217,6 +1327,7 @@ void VimMode::cancel()
     m_operator = QChar();
     m_await = Await::None;
     m_awaitFor.clear();
+    m_deadKey = 0;
     m_keys.clear();
     m_typed.clear();
     m_visualSize = {};
@@ -2157,8 +2268,8 @@ void VimMode::normalKey(const QString &k)
         showTyped(k);
         return;
     }
-    if (k == u"u" || k == u"<C-r>") {
-        undo(k == u"<C-r>");
+    if (k == u"u") {
+        undo(false);
         return;
     }
     if (k == u".") {
@@ -2330,6 +2441,7 @@ void VimMode::awaited(const QString &k)
     const QString command = m_awaitFor;
     m_await = Await::None;
     m_awaitFor.clear();
+    m_deadKey = 0;
     if (await == Await::Register) {
         const QChar name = k.size() == 1 ? k[0] : QChar();
         if (!isRegisterName(name)) {

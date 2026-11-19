@@ -92,7 +92,7 @@ private:
     QHash<QString, int> nextSuffix;
     std::vector<QString> headingSlugs; // by heading index
     std::vector<std::pair<Node *, int>> headingLinks;
-    std::vector<Node *> anchorLinks;
+    std::vector<std::pair<Node *, QString *>> anchorLinks;
     std::vector<Node *> tocs;
     std::vector<Node *> numbered;      // note references and citations
     QHash<quint64, int> inlineNotes; // by file and position, in included files
@@ -453,6 +453,11 @@ void Assembler::structure(Node &node)
 {
     switch (node.type) {
     case NodeType::HtmlElement:
+        if (node.label == u"a") {
+            for (Attribute &attribute : node.attributes)
+                if (attribute.name == u"href" && attribute.value.size() > 1 && attribute.value.startsWith(u'#'))
+                    anchorLinks.emplace_back(&node, &attribute.value);
+        }
         if (node.label != u"img") break;
         [[fallthrough]];
     case NodeType::Image:
@@ -506,7 +511,7 @@ void Assembler::structure(Node &node)
             headingLinks.emplace_back(&node, node.number - 1);
             node.number = 0;
         } else if (node.dest.size() > 1 && node.dest.startsWith(u'#')) {
-            anchorLinks.push_back(&node);
+            anchorLinks.emplace_back(&node, &node.dest);
         }
         break;
     case NodeType::TableOfContents:
@@ -688,13 +693,14 @@ void Assembler::resolve()
 
     for (const auto &[link, heading] : headingLinks)
         link->dest = u'#' + headingSlugs[heading];
-    for (Node *link : anchorLinks) {
+    for (const auto &[link, destination] : anchorLinks) {
         // An included file was written on its own: a `#anchor` in it means a
         // heading of its own when it has one so named, wherever that heading
         // is numbered in the whole document.
-        if (link->file > 0)
-            if (const QString own = anchorInFile(doc, link->file, link->dest.mid(1)); !own.isEmpty()) link->dest = u'#' + own;
-        const QString slug = QUrl::fromPercentEncoding(link->dest.mid(1).toUtf8());
+        const int file = link->destinationFile >= 0 ? link->destinationFile : link->file;
+        if (file > 0)
+            if (const QString own = anchorInFile(doc, file, destination->mid(1)); !own.isEmpty()) *destination = u'#' + own;
+        const QString slug = QUrl::fromPercentEncoding(destination->mid(1).toUtf8());
         if (slugs.contains(slug)) continue;
         link->resolved = false;
         st.diagnose(link->file, link->range, Severity::Warning, DiagnosticCode::UnresolvedAnchor,

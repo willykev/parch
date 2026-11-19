@@ -215,13 +215,19 @@ Result read(const QString &path, qint64 limit)
     return readFile(path, limit, nullptr);
 }
 
-Result readPicture(const QString &path, const QStringList &folders)
+Result readWithin(const QString &path, qint64 limit, const QStringList &folders)
 {
-    return readFile(path, PictureBytes, &folders);
+    return readFile(path, limit, &folders);
 }
 
-QString pictureRefusal(const QString &path, const QStringList &folders)
+Result readPicture(const QString &path, const QStringList &folders)
 {
+    return readWithin(path, PictureBytes, folders);
+}
+
+QString pictureRefusal(const QString &path, const QStringList &folders, PictureProblem *problem)
+{
+    if (problem) *problem = PictureProblem::Unreadable;
     QFileInfo info(path);
     QString canonical = info.canonicalFilePath();
     if (canonical.isEmpty() && !path.startsWith(QLatin1StringView(":/"))) {
@@ -242,8 +248,12 @@ QString pictureRefusal(const QString &path, const QStringList &folders)
         canonical = QDir(canonical).filePath(missing.join(u'/'));
     }
     if (canonical.isEmpty()) canonical = QDir::cleanPath(path);
-    if (isSystemPath(canonical)) return systemPathReason(canonical);
+    if (isSystemPath(canonical)) {
+        if (problem) *problem = PictureProblem::OutsideFolders;
+        return systemPathReason(canonical);
+    }
     if (QFileInfo candidate(path); candidate.exists() && !candidate.isFile()) return tr("it is not a regular file");
+    if (problem) *problem = PictureProblem::OutsideFolders;
     return outsideFolders(canonical, folders);
 }
 

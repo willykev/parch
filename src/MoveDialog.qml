@@ -4,9 +4,9 @@ import Parch
 
 // Asks where in the library a document or folder moves to: the library's
 // folders, indented as the library shows them and narrowed by what is
-// typed in the field, leaving out the folder it is in and, for a folder,
-// itself and what it holds. Up and Down move from the field, and Enter or
-// Move here moves it.
+// typed in the field. The current folder is disabled, and the folder being
+// moved and its contents are left out. Up and Down move from the field.
+// Enter or Move here moves it.
 ThemedDialog {
     id: dialog
 
@@ -21,30 +21,39 @@ ThemedDialog {
     // The folder chosen.
     signal chosen(string folder)
 
-    // The folders it can go to, as the organizer listed them.
+    // Leave the current folder in the tree to place its subfolders.
+    // Filtered results already show their full paths.
     readonly property var choices: {
         const kept = []
         const typed = field.text.toLowerCase()
         for (const entry of backend.organizer.folders) {
-            if (entry.path === dialog.folder || entry.path === dialog.path || entry.path.startsWith(dialog.path + "/"))
+            if (entry.path === dialog.path || entry.path.startsWith(dialog.path + "/"))
                 continue
-            if (typed.length > 0 && entry.label.toLowerCase().indexOf(typed) < 0)
+            if (typed.length > 0 && (entry.path === dialog.folder || entry.label.toLowerCase().indexOf(typed) < 0))
                 continue
             kept.push(entry)
         }
-        return kept
+        return kept.length === 1 && kept[0].path === dialog.folder ? [] : kept
     }
 
     function ask(path) {
         dialog.path = path
         field.text = ""
-        list.currentIndex = 0
+        selectFirst()
         backend.organizer.listFolders()
         open()
     }
 
+    function canChoose(index) {
+        return index >= 0 && index < choices.length && choices[index].path !== dialog.folder
+    }
+
+    function selectFirst() {
+        list.currentIndex = choices.findIndex((entry) => entry.path !== dialog.folder)
+    }
+
     function choose(index) {
-        if (index < 0 || index >= choices.length)
+        if (!canChoose(index))
             return
         const folder = choices[index].path
         dialog.accept()
@@ -54,7 +63,12 @@ ThemedDialog {
     function move(rows) {
         if (choices.length === 0)
             return
-        list.currentIndex = Math.max(0, Math.min(choices.length - 1, list.currentIndex + rows))
+        let index = Math.max(0, Math.min(choices.length - 1, list.currentIndex + rows))
+        if (!canChoose(index)) {
+            const step = rows > 0 ? 1 : -1
+            index += canChoose(index + step) ? step : -step
+        }
+        list.currentIndex = index
         list.positionViewAtIndex(list.currentIndex, ListView.Contain)
     }
 
@@ -88,7 +102,6 @@ ThemedDialog {
             cursorDelegate: FieldCaret { rest: fieldCaret }
             Accessible.name: placeholderText
             Accessible.searchEdit: true
-            onTextChanged: list.currentIndex = 0
 
             CaretRest {
                 id: fieldCaret
@@ -137,11 +150,14 @@ ThemedDialog {
             highlightMoveDuration: 0
             activeFocusOnTab: count > 0
             keyNavigationEnabled: true
+            onModelChanged: dialog.selectFirst()
             Accessible.role: Accessible.List
             Accessible.name: qsTr("Folders")
             Keys.onReturnPressed: dialog.choose(currentIndex)
             Keys.onEnterPressed: dialog.choose(currentIndex)
             Keys.onSpacePressed: dialog.choose(currentIndex)
+            Keys.onDownPressed: dialog.move(1)
+            Keys.onUpPressed: dialog.move(-1)
 
             delegate: AbstractButton {
                 id: entry
@@ -155,13 +171,14 @@ ThemedDialog {
                 width: list.width
                 height: dialog.rowHeight
                 focusPolicy: Qt.NoFocus
+                enabled: dialog.canChoose(index)
                 hoverEnabled: true
                 leftPadding: Math.round(theme.fontSize / 2) + (field.text.length > 0 ? 0 : modelData.depth * dialog.indent)
                 rightPadding: Math.round(theme.fontSize / 2)
                 font.family: theme.fontFamily
                 font.pixelSize: theme.fontSize
                 Accessible.role: Accessible.ListItem
-                Accessible.name: modelData.label
+                Accessible.name: enabled ? modelData.label : qsTr("%1, current folder").arg(modelData.label)
                 Accessible.selected: current
                 onClicked: dialog.choose(index)
 
@@ -170,7 +187,7 @@ ThemedDialog {
                     text: field.text.length > 0 ? entry.modelData.label : entry.modelData.name
                     textFormat: Text.PlainText
                     font: entry.font
-                    color: entry.current ? theme.bright : theme.foreground
+                    color: !entry.enabled ? theme.dim : entry.current ? theme.bright : theme.foreground
                     elide: Text.ElideMiddle
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -208,7 +225,7 @@ ThemedDialog {
         ThemedDialog.Choice {
             objectName: "moveHere"
             text: qsTr("Move here")
-            enabled: list.currentIndex >= 0 && list.currentIndex < dialog.choices.length
+            enabled: dialog.canChoose(list.currentIndex)
             onClicked: dialog.choose(list.currentIndex)
         }
     }

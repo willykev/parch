@@ -8,6 +8,7 @@
 // Inline content is not read here: leaves keep the source pieces they are
 // made of, and the inline parser reads those once every file is in the tree.
 #include "mdparser_p.h"
+#include "mdinclude.h"
 
 namespace md::detail {
 
@@ -1460,7 +1461,7 @@ void BlockParser::consumeReferences(Block *block)
         def->target = {toSource(pos + match.dest.start), toSource(pos + match.dest.start) + match.dest.length()};
         insertBefore(block, def);
         const QString key = normalizeLabel(label);
-        if (!fs.references.contains(key)) fs.references.insert(key, {def->dest, def->title});
+        if (!fs.references.contains(key)) fs.references.insert(key, {def->dest, def->title, fileId});
         pos = defEnd;
         consumed = last + 1;
     }
@@ -1474,38 +1475,33 @@ bool BlockParser::includeLine(Block *block, int from, int to)
     int i = from;
     int pathStart = from, pathEnd = from;
     const char16_t first = s[i].unicode();
-    if (first == u'"' || first == u'\'') {
+    const bool quoted = first == u'"' || first == u'\'';
+    if (quoted) {
         pathStart = ++i;
-        while (i < to && s[i].unicode() != first) ++i;
+        while (i < to && s[i].unicode() != first) {
+            if (s[i] == u'\\' && i + 1 < to && (s[i + 1] == first || s[i + 1] == u'\\')) ++i;
+            ++i;
+        }
         if (i >= to) return false;
         pathEnd = i++;
     } else {
         while (i < to && !isSpaceOrTab(s[i].unicode())) ++i;
         pathEnd = i;
     }
-    const QStringView path(s + pathStart, pathEnd - pathStart);
-    const bool known = path.endsWith(QLatin1StringView(".md"), Qt::CaseInsensitive)
-        || path.endsWith(QLatin1StringView(".markdown"), Qt::CaseInsensitive)
-        || path.endsWith(QLatin1StringView(".txt"), Qt::CaseInsensitive);
-    if (!known || path.size() < 4) return false;
-    // A URL is a link, not a file to include.
-    if (path.contains(QLatin1StringView("://")) || path.startsWith(QLatin1StringView("www."), Qt::CaseInsensitive))
-        return false;
-    for (qsizetype k = 0; k < path.size(); ++k) {
-        const char16_t c = path[k].unicode();
-        if (c < 0x20 || c == u'<' || c == u'>' || c == u'[' || c == u']' || c == u'*' || c == u'`' || c == u'|'
-            || c == u'\\')
-            return false;
-        if (c == u':' && k > 1) {
-            // `scheme:` before any slash names something other than a file.
-            bool scheme = isAsciiAlpha(path[0].unicode());
-            for (qsizetype j = 1; j < k && scheme; ++j)
-                scheme = isAsciiAlnum(path[j].unicode()) || path[j] == u'+' || path[j] == u'-' || path[j] == u'.';
-            if (scheme) return false;
-        }
+    const QStringView written(s + pathStart, pathEnd - pathStart);
+    const bool known = written.endsWith(QLatin1StringView(".md"), Qt::CaseInsensitive)
+        || written.endsWith(QLatin1StringView(".markdown"), Qt::CaseInsensitive)
+        || written.endsWith(QLatin1StringView(".txt"), Qt::CaseInsensitive);
+    if (!known || written.size() < 4 || isUrlSpelling(written) || (!quoted && !isBareIncludePath(written))) return false;
+    QString path;
+    path.reserve(written.size());
+    for (qsizetype k = 0; k < written.size(); ++k) {
+        if (written[k].unicode() < 0x20) return false;
+        if (quoted && written[k] == u'\\' && k + 1 < written.size()
+            && (written[k + 1] == first || written[k + 1] == u'\\'))
+            ++k;
+        path.append(written[k]);
     }
-    const QChar firstPathChar = path[0];
-    if (firstPathChar == u'#' || firstPathChar == u'!' || firstPathChar == u'(' || firstPathChar == u'=') return false;
 
     while (i < to && isSpaceOrTab(s[i].unicode())) ++i;
     QString caption;
@@ -1517,7 +1513,7 @@ bool BlockParser::includeLine(Block *block, int from, int to)
         caption = QStringView(s + i + 1, to - i - 2).toString();
     }
     block->type = NodeType::Include;
-    block->dest = path.toString();
+    block->dest = path;
     block->title = caption;
     block->target = {pathStart, pathEnd};
     block->resolved = false;

@@ -31,6 +31,8 @@ public:
         : doc(document), opt(options), safe(options.rawHtml == HtmlOptions::RawHtml::Safe),
           referencesSeen(document.footnotes.size(), 0)
     {
+        if (!document.footnotes.empty())
+            for (const Heading &heading : document.headings) headingIds.insert(heading.slug);
         // In a note style, a citation of the running text is a note.
         for (const Footnote &note : document.footnotes)
             if (note.content && note.content->type == NodeType::Citation) citationNotes.insert(note.content, note.number);
@@ -88,6 +90,7 @@ private:
     void citationText(const Node &node);
     void noteReference(const Node &node);
     void noteMark(int number);
+    QString noteId(int number, int reference = 0);
     void footnotes();
     void bibliography();
 
@@ -95,6 +98,8 @@ private:
     const HtmlOptions &opt;
     const bool safe;
     QString out;
+    QSet<QString> headingIds;
+    QHash<QString, QString> noteIds;
     std::vector<int> referencesSeen; // per note, how many references are written
     QHash<const Node *, int> citationNotes; // the citations that are notes, and their numbers
 };
@@ -391,18 +396,28 @@ void Writer::noteReference(const Node &node)
     noteMark(node.number);
 }
 
+QString Writer::noteId(int number, int reference)
+{
+    QString base = (reference ? QStringLiteral("fnref-") : QStringLiteral("fn-")) + QString::number(number);
+    if (reference > 1) base += u'-' + QString::number(reference);
+    if (!headingIds.contains(base)) return base;
+    if (const auto known = noteIds.constFind(base); known != noteIds.cend()) return *known;
+    // Keep the heading's address and choose an id outside the numbered series.
+    const QString stem = base + QStringLiteral("-note");
+    QString id = stem;
+    for (int n = 2; headingIds.contains(id); ++n) id = stem + u'-' + QString::number(n);
+    noteIds.insert(base, id);
+    return id;
+}
+
 void Writer::noteMark(int noteNumber)
 {
     const int seen = ++referencesSeen[noteNumber - 1];
     const QString number = QString::number(noteNumber);
-    lit(QLatin1StringView("<sup class=\"footnote-ref\"><a href=\"#fn-"));
-    out.append(number);
-    lit(QLatin1StringView("\" id=\"fnref-"));
-    out.append(number);
-    if (seen > 1) {
-        out.append(u'-');
-        out.append(QString::number(seen));
-    }
+    lit(QLatin1StringView("<sup class=\"footnote-ref\"><a href=\"#"));
+    out.append(noteId(noteNumber));
+    lit(QLatin1StringView("\" id=\""));
+    out.append(noteId(noteNumber, seen));
     lit(QLatin1StringView("\">"));
     out.append(number);
     lit(QLatin1StringView("</a></sup>"));
@@ -576,9 +591,8 @@ void Writer::footnotes()
     lit(QLatin1StringView("<ol>"));
     cr();
     for (const Footnote &note : doc.footnotes) {
-        const QString number = QString::number(note.number);
-        lit(QLatin1StringView("<li id=\"fn-"));
-        out.append(number);
+        lit(QLatin1StringView("<li id=\""));
+        out.append(noteId(note.number));
         lit(QLatin1StringView("\">"));
         cr();
         if (note.content && note.content->type == NodeType::InlineNote) {
@@ -599,9 +613,8 @@ void Writer::footnotes()
         // its last paragraph.
         QString back;
         for (int i = 1; i <= note.references; ++i) {
-            back.append(QLatin1StringView(" <a href=\"#fnref-"));
-            back.append(number);
-            if (i > 1) back.append(u'-' + QString::number(i));
+            back.append(QLatin1StringView(" <a href=\"#"));
+            back.append(noteId(note.number, i));
             back.append(QLatin1StringView("\" class=\"footnote-backref\">"));
             back.append(QChar(0x21a9));
             if (i > 1) back.append(QString::number(i));

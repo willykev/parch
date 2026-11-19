@@ -761,14 +761,14 @@ void previewBuildsNotesCitationsAndContents()
     QTextCursor reference = built->find(QStringLiteral("claim.1"));
     const QTextCharFormat mark = reference.charFormat();
     QCOMPARE(mark.verticalAlignment(), QTextCharFormat::AlignSuperScript);
-    QCOMPARE(mark.anchorHref(), QStringLiteral("#fn-1"));
+    QCOMPARE(mark.anchorHref(), QStringLiteral("#~fn-1"));
     QCOMPARE(inkOf(mark), int(PreviewStyle::Link));
     // Each reference has a name of its own kind; the first one is where
-    // "fnref-1" leads.
-    QCOMPARE(names.value(QStringLiteral("fnref-1")), reference.selectionEnd() - 1);
+    // "~fnref-1" leads.
+    QCOMPARE(names.value(QStringLiteral("~fnref-1")), reference.selectionEnd() - 1);
     int references = 0;
     for (const Section &section : built->sections)
-        for (const preview::NamedAnchor &name : section.names) references += name.name == QLatin1String("fnref-1");
+        for (const preview::NamedAnchor &name : section.names) references += name.name == QLatin1String("~fnref-1");
     QCOMPARE(references, 2);
 
     // The notes follow the text after a rule, in the order of their
@@ -781,12 +781,12 @@ void previewBuildsNotesCitationsAndContents()
     QCOMPARE(lines.at(first + 1), QStringLiteral("With a second paragraph. ") + back + QStringLiteral(" ") + back + QStringLiteral("2"));
     QCOMPARE(lines.at(first + 2), QStringLiteral("2.") + gap + QStringLiteral("The second note. ") + back);
     QCOMPARE(lines.at(first + 3), QStringLiteral("3.") + gap + QStringLiteral("written in place ") + back);
-    QCOMPARE(names.value(QStringLiteral("fn-1")), built->blockOf(QStringLiteral("The first note")).position());
-    QCOMPARE(names.value(QStringLiteral("fn-3")), built->blockOf(QStringLiteral("written in place")).position());
+    QCOMPARE(names.value(QStringLiteral("~fn-1")), built->blockOf(QStringLiteral("The first note")).position());
+    QCOMPARE(names.value(QStringLiteral("~fn-3")), built->blockOf(QStringLiteral("written in place")).position());
     QTextCursor ways = built->find(QString(back));
-    QCOMPARE(ways.charFormat().anchorHref(), QStringLiteral("#fnref-1"));
+    QCOMPARE(ways.charFormat().anchorHref(), QStringLiteral("#~fnref-1"));
     ways = built->find(QString(back) + QStringLiteral("2"));
-    QCOMPARE(ways.charFormat().anchorHref(), QStringLiteral("#fnref-1-2"));
+    QCOMPARE(ways.charFormat().anchorHref(), QStringLiteral("#~fnref-1-2"));
     // A note referred to everywhere keeps the ways back to its first places
     // and says how many more there are: its paragraph stays a paragraph.
     {
@@ -800,7 +800,7 @@ void previewBuildsNotesCitationsAndContents()
         QVERIFY(note.text().size() < 1000);
         QCOMPARE(often->formatOf(QStringLiteral("and 50 more")).anchorHref(), QString());
         QCOMPARE(often->find(QString(back) + QString::number(preview::Builder::MaxWaysBack)).charFormat().anchorHref(),
-                 QStringLiteral("#fnref-1-%1").arg(preview::Builder::MaxWaysBack));
+                 QStringLiteral("#~fnref-1-%1").arg(preview::Builder::MaxWaysBack));
     }
     // Notes are set smaller than the text.
     QVERIFY(built->formatOf(QStringLiteral("The first note")).intProperty(QTextFormat::FontPixelSize) < 20);
@@ -810,12 +810,12 @@ void previewBuildsNotesCitationsAndContents()
     // Citations are numbers in brackets that lead to the bibliography,
     // with their locators; the bibliography lists each work once.
     QVERIFY2(lines.contains(QStringLiteral("As shown [1, p. 23] and in [2; 1].")), qPrintable(lines.join(u'|')));
-    QCOMPARE(built->formatOf(QStringLiteral("1, p")).anchorHref(), QStringLiteral("#cite-1"));
+    QCOMPARE(built->formatOf(QStringLiteral("1, p")).anchorHref(), QStringLiteral("#~cite-1"));
     QVERIFY(!built->formatOf(QStringLiteral(", p. 23")).isAnchor());
     QVERIFY(lines.contains(QStringLiteral("[1]") + gap + QStringLiteral("Doe, J. A Book. 2020.")));
     QVERIFY(lines.contains(QStringLiteral("[2]") + gap + QStringLiteral("Roe, R. An Article.")));
     QVERIFY(built->formatOf(QStringLiteral("A Book")).fontItalic());
-    QCOMPARE(names.value(QStringLiteral("cite-2")), built->blockOf(QStringLiteral("Roe, R.")).position());
+    QCOMPARE(names.value(QStringLiteral("~cite-2")), built->blockOf(QStringLiteral("Roe, R.")).position());
 
     // A reference to a heading leads to it; one to no heading still reads as a link.
     QCOMPARE(built->formatOf(QStringLiteral("link to the works")).anchorHref(), QStringLiteral("#works"));
@@ -2232,7 +2232,7 @@ void tasksAreTickedInTheSource()
 
 void notesGoThereAndBack()
 {
-    QString markdown = QStringLiteral("# Notes\n\nA claim.[^a] Then more.\n\n");
+    QString markdown = QStringLiteral("# FN 1\n\n## FNRef 1 2\n\nA claim.[^a] Then more.\n\n");
     for (int i = 0; i < 50; ++i) markdown += QStringLiteral("Filler paragraph %1.\n\n").arg(i);
     markdown += QStringLiteral("The claim again.[^a] And another.[^b]\n\n[^a]: The first note.\n[^b]: The second note.\n");
     PreviewWindow w(markdown);
@@ -2255,22 +2255,27 @@ void notesGoThereAndBack()
     QTRY_VERIFY(visible(QStringLiteral("The first note.")));
     QVERIFY(w.preview->canGoBack());
     // The way back from the note returns the view to exactly where it was.
-    QVERIFY(w.preview->activate(QStringLiteral("#fnref-1"), 1));
+    QVERIFY(w.preview->activate(QStringLiteral("#~fnref-1"), 1));
     QTRY_COMPARE(contentY(w.flickable), 0.0);
     QVERIFY(!w.preview->canGoBack());
     // Each reference to a note has a way back of its own.
-    QVERIFY(w.preview->activate(QStringLiteral("#fnref-1-2"), 1));
+    QVERIFY(w.preview->activate(QStringLiteral("#~fnref-1-2"), 1));
     QTRY_VERIFY(visible(QStringLiteral("The claim again.")));
     QVERIFY(!visible(QStringLiteral("A claim.")));
     w.preview->goBack();
     QTRY_COMPARE(contentY(w.flickable), 0.0);
-    QVERIFY(w.preview->activate(QStringLiteral("#fn-2"), 1));
+    QVERIFY(w.preview->activate(QStringLiteral("#~fn-2"), 1));
     QTRY_VERIFY(visible(QStringLiteral("The second note.")));
+    // Markdown links to headings still land on the headings.
+    QVERIFY(w.preview->activate(QStringLiteral("#fn-1"), 1));
+    QTRY_VERIFY(visible(QStringLiteral("FN 1")));
+    QVERIFY(w.preview->activate(QStringLiteral("#fnref-1-2"), 1));
+    QTRY_VERIFY(visible(QStringLiteral("FNRef 1 2")));
     // The ways back are links in the notes themselves.
     QTextCursor back = document->find(QString(QChar(0x21a9)));
-    QCOMPARE(back.charFormat().anchorHref(), QStringLiteral("#fnref-1"));
+    QCOMPARE(back.charFormat().anchorHref(), QStringLiteral("#~fnref-1"));
     back = document->find(QString(QChar(0x21a9)) + QStringLiteral("2"));
-    QCOMPARE(back.charFormat().anchorHref(), QStringLiteral("#fnref-1-2"));
+    QCOMPARE(back.charFormat().anchorHref(), QStringLiteral("#~fnref-1-2"));
 }
 
 namespace {
@@ -3913,20 +3918,21 @@ void citationsReadAsTheirStyleWordsThem()
     QCOMPARE(hanging.textIndent(), -hanging.leftMargin());
     // An entry is set smaller than the text, as a note is, and a link can go to it.
     QVERIFY(apa->formatOf(QStringLiteral("Doe, J. (2006)")).intProperty(QTextFormat::FontPixelSize) < 20);
-    QCOMPARE(apa->names().value(QStringLiteral("ref-doe2006")), apa->blockOf(QStringLiteral("Doe, J. (2006)")).position());
-    QCOMPARE(apa->names().value(QStringLiteral("ref-roe2010")), apa->blockOf(QStringLiteral("Roe, J. (2010)")).position());
+    QCOMPARE(apa->names().value(QStringLiteral("~ref-doe2006")), apa->blockOf(QStringLiteral("Doe, J. (2006)")).position());
+    QCOMPARE(apa->names().value(QStringLiteral("~ref-roe2010")), apa->blockOf(QStringLiteral("Roe, J. (2010)")).position());
     // The citations are plain text of the paragraph: no number, no link.
     QVERIFY(!apa->formatOf(QStringLiteral("(Doe, 2006, p. 23)")).isAnchor());
     QCOMPARE(inkOf(apa->formatOf(QStringLiteral("(Doe, 2006, p. 23)"))), int(PreviewStyle::NoInk));
-    QVERIFY(!apa->names().contains(QStringLiteral("cite-1")));
+    QVERIFY(!apa->names().contains(QStringLiteral("~cite-1")));
     // An entry from a bibliography file has no place in the text.
     QCOMPARE(entriesOf(*apa).size(), 2);
     QCOMPARE(entriesOf(*apa).first()->sourceStart, -1);
 
     // The document can ask for its citations to link to their entries: one
     // that names a single work then leads to it.
-    const auto linked = buildRead(cited("apa", "link-citations: true\n") + text, folder.path());
-    QCOMPARE(linked->formatOf(QStringLiteral("(Doe, 2006, p. 23)")).anchorHref(), QStringLiteral("#ref-doe2006"));
+    const auto linked = buildRead(cited("apa", "link-citations: true\n") + QStringLiteral("# Ref Doe2006\n\n") + text, folder.path());
+    QCOMPARE(linked->formatOf(QStringLiteral("(Doe, 2006, p. 23)")).anchorHref(), QStringLiteral("#~ref-doe2006"));
+    QCOMPARE(linked->names().value(QStringLiteral("ref-doe2006")), linked->blockOf(QStringLiteral("Ref Doe2006")).position());
     QCOMPARE(inkOf(linked->formatOf(QStringLiteral("(Doe, 2006, p. 23)"))), int(PreviewStyle::Link));
     QVERIFY(!linked->formatOf(QStringLiteral("(Doe, 2006; Roe, 2010)")).isAnchor());
 
@@ -3967,8 +3973,8 @@ void citationsReadAsTheirStyleWordsThem()
     QTextCursor number(const_cast<QTextDocument *>(&notes->document));
     number.setPosition(mark.selectionEnd());
     QCOMPARE(number.charFormat().verticalAlignment(), QTextCharFormat::AlignSuperScript);
-    QCOMPARE(number.charFormat().anchorHref(), QStringLiteral("#fn-2"));
-    QCOMPARE(notes->names().value(QStringLiteral("fnref-2")), mark.selectionEnd() - 1);
+    QCOMPARE(number.charFormat().anchorHref(), QStringLiteral("#~fn-2"));
+    QCOMPARE(notes->names().value(QStringLiteral("~fnref-2")), mark.selectionEnd() - 1);
     const QStringList noteLines = notes->lines();
     QVERIFY2(noteLines.contains(QStringLiteral("1.") + gap + QStringLiteral("Plain. ") + back), qPrintable(noteLines.join(u'|')));
     QVERIFY2(noteLines.contains(QStringLiteral("2.") + gap + QStringLiteral("John Doe, Writing with Examples (Example Press, 2006), 23. ")
@@ -3981,9 +3987,9 @@ void citationsReadAsTheirStyleWordsThem()
              qPrintable(noteLines.join(u'|')));
     QVERIFY(notes->formatOf(QStringLiteral("Reading without Examples (")).fontItalic());
     QVERIFY(notes->formatOf(QStringLiteral("Writing with Examples (")).fontItalic());
-    QCOMPARE(notes->names().value(QStringLiteral("fn-2")), notes->blockOf(QStringLiteral("John Doe, Writing")).position());
+    QCOMPARE(notes->names().value(QStringLiteral("~fn-2")), notes->blockOf(QStringLiteral("John Doe, Writing")).position());
     QCOMPARE(notes->find(QString(back), notes->blockOf(QStringLiteral("John Doe, Writing")).position()).charFormat().anchorHref(),
-             QStringLiteral("#fnref-2"));
+             QStringLiteral("#~fnref-2"));
     // A rule before the notes and one before the bibliography, which lists each work once.
     QCOMPARE(notes->marks(Mark::NotesRule).size(), 2);
     QCOMPARE(entriesOf(*notes).size(), 2);
@@ -4121,8 +4127,8 @@ void documentSettingsReachThePreview()
     // The note's mark leads to the note, and the note back.
     const QTextCursor mark = w.preview->textDocument()->find(QStringLiteral("as shown 1"));
     QVERIFY(!mark.isNull());
-    QVERIFY(w.preview->goTo(QStringLiteral("fn-1")));
-    QVERIFY(w.preview->goTo(QStringLiteral("fnref-1")));
+    QVERIFY(w.preview->goTo(QStringLiteral("~fn-1")));
+    QVERIFY(w.preview->goTo(QStringLiteral("~fnref-1")));
     w.shot("citations-notes");
 
     // The Standard profile reads neither highlights nor citations: both are text.

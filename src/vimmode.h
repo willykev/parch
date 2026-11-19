@@ -93,6 +93,8 @@ public:
     // A key the view received: true when Vim keys took it, false when it
     // goes on as it would without them, as typing in Insert mode does.
     bool handleKey(QKeyEvent *event);
+    // Whether this key chord belongs to Vim before a window shortcut sees it.
+    bool takesShortcut(const QKeyEvent *event) const;
     // The same for an input method's text: outside Insert mode it is
     // taken as keys, never typed.
     bool handleInputMethod(QInputMethodEvent *event);
@@ -221,6 +223,7 @@ private:
     QChar m_operator;
     Await m_await = Await::None;
     QString m_awaitFor;
+    int m_deadKey = 0;
     QStringList m_keys;
     QString m_typed;
     // The size of the Visual area a command acts on, for ".".

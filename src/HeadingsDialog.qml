@@ -48,6 +48,10 @@ ThemedDialog {
     readonly property real rowHeight: Math.round(theme.fontSize * 2.2)
     readonly property real indent: Math.round(theme.fontSize * 1.2)
 
+    function formatPair(pattern, first, second) {
+        return pattern.replace(/%[12]/g, (slot) => slot === "%1" ? first : second)
+    }
+
     title: qsTr("Go to heading")
     preferredCharacters: 64
     preferredHeight: parent ? Math.round(parent.height * 0.7) : implicitHeight
@@ -157,6 +161,7 @@ ThemedDialog {
                 required property int index
                 required property string heading
                 required property int level
+                required property string parentPath
 
                 readonly property bool current: ListView.isCurrentItem
 
@@ -164,14 +169,14 @@ ThemedDialog {
                 height: dialog.rowHeight
                 focusPolicy: Qt.NoFocus
                 hoverEnabled: true
-                leftPadding: Math.round(theme.fontSize / 2) + (level - 1) * dialog.indent
+                leftPadding: Math.round(theme.fontSize / 2) + (field.text.length > 0 ? 0 : (level - 1) * dialog.indent)
                 rightPadding: Math.round(theme.fontSize / 2)
                 font.family: theme.fontFamily
                 font.pixelSize: theme.fontSize
                 font.weight: level <= 2 ? Font.DemiBold : Font.Normal
                 Accessible.role: Accessible.ListItem
-                text: heading
-                Accessible.name: qsTr("%1, level %2").arg(heading).arg(level)
+                text: parentPath.length > 0 ? dialog.formatPair(qsTr("%1 › %2"), parentPath, heading) : heading
+                Accessible.name: dialog.formatPair(qsTr("%1, level %2"), text, level)
                 Accessible.selected: current
                 onClicked: dialog.go(index)
 
@@ -180,7 +185,7 @@ ThemedDialog {
                     textFormat: Text.PlainText
                     font: entry.font
                     color: entry.current ? theme.bright : theme.foreground
-                    elide: Text.ElideRight
+                    elide: field.text.length > 0 ? Text.ElideMiddle : Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                 }
 

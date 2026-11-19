@@ -200,6 +200,7 @@ struct Node {
     bool generated = false;
 
     int file = 0;              // index into Document::files
+    int destinationFile = -1;  // file of a reference definition, or -1 for the link's own file
     Range range;
     Range open;
     Range close;
@@ -427,6 +428,7 @@ struct Destination {
 // (SourceFile::directory), so that the paths of an included file resolve
 // from that file's own folder.
 Destination classifyDestination(const QString &destination, const QString &baseDirectory);
+QString destinationDirectory(const Document &document, const Node &linkOrImage);
 Destination classifyDestination(const Document &document, const Node &linkOrImage);
 
 // Where in `document` a link to the file `path`, at `fragment`, leads when

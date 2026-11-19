@@ -491,6 +491,9 @@ bool FileOrganizer::perform(const Plan &plan)
     for (Document *document : going) {
         const QString now = canonicalTo + document->path().mid(canonicalFrom.size());
         m_store->relocate(document, now, plan.folder ? std::nullopt : copied);
+    }
+    m_store->relocateClosedPaths(canonicalFrom, canonicalTo, plan.folder);
+    for (Document *document : going) {
         emit documentMoved(document);
     }
     emit relocated(plan.from, plan.to);

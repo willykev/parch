@@ -328,15 +328,15 @@ private:
     {
         Look linked = look;
         linked.linked = true;
-        QString dest = destination;
+        const QString dest = m_destinations(node, destination);
+        if (dest.isEmpty() || !md::detail::isSafeUrl(dest, false)) {
+            content(look);
+            return;
+        }
         if (dest.startsWith(u'#')) {
-            out() += QStringLiteral("<w:hyperlink w:anchor=\"%1\" w:history=\"1\">").arg(bookmark(dest.mid(1)));
+            out() += QStringLiteral("<w:hyperlink w:anchor=\"%1\" w:history=\"1\">")
+                         .arg(bookmark(md::classifyDestination(dest, {}).fragment));
         } else {
-            dest = m_destinations(node, dest);
-            if (dest.isEmpty() || !md::detail::isSafeUrl(dest, false)) {
-                content(look);
-                return;
-            }
             out() += QStringLiteral("<w:hyperlink r:id=\"%1\" w:history=\"1\">").arg(m_part->relate(kHyperlinkType, dest, true));
         }
         content(linked);

@@ -2214,6 +2214,27 @@ void DocumentStore::relocate(Document *document, const QString &canonicalPath, c
     document->refresh();
 }
 
+void DocumentStore::relocateClosedPaths(const QString &from, const QString &to, bool folder)
+{
+    if (from.isEmpty() || to.isEmpty() || from == to) return;
+    QHash<QString, QString> moved;
+    if (const QString id = m_registry.take(from); !id.isEmpty()) moved.insert(to, id);
+    if (folder) {
+        const QString under = from + u'/';
+        for (auto it = m_registry.begin(); it != m_registry.end();) {
+            if (!it.key().startsWith(under)) {
+                ++it;
+                continue;
+            }
+            moved.insert(to + it.key().mid(from.size()), it.value());
+            it = m_registry.erase(it);
+        }
+    }
+    if (moved.isEmpty()) return;
+    for (auto it = moved.cbegin(); it != moved.cend(); ++it) m_registry.insert(it.key(), it.value());
+    writeRegistry();
+}
+
 QString DocumentStore::documentIdFor(const QString &canonicalPath)
 {
     if (Document *open = documentOf(canonicalPath)) return open->m_id;

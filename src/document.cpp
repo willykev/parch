@@ -111,7 +111,9 @@ QString safeFileName(const QString &words)
         // A half of a pair has no name in a file system's encoding.
         if (c.isSurrogate() || isDirectionMark(c)) continue;
         // A control character, a tab among them, parts words as a space does.
-        safe += c.category() == QChar::Other_Control ? u' ' : c == u'/' ? u'-' : c;
+        if (c == u'/') safe += u'-';
+        else if (c.category() == QChar::Other_Control || QStringView(u"\\:*?\"<>|").contains(c)) safe += u' ';
+        else safe += c;
     }
     // A leading dot hides the file, and "." and ".." name folders.
     for (;;) {
@@ -183,14 +185,19 @@ QString Document::suggestedFileName(const QString &text)
 {
     QString words = firstHeading(text);
     if (words.isEmpty()) {
-        // As much of the first line as can be cut between words.
+        // Read the first line without cutting through its Markdown markers.
         qsizetype begin = 0;
         while (begin < text.size() && (text.at(begin).isSpace() || text.at(begin) == u'#')) ++begin;
         qsizetype end = begin;
-        while (end < text.size() && end - begin <= titleLimit && !isLineBreak(text.at(end))) ++end;
+        while (end < text.size() && !isLineBreak(text.at(end))) ++end;
         words = text.mid(begin, end - begin);
+    } else {
+        words.prepend(QStringLiteral("# "));
     }
-    const QString name = safeFileName(cutAtWord(words.trimmed()));
+    md::Options options;
+    options.includes = options.frontMatter = false;
+    const QString visible = md::parse(words, options).plainText().simplified();
+    const QString name = cutAtWord(safeFileName(visible)).trimmed();
     return (name.isEmpty() ? tr("Untitled") : name) + QStringLiteral(".md");
 }
 

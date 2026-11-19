@@ -22,6 +22,7 @@ struct Payload {
     QString dest;
     QString title;
     QString label;
+    int destinationFile = -1;
     std::vector<Attribute> attributes;
 };
 
@@ -1459,6 +1460,7 @@ bool InlineParserPrivate::closeBracket()
     QString dest, title, label;
     int targetStart = 0, targetEnd = 0;
     int heading = -1;
+    int destinationFile = -1;
 
     if (afterClose < m_len && s[afterClose] == u'(')
         matched = inlineLinkTail(afterClose, &end, &dest, &title, &targetStart, &targetEnd);
@@ -1516,6 +1518,7 @@ bool InlineParserPrivate::closeBracket()
             if (const LinkReference *ref = reference(normalized)) {
                 dest = ref->dest;
                 title = ref->title;
+                destinationFile = ref->file;
                 matched = true;
             } else if (explicitLabel && o.headingLabels && !opener.image) {
                 // Writer heading references: `[text][Label]` and `[Title][]`.
@@ -1579,6 +1582,7 @@ bool InlineParserPrivate::closeBracket()
     data(node).dest = dest;
     data(node).title = title;
     data(node).label = label;
+    data(node).destinationFile = destinationFile;
     n(node).number = heading + 1; // until the slugs are known
     wrapInside(opener, node);
     popBracket();
@@ -1955,6 +1959,7 @@ Node InlineParserPrivate::finish(int index)
         node.dest = std::move(payload.dest);
         node.title = std::move(payload.title);
         node.label = std::move(payload.label);
+        node.destinationFile = payload.destinationFile;
         node.attributes = std::move(payload.attributes);
     }
     node.file = ctx.file;

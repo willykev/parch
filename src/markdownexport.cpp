@@ -1,12 +1,12 @@
 #include "markdownexport.h"
 
 #include "dialectchoice.h"
+#include "documentcitations.h"
 #include "exportweb.h"
 #include "htmlexport.h"
 #include "saferead.h"
 
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
@@ -43,18 +43,34 @@ QString yamlQuoted(const QString &text)
 {
     QString out = text;
     out.replace(u'\\', QStringLiteral("\\\\")).replace(u'"', QStringLiteral("\\\""));
+    out.replace(u'\n', QStringLiteral("\\n")).replace(u'\r', QStringLiteral("\\r")).replace(u'\t', QStringLiteral("\\t"));
     return u'"' + out + u'"';
+}
+
+QString yamlValue(const md::YamlValue &value)
+{
+    if (value.isScalar()) return yamlQuoted(value.scalar);
+    QStringList items;
+    if (value.isList()) {
+        for (const auto &item : value.list) items << yamlValue(item);
+        return u'[' + items.join(QStringLiteral(", ")) + u']';
+    }
+    if (value.isMap()) {
+        for (const auto &[key, item] : value.map) items << yamlQuoted(key) + QStringLiteral(": ") + yamlValue(item);
+        return u'{' + items.join(QStringLiteral(", ")) + u'}';
+    }
+    return QStringLiteral("null");
 }
 
 // The YAML without its top-level entries for `keys`: each key's line and the
 // lines that carry on its value (indented, or a list item, blank or a comment
 // among them).
-QString withoutKeys(const QString &yaml, const QStringList &keys)
+QString withoutKeys(const md::FrontMatter &frontMatter, const QStringList &keys)
 {
     static const QRegularExpression entry(QStringLiteral("^[\"']?([^\\s:\"'#][^:\"']*)[\"']?\\s*:(\\s|$)"));
     QString out;
     bool dropping = false;
-    const QStringList lines = yaml.split(u'\n');
+    const QStringList lines = frontMatter.source.split(u'\n');
     for (qsizetype i = 0; i < lines.size(); ++i) {
         const QString &line = lines[i];
         const bool goesOn = line.isEmpty() || line.front().isSpace() || line.startsWith(u'#')
@@ -67,6 +83,14 @@ QString withoutKeys(const QString &yaml, const QStringList &keys)
         out += line;
         if (i + 1 < lines.size()) out += u'\n';
     }
+    // Keep the original layout when whole lines can be removed. Flow
+    // mappings and escaped keys may instead need to be written from the
+    // parsed values so that no old citation settings survive.
+    const md::YamlValue kept = md::parseYaml(out);
+    if (std::none_of(keys.cbegin(), keys.cend(), [&](const QString &key) { return kept.find(key); })) return out;
+    out.clear();
+    for (const auto &[key, value] : frontMatter.data.map)
+        if (!keys.contains(key, Qt::CaseInsensitive)) out += yamlQuoted(key) + QStringLiteral(": ") + yamlValue(value) + u'\n';
     return out;
 }
 
@@ -107,9 +131,9 @@ QString applied(const QString &text, std::vector<Edit> edits)
 
 class Assembler {
 public:
-    Assembler(const md::Document &document, const QString &outputFolder, const ImageDestination &image,
+    Assembler(const md::Document &document, const QString &outputFolder, const Dialect::Choice &choice, const ImageDestination &image,
               const FileDestination &citationFile)
-        : doc(document), folder(QDir::cleanPath(outputFolder)), imageDestination(image), citationDestination(citationFile)
+        : doc(document), folder(QDir::cleanPath(outputFolder)), dialect(choice), imageDestination(image), citationDestination(citationFile)
     {
     }
 
@@ -134,56 +158,86 @@ public:
     // as the folder written to reaches them, and every bibliography an
     // included file names beside the document's own: the assembled text has
     // no included file of its own to name it. Nothing when nothing changes.
-    std::optional<Edit> citationFiles() const
+    std::optional<Edit> citationFiles()
     {
         if (!doc.options.frontMatter || doc.files.empty()) return std::nullopt;
         const md::SourceFile &root = doc.files.front();
-        if (root.directory.isEmpty()) return std::nullopt;
         const Dialect::Layer own = Dialect::frontMatterLayer(root.frontMatter, root.directory);
-        QStringList bibliography = own.bibliography.value_or(QStringList());
-        bool added = false;
-        if (doc.options.citations)
+        const QStringList original = own.bibliography.value_or(QStringList());
+        const auto reach = DocumentCitations::Reach::of(dialect.libraryRoot, root.directory);
+        bool outside = false;
+        const auto allowed = [&](const QString &path) {
+            if (reach.allows(path)) return true;
+            outside = true;
+            return false;
+        };
+        const bool ownBibliography = !hasCitations || dialect.bibliographyFrom == u"default";
+        const bool authorBibliography = ownBibliography || dialect.bibliographyFrom == u"front-matter";
+        QStringList bibliography = ownBibliography ? original : dialect.bibliography;
+        QSet<QString> authorFiles;
+        if (authorBibliography) {
+            bibliography.removeIf([&](const QString &path) { return !allowed(path); });
+            for (const QString &path : std::as_const(bibliography)) authorFiles.insert(path);
+        }
+        if (hasCitations)
             for (size_t i = 1; i < doc.files.size(); ++i) {
                 const md::SourceFile &file = doc.files[i];
                 if (!file.frontMatter.present || file.directory.isEmpty()) continue;
                 const Dialect::Layer layer = Dialect::frontMatterLayer(file.frontMatter, file.directory);
-                for (const QString &path : layer.bibliography.value_or(QStringList()))
-                    if (!bibliography.contains(path)) {
-                        bibliography.append(path);
-                        added = true;
-                    }
+                for (const QString &path : layer.bibliography.value_or(QStringList())) {
+                    if (bibliography.contains(path) || !allowed(path)) continue;
+                    bibliography.append(path);
+                    authorFiles.insert(path);
+                }
             }
+        const bool ownStyle = !hasCitations || dialect.citationStyleFrom == u"default";
+        const bool authorStyle = ownStyle || dialect.citationStyleFrom == u"front-matter";
+        QString style = ownStyle ? own.citationStyle : dialect.citationStyle;
+        if (authorStyle && Dialect::isStyleFile(style) && !allowed(style)) style.clear();
+        if (outside)
+            limitations.append(QStringLiteral("Citation files outside the document's allowed folders were omitted"));
+
         const bool moved = QDir::cleanPath(root.directory) != folder;
-        const bool styleFile = Dialect::isStyleFile(own.citationStyle);
-        if (!added && !(moved && (own.bibliography || styleFile))) return std::nullopt;
+        const bool styleFile = Dialect::isStyleFile(style);
+        const bool writeBibliography = bibliography != original || (moved && !bibliography.isEmpty());
+        const bool writeStyle = style != own.citationStyle || (moved && styleFile);
+        if (!writeBibliography && !writeStyle) return std::nullopt;
 
         // Front matter names files within its document's folder alone: one
         // the folder written to does not hold goes along with the text, as
         // its pictures do.
-        const auto written = [&](const QString &path) {
+        bool uncopied = false;
+        const auto written = [&](const QString &path, bool fromFrontMatter) {
             const QString relative = Exporters::relativeTo(folder, path);
             const bool within = !QDir::isAbsolutePath(relative) && relative != u".." && !relative.startsWith(QLatin1String("../"));
             if (within || !citationDestination) return relative;
-            const QString placed = citationDestination(path);
-            return placed.isEmpty() ? relative : placed;
+            const QString placed = citationDestination(path, fromFrontMatter ? &reach.folders : nullptr);
+            if (placed.isEmpty()) uncopied = true;
+            return placed;
         };
         QStringList keys;
         QString entries;
-        if (!bibliography.isEmpty()) {
+        if (writeBibliography) {
             keys.append(QStringLiteral("bibliography"));
-            entries += QStringLiteral("bibliography:\n");
-            for (const QString &path : std::as_const(bibliography))
-                entries += QStringLiteral("  - %1\n").arg(yamlQuoted(written(path)));
+            QString names;
+            for (const QString &path : std::as_const(bibliography)) {
+                const QString name = written(path, authorFiles.contains(path));
+                if (!name.isEmpty()) names += QStringLiteral("  - %1\n").arg(yamlQuoted(name));
+            }
+            if (!names.isEmpty()) entries += QStringLiteral("bibliography:\n") + names;
         }
-        if (styleFile) {
+        if (writeStyle) {
             keys.append(QStringLiteral("csl"));
-            entries += QStringLiteral("csl: %1\n").arg(yamlQuoted(written(own.citationStyle)));
+            const QString name = styleFile ? written(style, authorStyle) : style;
+            if (!name.isEmpty()) entries += QStringLiteral("csl: %1\n").arg(yamlQuoted(name));
         }
+        if (uncopied) limitations.append(QStringLiteral("Citation files that could not be copied were omitted"));
         if (!root.frontMatter.present) {
+            if (entries.isEmpty()) return std::nullopt;
             const int start = root.text.startsWith(QChar(0xfeff)) ? 1 : 0;
             return Edit{start, start, QStringLiteral("---\n") + entries + QStringLiteral("---\n\n")};
         }
-        QString yaml = withoutKeys(root.frontMatter.source, keys);
+        QString yaml = withoutKeys(root.frontMatter, keys);
         if (!yaml.isEmpty() && !yaml.endsWith(u'\n')) yaml += u'\n';
         return Edit{root.frontMatter.contentStart, root.frontMatter.contentEnd, yaml + entries};
     }
@@ -214,10 +268,19 @@ private:
             case md::NodeType::Image:
                 if (!child.label.isEmpty()) linkLabels.insert(label);
                 break;
-            case md::NodeType::Heading:
+            case md::NodeType::Heading: {
                 // A new link label must not take the name of a heading's.
-                if (!child.label.isEmpty()) linkLabels.insert(label);
-                linkLabels.insert(normalized(md::plainText(child)));
+                const QString title = normalized(md::plainText(child));
+                if (!child.label.isEmpty()) {
+                    linkLabels.insert(label);
+                    if (label != title) ++headingAliases[label];
+                }
+                linkLabels.insert(title);
+                ++headingAliases[title];
+                break;
+            }
+            case md::NodeType::Citation:
+                hasCitations = true;
                 break;
             case md::NodeType::CitationDefinition: {
                 QString text = doc.source(child).toString();
@@ -268,20 +331,47 @@ private:
         return applied(doc.files[size_t(file)].text, std::move(edits));
     }
 
+    // The block at either edge of an include after its front matter and
+    // any nested include lines have been removed.
+    static const md::Node *includeEdge(const md::Node &node, bool first)
+    {
+        if (node.generated || node.type == md::NodeType::FrontMatter) return nullptr;
+        if (node.type != md::NodeType::Include || !node.resolved) return &node;
+        for (size_t i = 0; i < node.children.size(); ++i) {
+            const md::Node &child = node.children[first ? i : node.children.size() - 1 - i];
+            if (const md::Node *edge = includeEdge(child, first)) return edge;
+        }
+        return nullptr;
+    }
+
+    static bool listsJoin(const md::Node *before, const md::Node *after)
+    {
+        return before && after && before->type == md::NodeType::List && after->type == md::NodeType::List
+               && before->ordered == after->ordered && before->marker == after->marker;
+    }
+
     void collect(int file, const md::Node &node, std::vector<Edit> &edits)
     {
-        for (const md::Node &child : node.children) {
+        const md::Node *previous = nullptr;
+        for (size_t i = 0; i < node.children.size(); ++i) {
+            const md::Node &child = node.children[i];
             if (child.generated || child.file != file) continue;
-            if (child.type == md::NodeType::Include) {
-                if (child.resolved && child.includedFile >= 0) include(file, child, edits);
+            if (child.type == md::NodeType::Include && child.resolved && child.includedFile >= 0) {
+                const md::Node *first = includeEdge(child, true);
+                const md::Node *last = includeEdge(child, false);
+                const md::Node *following = i + 1 < node.children.size() ? &node.children[i + 1] : nullptr;
+                const bool before = listsJoin(previous, first);
+                if (last) previous = last;
+                include(file, child, edits, before, listsJoin(previous, following));
                 continue;
             }
+            previous = &child;
             visit(file, child, edits);
             collect(file, child, edits);
         }
     }
 
-    void include(int file, const md::Node &node, std::vector<Edit> &edits)
+    void include(int file, const md::Node &node, std::vector<Edit> &edits, bool separateBefore, bool separateAfter)
     {
         QString text = assemble(node.includedFile, node);
         while (text.endsWith(u'\n') || text.endsWith(u'\r')) text.chop(1);
@@ -296,6 +386,9 @@ private:
                 text += u'\n' + open.first(run).toString();
             }
         }
+        // A blank line alone would merge these lists on the next read.
+        if (separateBefore) text.prepend(QStringLiteral("\n<!-- -->\n\n"));
+        if (separateAfter) text += QStringLiteral("\n\n<!-- -->");
         // What follows the include line starts a block of its own.
         const QString &around = doc.files[size_t(file)].text;
         QStringView rest = QStringView(around).sliced(node.range.end);
@@ -326,11 +419,16 @@ private:
             if (const QString fresh = noteRenames.value(file).value(normalized(node.label)); !fresh.isEmpty())
                 edits.push_back({node.range.start, node.range.end, QStringLiteral("[^%1]").arg(fresh)});
             break;
-        case md::NodeType::LinkDefinition:
+        case md::NodeType::LinkDefinition: {
             if (const QString fresh = linkRenames.value(file).value(normalized(node.label)); !fresh.isEmpty())
                 edits.push_back({node.open.start, node.open.end, QStringLiteral("[%1]:").arg(fresh)});
-            rebase(file, node.target, node.dest, edits);
+            const QString anchor = file > 0 && node.dest.startsWith(u'#') ? md::anchorInFile(doc, file, node.dest.mid(1)) : QString();
+            if (!anchor.isEmpty() && anchor != QUrl::fromPercentEncoding(node.dest.mid(1).toUtf8()))
+                edits.push_back({node.target.start, node.target.end, u'#' + anchor});
+            else
+                rebase(file, node.target, node.dest, edits);
             break;
+        }
         case md::NodeType::Link:
         case md::NodeType::Image:
             if (node.type == md::NodeType::Image && copyImage(node, edits)) break;
@@ -343,7 +441,12 @@ private:
                     edits.push_back({node.target.start, node.target.end, node.dest});
             } else if (node.label.isEmpty()) {
                 rebase(file, node.target, node.dest, edits);
-            } else if (const QString fresh = linkRenames.value(file).value(normalized(node.label));
+            } else if (node.type == md::NodeType::Link && node.destinationFile < 0 && node.dest.startsWith(u'#')
+                       && (headingAliases.value(normalized(node.label)) > 1 || linkDefinitions.contains(normalized(node.label)))) {
+                // Flattening the files loses the heading reference's local scope.
+                edits.push_back({node.close.start, node.close.end, QStringLiteral("](%1)").arg(node.dest)});
+            } else if (const QString fresh = linkRenames.value(node.destinationFile >= 0 ? node.destinationFile : file)
+                                               .value(normalized(node.label));
                        !fresh.isEmpty()) {
                 // `[text][label]` names its label after the text; `[label][]`
                 // and `[label]` are named by their text, which stays.
@@ -420,6 +523,8 @@ private:
                     if (!found.fragment.isEmpty()) written += u'#' + found.fragment;
                 }
         }
+        if (written.isEmpty() && file != 0 && node.label == u"a" && node.resolved && dest.startsWith(u'#'))
+            written = dest;
         if (written.isEmpty()) written = rebased(file, dest);
         if (written.isEmpty()) return;
         static const QRegularExpression value(
@@ -430,28 +535,34 @@ private:
             const QRegularExpressionMatch found = match.next();
             if (found.captured(1).compare(name, Qt::CaseInsensitive) != 0) continue;
             const int start = node.open.start + int(found.capturedStart(2));
-            edits.push_back({start, start + int(found.capturedLength(2)), u'"' + attributeEscaped(written) + u'"'});
+            const QString replacement = u'"' + attributeEscaped(written) + u'"';
+            if (found.captured(2) != replacement)
+                edits.push_back({start, start + int(found.capturedLength(2)), replacement});
             return;
         }
     }
 
     const md::Document &doc;
     const QString folder;
+    const Dialect::Choice &dialect;
     const ImageDestination imageDestination;
     const FileDestination citationDestination;
     Definitions noteDefinitions, linkDefinitions;
     QSet<QString> noteLabels, linkLabels;
+    QHash<QString, int> headingAliases;
     Renames noteRenames, linkRenames;
     QHash<QString, QList<std::pair<int, QString>>> citations;
+    bool hasCitations = false;
     QStringList limitations;
 };
 
 } // namespace
 
-Assembled assemble(const md::Document &document, const QString &outputFolder, const ImageDestination &image,
+Assembled assemble(const md::Document &document, const QString &outputFolder, const Dialect::Choice &dialect,
+                   const ImageDestination &image,
                    const FileDestination &citationFile)
 {
-    return Assembler(document, outputFolder, image, citationFile).run();
+    return Assembler(document, outputFolder, dialect, image, citationFile).run();
 }
 
 } // namespace MarkdownExport
@@ -526,24 +637,17 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     }
     // A bibliography or style the new folder cannot reach goes along with
     // the text, beside its pictures.
-    QStringList uncopied;
-    const MarkdownExport::FileDestination citationFile = [&](const QString &path) {
-        QFile file(path);
-        if (!QFileInfo(path).isFile() || QFileInfo(path).size() > (qint64(64) << 20) || !file.open(QIODevice::ReadOnly)) {
-            uncopied.append(QFileInfo(path).fileName());
-            return QString();
-        }
-        return QUrl::fromPercentEncoding(assets.copy(file.readAll(), QFileInfo(path).fileName()).toUtf8());
+    const MarkdownExport::FileDestination citationFile = [&](const QString &path, const QStringList *folders) {
+        const SafeRead::Result file = folders ? SafeRead::readWithin(path, SafeRead::ReferenceBytes, *folders)
+                                              : SafeRead::read(path, SafeRead::ReferenceBytes);
+        if (!file.ok) return QString();
+        return QUrl::fromPercentEncoding(assets.copy(file.bytes, QFileInfo(path).fileName()).toUtf8());
     };
-    const MarkdownExport::Assembled assembled = MarkdownExport::assemble(document, outputFolder, image, citationFile);
+    const MarkdownExport::Assembled assembled = MarkdownExport::assemble(document, outputFolder, recipe.dialect, image, citationFile);
     result.limitations = assembled.limitations;
     if (!unread.isEmpty())
         result.limitations.append(QStringLiteral("Images that could not be read are linked where they were: %1")
                                       .arg(unread.join(QStringLiteral(", "))));
-    if (!uncopied.isEmpty())
-        result.limitations.append(QStringLiteral("Citation files that could not be copied are named where they were, "
-                                                 "which the new folder may not read: %1")
-                                      .arg(uncopied.join(QStringLiteral(", "))));
     if (run.stopped()) return Exporters::cancelled();
     // Nothing is written through a link, the folder of pictures included.
     if (!ExportWeb::writePage(document, recipe, assembled.text.toUtf8(), folder, assets, &result.error)) {

@@ -85,8 +85,9 @@ struct Anchor {
     int file = 0;
 };
 
-// A place links go to: a heading's slug, "fn-3" for a note, "fnref-3" for a
-// reference to it (each reference has one), "cite-2" for a bibliography entry.
+// A place links go to: a heading's slug, "~fn-3" for a note, "~fnref-3" for a
+// reference to it (each reference has one), "~cite-2" or "~ref-key" for a
+// bibliography entry. Heading slugs cannot contain a tilde.
 struct NamedAnchor {
     QString name;
     int position = 0;

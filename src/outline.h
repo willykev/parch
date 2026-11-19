@@ -35,6 +35,7 @@ struct Heading {
     // document's own headings.
     QString file;
     int fileLine = -1;
+    QString parentPath; // headings above this match in a filtered outline
 };
 
 namespace Outline {
@@ -70,7 +71,8 @@ class OutlineModel : public QAbstractListModel {
 
 public:
     // QML reads a heading's text as "heading", since a delegate's "text" is its own.
-    enum Role { TextRole = Qt::UserRole + 1, LevelRole, PositionRole, LineRole, SlugRole, LabelRole, FileRole, FileLineRole };
+    enum Role { TextRole = Qt::UserRole + 1, LevelRole, PositionRole, LineRole, SlugRole, LabelRole, FileRole, FileLineRole,
+                ParentPathRole };
     Q_ENUM(Role)
 
     // How long the text must rest after an edit before it is looked at again.

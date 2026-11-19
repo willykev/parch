@@ -4,11 +4,27 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QStringDecoder>
 
 #include <algorithm>
 
 namespace md {
+
+bool isUrlSpelling(QStringView path)
+{
+    if (path.startsWith(u"www.", Qt::CaseInsensitive) || path.contains(u"://")) return true;
+    static const QRegularExpression scheme(QStringLiteral("^[A-Za-z][A-Za-z0-9+.-]+:"));
+    return path.contains(u':') && scheme.matchView(path).hasMatch();
+}
+
+bool isBareIncludePath(QStringView path)
+{
+    if (path.isEmpty() || QStringView(u"\"'#!(=").contains(path.front()) || path.startsWith(u"~~~")) return false;
+    for (const QChar ch : path)
+        if (ch <= u' ' || QStringView(u"<>[]*`|\\").contains(ch)) return false;
+    return true;
+}
 
 QString includeTarget(const QString &written, const QString &includingDirectory, const QString &libraryRoot)
 {

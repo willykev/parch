@@ -133,19 +133,17 @@ QSet<QString> slugsOfFile(const QString &path, const QString &library, const md:
 
 // A path written as a destination, percent-encoding characters beyond ASCII
 // as UTF-8 when the destination it replaces did.
-QString encodedLike(const QString &path, const QString &written)
+QString encodedLike(const QString &encoded, const QString &written)
 {
     static const QRegularExpression beyondAscii(QStringLiteral("%[89A-Fa-f][0-9A-Fa-f]"));
-    const QString encoded = md::encodeDestination(path);
     if (!beyondAscii.match(written).hasMatch()) return encoded;
     QString result;
-    for (const QChar c : encoded) {
-        if (c.unicode() < 0x80) {
-            result.append(c);
+    for (const char byte : encoded.toUtf8()) {
+        if (uchar(byte) < 0x80) {
+            result.append(QLatin1Char(byte));
             continue;
         }
-        for (const char byte : QString(c).toUtf8())
-            result.append(u'%' + QString::number(uchar(byte), 16).toUpper().rightJustified(2, u'0'));
+        result.append(u'%' + QString::number(uchar(byte), 16).toUpper().rightJustified(2, u'0'));
     }
     return result;
 }
@@ -260,7 +258,7 @@ QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const Q
         QString plain;
         QString suffix;
         if (include) {
-            plain = link.written;
+            plain = link.dest;
         } else if (fileUrl) {
             plain = destination.path;
             const qsizetype hash = link.written.indexOf(u'#');
@@ -289,16 +287,31 @@ QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const Q
                 relative.prepend(QStringLiteral("./"));
         }
         if (plain.endsWith(u'/') && !relative.endsWith(u'/')) relative.append(u'/');
+        if (include && md::isUrlSpelling(relative)) relative.prepend(QStringLiteral("./"));
         if (relative == plain) continue;
         QString after;
         if (include) {
             // The range holds the path alone, inside its quotes when it has them.
-            after = !link.enclosed && relative.contains(u' ') ? u'"' + relative + u'"' : relative;
-        } else if (link.enclosed) {
-            const QString written = fileUrl ? QStringLiteral("file://") + relative : relative;
-            after = QString(written).replace(u'<', QStringLiteral("\\<")).replace(u'>', QStringLiteral("\\>")) + suffix;
+            const bool quote = !md::isBareIncludePath(relative);
+            const QChar delimiter = link.enclosed ? text.at(link.range.start - 1) : QChar(u'"');
+            after = relative;
+            if (link.enclosed || quote)
+                after.replace(u'\\', QStringLiteral("\\\\")).replace(delimiter, u'\\' + QString(delimiter));
+            if (!link.enclosed && quote) after = delimiter + after + delimiter;
         } else {
-            after = (fileUrl ? QStringLiteral("file://") : QString()) + encodedLike(relative, link.written) + suffix;
+            QString encoded;
+            if (link.enclosed) {
+                // Angle brackets allow spaces and parentheses. The path
+                // still goes through Markdown unescaping and URL decoding.
+                encoded = relative.replace(u'%', QStringLiteral("%25")).replace(u'#', QStringLiteral("%23"))
+                              .replace(u'&', QStringLiteral("%26")).replace(u'\\', QStringLiteral("%5C"))
+                              .replace(u'<', QStringLiteral("\\<")).replace(u'>', QStringLiteral("\\>"));
+            } else {
+                encoded = md::encodeDestination(relative);
+            }
+            if (fileUrl) encoded.replace(u'?', QStringLiteral("%3F"));
+            after = encodedLike(encoded, link.written) + suffix;
+            if (fileUrl) after.prepend(QStringLiteral("file://"));
         }
         if (after == link.written) continue;
         qsizetype lineStart = link.range.start;

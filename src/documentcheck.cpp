@@ -102,9 +102,12 @@ private:
                std::vector<Problem> &found)
     {
         if (!checkable(target)) return;
-        const QString why = SafeRead::pictureRefusal(target.path, m_loaded.document.resourceFolders);
+        SafeRead::PictureProblem problem;
+        const QString why = SafeRead::pictureRefusal(target.path, m_loaded.document.resourceFolders, &problem);
         if (!why.isEmpty()) {
-            add(node, QStringLiteral("image-outside-folders"), QStringLiteral("asset"),
+            const QString code = problem == SafeRead::PictureProblem::OutsideFolders ? QStringLiteral("image-outside-folders")
+                                                                                     : QStringLiteral("image-unreadable");
+            add(node, code, QStringLiteral("asset"),
                 QStringLiteral("The image \"%1\" cannot be read: %2").arg(written, why), found);
             return;
         }

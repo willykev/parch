@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QString>
+#include <QStringView>
 
 // Reading the files a document includes.
 //
@@ -80,6 +81,9 @@ private:
     QHash<QString, QString> m_files;
     int m_reads = 0;
 };
+
+// Whether a path can be written alone on an include line without quotes.
+bool isBareIncludePath(QStringView path);
 
 // The absolute path an include line points at, or an empty string when the
 // folder it needs (the library root for `/rooted`, else the including

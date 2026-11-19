@@ -20,6 +20,7 @@ void undoTakesBackWholeChanges();
 void modifierPressesKeepPendingCommands();
 void deadKeysKeepPendingCharacterCommands();
 void controlRRedoesWithVimEditorFocus();
+void controlROpensHeadingsInReadOnlyVim();
 void escapeAlwaysReachesNormalMode();
 void insertTypesAsWithoutVimKeys();
 void commandLineRunsWindowCommands();

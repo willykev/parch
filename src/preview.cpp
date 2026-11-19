@@ -1708,8 +1708,8 @@ bool Preview::goTo(const QString &name)
         m_pendingName = name;
         return true;
     }
-    // "fnref-3-2" is the second place that refers to note 3.
-    static const QRegularExpression again(QStringLiteral("^(fnref-\\d+)-(\\d+)$"));
+    // "~fnref-3-2" is the second place that refers to note 3.
+    static const QRegularExpression again(QStringLiteral("^(~fnref-\\d+)-(\\d+)$"));
     QString wanted = name;
     int occurrence = 1;
     if (const QRegularExpressionMatch match = again.match(name); match.hasMatch()) {
@@ -1726,8 +1726,9 @@ bool Preview::goTo(const QString &name)
     if (position < 0) return false;
     // The way back from a note returns the view to exactly where it was
     // left for the note.
-    if (!m_trail.isEmpty() && wanted.startsWith(QLatin1String("fnref-"))
-        && m_trailTarget == QStringLiteral("fn-") + wanted.mid(6)) {
+    constexpr QLatin1StringView noteRefPrefix("~fnref-");
+    if (!m_trail.isEmpty() && wanted.startsWith(noteRefPrefix)
+        && m_trailTarget == QStringLiteral("~fn-") + wanted.mid(noteRefPrefix.size())) {
         goBack();
         return true;
     }

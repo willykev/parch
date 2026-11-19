@@ -45,6 +45,8 @@ struct Result {
 
 // Reads the file at the path, refusing it, with the reason, as above.
 Result read(const QString &path, qint64 limit);
+// Also checks the opened file is within the canonical folders before reading.
+Result readWithin(const QString &path, qint64 limit, const QStringList &folders);
 Result readPicture(const QString &path, const QStringList &folders);
 // Checks a picture reference for diagnostics and links. Reads check the
 // opened descriptor as well, before consuming any bytes.

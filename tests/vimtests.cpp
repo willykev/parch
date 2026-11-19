@@ -844,11 +844,20 @@ void deadKeysKeepPendingCharacterCommands()
     for (const QString &command : {QStringLiteral("f"), QStringLiteral("t")}) {
         view.load(QStringLiteral("‸a c"));
         view.keys(command);
+        QVERIFY(!(view.window.activeFocusItem()->flags() & QQuickItem::ItemAcceptsInputMethod));
+        QInputMethodEvent preedit(QStringLiteral("ci"), {});
+        QCoreApplication::sendEvent(view.window.activeFocusItem(), &preedit);
+        QCOMPARE(view.vim->pending(), command);
         deadKey(Qt::Key_Dead_Acute);
         QCOMPARE(view.vim->pending(), command);
         view.keys(QStringLiteral("c"));
         QCOMPARE(view.vim->cursor(), command == u"f" ? 2 : 1);
     }
+    view.load(QStringLiteral("‸cafe"));
+    view.keys(QStringLiteral("r"));
+    QVERIFY(!(view.window.activeFocusItem()->flags() & QQuickItem::ItemAcceptsInputMethod));
+    view.keys(QStringLiteral("x"));
+    QCOMPARE(view.text(), QStringLiteral("xafe"));
 }
 
 void controlRRedoesWithVimEditorFocus()
@@ -877,6 +886,17 @@ void controlRRedoesWithVimEditorFocus()
         QCOMPARE(buffer->text(), QStringLiteral("# Title\ne\n"));
         QVERIFY(!headings->property("visible").toBool());
     }
+    for (QLatin1StringView pending : {QLatin1StringView("d"), QLatin1StringView("f"), QLatin1StringView("t"),
+                                    QLatin1StringView("r"), QLatin1StringView("\""), QLatin1StringView("\"a")}) {
+        readyToRedo();
+        QVERIFY(buffer->canRedo());
+        press(window, pending + QStringLiteral("<C-r>"));
+        QCOMPARE(buffer->text(), QStringLiteral("# Title\none\n"));
+        QVERIFY(buffer->canRedo());
+        QVERIFY(!headings->property("visible").toBool());
+        press(window, QStringLiteral("2<C-r>"));
+        QCOMPARE(buffer->text(), QStringLiteral("# Title\ne\n"));
+    }
     readyToRedo();
     press(window, QStringLiteral("i<C-r>"));
     QTRY_VERIFY(headings->property("opened").toBool());
@@ -886,6 +906,24 @@ void controlRRedoesWithVimEditorFocus()
     QTRY_COMPARE(window->activeFocusItem(), editor);
     press(window, QStringLiteral("<C-r>"));
     QTRY_VERIFY(headings->property("opened").toBool());
+}
+
+void controlROpensHeadingsInReadOnlyVim()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString path = root.filePath(QStringLiteral("read-only.md"));
+    writeFile(path, "# Title\n\nInvalid \xff text.\n");
+    ShellFixture shell({.settings = R"({"vimKeys":true})", .files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    QVERIFY(editor->property("readOnly").toBool());
+    editor->forceActiveFocus();
+    press(window, QStringLiteral("<C-r>"));
+    QTRY_VERIFY(shell.object(QStringLiteral("headingsDialog"))->property("opened").toBool());
+    QTRY_COMPARE(shell.object(QStringLiteral("headingsList"))->property("count").toInt(), 1);
 }
 
 void escapeAlwaysReachesNormalMode()

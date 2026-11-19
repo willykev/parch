@@ -377,6 +377,8 @@ private slots:
     void cliNothingADocumentIsMadeFromIsWrittenOver() { CliTests::nothingADocumentIsMadeFromIsWrittenOver(); }
     void cliAssembledMarkdownKeepsItsCitations() { CliTests::assembledMarkdownKeepsItsCitations(); }
     void cliAssembledMarkdownKeepsEffectiveBibliography() { CliTests::assembledMarkdownKeepsEffectiveBibliography(); }
+    void cliAssembledMarkdownOmitsCitationFilesOutsideReach() { CliTests::assembledMarkdownOmitsCitationFilesOutsideReach(); }
+    void cliAssembledMarkdownWithNoCitationsKeepsItsText() { CliTests::assembledMarkdownWithNoCitationsKeepsItsText(); }
     void cliExportLeavesTheSourceAlone() { CliTests::exportLeavesTheSourceAlone(); }
     void cliExportFormatsPlugInThroughOneInterface() { CliTests::exportFormatsPlugInThroughOneInterface(); }
     void cliStatsCountWhatAReaderReads() { CliTests::statsCountWhatAReaderReads(); }
@@ -867,6 +869,7 @@ private slots:
     void modifierPressesKeepPendingCommands() { VimTests::modifierPressesKeepPendingCommands(); }
     void deadKeysKeepPendingCharacterCommands() { VimTests::deadKeysKeepPendingCharacterCommands(); }
     void controlRRedoesWithVimEditorFocus() { VimTests::controlRRedoesWithVimEditorFocus(); }
+    void controlROpensHeadingsInReadOnlyVim() { VimTests::controlROpensHeadingsInReadOnlyVim(); }
     void escapeAlwaysReachesNormalMode() { VimTests::escapeAlwaysReachesNormalMode(); }
     void insertTypesAsWithoutVimKeys() { VimTests::insertTypesAsWithoutVimKeys(); }
     void commandLineRunsWindowCommands() { VimTests::commandLineRunsWindowCommands(); }
@@ -1044,6 +1047,7 @@ private slots:
     void renameRewritesEncodedDestinations_data();
     void renameRewritesEncodedDestinations();
     void renameKeepsQuotedIncludesWorking();
+    void renameKeepsQuotedIncludesWorking_data();
     void movingADocumentUpdatesTheLinksToIt();
     void closedLinkUpdatesRequireHistory();
     void crossDeviceMovesKeepChangedSources();
@@ -1056,7 +1060,9 @@ private slots:
     void findBarFindsAndReplacesFromTheKeys();
     void goToHeadingAndTheOutlineMoveTheCaret();
     void filteredHeadingsKeepTheirContext();
+    void headingPickerShowsPercentPlaceholdersLiterally();
     void destinationsKeepTheCurrentFolderInTheTree();
+    void movePickerReopensOnAnEnabledFolder();
     void searchAcrossTheLibraryOpensTheMatch();
     void searchOfTenThousandDocumentsKeepsTheWindowResponsive();
     void libraryMenusAndKeysOrganizeFiles();
@@ -17566,13 +17572,23 @@ void ParchTests::renameRewritesEncodedDestinations()
     QVERIFY(links.missing.isEmpty());
 }
 
+void ParchTests::renameKeepsQuotedIncludesWorking_data()
+{
+    QTest::addColumn<QString>("includeLine");
+    QTest::addColumn<QString>("renamed");
+    QTest::newRow("quote") << QStringLiteral("\"old.md\"") << QStringLiteral("Writer's \"draft\".md");
+    QTest::newRow("brackets with a space") << QStringLiteral("old.md") << QStringLiteral("[draft] one.md");
+    QTest::newRow("brackets without a space") << QStringLiteral("old.md") << QStringLiteral("[draft].md");
+}
+
 void ParchTests::renameKeepsQuotedIncludesWorking()
 {
+    QFETCH(QString, includeLine);
+    QFETCH(QString, renamed);
     OrganizerFixture f;
     const QString index = f.file(QStringLiteral("index.md"));
     const QString old = f.file(QStringLiteral("old.md"));
-    const QString renamed = QStringLiteral("Writer's \"draft\".md");
-    writeFile(index, "# Book\n\n\"old.md\" \"Chapter title\"\n");
+    writeFile(index, (QStringLiteral("# Book\n\n") + includeLine + QStringLiteral(" \"Chapter title\"\n")).toUtf8());
     writeFile(old, "# Chapter\n\nIncluded text.\n");
     QSignalSpy finished(f.organizer(), &FileOrganizer::moved);
     f.organizer()->rename(old, renamed);
@@ -17591,6 +17607,10 @@ void ParchTests::renameKeepsQuotedIncludesWorking()
     QCOMPARE(book.files[1].path, f.file(renamed));
     QVERIFY(book.plainText().contains(QStringLiteral("Included text.")));
     QCOMPARE(book.root.children.back().title, QStringLiteral("Chapter title"));
+    QVERIFY(QFile::remove(f.file(renamed)));
+    const md::Document missing = md::parse(QString::fromUtf8(readFile(index)), {}, source);
+    QVERIFY(missing.incomplete);
+    QCOMPARE(missing.diagnostics.front().code, md::DiagnosticCode::IncludeNotFound);
 }
 
 void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
@@ -18313,6 +18333,54 @@ void ParchTests::destinationsKeepTheCurrentFolderInTheTree()
     QTRY_COMPARE(shell.object(QStringLiteral("moveFolders"))->property("count").toInt(), 1);
     QTest::keyClick(window, Qt::Key_Return);
     QTRY_COMPARE(shell.document()->path(), library + QStringLiteral("/odd/realsub/notes.md"));
+}
+
+void ParchTests::headingPickerShowsPercentPlaceholdersLiterally()
+{
+    QAccessible::setActive(true);
+    const auto inactive = qScopeGuard([] { QAccessible::setActive(false); });
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.document()->buffer()->replace({0, 0}, QStringLiteral("# Using %1 in QString\n## Examples %2\n"));
+    QTest::keyClick(window, Qt::Key_R, Qt::ControlModifier);
+    QTRY_COMPARE(window->activeFocusItem(), shell.item(QStringLiteral("headingsFilter")));
+    typeText(window, QStringLiteral("examples"));
+    QObject *list = shell.object(QStringLiteral("headingsList"));
+    QTRY_COMPARE(list->property("count").toInt(), 1);
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY((row = shell.item(QStringLiteral("headingRow"))) && row->isVisible());
+    const QString expected = QStringLiteral("Using %1 in QString › Examples %2");
+    QCOMPARE(row->property("text").toString(), expected);
+    auto *access = QAccessible::queryAccessibleInterface(row);
+    QVERIFY(access);
+    QCOMPARE(access->text(QAccessible::Name), expected + QStringLiteral(", level 2"));
+}
+
+void ParchTests::movePickerReopensOnAnEnabledFolder()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString library = root.filePath(QStringLiteral("library"));
+    const QString file = library + QStringLiteral("/notes.md");
+    QVERIFY(QDir().mkpath(library + QStringLiteral("/book")));
+    writeFile(file, "Notes.\n");
+    ShellFixture shell({.settings = librarySettings(library), .files = {file}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    auto *mover = shell.object(QStringLiteral("libraryMoveDialog"));
+    auto *list = shell.object(QStringLiteral("moveFolders"));
+    for (int opening = 0; opening < 2; ++opening) {
+        runCommand(window, "moveDocument");
+        QTRY_VERIFY(mover->property("opened").toBool());
+        QTRY_COMPARE(list->property("count").toInt(), 2);
+        QTRY_COMPARE(list->property("currentIndex").toInt(), 1);
+        QVERIFY(shell.item(QStringLiteral("moveHere"))->isEnabled());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!mover->property("visible").toBool());
+    }
 }
 
 void ParchTests::searchAcrossTheLibraryOpensTheMatch()

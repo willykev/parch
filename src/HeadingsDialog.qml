@@ -48,6 +48,10 @@ ThemedDialog {
     readonly property real rowHeight: Math.round(theme.fontSize * 2.2)
     readonly property real indent: Math.round(theme.fontSize * 1.2)
 
+    function formatPair(pattern, first, second) {
+        return pattern.replace(/%[12]/g, (slot) => slot === "%1" ? first : second)
+    }
+
     title: qsTr("Go to heading")
     preferredCharacters: 64
     preferredHeight: parent ? Math.round(parent.height * 0.7) : implicitHeight
@@ -171,8 +175,8 @@ ThemedDialog {
                 font.pixelSize: theme.fontSize
                 font.weight: level <= 2 ? Font.DemiBold : Font.Normal
                 Accessible.role: Accessible.ListItem
-                text: parentPath.length > 0 ? qsTr("%1 › %2").arg(parentPath).arg(heading) : heading
-                Accessible.name: qsTr("%1, level %2").arg(text).arg(level)
+                text: parentPath.length > 0 ? dialog.formatPair(qsTr("%1 › %2"), parentPath, heading) : heading
+                Accessible.name: dialog.formatPair(qsTr("%1, level %2"), text, level)
                 Accessible.selected: current
                 onClicked: dialog.go(index)
 

@@ -1497,6 +1497,70 @@ void assembledMarkdownKeepsEffectiveBibliography()
     }
 }
 
+void assembledMarkdownOmitsCitationFilesOutsideReach()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    // These out-of-reach names are deliberately absent. Metadata is
+    // governed by the source's reach even when the output could name them.
+    box.write(QStringLiteral("book/main.md"),
+              QStringLiteral("---\ntitle: Book\nbibliography: ../unavailable-root.bib\ncsl: ../unavailable-style.csl\n"
+                             "---\n\nSee [@root].\n\nchapter.md\n"));
+    box.write(QStringLiteral("book/chapter.md"),
+              QStringLiteral("---\nbibliography: ../unavailable-chapter.bib\n---\n\nSee [@chapter].\n"));
+    for (QLatin1StringView output : {QLatin1StringView("assembled.md"), QLatin1StringView("book/assembled.md")}) {
+        const Ran exported = box.run({"export", "book/main.md", "-o", output});
+        QVERIFY2(exported.code == 0, qPrintable(exported.said()));
+        const QByteArray assembled = box.read(output);
+        QVERIFY(assembled.startsWith("---\ntitle: Book\n"));
+        QVERIFY2(!assembled.contains("bibliography:") && !assembled.contains("csl:")
+                     && !assembled.contains("unavailable-"), assembled.constData());
+        QVERIFY2(exported.said().contains(QStringLiteral("Citation files outside the document's allowed folders")),
+                 qPrintable(exported.said()));
+        QVERIFY(!QFileInfo::exists(HtmlExporter::assetFolder(box.path(output))));
+    }
+    // A compact metadata block keeps its other entries when citation
+    // settings are removed.
+    box.write(QStringLiteral("book/compact.md"),
+              QStringLiteral("---\n{title: Book, keywords: [a, b], bibliography: ../unavailable-root.bib}\n"
+                             "---\n\nSee [@root].\n"));
+    const Ran compact = box.run({"export", "book/compact.md", "-o", "compact.md"});
+    QVERIFY2(compact.code == 0, qPrintable(compact.said()));
+    const QByteArray text = box.read(QStringLiteral("compact.md"));
+    QVERIFY(!text.contains("unavailable-root.bib"));
+    const md::FrontMatter fields = md::parseFrontMatter(QString::fromUtf8(text));
+    QCOMPARE(fields.scalar(u"title").value_or(QString()), QStringLiteral("Book"));
+    const md::YamlValue *keywords = fields.data.find(u"keywords");
+    QVERIFY(keywords && keywords->isList());
+    QCOMPARE(keywords->list.size(), std::size_t(2));
+}
+
+void assembledMarkdownWithNoCitationsKeepsItsText()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    const QString plain = QStringLiteral("Line one.\n\nLine two.\n");
+    box.write(QStringLiteral("library/plain.md"), plain);
+    const QString library = box.path(QStringLiteral("library"));
+    writeFile(box.paths().settingsFile(),
+              QJsonDocument(QJsonObject{{QStringLiteral("libraryFolders"), QJsonArray{library}}}).toJson());
+    writeFile(box.paths().documentSettingsFile(),
+              QJsonDocument(QJsonObject{{QStringLiteral("libraries"),
+                                         QJsonObject{{library, QJsonObject{{QStringLiteral("citationStyle"),
+                                                                          QStringLiteral("apa")}}}}}}).toJson());
+    const Ran settings = box.run({"stats", "library/plain.md", "--use-saved-settings", "--json"});
+    QCOMPARE(settings.json().value(QStringLiteral("dialect")).toObject().value(QStringLiteral("citationStyle")).toString(),
+             QStringLiteral("apa"));
+    for (bool useSaved : {false, true}) {
+        const QString output = useSaved ? QStringLiteral("with-settings.md") : QStringLiteral("plain.md");
+        QStringList arguments{QStringLiteral("export"), QStringLiteral("library/plain.md"), QStringLiteral("-o"), output};
+        if (useSaved) arguments.append(QStringLiteral("--use-saved-settings"));
+        const Ran exported = box.run(arguments);
+        QVERIFY2(exported.code == 0, qPrintable(exported.said()));
+        QCOMPARE(box.read(output), plain.toUtf8());
+    }
+}
+
 void statsCountWhatAReaderReads()
 {
     Sandbox box;

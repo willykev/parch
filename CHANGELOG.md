@@ -4,16 +4,20 @@
 
 - Recovery keeps the text shown in an unresolved conflict, even if an
   externally deleted file quickly returns with different contents.
-- Vim commands survive modifier presses and accept composed character
-  arguments. `Ctrl+R` redoes edits in the focused Vim editor in Normal
-  and Visual modes.
+- Vim commands survive modifier presses, and character commands keep
+  waiting through dead keys without enabling an input method. `Ctrl+R`
+  redoes edits or cancels a pending command in the focused, editable Vim
+  editor. It opens Go to heading in read-only documents.
 - Library moves and renames keep closed documents' version history.
   Link updates preserve encoded names, quoted includes and local file URLs.
-  The Move to and heading pickers show which folder or section a row belongs to.
+  Quoted includes accept Markdown punctuation in filenames. The Move to
+  picker opens on an enabled folder, and heading labels show literal
+  percent placeholders.
 - File renders refuse incomplete documents and preserve an existing output.
-  Assembled Markdown preserves effective bibliographies, heading targets and
-  list boundaries. DOCX links use internal bookmarks, and HTML and EPUB give
-  footnotes their own IDs.
+  Assembled Markdown preserves heading targets and list boundaries. DOCX
+  links use internal bookmarks, and HTML and EPUB give
+  footnotes their own IDs. The preview keeps its note and bibliography
+  targets distinct from heading slugs.
 - Links inherited from a root document resolve from their definition.
   HTML heading links follow the same anchor rules as Markdown links.
   Plain text omits unused notes, and stats counts visible code as text.
@@ -41,9 +45,11 @@
   a link into a `file://` address with the writer's folders in it. A `#link`
   in an included chapter reaches that chapter's own heading, and EPUB
   chapters route links to headings with accented names.
-- Assembled Markdown keeps its citations working from wherever it is written:
-  the bibliography and style paths are rewritten for its folder, and the
-  bibliographies of included chapters are added to its own.
+- Assembled Markdown rewrites bibliography and style paths for its output
+  folder and adds bibliographies from included chapters. It omits and
+  reports citation files named in front matter outside the source's
+  allowed folders. It adds effective settings only when the text uses
+  citations.
 - Replacing an export keeps the old file's group and extended attributes,
   its access control list among them, as well as its mode.
 - Web pictures are never fetched from this computer's own addresses or from

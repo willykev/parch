@@ -215,9 +215,14 @@ Result read(const QString &path, qint64 limit)
     return readFile(path, limit, nullptr);
 }
 
+Result readWithin(const QString &path, qint64 limit, const QStringList &folders)
+{
+    return readFile(path, limit, &folders);
+}
+
 Result readPicture(const QString &path, const QStringList &folders)
 {
-    return readFile(path, PictureBytes, &folders);
+    return readWithin(path, PictureBytes, folders);
 }
 
 QString pictureRefusal(const QString &path, const QStringList &folders, PictureProblem *problem)

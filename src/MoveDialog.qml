@@ -4,9 +4,9 @@ import Parch
 
 // Asks where in the library a document or folder moves to: the library's
 // folders, indented as the library shows them and narrowed by what is
-// typed in the field, leaving out the folder it is in and, for a folder,
-// itself and what it holds. Up and Down move from the field, and Enter or
-// Move here moves it.
+// typed in the field. The current folder is disabled, and the folder being
+// moved and its contents are left out. Up and Down move from the field.
+// Enter or Move here moves it.
 ThemedDialog {
     id: dialog
 
@@ -39,13 +39,17 @@ ThemedDialog {
     function ask(path) {
         dialog.path = path
         field.text = ""
-        list.currentIndex = 0
+        selectFirst()
         backend.organizer.listFolders()
         open()
     }
 
     function canChoose(index) {
         return index >= 0 && index < choices.length && choices[index].path !== dialog.folder
+    }
+
+    function selectFirst() {
+        list.currentIndex = choices.findIndex((entry) => entry.path !== dialog.folder)
     }
 
     function choose(index) {
@@ -98,7 +102,6 @@ ThemedDialog {
             cursorDelegate: FieldCaret { rest: fieldCaret }
             Accessible.name: placeholderText
             Accessible.searchEdit: true
-            onTextChanged: list.currentIndex = 0
 
             CaretRest {
                 id: fieldCaret
@@ -147,7 +150,7 @@ ThemedDialog {
             highlightMoveDuration: 0
             activeFocusOnTab: count > 0
             keyNavigationEnabled: true
-            onCountChanged: if (count > 0 && !dialog.canChoose(currentIndex)) dialog.move(1)
+            onModelChanged: dialog.selectFirst()
             Accessible.role: Accessible.List
             Accessible.name: qsTr("Folders")
             Keys.onReturnPressed: dialog.choose(currentIndex)

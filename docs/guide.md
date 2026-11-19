@@ -553,8 +553,9 @@ A line that names another Markdown file, `chapters/one.md`, alone in its
 paragraph, puts that file's text in its place, in the preview, `parch check`,
 `parch render` and every export. A path that starts with `/` is found in the
 library root; any other beside the file that names it.
-Put a path with spaces in single or double quotes. Within that path, a
-backslash followed by the matching quote gives a literal quote in the filename.
+Put a path with spaces or Markdown punctuation such as brackets in single
+or double quotes. Within that path, escape the matching quote or a literal
+backslash with a backslash.
 
 parch reads an include only from within the document's library, or, for a
 document in no library, from its folder and the folders in it. An include
@@ -617,6 +618,9 @@ What each format holds:
   folder and copies other readable pictures into `NAME_files` beside it.
   Choose **copy** to carry all its pictures, **link** to point back to the
   originals, or **Write the text as it is** to keep the source text.
+  Assembled Markdown carries the effective bibliography and style when the
+  text uses citations. It omits citation files the source's front matter
+  names outside its allowed folders and reports them as omitted.
 - **HTML**: a page of its own, in typography that does not follow the
   desktop theme. Images are copied into a folder beside it (`NAME_files`),
   written into the page, or linked where they are. If an allowed picture is
@@ -781,9 +785,11 @@ Insert or Visual mode, the command line or a command half typed. The command
 palette (`Ctrl+Shift+P`) and the menu (`F10`) work in every mode, and
 **Turn off Vim keys** in either, or the box in **Preferences**, turns them off
 at once. The usual shortcuts such as `Ctrl+S` and `Ctrl+Z` still save and
-undo. `Ctrl+R` redoes a change in the focused Vim editor in Normal or
-Visual mode. In Insert mode or with a Vim command line open, `Ctrl+R` opens
-Go to heading. A modifier key by itself leaves a partly typed command pending.
+undo. `Ctrl+R` redoes a change in the focused, editable Vim editor in Normal
+or Visual mode. With a command partly typed, it cancels the command. In a
+read-only document, in Insert mode or with a Vim command line open, `Ctrl+R`
+opens Go to heading. A modifier key by itself leaves a partly typed command
+pending.
 
 ### Normal mode
 
@@ -828,8 +834,9 @@ Keys that are no command here do nothing and type nothing.
 Insert mode types exactly as parch does without Vim keys: lists continue on
 `Enter`, `Tab` indents, `Shift+Enter` breaks the line, input methods compose,
 and paste converts rich text. `Esc` or `Ctrl+[` returns to Normal mode, one
-character to the left. Outside Insert mode the editor takes no input method,
-so that every key is a command.
+character to the left. Outside Insert mode the editor takes keystrokes
+directly. After `f`, `t` or `r`, a dead key leaves the command waiting for
+the next printable character.
 
 ### Visual mode
 
@@ -1031,7 +1038,7 @@ another command has can be swapped. **Remove** leaves a command without keys,
 | `Ctrl+F` / `Ctrl+H` | Find / find and replace |
 | `F3` / `Shift+F3` | Next / previous match |
 | `Ctrl+Shift+F` | Search the library |
-| `Ctrl+R` | Go to heading. Redo in the focused Vim editor in Normal or Visual mode |
+| `Ctrl+R` | Go to heading. Redo or cancel a pending command in the focused, editable Vim editor in Normal or Visual mode |
 | `Ctrl+S` | Save now |
 | `Ctrl+Shift+S` | Save as |
 | `Ctrl+Shift+E` | Export |

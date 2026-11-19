@@ -27,7 +27,9 @@ using ImageDestination = std::function<QString(const QString &absolutePath)>;
 // Where a file the front matter names (a bibliography, a citation style) is
 // put for the assembled text when the folder written to cannot reach it
 // where it is: its path from that folder, or nothing when it is not copied.
-using FileDestination = std::function<QString(const QString &absolutePath)>;
+// For a path supplied by the document, the open file must be within the
+// given folders.
+using FileDestination = std::function<QString(const QString &absolutePath, const QStringList *folders)>;
 Assembled assemble(const md::Document &document, const QString &outputFolder, const Dialect::Choice &dialect,
                    const ImageDestination &image = {},
                    const FileDestination &citationFile = {});

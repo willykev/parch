@@ -291,9 +291,11 @@ QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const Q
         QString after;
         if (include) {
             // The range holds the path alone, inside its quotes when it has them.
-            const bool quote = relative.contains(u' ') || relative.startsWith(u'"') || relative.startsWith(u'\'');
+            const bool quote = !md::isBareIncludePath(relative);
             const QChar delimiter = link.enclosed ? text.at(link.range.start - 1) : QChar(u'"');
-            after = link.enclosed || quote ? QString(relative).replace(delimiter, u'\\' + QString(delimiter)) : relative;
+            after = relative;
+            if (link.enclosed || quote)
+                after.replace(u'\\', QStringLiteral("\\\\")).replace(delimiter, u'\\' + QString(delimiter));
             if (!link.enclosed && quote) after = delimiter + after + delimiter;
         } else {
             QString encoded;

@@ -32,6 +32,8 @@ void exportRefusesWhatItMustNot();
 void nothingADocumentIsMadeFromIsWrittenOver();
 void assembledMarkdownKeepsItsCitations();
 void assembledMarkdownKeepsEffectiveBibliography();
+void assembledMarkdownOmitsCitationFilesOutsideReach();
+void assembledMarkdownWithNoCitationsKeepsItsText();
 void exportLeavesTheSourceAlone();
 void exportFormatsPlugInThroughOneInterface();
 void statsCountWhatAReaderReads();

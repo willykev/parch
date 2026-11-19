@@ -146,7 +146,6 @@ private:
     enum class InsertKind { Plain, OpenBelow, OpenAbove };
 
     QString tokenOf(const QKeyEvent *event) const;
-    void setAwait(Await await);
     // One key from the view, a whole command or part of one; true when taken.
     bool run(const QString &token);
     bool press(const QString &token);

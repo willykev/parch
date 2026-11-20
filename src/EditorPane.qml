@@ -958,6 +958,7 @@ Rectangle {
     TableSizePicker {
         id: tablePicker
         objectName: "tablePicker"
+        maxCells: binding.tables.maxCells
         onChosen: (columns, rows) => binding.insertTable(columns, rows)
         onClosed: editor.forceActiveFocus()
     }

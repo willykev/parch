@@ -98,10 +98,15 @@ void EditorBinding::setAttachments(Attachments *attachments)
 void EditorBinding::writeThrough(Insertion *insertion)
 {
     QPointer<EditorBinding> view(this);
-    insertion->setWriter([view](Document *document, SourceRange range, const QString &text, bool block) -> int {
-        // Another document now in the view, or no grid in it: the insertion writes it itself.
-        if (!view || view->m_document != document || !view->m_loaded || view->m_tables->grids().isEmpty())
-            return Insertion::Buffer;
+    // Whether this view showed tables as grids when the text was asked for.
+    const bool grids = m_tables->enabled();
+    insertion->setWriter([view, grids](Document *document, SourceRange range, const QString &text, bool block) -> int {
+        // Another document now in the view: the insertion writes it itself,
+        // into a table's cell as grids have it if the view showed them.
+        if (!view || view->m_document != document || !view->m_loaded)
+            return grids ? Insertion::Buffer : Insertion::Plain;
+        // No grid in the view, tables shown as their Markdown: as text.
+        if (view->m_tables->grids().isEmpty()) return Insertion::Plain;
         // In a cell the text goes in on the cell's line, its breaks spaces.
         const bool inCell = view->m_tables->gridAt(range.start)
                             && view->m_tables->inCellText(range.start, range.start + range.length);

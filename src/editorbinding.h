@@ -348,7 +348,9 @@ private:
     // Applies a command's edits as one step and selects as it says.
     bool apply(const TextChange &change);
     // An editing key's change, run on this view's selection; false when the key does nothing special here.
-    bool applyEditing(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation);
+    // Over a block of a grid's cells, an inline command (`inCells`) is made on each cell; any other is refused.
+    bool applyEditing(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation,
+                      bool inCells = false);
     MarkdownEditing::Options editingOptions() const;
     void cancelComposition();
 

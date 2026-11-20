@@ -1,6 +1,7 @@
 #include "documentfind.h"
 
 #include "editorbinding.h"
+#include "sourceboundaries.h"
 #include "sourcebuffer.h"
 #include "tablegrids.h"
 #include "workerfailure.h"
@@ -356,19 +357,29 @@ void DocumentFind::replaceCurrent(const QString &replacement)
         return;
     }
     const QString text = TextSearch::expand(replacement, match, m_query.regex);
-    // In a grid, the cell's text is replaced and the table written tidy around it.
+    // In a grid, the cell's text is replaced and the table written tidy
+    // around it; a replacement it cannot take is refused, and why said.
     SourceBuffer::EditOutcome outcome;
     const TableGrids::Adapted adapted =
         m_binding ? m_binding->tables()->adapt(range, text) : TableGrids::Adapted{};
-    if (adapted.kind == TableGrids::Adapted::Refused) outcome = SourceBuffer::EditOutcome::Rejected;
-    else if (adapted.kind == TableGrids::Adapted::Changed) outcome = buffer->replace(adapted.edits);
-    else outcome = buffer->replace(range, text, EditKind::Other);
+    if (adapted.kind == TableGrids::Adapted::Refused) {
+        outcome = SourceBuffer::EditOutcome::Rejected;
+        emit m_binding->tables()->refused(adapted.reason);
+    } else if (adapted.kind == TableGrids::Adapted::Changed) {
+        outcome = buffer->replace(adapted.edits);
+    } else {
+        outcome = buffer->replace(range, text, EditKind::Other);
+    }
+    const bool rewritten = adapted.kind == TableGrids::Adapted::Changed && outcome == SourceBuffer::EditOutcome::Applied;
+    // A table written anew all through took the matches in it with it: they
+    // are found in it again at once, for the next to be among them.
+    if (rewritten) findInTable(adapted.cursor);
     if (m_matches.isEmpty()) return;
     // The next match after what was written, which a match the replacement
     // made is not.
     int next;
     if (outcome == SourceBuffer::EditOutcome::Applied) {
-        const int after = range.start + int(text.size());
+        const int after = rewritten ? adapted.cursor : range.start + int(text.size());
         const auto at = std::lower_bound(m_matches.cbegin(), m_matches.cend(), after,
                                          [](const SourceRange &found, int position) { return found.start < position; });
         next = at == m_matches.cend() ? 0 : int(at - m_matches.cbegin());
@@ -376,6 +387,35 @@ void DocumentFind::replaceCurrent(const QString &replacement)
         next = (index + 1) % int(m_matches.size());
     }
     selectMatch(next);
+}
+
+void DocumentFind::findInTable(int position)
+{
+    TableGrid *grid = m_binding ? m_binding->tables()->gridAt(position) : nullptr;
+    if (!grid || !m_expression || !m_document) return;
+    const int start = grid->start(), end = grid->end();
+    const QString text = m_document->buffer()->text();
+    QList<SourceRange> found;
+    QRegularExpressionMatchIterator matches = m_expression->globalMatch(text, start);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        const SourceRange range{int(match.capturedStart()), int(match.capturedLength())};
+        if (range.start > end) break;
+        if (range.start + range.length > end || !sourceGraphemeRange(text, range)) continue;
+        found.append(range);
+    }
+    found = inCellText(found);
+    // The table's matches in place of those around it that the edit left.
+    QList<SourceRange> merged;
+    merged.reserve(m_matches.size() + found.size());
+    for (const SourceRange &match : std::as_const(m_matches))
+        if (match.start < start) merged.append(match);
+    merged += found;
+    for (const SourceRange &match : std::as_const(m_matches))
+        if (match.start > end) merged.append(match);
+    m_matches = std::move(merged);
+    emit resultsChanged();
+    refreshCurrent();
 }
 
 void DocumentFind::replaceAll(const QString &replacement)
@@ -403,16 +443,19 @@ void DocumentFind::startReplaceAll(const QString &replacement)
             int count = replaced.count;
             if (count > 0 && m_binding && !m_binding->tables()->grids().isEmpty() && !replaced.edits.isEmpty()) {
                 // Matches in a table's syntax are none; those in cells are
-                // written into them, each table tidy, all one step.
+                // written into them, each table tidy, all one step. Those a
+                // table cannot take are left, the others made, and why said.
                 QList<SourceEdit> edits;
                 for (const TextSearch::Edit &edit : replaced.edits)
                     if (m_binding->tables()->inCellText(edit.range.start, edit.range.start + edit.range.length))
                         edits.append({edit.range, edit.text});
-                count = int(edits.size());
-                const TableGrids::Adapted adapted = m_binding->tables()->adapt(edits, 0, 0);
-                if (count > 0 && adapted.kind != TableGrids::Adapted::Refused)
+                int left = 0;
+                const TableGrids::Adapted adapted =
+                    edits.isEmpty() ? TableGrids::Adapted{} : m_binding->tables()->adapt(edits, 0, 0, &left);
+                count = int(edits.size()) - left;
+                if (count > 0)
                     buffer->replace(adapted.kind == TableGrids::Adapted::Changed ? adapted.edits : edits);
-                else count = 0;
+                if (left > 0 && !adapted.reason.isEmpty()) emit m_binding->tables()->refused(adapted.reason);
             } else if (count > 0) {
                 buffer->replace(replaced.edit.range, replaced.edit.text, EditKind::Other);
             }

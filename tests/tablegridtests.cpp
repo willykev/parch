@@ -430,8 +430,10 @@ void editsAcrossTableSyntaxAreRefusedWithAReason()
     // So is joining the table's last line with the text after it, from either side.
     const int end = view.grid()->end();
     QCOMPARE(view.binding->tables()->adapt({end, 1}, QString()).kind, TableGrids::Adapted::Refused);
+    QCOMPARE(view.binding->tables()->adapt({end + 1, 1}, QString()).kind, TableGrids::Adapted::Refused);
+    // The blank line above it may go: the paragraph there stays one, the table a table.
     QCOMPARE(view.binding->tables()->adapt({view.grid()->start() - 1, 1}, QString()).kind,
-             TableGrids::Adapted::Refused);
+             TableGrids::Adapted::Pass);
 }
 
 void wholeTableEditsPassThrough()
@@ -1490,7 +1492,7 @@ void textWrittenBelowATableStaysText()
     QCOMPARE(cells(view), u"A|B / one|two / three|four"_s);
 }
 
-void anEditThatWouldJoinCellsIsRefused()
+void aBacktickThatWouldJoinCellsIsWrittenEscaped()
 {
     // A backtick before aaa would open code that the one after bbb closes.
     const QString text = u"| A | B |\n| --- | --- |\n| aaa | bbb` |\n\nAfter"_s;
@@ -1501,9 +1503,24 @@ void anEditThatWouldJoinCellsIsRefused()
     view.select(aaa, aaa);
     QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
     view.type(u"`"_s);
+    QCOMPARE(refused.count(), 0);
+    QCOMPARE(cells(view), u"A|B / \\`aaa|bbb`"_s);
+    QCOMPARE(view.cursor(), int(view.text().indexOf(u"\\`aaa"_s)) + 2);
+    // A backtick written after it closes it: the two are code in the cell.
+    view.key(Qt::Key_End);
+    view.type(u"`"_s);
+    QCOMPARE(cells(view), u"A|B / `aaa`|bbb`"_s);
+    QCOMPARE(view.cursor(), int(view.text().indexOf(u"`aaa`"_s)) + 5);
+    QCOMPARE(refused.count(), 0);
+    // Taking the backslash away alone would join the cells: refused.
+    view.binding->undo();
+    QCOMPARE(cells(view), u"A|B / \\`aaa|bbb`"_s);
+    const QString escaped = view.text();
+    const int slash = int(escaped.indexOf(u"\\`aaa"_s)) + 1;
+    view.select(slash, slash);
+    view.key(Qt::Key_Backspace);
     QCOMPARE(refused.count(), 1);
-    QCOMPARE(view.text(), text);
-    QCOMPARE(cells(view), u"A|B / aaa|bbb`"_s);
+    QCOMPARE(view.text(), escaped);
 }
 
 void slowRichPastesGoInAsACellsText()
@@ -1530,9 +1547,17 @@ void anEditReachingIntoTwoTablesIsRefused()
     GridEditor view(text);
     QVERIFY2(view.ok(), qPrintable(view.error));
     QVERIFY(view.grids(2));
-    view.select(int(text.indexOf(u"first")) + 2, int(text.indexOf(u"After")));
+    TableGrids *tables = view.binding->tables();
+    const int first = int(text.indexOf(u"first")) + 2;
+    // From a cell of one into a cell of the other, or past the other whole.
+    QCOMPARE(tables->adapt({first, int(text.indexOf(u"last")) + 2 - first}, u"x"_s).kind, TableGrids::Adapted::Refused);
+    QCOMPARE(tables->adapt({first, int(text.indexOf(u"After")) - first}, u"replacement\nline"_s).kind,
+             TableGrids::Adapted::Refused);
+    // A selection from the cell to the text after both takes the first whole too.
+    view.select(first, int(text.indexOf(u"After")));
+    QCOMPARE(view.anchor(), view.grid(0)->start());
     pasteText(view, u"replacement\nline"_s);
-    QCOMPARE(view.text(), text);
+    QCOMPARE(view.text(), u"replacement\nlineAfter"_s);
 }
 
 void aDropOnRowsNoLongerThereMovesNothing()
@@ -1904,6 +1929,362 @@ void anImagePastedInACellAsksForItsDescription()
     view.type(u"Red"_s);
     QVERIFY2(view.text().contains(u"![Red]("_s), qPrintable(view.text()));
     view.binding->setAttachments(nullptr);
+}
+
+void aSelectionEndingWhereATableStartsLeavesItOut()
+{
+    const QString text = u"Intro\n\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nEnd"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int start = view.grid()->start();
+    // Whole lines selected above the table stop where it starts.
+    view.select(0, 0);
+    for (int i = 0; i < 3; ++i) view.key(Qt::Key_Down, Qt::ShiftModifier);
+    QCOMPARE(view.anchor(), 0);
+    QCOMPARE(view.cursor(), start);
+    view.key(Qt::Key_Delete);
+    QCOMPARE(view.text(), text.mid(start));
+    QCOMPARE(cells(view), u"a|b / 1|2"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    QVERIFY(view.grids(1));
+    // The line just above it taken away, selected or with Vim's dd: the
+    // table moves up, a grid still, drawn where it now is.
+    const QString moved = u"Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nEnd"_s;
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    view.select(start - 1, start);
+    QCOMPARE(view.cursor(), start);
+    view.key(Qt::Key_Delete);
+    QCOMPARE(refused.count(), 0);
+    QCOMPARE(view.text(), moved);
+    const auto drawnInPlace = [&] {
+        TableGrid *grid = view.grid();
+        if (view.binding->tables()->grids().size() != 1 || grid->start() != start - 1) return false;
+        const QTextBlock header = view.binding->textDocument()->findBlock(view.binding->sourceToEditor(grid->start()));
+        return header.blockFormat().lineHeight() == std::ceil(grid->height()) && !header.next().isVisible();
+    };
+    QVERIFY(drawnInPlace());
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    QVERIFY(view.grids(1));
+    view.pane->setProperty("vimKeys", true);
+    view.select(start - 1, start - 1);
+    typeText(&view.window, u"dd"_s);
+    QCOMPARE(refused.count(), 0);
+    QCOMPARE(view.text(), moved);
+    QVERIFY(drawnInPlace());
+}
+
+void textWithATabPastedInACellGoesInAsText()
+{
+    const QString text = u"| Item | Value |\n| --- | --- |\n| Total cost | 42 |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // A line of code with a tab in it goes in at the caret, the tab a space.
+    const int total = int(text.indexOf(u"Total")) + 5;
+    view.select(total, total);
+    pasteText(view, u"\tprint(x)"_s);
+    QCOMPARE(cells(view), u"Item|Value / Total print(x) cost|42"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    // Over a block of cells, text with tabs is cells.
+    view.select(int(text.indexOf(u"Total")), int(text.indexOf(u"42")) + 2);
+    pasteText(view, u"x\ty\n"_s);
+    QCOMPARE(cells(view), u"Item|Value / x|y"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    // From a spreadsheet, which says so, they are cells at the caret too.
+    view.select(total, total);
+    auto *sheet = new QMimeData;
+    sheet->setText(u"p\tq\n"_s);
+    sheet->setData(u"application/x-libreoffice-tsvc"_s, "p\tq\n");
+    QGuiApplication::clipboard()->setMimeData(sheet);
+    view.binding->paste();
+    QCOMPARE(cells(view), u"Item|Value / p|q"_s);
+}
+
+void blockCommandsAreRefusedOverABlockOfCells()
+{
+    const QString text = u"| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    view.select(int(text.indexOf(u"A")), int(text.indexOf(u"two")) + 3);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    for (const QString &command : {u"heading1"_s, u"quote"_s, u"bulletList"_s, u"codeBlock"_s, u"footnote"_s,
+                                   u"thematicBreak"_s, u"displayMath"_s})
+        QVERIFY2(!view.binding->format(command), qPrintable(command));
+    QCOMPARE(refused.count(), 7);
+    QCOMPARE(view.text(), text);
+    QVERIFY(!view.binding->insertTable(2, 2));
+    QCOMPARE(view.text(), text);
+    // Inline ones still format each cell.
+    QVERIFY(view.binding->format(u"code"_s));
+    QCOMPARE(cells(view), u"`A`|`B` / `one`|`two`"_s);
+}
+
+void aTablePastedBelowAGridIsATableOfItsOwn()
+{
+    const QString text = u"Intro\n\n| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int blank = int(text.indexOf(u"\n\nAfter")) + 1;
+    view.select(blank, blank);
+    pasteText(view, u"| X | Y |\n|---|---|\n| 1 | 2 |\n"_s);
+    QCOMPARE(cells(view), u"A|B / one|two"_s);
+    QVERIFY2(view.text().contains(u"| one | two |\n\n| X | Y |\n|---|---|\n| 1 | 2 |\n"_s), qPrintable(view.text()));
+    const int after = int(view.text().indexOf(u"After"));
+    view.select(after, after);
+    QVERIFY(view.grids(2));
+}
+
+void replaceGoesOnThroughTheMatchesOfATable()
+{
+    const QString text = u"| A |\n| --- |\n| foo |\n| foo |\n| foo |\n\nAfter foo"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    DocumentFind find;
+    find.setDocument(view.document);
+    find.setBinding(view.binding);
+    find.setActive(true);
+    find.setCaseSensitive(true);
+    find.setPattern(u"foo"_s);
+    QTRY_COMPARE(find.count(), 4);
+    const int first = int(text.indexOf(u"foo"));
+    find.setSelection(first, first + 3);
+    QCOMPARE(find.current(), 0);
+    // Each replacement widens the column, the table written anew all
+    // through; the next match is the next row's all the same.
+    for (int row = 2; row <= 3; ++row) {
+        find.replace(u"longer text"_s);
+        QVERIFY(find.current() >= 0);
+        const SourceRange next = find.matches().at(find.current());
+        QCOMPARE(view.text().mid(next.start, next.length), u"foo"_s);
+        QCOMPARE(view.grid()->placeOf(next.start).row, row);
+    }
+    find.replace(u"longer text"_s);
+    QCOMPARE(cells(view), u"A / longer text / longer text / longer text"_s);
+    const SourceRange prose = find.matches().at(find.current());
+    QVERIFY(prose.start > view.grid()->end());
+}
+
+void aSelectionFromACellOutOfTheTableTakesItWhole()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Down past the last row, Shift held: the whole table and the line after it.
+    const int east = int(weather.indexOf(u"East"));
+    view.select(east, east);
+    view.key(Qt::Key_Down, Qt::ShiftModifier);
+    QCOMPARE(view.anchor(), view.grid()->start());
+    QVERIFY(view.cursor() > view.grid()->end());
+    view.key(Qt::Key_Delete);
+    QVERIFY2(!view.text().contains(u"| Time"_s), qPrintable(view.text()));
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    QVERIFY(view.grids(1));
+    // Up past the header, the other way.
+    const int time = int(weather.indexOf(u"Time"));
+    view.select(time, time);
+    view.key(Qt::Key_Up, Qt::ShiftModifier);
+    QCOMPARE(view.anchor(), view.grid()->end());
+    QVERIFY(view.cursor() < view.grid()->start());
+    // From a cell to the text below, as a Shift-click makes it.
+    const int after = int(weather.indexOf(u"After"));
+    view.select(east, after);
+    QCOMPARE(view.anchor(), view.grid()->start());
+    QCOMPARE(view.cursor(), after);
+}
+
+void undoInACellLeavesTheCaretWhereItTyped()
+{
+    QString text = u"| A | B |\n| --- | --- |\n"_s;
+    for (int row = 1; row <= 30; ++row) text += u"| r%1 | x |\n"_s.arg(row);
+    text += u"\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int r2 = int(text.indexOf(u"| r2 |")) + 2;
+    view.select(r2 + 2, r2 + 2);
+    view.type(u"xyz"_s);
+    QCOMPARE(view.cell(), u"r2xyz"_s);
+    view.select(int(view.text().indexOf(u"r30")), int(view.text().indexOf(u"r30")));
+    // Undo takes the caret back to the cell it took the typing from, not
+    // to the last row the column's widening rewrote.
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    QCOMPARE(view.cell(), u"r2"_s);
+    QCOMPARE(view.cursor(), r2 + 2);
+    view.binding->redo();
+    QCOMPARE(view.cell(), u"r2xyz"_s);
+    QCOMPARE(view.cursor(), int(view.text().indexOf(u"r2xyz")) + 5);
+}
+
+void upAndDownKeepToTheColumnClickedIn()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Down from the blank line above enters the first column.
+    const int blank = int(weather.indexOf(u"\n\n| Time")) + 1;
+    view.select(blank, blank);
+    view.key(Qt::Key_Down);
+    QCOMPARE(view.cell(), u"Time"_s);
+    // A click in the third column, then Down: the third column's cell below.
+    const int air = int(weather.indexOf(u"Air"));
+    view.select(air, air);
+    view.key(Qt::Key_Down);
+    QCOMPARE(view.cell(), u"7.8"_s);
+    view.key(Qt::Key_Down);
+    QCOMPARE(view.cell(), u"12"_s);
+}
+
+void aLineBreakPastedInACellLeavesTheCaretAfterIt()
+{
+    const QString text = u"| A | B |\n| --- | --- |\n| AB | next |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int ab = int(text.indexOf(u"AB")) + 2;
+    view.select(ab, ab);
+    QGuiApplication::clipboard()->setText(u"x\n\ny"_s);
+    view.binding->paste();
+    QCOMPARE(view.cell(), u"ABx y"_s);
+    QCOMPARE(view.cursor(), int(view.text().indexOf(u"ABx y")) + 5);
+    view.type(u"z"_s);
+    QCOMPARE(cells(view), u"A|B / ABx yz|next"_s);
+    // A CRLF the same.
+    QGuiApplication::clipboard()->setText(u"1\r\n2"_s);
+    view.binding->paste();
+    QCOMPARE(cells(view), u"A|B / ABx yz1 2|next"_s);
+    QCOMPARE(view.cursor(), int(view.text().indexOf(u"ABx yz1 2")) + 9);
+}
+
+void replaceAllMakesTheReplacementsTablesCanTake()
+{
+    // Taking the backslash before the backtick would join the cells; the
+    // backslash in the prose goes.
+    const QString text = u"| A | B |\n| --- | --- |\n| \\`aaa | bbb` |\n\nSome \\ prose."_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    DocumentFind find;
+    find.setDocument(view.document);
+    find.setBinding(view.binding);
+    find.setActive(true);
+    find.setPattern(u"\\"_s);
+    QTRY_COMPARE(find.count(), 2);
+    QSignalSpy replaced(&find, &DocumentFind::replacedAll);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    find.replaceAll(QString());
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(replaced.first().first().toInt(), 1);
+    QCOMPARE(refused.count(), 1);
+    QCOMPARE(view.text(), u"| A | B |\n| --- | --- |\n| \\`aaa | bbb` |\n\nSome  prose."_s);
+}
+
+void slowPastesLeaveTablesShownAsMarkdownAsWritten()
+{
+    const QString html = u"<p>First.</p><!--"_s + QString(65536, u' ') + u"-->"_s;
+    // A table in a code block is text.
+    {
+        const QString text = u"Intro\n\n```\n| A | B |\n|---|---|\n| one | two |\n```\n\nAfter"_s;
+        GridEditor view(text);
+        QVERIFY2(view.ok(), qPrintable(view.error));
+        QTest::qWait(200);
+        QVERIFY(view.grids(0));
+        Attachments attachments(AppPaths::under(view.root.path()));
+        view.binding->setAttachments(&attachments);
+        const int one = int(text.indexOf(u"one")) + 3;
+        view.select(one, one);
+        pasteText(view, u"First."_s, html);
+        QTRY_VERIFY(view.text().contains(u"First."_s));
+        QVERIFY2(view.text().contains(u"| A | B |\n|---|---|\n"_s), qPrintable(view.text()));
+        view.binding->setAttachments(nullptr);
+    }
+    // With grids off, a table stays as its Markdown is written.
+    {
+        const QString text = u"Intro\n\n| A | B |\n|---|---|\n| one | two |\n\nAfter"_s;
+        GridEditor view(text);
+        QVERIFY2(view.ok(), qPrintable(view.error));
+        view.pane->setProperty("tableGrids", false);
+        QTest::qWait(200);
+        QVERIFY(view.grids(0));
+        Attachments attachments(AppPaths::under(view.root.path()));
+        view.binding->setAttachments(&attachments);
+        const int one = int(text.indexOf(u"one")) + 3;
+        view.select(one, one);
+        pasteText(view, u"First."_s, html);
+        QTRY_VERIFY(view.text().contains(u"First."_s));
+        QVERIFY2(view.text().contains(u"| A | B |\n|---|---|\n"_s), qPrintable(view.text()));
+        view.binding->setAttachments(nullptr);
+    }
+}
+
+void aTableGrowsNoLargerThanAGridHolds()
+{
+    GridEditor view(u"A paragraph.\n\nAnother one."_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    // The picker offers no more rows than a grid of so many columns holds.
+    view.select(5, 5);
+    QMetaObject::invokeMethod(view.pane, "chooseTable");
+    QObject *picker = view.pane->findChild<QObject *>(u"tablePicker"_s);
+    QVERIFY(picker);
+    QTRY_VERIFY(picker->property("opened").toBool());
+    picker->setProperty("columns", 64);
+    QCOMPARE(picker->property("maxRows").toInt(), 312);
+    picker->setProperty("columns", 3);
+    picker->setProperty("rows", 1000);
+    QCOMPARE(picker->property("maxColumns").toInt(), 20);
+    view.key(Qt::Key_Escape);
+    QTRY_VERIFY(!picker->property("visible").toBool());
+    // A table asked for larger is made as large as a grid holds, and is one.
+    QVERIFY(view.binding->insertTable(64, 1000));
+    QVERIFY(view.grids(1));
+    QCOMPARE(view.grid()->columnCount(), 64);
+    QCOMPARE(view.grid()->rowCount(), 312);
+    // It takes no more rows, and says why.
+    const QString full = view.text();
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    QVERIFY(!view.binding->tables()->appendRow(view.grid()));
+    QCOMPARE(refused.count(), 1);
+    QCOMPARE(view.text(), full);
+}
+
+void escapeWithTextSelectedInACellIsTheViews()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    QSignalSpy escaped(view.pane, SIGNAL(escapePressed()));
+    // A word selected in a cell: Escape goes on to the view, as in the text.
+    view.binding->tables()->selectWordAt(int(weather.indexOf(u"North")) + 1);
+    QCOMPARE(selected(view), u"North"_s);
+    view.key(Qt::Key_Escape);
+    QCOMPARE(escaped.count(), 1);
+    // A block of cells is let go of first.
+    view.select(int(weather.indexOf(u"North")), int(weather.indexOf(u"12")) + 1);
+    view.key(Qt::Key_Escape);
+    QCOMPARE(escaped.count(), 1);
+    QCOMPARE(view.anchor(), view.cursor());
+}
+
+void theSpellingMenuKeepsOneTableMenu()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    QObject *menu = view.pane->findChild<QObject *>(u"spellingMenu"_s);
+    QVERIFY(menu);
+    for (int i = 0; i < 4; ++i)
+        QVERIFY(QMetaObject::invokeMethod(menu, "offer", Q_ARG(QVariant, 0), Q_ARG(QVariant, 5), Q_ARG(QVariant, u"Nrth"_s),
+                                          Q_ARG(QVariant, QVariant(QStringList{u"North"_s})), Q_ARG(QVariant, true)));
+    QTRY_COMPARE(menu->findChildren<QObject *>(u"spellingTableMenu"_s).size(), 1);
 }
 
 } // namespace TableGridTests

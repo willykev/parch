@@ -43,9 +43,12 @@ public:
     void cancel();
     // Who writes the text in, in place of the document's buffer: a view,
     // which keeps its tables whole. It is given where the text goes and is
-    // to return where it starts, -1 when it was not written, or Buffer for
-    // the insertion to write it itself.
+    // to return where it starts, -1 when it was not written, or for the
+    // insertion to write it itself: Buffer, text in a table's cell made the
+    // cell's text with the table written tidy around it, as grids have it;
+    // Plain, as it is, tables shown as their Markdown.
     static constexpr int Buffer = -2;
+    static constexpr int Plain = -3;
     using Writer = std::function<int(Document *document, SourceRange range, const QString &text, bool block)>;
     void setWriter(Writer writer) { m_writer = std::move(writer); }
     // `text` as it is to stand in `source` at `range`: block text with a

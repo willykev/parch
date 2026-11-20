@@ -25,8 +25,14 @@ ThemedMenu {
         spellingMenu.start = start
         spellingMenu.end = end
         spellingMenu.word = word
-        while (spellingMenu.count > 0)
-            spellingMenu.removeItem(spellingMenu.itemAt(0))
+        // A submenu goes with its entry, as removing the entry alone would leave it.
+        while (spellingMenu.count > 0) {
+            const item = spellingMenu.itemAt(0)
+            if (item.subMenu)
+                spellingMenu.removeMenu(item.subMenu)
+            else
+                spellingMenu.removeItem(item)
+        }
         for (const suggestion of suggestions)
             spellingMenu.addItem(entry.createObject(spellingMenu.contentItem, { text: suggestion, replacement: suggestion }))
         if (suggestions.length === 0)

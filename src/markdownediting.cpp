@@ -1382,6 +1382,17 @@ bool isCommand(const QString &id)
     return all.contains(id);
 }
 
+bool isInline(const QString &id)
+{
+    static const QStringList inlined{QStringLiteral("bold"),        QStringLiteral("italic"),
+                                     QStringLiteral("strikethrough"), QStringLiteral("highlight"),
+                                     QStringLiteral("superscript"), QStringLiteral("subscript"),
+                                     QStringLiteral("code"),        QStringLiteral("comment"),
+                                     QStringLiteral("link"),        QStringLiteral("image"),
+                                     QStringLiteral("inlineMath")};
+    return inlined.contains(id);
+}
+
 std::optional<TextChange> format(const QString &command, QStringView text, int anchor, int cursor, const Options &options)
 {
     const int size = int(text.size());
@@ -1549,7 +1560,9 @@ std::optional<TextChange> moveToCell(QStringView text, int anchor, int cursor, b
         if (row == 0) return TextChange{{}, anchor, cursor};
     }
     const int previous = row <= 2 ? 0 : row - 1;
-    return selectCell(table->rows[previous].cells[writtenCells(*table, previous).last()]);
+    // A row written with no cells, a pipe alone, has only those the header gives it: the first.
+    const QList<int> written = writtenCells(*table, previous);
+    return selectCell(table->rows[previous].cells[written.isEmpty() ? 0 : written.last()]);
 }
 
 std::optional<TextChange> formatTable(QStringView text, int anchor, int cursor, const Options &options)

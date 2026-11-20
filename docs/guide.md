@@ -238,18 +238,20 @@ padded to its widest cell.
 asks for its size: point at the little grid of cells, use the arrow keys, or
 type the number of columns and rows, the header counting as a row. `Enter`
 puts the table in, on a line of its own, with the caret in its first cell;
-`Esc` leaves without one. With the caret in a table, the same keys and
-button open that table's menu instead. A table you type by hand, pipes and
-all, becomes a grid as soon as the caret leaves it.
+`Esc` leaves without one. The size goes no further than a grid holds, 20,000
+cells counting the header's, so that the new table is one. With the caret in
+a table, the same keys and button open that table's menu instead. A table you
+type by hand, pipes and all, becomes a grid as soon as the caret leaves it.
 
 **Write in the cells.** Click a cell to put the caret where you clicked, and
-type; double-click to select a word, triple-click to select the cell's text.
-A cell's Markdown stays in view, styled as in the rest of the text, so
+type; double-click to select a word, triple-click to select the cell's text. A
+cell's Markdown stays in view, styled as in the rest of the text, so
 `**bold**`, `[links](…)` and `code` work in cells as anywhere. A `|` you type
-is written `\|`, as Markdown needs it in a table. Spaces at the start or end
-of a cell are dropped, since Markdown ignores them. Typing in a cell is one
-step for `Ctrl+Z`, as in a paragraph, and the preview and saving follow as
-you type.
+is written `\|`, as Markdown needs it in a table, and a `` ` `` that would
+start code ending in another cell is written `` \` ``, until you type the one
+that closes it in the same cell. Spaces at the start or end of a cell are
+dropped, since Markdown ignores them. Typing in a cell is one step for
+`Ctrl+Z`, as in a paragraph, and the preview and saving follow as you type.
 
 **Move from cell to cell.**
 
@@ -265,20 +267,24 @@ you type.
 - `Home` and `End` go to the start and end of the line in the cell's text, and
   `Ctrl+Left` and `Ctrl+Right` go a word at a time.
 
-**Select cells.** Drag across cells, or hold `Shift` and move past the edge
-of a cell's text, to select a block of cells. `Delete` empties them, and
-typing replaces them, writing into the first. **Bold**, **Italic** and the
-other inline commands format each cell of a block. `Ctrl+A` selects the
-cell's text, then every cell of the table, then the whole document; `Esc`
-lets go of a block. A selection that starts in a paragraph and reaches into a table takes
-the whole table.
+**Select cells.** Drag across cells, or hold `Shift` and move past the edge of
+a cell's text, to select a block of cells. `Delete` empties them, and typing
+replaces them, writing into the first. **Bold**, **Italic** and the other
+inline commands format each cell of a block; headings, lists, quotes and the
+other commands for whole lines are not made in a table, and the status line
+says so. `Ctrl+A` selects the cell's text, then every cell of the table, then
+the whole document; `Esc` lets go of a block. A selection that starts in a
+paragraph and reaches into a table takes the whole table, as does one that
+starts in a cell and goes on out of the table. One that ends where a table
+starts, as lines selected above it do, leaves the table out.
 
 **Copy and paste.** A block of cells copies as cells, which paste into a
 spreadsheet as cells; **Cut** copies them and empties them. Cells copied from
 a spreadsheet, a web page or another table paste from the caret's cell on,
 over what is there, and add rows and columns where they reach past the
-table. One value pasted over a block fills each of its cells. Any other text
-pastes into the cell, its line breaks made spaces.
+table. One value pasted over a block fills each of its cells, and text with
+tabs between its values pastes over a block as cells. Any other text pastes
+into the cell at the caret, its tabs and line breaks made spaces.
 
 **Add, move and delete rows and columns.** Pointing at a table, or having the
 caret in it, shows a handle beside the row and above the column, a **+** on

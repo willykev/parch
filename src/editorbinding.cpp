@@ -533,9 +533,12 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
 
     // A caret in a grid's cell stays in that cell, at the same place in its
     // text, however the table is written around it.
-    // This view's own undo leaves the caret where the change ends, as in any text.
-    const TableGrids::Spot anchorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(anchor, range);
-    const TableGrids::Spot cursorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(cursor, range);
+    const TableGrids::Spot anchorSpot = m_tables->spotOf(anchor, range);
+    const TableGrids::Spot cursorSpot = m_tables->spotOf(cursor, range);
+    // This view's own undo leaves a caret in what it changes where the
+    // change ends, as in any text: in a table, written anew all through,
+    // where it ends in the first cell whose text it changes.
+    const TableGrids::CellTexts undone = m_undoing ? m_tables->cellTexts(range) : TableGrids::CellTexts{};
     m_pairs.update(source, range, inserted);
     emit sourceEdited(revision, range, inserted);
     // Qt shows CRLF as one separator, so where the edit joins or splits a
@@ -569,8 +572,13 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
         if (position >= oldEnd) return position + delta;
         return newEnd;
     };
-    const int newAnchor = m_tables->positionOf(anchorSpot, range, inserted).value_or(track(anchor));
-    const int newCursor = m_tables->positionOf(cursorSpot, range, inserted).value_or(track(cursor));
+    const std::optional<int> changedAt = undone.grid ? m_tables->changeEnd(undone) : std::nullopt;
+    const auto follow = [&](int position, const TableGrids::Spot &spot) {
+        if (changedAt && position >= start && position < oldEnd) return *changedAt;
+        return m_tables->positionOf(spot, range, inserted).value_or(track(position));
+    };
+    const int newAnchor = follow(anchor, anchorSpot);
+    const int newCursor = follow(cursor, cursorSpot);
     selectEditor(m_pairs.toEditor(newAnchor), m_pairs.toEditor(newCursor));
     m_projecting = false;
     if ((oldLength > largeTextUnits) != (source.size() > largeTextUnits))
@@ -738,26 +746,30 @@ bool EditorBinding::format(const QString &command)
     const MarkdownEditing::Options options = editingOptions();
     return applyEditing([&](QStringView text, int anchor, int cursor) {
         return MarkdownEditing::format(command, text, anchor, cursor, options);
-    });
+    }, MarkdownEditing::isInline(command));
 }
 
 bool EditorBinding::insertTable(int columns, int rows)
 {
     const MarkdownEditing::Options options = editingOptions();
+    // No larger than a grid holds, so that it is a grid.
+    columns = qBound(1, columns, 64);
+    rows = qBound(1, rows, qMin(1000, int(MdTable::MaxCells) / columns));
     const bool done = applyEditing([&](QStringView text, int, int cursor) {
-        return std::optional(MarkdownEditing::insertTable(text, cursor, qBound(1, columns, 64), qBound(1, rows, 1000), options));
+        return std::optional(MarkdownEditing::insertTable(text, cursor, columns, rows, options));
     });
     // A table put in here is a grid at once, the caret in its first cell.
     if (done) m_tables->adoptAt(m_cursorSource);
     return done;
 }
 
-bool EditorBinding::applyEditing(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation)
+bool EditorBinding::applyEditing(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation,
+                                 bool inCells)
 {
     if (!editable() || m_projecting || m_blocked) return false;
     cancelComposition();
-    // Over a block of a grid's cells, the command is made on each.
-    if (const std::optional<bool> done = m_tables->formatCells(operation)) return *done;
+    // Over a block of a grid's cells, an inline command is made on each.
+    if (const std::optional<bool> done = m_tables->formatCells(operation, inCells)) return *done;
     // The selection as whole graphemes, keeping its direction.
     const SourceRange range = selection();
     const bool backwards = editorCursor() < editorAnchor();

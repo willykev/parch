@@ -12,6 +12,11 @@ Popup {
     property int rows: 3
     // How many cells the pointing grid offers each way.
     readonly property int reach: 8
+    // The most cells a table shown as a grid holds, the header's counted:
+    // the size goes no further, so that the new table is a grid.
+    property int maxCells: 20000
+    readonly property int maxColumns: Math.max(1, Math.min(64, Math.floor(picker.maxCells / picker.rows)))
+    readonly property int maxRows: Math.max(1, Math.min(1000, Math.floor(picker.maxCells / picker.columns)))
 
     signal chosen(int columns, int rows)
 
@@ -67,9 +72,9 @@ Popup {
             Accessible.role: Accessible.Table
             Accessible.name: qsTr("Table size, %1 columns by %2 rows").arg(picker.columns).arg(picker.rows)
             Keys.onPressed: (event) => {
-                if (event.key === Qt.Key_Right) picker.columns = Math.min(64, picker.columns + 1)
+                if (event.key === Qt.Key_Right) picker.columns = Math.min(picker.maxColumns, picker.columns + 1)
                 else if (event.key === Qt.Key_Left) picker.columns = Math.max(1, picker.columns - 1)
-                else if (event.key === Qt.Key_Down) picker.rows = Math.min(1000, picker.rows + 1)
+                else if (event.key === Qt.Key_Down) picker.rows = Math.min(picker.maxRows, picker.rows + 1)
                 else if (event.key === Qt.Key_Up) picker.rows = Math.max(1, picker.rows - 1)
                 else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) picker.choose()
                 else return
@@ -118,7 +123,7 @@ Popup {
                 ThemedSpinBox {
                     objectName: "tableColumnsField"
                     from: 1
-                    to: 64
+                    to: picker.maxColumns
                     value: picker.columns
                     Accessible.name: qsTr("Columns")
                     onValueModified: picker.columns = value
@@ -136,7 +141,7 @@ Popup {
                 ThemedSpinBox {
                     objectName: "tableRowsField"
                     from: 1
-                    to: 1000
+                    to: picker.maxRows
                     value: picker.rows
                     Accessible.name: qsTr("Rows, with the header")
                     onValueModified: picker.rows = value

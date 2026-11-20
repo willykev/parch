@@ -26,6 +26,7 @@
 #include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextDocument>
+#include <QWheelEvent>
 #include <QtTest>
 #include <memory>
 
@@ -561,6 +562,45 @@ void aSecondViewKeepsItsCaretWhenATableIsRetidied()
     QCOMPARE(second->binding->cursorSource(), now + 2);
     QCOMPARE(second->binding->anchorSource(), now + 2);
     QCOMPARE(second->binding->tables()->grids().first()->end(), view.grid()->end());
+}
+
+void aRetidyChangesOnlyTheLinesItMustAndStylesRowsShownAgain()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    QTextDocument *shown = view.binding->textDocument();
+    const int blocks = shown->blockCount();
+    // A cursor held in a hidden row, as another part of the view holds one:
+    // after "No" in North.
+    const int north = int(view.text().indexOf(u"North"));
+    QTextCursor held(shown);
+    held.setPosition(view.binding->sourceToEditor(north + 2));
+    QVERIFY(!held.block().isVisible());
+    // Writing in a cell widens its column, and every row is padded anew.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east + 4, east + 4);
+    view.type(u" Gate"_s);
+    QVERIFY2(view.text().contains(u"| North     | 7.8 |"_s), qPrintable(view.text()));
+    // The styling of the change is done before the table is shown again.
+    QObject *styling = nullptr;
+    for (QObject *child : view.pane->findChildren<QObject *>())
+        if (child->inherits("MarkdownStyling")) styling = child;
+    QVERIFY(styling);
+    QTest::qWait(100);
+    QTRY_VERIFY(!styling->property("busy").toBool());
+    QTest::qWait(100);
+    // The rows are the same paragraphs as before, each changed in place:
+    // the held cursor is still after "No", and the view shows the source.
+    QCOMPARE(shown->blockCount(), blocks);
+    QCOMPARE(view.binding->editorToSource(held.position()), int(view.text().indexOf(u"North")) + 2);
+    QCOMPARE(shown->toPlainText(), view.text());
+    // Shown as Markdown again, its rows are styled as any text is.
+    QVERIFY(view.binding->tables()->runCommand(u"showTableMarkdown"_s));
+    const QTextBlock row = shown->findBlock(view.binding->sourceToEditor(int(view.text().indexOf(u"North"))));
+    QVERIFY(row.isVisible());
+    QTRY_VERIFY(std::any_of(row.layout()->formats().cbegin(), row.layout()->formats().cend(),
+                            [](const QTextLayout::FormatRange &range) { return range.start == 0; }));
 }
 
 namespace {
@@ -1138,6 +1178,58 @@ void pastingCellsFillsOverwritesAndGrows()
     QGuiApplication::clipboard()->setText(u" gate\nopen"_s);
     view.binding->paste();
     QCOMPARE(view.cell(), u"East gate open"_s);
+}
+
+void wideTablesScrollSidewaysAndTheTextScrollsOver()
+{
+    // A table wider than a narrow window, its words too long to wrap
+    // within it, and text after it to scroll to.
+    QString text = u"| Shelter | Thermometer | Hygrometer | Anemometer | Barometer | Pluviometer |\n"
+                   "| --- | --- | --- | --- | --- | --- |\n"_s;
+    for (int i = 0; i < 4; ++i)
+        text += u"| Northernmost | Calibrated%1 | Recalibrated | Uncalibrated | Waterproofed | Overflowing |\n"_s.arg(i);
+    for (int i = 0; i < 60; ++i) text += u"\nA paragraph after the table."_s;
+    GridEditor view(text, QSize(360, 300));
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrid *grid = view.grid();
+    QTRY_VERIFY(grid->width() > grid->viewWidth());
+    auto *flickable = view.pane->findChild<QQuickItem *>(u"flickable"_s);
+    QVERIFY(flickable);
+    QQuickItem *drawn = findItem(view.window.contentItem(), u"tableGrid"_s);
+    QVERIFY(drawn);
+    // The table at the top of the view.
+    view.select(0, 0);
+    flickable->setProperty("contentY", 0);
+    QTRY_VERIFY(drawn->mapToScene(QPointF(0, 0)).y() >= 0);
+    const QPointF at = drawn->mapToScene(QPointF(drawn->width() / 2, drawn->height() / 2));
+    const auto scroll = [&](QPoint pixels, QPoint angle, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QWheelEvent event(at, view.window.mapToGlobal(at), pixels, angle, Qt::NoButton, modifiers,
+                          Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(&view.window, &event);
+    };
+    // Sideways on the touchpad moves the table and leaves the text.
+    scroll({-30, 0}, {-360, 0});
+    QCOMPARE(grid->scrollX(), 30.0);
+    QCOMPARE(flickable->property("contentY").toReal(), 0.0);
+    // Shift and the wheel move it too.
+    scroll({}, {0, -120}, Qt::ShiftModifier);
+    QVERIFY(grid->scrollX() > 30.0);
+    const qreal across = grid->scrollX();
+    // A swipe on the touchpad mostly downward, even a little sideways,
+    // scrolls the text and leaves the table.
+    quint64 time = 1000;
+    const auto send = [&](Qt::ScrollPhase phase, QPoint pixels, Qt::MouseEventSource source) {
+        QWheelEvent event(at, view.window.mapToGlobal(at), pixels, pixels * 12, Qt::NoButton, Qt::NoModifier, phase,
+                          false, source);
+        event.setTimestamp(time += 10);
+        QCoreApplication::sendEvent(&view.window, &event);
+    };
+    send(Qt::ScrollBegin, {}, Qt::MouseEventNotSynthesized);
+    for (int i = 0; i < 5; ++i) send(Qt::ScrollUpdate, {-2, -20}, Qt::MouseEventSynthesizedBySystem);
+    send(Qt::ScrollEnd, {}, Qt::MouseEventSynthesizedBySystem);
+    QCOMPARE(grid->scrollX(), across);
+    QTRY_VERIFY(flickable->property("contentY").toReal() > 0);
 }
 
 void handTypedTablesWaitUntilTheCaretLeaves()

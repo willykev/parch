@@ -165,6 +165,9 @@ public:
     bool pending() const { return !m_dirty.empty(); }
     // Formats every waiting paragraph now.
     void flush();
+    // Paragraphs of the source that were hidden and are shown again, which
+    // were left unformatted while hidden: they are formatted again.
+    void reshown(int start, int end);
 
 public slots:
     // The view scrolled or changed size.

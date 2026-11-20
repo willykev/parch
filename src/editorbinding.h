@@ -27,6 +27,7 @@ class QKeyEvent;
 
 class QMimeData;
 class QTextBlockFormat;
+class QTextCursor;
 class QTextDocument;
 
 // Where the CRLF pairs of a source are. Qt shows CRLF as one paragraph
@@ -284,6 +285,9 @@ private:
     void detach();
     void load();
     void applySourceChange(Revision revision, SourceRange range, const QString &replacement);
+    // Writes a span of the projection anew, line for line, where the lines
+    // are as many as before; otherwise whole.
+    void applyByLines(QTextCursor &span, const QString &written);
     // The format every paragraph takes: lines lineHeight × the font's pixel size apart.
     QTextBlockFormat lineFormat() const;
     // Notices a change of the TextEdit's text that did not come from the source.

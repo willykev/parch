@@ -871,6 +871,7 @@ private slots:
     void replaceAndReplaceAllKeepTablesTidy() { TableGridTests::replaceAndReplaceAllKeepTablesTidy(); }
     void findSkipsTableSyntax() { TableGridTests::findSkipsTableSyntax(); }
     void aSecondViewKeepsItsCaretWhenATableIsRetidied() { TableGridTests::aSecondViewKeepsItsCaretWhenATableIsRetidied(); }
+    void aRetidyChangesOnlyTheLinesItMustAndStylesRowsShownAgain() { TableGridTests::aRetidyChangesOnlyTheLinesItMustAndStylesRowsShownAgain(); }
     void arrowsWalkThroughCellsAndOutOfTheTable() { TableGridTests::arrowsWalkThroughCellsAndOutOfTheTable(); }
     void tabAndEnterMoveAddAndLeave() { TableGridTests::tabAndEnterMoveAddAndLeave(); }
     void selectionsAreACellABlockOrTheWholeTable() { TableGridTests::selectionsAreACellABlockOrTheWholeTable(); }
@@ -886,6 +887,7 @@ private slots:
     void readOnlyTablesTakeNoEdits() { TableGridTests::readOnlyTablesTakeNoEdits(); }
     void copyingCellsGivesTabsAndAnHtmlTable() { TableGridTests::copyingCellsGivesTabsAndAnHtmlTable(); }
     void pastingCellsFillsOverwritesAndGrows() { TableGridTests::pastingCellsFillsOverwritesAndGrows(); }
+    void wideTablesScrollSidewaysAndTheTextScrollsOver() { TableGridTests::wideTablesScrollSidewaysAndTheTextScrollsOver(); }
     void handTypedTablesWaitUntilTheCaretLeaves() { TableGridTests::handTypedTablesWaitUntilTheCaretLeaves(); }
     void everyGeometryQuestionHasAnAnswerInATable() { TableGridTests::everyGeometryQuestionHasAnAnswerInATable(); }
     void fontAndWidthChangesKeepTheGrid() { TableGridTests::fontAndWidthChangesKeepTheGrid(); }

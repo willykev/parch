@@ -219,8 +219,15 @@ QTextLayout *TableGrid::layoutOf(Place place) const
 
 void TableGrid::restyle(int start, int end)
 {
+    if (end < m_table.start || start > m_table.end) return;
     bool any = false;
-    for (int row = 0; row < m_rowFirst.size(); ++row) {
+    // The rows the range reaches, found by where their lines are.
+    const auto first = std::lower_bound(m_table.rows.cbegin(), m_table.rows.cend(), start,
+                                        [](const MdTable::Row &row, int at) { return row.line.end < at; });
+    for (auto at = first; at != m_table.rows.cend() && at->line.start <= end; ++at) {
+        const int tableRow = int(at - m_table.rows.cbegin());
+        if (tableRow == 1) continue;
+        const int row = MdTable::modelRowOf(tableRow);
         for (int i = 0; i < cellCount(row); ++i) {
             const MdTable::Cell &cell = cellAt({row, i});
             if (cell.end < start || cell.start > end) continue;
@@ -337,6 +344,8 @@ void TableGrid::read(const MdTable::Table &table, QStringView text)
 {
     m_table = table;
     std::vector<CellText> cells;
+    // The header's cells come first, drawn in a font of their own.
+    const size_t oldHeaderCells = m_rowFirst.size() > 1 ? size_t(m_rowFirst[1]) : m_cells.size();
     m_rowFirst.clear();
     for (int r = 0; r < table.rows.size(); ++r) {
         if (r == 1) continue;
@@ -344,12 +353,16 @@ void TableGrid::read(const MdTable::Table &table, QStringView text)
         for (const MdTable::Cell &cell : table.rows[r].cells) {
             CellText item;
             item.text = text.mid(cell.start, cell.end - cell.start).toString();
-            // A cell whose text is unchanged keeps its layout.
+            // A cell whose text is unchanged, in the same kind of row, keeps
+            // its layout and its widths.
             const size_t previous = cells.size();
-            if (previous < m_cells.size() && m_cells[previous].text == item.text) {
+            if (previous < m_cells.size() && m_cells[previous].text == item.text
+                && (r == 0) == (previous < oldHeaderCells)) {
                 item.layout = std::move(m_cells[previous].layout);
                 item.width = m_cells[previous].width;
                 item.lines = m_cells[previous].lines;
+                item.natural = m_cells[previous].natural;
+                item.word = m_cells[previous].word;
             }
             cells.push_back(std::move(item));
         }
@@ -367,6 +380,12 @@ void TableGrid::measure()
     const qreal pad = padding();
     const int columns = qMax(1, m_table.columns);
     const qreal least = metrics.horizontalAdvance(QStringLiteral("000"));
+    // Widths measured in another font are measured again.
+    const QString font = m_owner->font().toString();
+    if (font != m_measuredFont) {
+        for (CellText &cell : m_cells) cell.natural = cell.word = -1;
+        m_measuredFont = font;
+    }
     QList<qreal> natural(columns, least), minimal(columns, least);
     struct Spanning {
         int first, last;
@@ -378,13 +397,20 @@ void TableGrid::measure()
         for (int i = 0; i < cellCount(row); ++i) {
             const MdTable::Cell &cell = cellAt({row, i});
             if (cell.column >= columns) continue;
-            const QString &text = m_cells[size_t(indexOf({row, i}))].text;
-            const qreal width = std::ceil(m.horizontalAdvance(text));
-            qreal word = 0;
-            for (const QStringView part : QStringView(text).split(u' ', Qt::SkipEmptyParts))
-                word = qMax(word, std::ceil(m.horizontalAdvance(part.toString())));
+            CellText &measured = m_cells[size_t(indexOf({row, i}))];
+            if (measured.natural < 0) {
+                measured.natural = std::ceil(m.horizontalAdvance(measured.text));
+                measured.word = 0;
+                // Only a cell wider than a word needs its words measured.
+                if (measured.text.contains(u' '))
+                    for (const QStringView part : QStringView(measured.text).split(u' ', Qt::SkipEmptyParts))
+                        measured.word = qMax(measured.word, std::ceil(m.horizontalAdvance(part.toString())));
+                else
+                    measured.word = measured.natural;
+            }
+            const qreal width = measured.natural;
             // A word longer than the column at its widest wraps anywhere.
-            word = qMin(word, 30 * least / 3);
+            const qreal word = qMin(measured.word, 30 * least / 3);
             if (cell.span == 1) {
                 natural[cell.column] = qMax(natural[cell.column], width);
                 minimal[cell.column] = qMax(minimal[cell.column], word);
@@ -451,14 +477,13 @@ void TableGrid::measure()
     qreal y = rule;
     for (int row = 0; row < m_rowFirst.size(); ++row) {
         int lines = 1;
-        const QFontMetricsF &m = row == 0 ? headerMetrics : metrics;
         for (int i = 0; i < cellCount(row); ++i) {
             const MdTable::Cell &cell = cellAt({row, i});
             if (cell.column >= columns) continue;
             CellText &text = m_cells[size_t(indexOf({row, i}))];
             const auto [left, right] = extent(cell);
             const qreal room = right - left - 2 * pad;
-            if (m.horizontalAdvance(text.text) <= room) {
+            if (text.natural <= room) {
                 if (text.layout && !qFuzzyCompare(text.width, room)) text.layout.reset();
                 continue;
             }
@@ -842,6 +867,8 @@ void TableGrids::unproject(int start, int end)
     for (QTextBlock block = doc->findBlock(first); block.isValid() && block.position() <= last; block = block.next())
         block.setVisible(true);
     doc->markContentsDirty(first, last - first + 1);
+    // Its rows were not formatted while the grid hid them.
+    if (EditorDecorations *decorations = this->decorations()) decorations->reshown(start, end);
 }
 
 void TableGrids::placeGrids()
@@ -1895,9 +1922,11 @@ void TableGridView::wheelEvent(QWheelEvent *event)
     QPointF delta = event->pixelDelta();
     if (delta.isNull()) delta = QPointF(event->angleDelta()) / 8.0 * 2;
     // Shift turns the wheel's turn into a sideways one, as everywhere.
-    qreal across = delta.x();
-    if (qFuzzyIsNull(across) && (event->modifiers() & Qt::ShiftModifier)) across = delta.y();
-    if (qFuzzyIsNull(across)) {
+    qreal across = delta.x(), down = delta.y();
+    if (qFuzzyIsNull(across) && (event->modifiers() & Qt::ShiftModifier)) std::swap(across, down);
+    // A scroll more up or down than sideways is the text's, which scrolls
+    // on over the table.
+    if (qFuzzyIsNull(across) || qAbs(down) > qAbs(across)) {
         event->ignore();
         return;
     }

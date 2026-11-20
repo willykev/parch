@@ -549,9 +549,16 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     QTextCursor edit(m_textDocument);
     edit.setPosition(growStart ? shownBeforeStart : shownStart);
     edit.setPosition(growEnd ? shownAfterEnd : shownEnd, QTextCursor::KeepAnchor);
-    // Qt turns the line breaks in the inserted source into separators itself,
-    // exactly as the pairs table counts them.
-    edit.insertText(source.mid(spanStart, spanEnd - spanStart));
+    const QString written = source.mid(spanStart, spanEnd - spanStart);
+    if (!growStart && !growEnd && m_tables->gridAt(start)) {
+        // A table written anew line for line keeps its paragraphs, which
+        // its grid hides, and changes only what changed in each.
+        applyByLines(edit, written);
+    } else {
+        // Qt turns the line breaks in the inserted source into separators
+        // itself, exactly as the pairs table counts them.
+        edit.insertText(written);
+    }
     // The grids follow the change, before the selection does.
     m_tables->sourceChanged(range, inserted);
     // Positions before the edit stay, positions after it move by its length,
@@ -573,6 +580,48 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
         const QRectF line = rectangleAt(m_pairs.toEditor(top + delta));
         scrollView(view, m_editor->y() + line.y() + intoTop);
     }
+}
+
+void EditorBinding::applyByLines(QTextCursor &span, const QString &written)
+{
+    // What the span shows now, a paragraph separator for each line break,
+    // and what replaces it, line for line; another number of lines is
+    // written whole, as any edit is.
+    const QString shown = span.selectedText();
+    const QStringList before = shown.split(QChar::ParagraphSeparator);
+    QStringList after;
+    qsizetype from = 0;
+    for (qsizetype i = 0; i < written.size(); ++i) {
+        // The breaks Qt makes paragraphs of, as insertText does.
+        const QChar c = written.at(i);
+        if (c != u'\n' && c != u'\r' && c != QChar::ParagraphSeparator) continue;
+        after.append(written.mid(from, i - from));
+        if (c == u'\r' && i + 1 < written.size() && written.at(i + 1) == u'\n') ++i;
+        from = i + 1;
+    }
+    after.append(written.mid(from));
+    if (before.size() != after.size() || before.size() < 2) {
+        span.insertText(written);
+        return;
+    }
+    QTextCursor edit(m_textDocument);
+    edit.beginEditBlock();
+    int line = span.selectionStart();
+    for (qsizetype i = 0; i < before.size(); ++i) {
+        const QString &old = before[i], &now = after[i];
+        int same = 0;
+        const int shortest = int(qMin(old.size(), now.size()));
+        while (same < shortest && old[same] == now[same]) ++same;
+        int tail = 0;
+        while (tail < shortest - same && old[old.size() - 1 - tail] == now[now.size() - 1 - tail]) ++tail;
+        if (same + tail < old.size() || same + tail < now.size()) {
+            edit.setPosition(line + same);
+            edit.setPosition(line + int(old.size()) - tail, QTextCursor::KeepAnchor);
+            edit.insertText(now.mid(same, now.size() - same - tail));
+        }
+        line += int(now.size()) + 1;
+    }
+    edit.endEditBlock();
 }
 
 void EditorBinding::setLineHeight(qreal lineHeight)

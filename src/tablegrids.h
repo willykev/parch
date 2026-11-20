@@ -146,6 +146,10 @@ private:
         std::unique_ptr<QTextLayout> layout;
         qreal width = -1;
         int lines = 1;
+        // Its text's width on one line, and its longest word's, in the font
+        // it is drawn in; -1 until measured.
+        qreal natural = -1;
+        qreal word = -1;
     };
     // The table changed or the font or width did: reads its cells and lays them out again.
     void read(const MdTable::Table &table, QStringView text);
@@ -162,6 +166,8 @@ private:
     MdTable::Table m_table;
     // Each cell's text and layout, the model's rows one after another.
     mutable std::vector<CellText> m_cells;
+    // The font the cells' widths were measured in: another measures them again.
+    QString m_measuredFont;
     QList<int> m_rowFirst; // the index in m_cells of each model row's first cell
     QList<qreal> m_columnLeft, m_columnWidth;
     QList<qreal> m_rowTop, m_rowHeight;

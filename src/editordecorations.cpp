@@ -546,6 +546,12 @@ void EditorDecorations::markDirty(int start, int end)
     m_dirty.insert(it, range);
 }
 
+void EditorDecorations::reshown(int start, int end)
+{
+    markDirty(start, end);
+    schedule();
+}
+
 void EditorDecorations::schedule()
 {
     if (m_dirty.empty() || !ready() || m_formatting) return;
@@ -633,9 +639,11 @@ bool EditorDecorations::format(Range range, const QElapsedTimer *budget, int *re
     const bool formatting = std::exchange(m_formatting, true);
     QTextBlock block = m_document->findBlock(start);
     bool whole = true;
-    // Every paragraph the range reaches into, and the one an empty range is in.
+    // Every paragraph the range reaches into, and the one an empty range is
+    // in. A hidden one, a table's row that its grid draws, waits until it
+    // is shown.
     while (block.isValid() && (block.position() < end || block.position() <= start)) {
-        rehighlightBlock(block);
+        if (block.isVisible()) rehighlightBlock(block);
         block = block.next();
         if (budget && budget->elapsed() >= SliceMs && block.isValid() && block.position() < end) {
             whole = false;
@@ -726,6 +734,9 @@ void EditorDecorations::highlightBlock(const QString &text)
 {
     ++m_formatted;
     if (!m_loaded || !m_binding) return;
+    // A hidden paragraph, a table's row that its grid draws, is formatted
+    // when it is shown again.
+    if (!currentBlock().isVisible()) return;
     const int sourceStart = m_binding->editorToSource(currentBlock().position());
     if (sourceStart < 0) return;
     // Inside a paragraph the source and the projection agree unit for unit:

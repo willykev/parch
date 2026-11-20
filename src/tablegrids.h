@@ -1,5 +1,6 @@
 #pragma once
 
+#include "markdownediting.h"
 #include "mdtable.h"
 #include "sourcetypes.h"
 
@@ -21,6 +22,9 @@
 
 class EditorBinding;
 class EditorDecorations;
+namespace md {
+struct Options;
+}
 class QKeyEvent;
 class QMimeData;
 class QTextDocument;
@@ -134,6 +138,12 @@ public:
     qreal padding() const;
     // The height of a line of the text it stands in.
     qreal lineHeight() const;
+    // The text of each cell of a model row.
+    QStringList rowTexts(int row) const;
+    // Whether a model row's cells hold these texts.
+    bool rowIs(int row, const QStringList &texts) const;
+    // Where a visual line of a cell's text starts and ends, as source positions.
+    std::pair<int, int> lineRange(Place place, int line) const;
 
 signals:
     void geometryChanged();
@@ -163,6 +173,9 @@ private:
     std::pair<qreal, qreal> extent(const MdTable::Cell &cell) const;
     int indexOf(Place place) const;
     void updateCaret();
+    // Of the cells a short row leaves out, which all stand at its end, the
+    // one the caret was taken to; any other place for none.
+    void preferMissing(Place place, int position) const;
 
     TableGrids *m_owner;
     MdTable::Table m_table;
@@ -179,6 +192,8 @@ private:
     qreal m_scrollX = 0;
     bool m_hasCaret = false;
     QRectF m_caretRect, m_blockRect;
+    mutable Place m_missing;
+    mutable int m_missingAt = -1;
 };
 
 // The tables of one view drawn as grids, and what that changes for its
@@ -219,6 +234,13 @@ public:
     // The room a grid may take: the column and the margin to its right.
     qreal availableWidth() const;
     MdTable::Dialect dialect() const;
+    // The table dialect a document's Markdown is read in.
+    static MdTable::Dialect dialectOf(const md::Options &options);
+    // Edits of a text, those inside the cells of its tables made with each
+    // such table written tidy around them; the others as they are. For a
+    // writer with no view, as a link rewritten when its file moves.
+    static QList<SourceEdit> tidyCellEdits(QStringView text, const QList<SourceEdit> &edits,
+                                           const MdTable::Dialect &dialect);
 
     // The grid holding a source position, from its header line's start to
     // its last line's end; null for none.
@@ -257,6 +279,10 @@ public:
                    int column, bool selectText = false) const;
     // A key that moves the caret in or into a grid; false for any other.
     bool key(QKeyEvent *event);
+    // An inline command over a block of cells: made on each cell's text,
+    // the table written once, one step to undo. Nothing when the selection
+    // is no block, for the view to make it as anywhere.
+    std::optional<bool> formatCells(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation);
     // The caret or the selection moved: one in a table's syntax is moved
     // into its cells' text.
     void cursorMoved();
@@ -271,9 +297,23 @@ public:
         QPointer<TableGrid> grid;
         TableGrid::Place place;
         int offset = 0;
+        // The row's line and cells as they were, and how many rows the
+        // table had: rows coming or going before it move it, and where an
+        // edit wrote rows around it anew it is found again by its cells.
+        int lineStart = 0;
+        int lineEnd = 0;
+        int rows = 0;
+        QStringList row;
+        // Which of the rows with these cells it is, counted from the top;
+        // counted only where the edit reaches its row.
+        int likeBefore = 0;
     };
-    Spot spotOf(int position) const;
-    std::optional<int> positionOf(const Spot &spot) const;
+    // Where a position is before an edit of `range`.
+    Spot spotOf(int position, SourceRange range = {-1, 0}) const;
+    // Where a spot is after an edit of the source, of `range` by `inserted` units.
+    std::optional<int> positionOf(const Spot &spot, SourceRange range, int inserted) const;
+    // Whether a range of a text lies in the text of one cell of a table.
+    static bool inTableCell(QStringView text, SourceRange range, const MdTable::Dialect &dialect);
 
     // The commands for a grid's rows, columns, cells and the table as a
     // whole, by id, in the order a menu lists them.
@@ -304,8 +344,17 @@ public:
     bool cutBlock();
     // Cells from a spreadsheet pasted at the caret's cell, or over a block
     // of them: they fill it and grow the table where they reach past it. A
-    // single value fills every cell of a block. False for anything else.
-    bool pasteCells(const QMimeData *mime);
+    // single value fills every cell of a block. NotCells for anything else,
+    // which the view pastes as text; Refused when they cannot go there.
+    enum class Paste { NotCells, Pasted, Refused };
+    Paste pasteCells(const QMimeData *mime);
+    // A double click selects the word at a position in a cell, a triple
+    // click the cell's text.
+    Q_INVOKABLE void selectWordAt(int position);
+    Q_INVOKABLE void selectCellAt(int position);
+    // What an input method shows changed: the cell it is in is laid out
+    // again with it.
+    void compositionChanged();
     // The cells a clipboard holds, row by row: from an HTML table, or text
     // with tabs between them; none for anything else.
     static std::optional<QList<QStringList>> cellsOf(const QMimeData *mime);
@@ -354,6 +403,11 @@ private:
     // Where the line after a grid starts, and the line after that, when the
     // first is blank; -1 where there is none.
     int lineAfter(const TableGrid *grid) const;
+    // Lines put among a grid's rows as rows of its model, merged cells kept;
+    // none when a line is no table row, and with `strict`, when one lacks a
+    // pipe at either end. A row wider than the table says so in `refusal`.
+    std::optional<QList<QList<MdTable::Item>>> rowsToPut(const TableGrid *grid, const QString &lines, bool strict,
+                                                         QString *refusal) const;
 
     // Runs a change on the grid as the view's own edit, one undo step, and
     // places the selection it says; false when it is refused.
@@ -387,6 +441,23 @@ private:
     bool m_stepping = false;
     // The x a vertical move keeps, in the grid's coordinates.
     qreal m_goalX = -1;
+    // The columns a column's handle selected, while the selection it made
+    // stays: the commands act on them, though the block shown takes in the
+    // merged cells that reach into them.
+    struct Picked {
+        QPointer<TableGrid> grid;
+        int anchor = -1, cursor = -1, firstColumn = 0, lastColumn = 0;
+    };
+    Picked m_picked;
+    // The selection Ctrl+A made last in a grid, and how far it went: a
+    // cell's text, then every cell; the third goes to the whole text.
+    struct SelectAll {
+        int anchor = -1, cursor = -1, level = 0;
+    };
+    SelectAll m_selectAll;
+    // The cell an input method's text was last shown in.
+    QPointer<TableGrid> m_preeditGrid;
+    TableGrid::Place m_preeditPlace;
     QMetaObject::Connection m_parseConnection;
 };
 

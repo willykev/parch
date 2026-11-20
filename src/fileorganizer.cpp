@@ -10,6 +10,7 @@
 #include "saferead.h"
 #include "settings.h"
 #include "sourcebuffer.h"
+#include "tablegrids.h"
 #include "textsearch.h"
 
 #include <QDir>
@@ -522,7 +523,15 @@ void FileOrganizer::updateReferences(const Plan &plan)
                 DocumentLinks::changes(text, file.path, plan.library, moves, open->markdownOptions());
             if (found.isEmpty()) continue;
             QList<TextSearch::Edit> edits;
-            for (const DocumentLinks::Change &change : found) edits.append({change.range, change.after});
+            if (m_settings && m_settings->tableGrids() && open->markdownOptions().tables) {
+                // A link in a table's cell is changed with the table written tidy around it.
+                QList<SourceEdit> inText;
+                for (const DocumentLinks::Change &change : found) inText.append({change.range, change.after});
+                inText = TableGrids::tidyCellEdits(text, inText, TableGrids::dialectOf(open->markdownOptions()));
+                for (const SourceEdit &edit : std::as_const(inText)) edits.append({edit.range, edit.replacement});
+            } else {
+                for (const DocumentLinks::Change &change : found) edits.append({change.range, change.after});
+            }
             const TextSearch::Edit edit = TextSearch::combine(text, edits);
             if (buffer->replace(edit.range, edit.text, EditKind::Other) != SourceBuffer::EditOutcome::Applied) {
                 failed << PathText::fileName(now);

@@ -3,7 +3,9 @@
 #include "markdownediting.h"
 #include "mdtable.h"
 #include "mdtree.h"
+#include "focusmode.h"
 #include "sourcebuffer.h"
+#include "tablegrids.h"
 
 #include <QRandomGenerator>
 #include <functional>
@@ -321,6 +323,10 @@ void tablesTheGridCannotHoldSayWhy()
     QString tall = QStringLiteral("| a | b |\n|---|---|");
     for (int i = 0; i < 10001; ++i) tall += QStringLiteral("\n| x | y |");
     QCOMPARE(unfit(tall).first, MdTable::Unfit::TooLarge);
+    // Lines indented or quoted differently could not be written back alike.
+    QCOMPARE(unfit(u"  | A | B |\n    |---|---|\n   | one | two |"_s), std::pair(MdTable::Unfit::MixedPrefixes, 1));
+    QCOMPARE(unfit(u"> | A | B |\n> |---|---|\n>| one | two |"_s), std::pair(MdTable::Unfit::MixedPrefixes, 2));
+    QCOMPARE(unfit(u"> | A | B |\n> |---|---|\n> | one | two |"_s), std::pair(MdTable::Unfit::None, -1));
     // A short row is fine: it is filled out when the table is written.
     QCOMPARE(unfit(u"| a | b |\n|---|---|\n| x |"_s), std::pair(MdTable::Unfit::None, -1));
     QCOMPARE(formatted(u"| a | b |\n|---|---|\n| x |"_s), u"| a   | b   |\n| --- | --- |\n| x   |     |"_s);
@@ -620,6 +626,54 @@ void insertedTablesAreTidyAndEmpty()
     QCOMPARE(parsed.size(), 3);
     for (const QList<ParsedCell> &row : parsed) QCOMPARE(row.size(), 3);
     QCOMPARE(MdTable::write(MdTable::emptyTable(2, 1, u"> "_s, u"\r\n"_s)).text, u"> |     |     |\r\n> | --- | --- |"_s);
+}
+
+} // namespace TableTests
+
+namespace TableTests {
+
+void anEditOutsideARunIsAStepOfItsOwn()
+{
+    // A run of typing in a cell, and then typing just after it that is no
+    // part of the run, as another window's: undo takes back only the last.
+    SourceBuffer buffer(u"alpha"_s);
+    qint64 now = 0;
+    buffer.setClock([&] { return now; });
+    QCOMPARE(buffer.replace({{{5, 0}, u"x"_s}}, EditKind::Typing, 71), SourceBuffer::EditOutcome::Applied);
+    now += 50;
+    QCOMPARE(buffer.replace({6, 0}, u"y"_s, EditKind::Typing), SourceBuffer::EditOutcome::Applied);
+    buffer.undo();
+    QCOMPARE(buffer.text(), u"alphax"_s);
+    buffer.undo();
+    QCOMPARE(buffer.text(), u"alpha"_s);
+}
+
+void cellEditsWithoutAViewKeepTablesTidy()
+{
+    // A link a move rewrites, in a cell: the column widens in every row.
+    const QString text = u"Intro\n\n| Link      | B   |\n| --------- | --- |\n| [x](a.md) | end |\n\nSee [y](a.md)."_s;
+    const int inCell = int(text.indexOf(u"a.md"));
+    const int inProse = int(text.lastIndexOf(u"a.md"));
+    const QList<SourceEdit> edits{{{inCell, 4}, u"longer-name.md"_s}, {{inProse, 4}, u"longer-name.md"_s}};
+    const QList<SourceEdit> tidied = TableGrids::tidyCellEdits(text, edits, MdTable::Dialect{});
+    QString result = text;
+    for (auto edit = tidied.crbegin(); edit != tidied.crend(); ++edit)
+        result.replace(edit->range.start, edit->range.length, edit->replacement);
+    QCOMPARE(result, u"Intro\n\n| Link                | B   |\n| ------------------- | --- |\n| [x](longer-name.md) | end |\n\n"
+                     "See [y](longer-name.md)."_s);
+}
+
+void focusLightsAWholeTable()
+{
+    const QString text = u"Before.\n\n| a | b |\n| --- | --- |\n| x | two |\n\nAfter."_s;
+    const int start = int(text.indexOf(u"| a"));
+    const int end = int(text.indexOf(u"two |")) + 5;
+    const SourceRange lit = FocusMode::rangeAt(text, int(text.indexOf(u"two")), FocusMode::Unit::Paragraph);
+    QCOMPARE(lit.start, start);
+    QCOMPARE(lit.length, end - start);    // By sentence too: a table is one part.
+    const SourceRange sentence = FocusMode::rangeAt(text, int(text.indexOf(u"two")), FocusMode::Unit::Sentence);
+    QCOMPARE(sentence.start, start);
+    QCOMPARE(sentence.length, end - start);
 }
 
 } // namespace TableTests

@@ -22,5 +22,8 @@ void movedRowsKeepTheirLineEndings();
 void pipesTypedInCellsAreEscapedByDialect();
 void tablesInQuotesKeepTheirPrefix();
 void insertedTablesAreTidyAndEmpty();
+void anEditOutsideARunIsAStepOfItsOwn();
+void cellEditsWithoutAViewKeepTablesTidy();
+void focusLightsAWholeTable();
 
 } // namespace TableTests

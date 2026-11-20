@@ -22,6 +22,7 @@
 #include <optional>
 #include <vector>
 
+class Insertion;
 class QInputMethodEvent;
 class QKeyEvent;
 
@@ -211,6 +212,10 @@ public:
     // Where the caret is drawn, in the editor's coordinates: in a grid's
     // cell as the grid draws it.
     Q_INVOKABLE QRectF caretRectangle() const;
+    // What an input method is composing, shown where the composition
+    // starts, a source position; empty while it composes nothing.
+    QString preedit() const { return m_composing ? m_preedit : QString(); }
+    int preeditAt() const { return m_compositionSelection.start; }
     // Where a caret at a source position would be drawn, in the editor's
     // coordinates, a grid's cells and rows included.
     QRectF sourceRectangle(int source) const;
@@ -324,6 +329,9 @@ private:
     // grow far past it.
     bool insertHtml(const QString &html, SourceRange range, const QString &plain = {});
     void pasteImage(const QMimeData *mime, const QString &alt, SourceRange range);
+    // Text an insertion puts in later goes in as this view's own edit, so
+    // that a cell takes it as its text and no table is broken.
+    void writeThrough(Insertion *insertion);
     // An image with no alt text, `length` long, came into the document at
     // `at`: a caret that followed it in, in this view, goes between its
     // brackets, for the alt text to be written there.
@@ -404,6 +412,11 @@ private:
     };
     ForeignWrite m_foreign;
     bool m_composing = false;
+    // What the input method shows while it composes.
+    QString m_preedit;
+    // An edit made for something that finished later, as a paste converted
+    // off the window's thread, leaves the caret where it is.
+    bool m_keepCaret = false;
     // The source range a composition will replace, kept while Qt shows its preedit.
     SourceRange m_compositionSelection{0, 0};
     // The anchor restore() last set, kept while the view stays where restore()

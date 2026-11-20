@@ -296,6 +296,14 @@ std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dia
     Table table;
     table.start = header.start;
     table.columns = int(aligns->size());
+    // Every line of a table stands behind the same quote markers and indentation.
+    const QStringView prefix = text.mid(header.start, header.content - header.start);
+    const auto prefixed = [&](const Line &line, int row) {
+        if (text.mid(line.start, line.content - line.start) == prefix || table.unfit != Unfit::None) return;
+        table.unfit = Unfit::MixedPrefixes;
+        table.unfitRow = row;
+    };
+    prefixed(*second, 1);
     table.aligns = *aligns;
     bool extra = false, leading = false;
     table.rows.append(rowOf(text, header, table.columns, dialect, &extra, &leading));
@@ -316,6 +324,7 @@ std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dia
             break;
         }
         extra = leading = false;
+        prefixed(*line, int(table.rows.size()));
         table.rows.append(rowOf(text, *line, table.columns, dialect, &extra, &leading));
         table.end = line->end;
         if ((extra || leading) && table.unfit == Unfit::None) {
@@ -355,11 +364,13 @@ std::optional<Table> locate(QStringView text, int position, const Dialect &diale
 
 int rowAt(const Table &table, int position)
 {
-    for (int i = 0; i < table.rows.size(); ++i) {
-        const Line &line = table.rows[i].line;
-        if (position >= line.start && (position < line.next || position <= line.end)) return i;
-    }
-    return -1;
+    // The last row starting at or before the position, found by halving.
+    const auto after = std::upper_bound(table.rows.cbegin(), table.rows.cend(), position,
+                                        [](int at, const Row &row) { return at < row.line.start; });
+    if (after == table.rows.cbegin()) return -1;
+    const int i = int(after - table.rows.cbegin()) - 1;
+    const Line &line = table.rows[i].line;
+    return position < line.next || position <= line.end ? i : -1;
 }
 
 int cellAt(const Table &table, int row, int position)
@@ -457,6 +468,29 @@ Layout write(const Model &model)
         if (line + 1 < lines) out += line < model.breaks.size() ? model.breaks[line] : QStringLiteral("\n");
     }
     return layout;
+}
+
+bool readsBack(const Layout &layout, const Model &model, int row, const Dialect &dialect, int columns)
+{
+    if (columns < 0) columns = columnCount(model);
+    if (row < 0 || row >= model.rows.size()) return false;
+    const int physical = lineOf(row);
+    if (physical >= layout.lineStarts.size()) return false;
+    const QStringView text(layout.text);
+    const int start = layout.lineStarts[physical];
+    const QString &brk = model.breaks.value(physical);
+    const int end = physical + 1 < layout.lineStarts.size() ? layout.lineStarts[physical + 1] - int(brk.size())
+                                                            : int(text.size());
+    const Line line{start, start + int(model.prefixes.value(physical).size()), end, end};
+    bool extra = false, leading = false;
+    const Row read = rowOf(text, line, columns, dialect, &extra, &leading);
+    const QList<Item> &items = model.rows[row];
+    if (extra || leading || read.cells.size() != items.size()) return false;
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        const Cell &cell = read.cells[i];
+        if (cell.span != items[i].span || text.mid(cell.start, cell.end - cell.start) != items[i].text) return false;
+    }
+    return true;
 }
 
 } // namespace MdTable
@@ -601,6 +635,9 @@ QString duplicateRows(Model &model, int first, int count, const QString &newline
 QString moveRows(Model &model, int first, int count, int to)
 {
     if (first < 1 || to < 1) return refusal(QT_TRANSLATE_NOOP("MdTable", "The header row stays first."));
+    const int rows = int(model.rows.size());
+    if (count < 1 || first + count > rows || to > rows)
+        return refusal(QT_TRANSLATE_NOOP("MdTable", "Those rows are not in the table any more."));
     if (to >= first && to <= first + count) return {};
     model.rows = reordered(model.rows, first, count, to);
     return {};
@@ -659,6 +696,8 @@ QString deleteColumns(Model &model, int first, int count)
 QString moveColumns(Model &model, int first, int count, int to)
 {
     const int columns = columnCount(model);
+    if (first < 0 || count < 1 || first + count > columns || to < 0 || to > columns)
+        return refusal(QT_TRANSLATE_NOOP("MdTable", "Those columns are not in the table any more."));
     if (to >= first && to <= first + count) return {};
     if (cutsAny(model, first) || cutsAny(model, first + count) || cutsAny(model, to)) return refusal(CutsMerge);
     for (QList<Item> &row : model.rows) {

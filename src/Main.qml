@@ -695,8 +695,7 @@ ApplicationWindow {
         // no new table inside a cell.
         if (tableCommands.indexOf(command) >= 0)
             return editorPane.binding.tables.can(command)
-        if (command === "table")
-            return !editorPane.binding.tables.caretInGrid
+        // In a table, "table" opens its menu.
         if (command !== "inlineNote" && command !== "defineNote" && command !== "superscript" && command !== "subscript")
             return true
         return editorPane.cursorSource >= 0 && editorPane.binding.acts(command)

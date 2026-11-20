@@ -95,6 +95,42 @@ void EditorBinding::setAttachments(Attachments *attachments)
     emit attachmentsChanged();
 }
 
+void EditorBinding::writeThrough(Insertion *insertion)
+{
+    QPointer<EditorBinding> view(this);
+    insertion->setWriter([view](Document *document, SourceRange range, const QString &text, bool block) -> int {
+        // Another document now in the view, or no grid in it: the insertion writes it itself.
+        if (!view || view->m_document != document || !view->m_loaded || view->m_tables->grids().isEmpty())
+            return Insertion::Buffer;
+        // In a cell the text goes in on the cell's line, its breaks spaces.
+        const bool inCell = view->m_tables->gridAt(range.start)
+                            && view->m_tables->inCellText(range.start, range.start + range.length);
+        QString written;
+        QString lead;
+        {
+            const QString source = view->m_buffer->text();
+            written = Insertion::fitted(source, range, text, block && !inCell);
+            lead = written.left(written.indexOf(text));
+        }
+        const QString newline = view->m_document->newline();
+        if (newline != u"\n") {
+            written.replace(u'\n', newline);
+            lead.replace(u'\n', newline);
+        }
+        // The caret goes after the text while it is still where the text
+        // was pasted; one taken elsewhere meanwhile stays there.
+        const SourceRange selected = view->selection();
+        const bool following = selected.start == range.start && selected.length == range.length;
+        view->m_keepCaret = !following;
+        const bool written_ = view->replace(range, written, EditKind::Other, following);
+        view->m_keepCaret = false;
+        if (!written_) return -1;
+        // A cell's text is where the caret now ends it, the table written anew around it.
+        if (following && inCell) return view->m_cursorSource - int(written.size());
+        return range.start + int(lead.size());
+    });
+}
+
 void EditorBinding::pastePlainText()
 {
     if (!editable()) return;
@@ -105,7 +141,7 @@ void EditorBinding::pastePlainText()
 void EditorBinding::pasteFrom(const QMimeData *mime)
 {
     // Cells from a spreadsheet, or another grid, fill a grid's cells from the caret's.
-    if (m_tables->pasteCells(mime)) return;
+    if (m_tables->pasteCells(mime) != TableGrids::Paste::NotCells) return;
     cancelComposition();
     // Files copied in a file manager come in as when they are dropped.
     const QStringList files = mime->hasUrls() ? localFiles(mime->urls()) : QStringList();
@@ -142,6 +178,7 @@ bool EditorBinding::insertHtml(const QString &html, SourceRange range, const QSt
     const bool images = HtmlMarkdown::mayEmbedImages(html);
     if (m_attachments && (images || html.size() > ConvertAtOnceChars)) {
         auto *insertion = new Insertion(m_document, range);
+        writeThrough(insertion);
         const QString folder = m_attachments->documentFolder(m_document);
         const QDate date = m_attachments->today();
         Attachments *attachments = m_attachments;
@@ -217,6 +254,7 @@ void EditorBinding::pasteImage(const QMimeData *mime, const QString &alt, Source
         extension = QStringLiteral("png");
     }
     auto *insertion = new Insertion(m_document, range);
+    writeThrough(insertion);
     const QString folder = m_attachments->documentFolder(m_document);
     const QDate date = m_attachments->today();
     Attachments *attachments = m_attachments;
@@ -292,6 +330,7 @@ void EditorBinding::attachFiles(const QStringList &paths, SourceRange range)
     if (m_drop && m_drop->insertion) m_drop->insertion->cancel();
     auto request = std::make_shared<DropRequest>();
     request->insertion = new Insertion(m_document, range);
+    writeThrough(request->insertion);
     request->folder = m_attachments->documentFolder(m_document);
     request->draft = m_document->isDraft();
     m_drop = request;

@@ -41,6 +41,13 @@ public:
     int insertedAt() const { return m_insertedAt; }
     // Gives the insertion up.
     void cancel();
+    // Who writes the text in, in place of the document's buffer: a view,
+    // which keeps its tables whole. It is given where the text goes and is
+    // to return where it starts, -1 when it was not written, or Buffer for
+    // the insertion to write it itself.
+    static constexpr int Buffer = -2;
+    using Writer = std::function<int(Document *document, SourceRange range, const QString &text, bool block)>;
+    void setWriter(Writer writer) { m_writer = std::move(writer); }
     // `text` as it is to stand in `source` at `range`: block text with a
     // blank line between it and the text before and after it on its lines.
     static QString fitted(QStringView source, SourceRange range, const QString &text, bool block);
@@ -49,6 +56,7 @@ private:
     void follow(SourceRange edited, const QString &replacement);
 
     QPointer<Document> m_document;
+    Writer m_writer;
     QMetaObject::Connection m_following;
     int m_start = 0;
     int m_end = 0;

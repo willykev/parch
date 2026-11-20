@@ -49,6 +49,8 @@ bool SourceBuffer::joinsLastStep(const Transaction &edit, EditKind kind, bool li
     // An edit at the saved position starts a step, or the saved text could not be told from an edited one.
     if (m_historyPosition == m_savedPosition) return false;
     const auto &step = m_history.last();
+    // A run's step is its own: typing elsewhere, as in another view, starts another.
+    if (step.run != 0) return false;
     if (step.kind != kind || step.hasLineBreak) return false;
     if (now - step.lastTime >= groupingWindowMs) return false;
     const auto &last = step.edits.last();

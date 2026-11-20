@@ -9,6 +9,8 @@ import QtQuick.Controls.Basic
 ThemedMenu {
     id: spellingMenu
 
+    // The view's tables, whose commands follow the spellings in a cell.
+    property var tables: null
     // The word, and where it is in the source.
     property int start: 0
     property int end: 0
@@ -19,7 +21,7 @@ ThemedMenu {
     signal ignoreWord(string word)
 
     // Fills the menu for a word and its suggestions.
-    function offer(start, end, word, suggestions) {
+    function offer(start, end, word, suggestions, inTable) {
         spellingMenu.start = start
         spellingMenu.end = end
         spellingMenu.word = word
@@ -32,6 +34,10 @@ ThemedMenu {
         spellingMenu.addItem(line.createObject(spellingMenu.contentItem))
         spellingMenu.addItem(entry.createObject(spellingMenu.contentItem, { text: qsTr("Add to dictionary"), kind: "add", objectName: "addToDictionary" }))
         spellingMenu.addItem(entry.createObject(spellingMenu.contentItem, { text: qsTr("Ignore"), kind: "ignore", objectName: "ignoreWord" }))
+        if (inTable && spellingMenu.tables) {
+            spellingMenu.addItem(line.createObject(spellingMenu.contentItem))
+            spellingMenu.addMenu(table.createObject(spellingMenu, { tables: spellingMenu.tables }))
+        }
     }
 
     // What assistive technology hears the menu named.
@@ -64,5 +70,15 @@ ThemedMenu {
         id: line
 
         MenuLine {}
+    }
+
+    // The table's commands, for a word in a cell.
+    Component {
+        id: table
+
+        TableMenu {
+            objectName: "spellingTableMenu"
+            kind: "cell"
+        }
     }
 }

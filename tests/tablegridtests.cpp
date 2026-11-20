@@ -1,6 +1,9 @@
 #include "tablegridtests.h"
 
 #include "apppaths.h"
+#include "mdtree.h"
+#include "documentsettings.h"
+#include "attachments.h"
 #include "documentfind.h"
 #include "documentstore.h"
 #include "editorbinding.h"
@@ -16,6 +19,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QSignalSpy>
+#include <QImage>
 #include <QInputMethodQueryEvent>
 #include <QMimeData>
 #include <QQmlComponent>
@@ -731,14 +735,26 @@ void selectionsAreACellABlockOrTheWholeTable()
     view.type(u"x"_s);
     QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|x| / 10:00||"_s);
     view.binding->undo();
-    // Ctrl+A: the cell's text, then the table, then everything.
+    // Ctrl+A: the cell's text, then every cell, then everything.
     const int east = int(view.text().indexOf(u"East"));
     view.select(east + 1, east + 1);
     view.key(Qt::Key_A, Qt::ControlModifier);
     QCOMPARE(selected(view), u"East"_s);
     view.key(Qt::Key_A, Qt::ControlModifier);
-    QCOMPARE(view.anchor(), view.grid()->start());
-    QCOMPARE(view.cursor(), view.grid()->end());
+    QCOMPARE(view.anchor(), int(view.text().indexOf(u"Time")));
+    QCOMPARE(view.cursor(), int(view.text().indexOf(u"12")) + 2);
+    // Every cell is a block: copied as cells, emptied by Delete, the table kept.
+    view.binding->copy();
+    QCOMPARE(QGuiApplication::clipboard()->text(), u"Time\tShelter\tAir\n06:00\tNorth\t7.8\n10:00\tEast\t12\n"_s);
+    QVERIFY(QGuiApplication::clipboard()->mimeData()->hasHtml());
+    view.key(Qt::Key_Delete);
+    QCOMPARE(view.binding->tables()->grids().size(), 1);
+    QCOMPARE(cells(view), u"|| / || / ||"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    view.select(east + 1, east + 1);
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    view.key(Qt::Key_A, Qt::ControlModifier);
     view.key(Qt::Key_A, Qt::ControlModifier);
     QCOMPARE(selected(view), view.text());
     // Escape collapses a block.
@@ -1119,10 +1135,20 @@ void theSizePickerInsertsATidyEmptyTable()
     view.key(Qt::Key_Tab);
     view.type(u"Shelter"_s);
     QVERIFY2(view.text().contains(u"| Time | Shelter |     |     |"_s), qPrintable(view.text()));
-    // Escape leaves the picker without a table; and there is none to put in a cell.
+    // In a cell no table goes in: the table's own menu opens instead.
+    QMetaObject::invokeMethod(view.pane, "chooseTable");
+    QObject *tableMenu = view.pane->findChild<QObject *>(u"tableMenu"_s);
+    QVERIFY(tableMenu);
+    QTRY_VERIFY(tableMenu->property("opened").toBool());
+    QVERIFY(!picker->property("opened").toBool());
+    QMetaObject::invokeMethod(tableMenu, "close");
+    QTRY_VERIFY(!tableMenu->property("visible").toBool());
+    // Escape leaves the picker without a table.
+    const QString before = view.text();
+    const int another = int(before.indexOf(u"Another"));
+    view.select(another, another);
     QMetaObject::invokeMethod(view.pane, "chooseTable");
     QTRY_VERIFY(picker->property("opened").toBool());
-    const QString before = view.text();
     view.key(Qt::Key_Escape);
     QTRY_VERIFY(!picker->property("visible").toBool());
     QCOMPARE(view.text(), before);
@@ -1384,6 +1410,500 @@ void tablesTheGridCannotHoldStayMarkdown()
     view.select(3, 3);
     view.type(u"z"_s);
     QVERIFY(view.text().startsWith(u"| az | b |"_s));
+}
+
+namespace {
+
+// A table whose second row has a cell merged over two columns.
+const QString mergedTable = u"Intro\n\n| A | B | C |\n| --- | --- | --- |\n| one || keep |\n| ax | bx | cx |\n\nAfter"_s;
+
+void pasteText(GridEditor &view, const QString &text, const QString &html = {})
+{
+    auto *mime = new QMimeData;
+    mime->setText(text);
+    if (!html.isEmpty()) mime->setHtml(html);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    view.binding->paste();
+}
+
+// The layout a grid draws a cell's text with.
+QTextLayout *drawnLayout(GridEditor &view, TableGrid::Place place)
+{
+    TableGrid *grid = view.grid();
+    const QRectF rect = grid->cellRect(place);
+    for (const TableGrid::Drawn &drawn : grid->drawn(0, grid->height() + 1))
+        if (drawn.rect.contains(rect.center())) return drawn.layout;
+    return nullptr;
+}
+
+} // namespace
+
+void aColumnsHandleActsOnTheColumnItPicked()
+{
+    GridEditor view(mergedTable);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrids *tables = view.binding->tables();
+    // B's handle: the merged cell over A and B narrows to A, and A stays.
+    tables->selectColumn(view.grid(), 1, false);
+    QVERIFY(tables->runCommand(u"deleteTableColumn"_s));
+    QCOMPARE(cells(view), u"A|C / one|keep / ax|cx"_s);
+    view.binding->undo();
+    // The column stays the one picked through other commands on it.
+    tables->selectColumn(view.grid(), 1, false);
+    QVERIFY(tables->runCommand(u"alignTableColumnRight"_s));
+    QVERIFY(tables->runCommand(u"deleteTableColumn"_s));
+    QCOMPARE(cells(view), u"A|C / one|keep / ax|cx"_s);
+}
+
+void aRefusedPasteOfCellsChangesNothing()
+{
+    GridEditor view(mergedTable);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const QString before = view.text();
+    // Two values over a block that a merged cell would have to be cut for.
+    view.select(int(before.indexOf(u"one")), int(before.indexOf(u"bx")) + 2);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    pasteText(view, u"x\ty\n"_s);
+    QCOMPARE(refused.count(), 1);
+    QCOMPARE(view.text(), before);
+}
+
+void textWrittenBelowATableStaysText()
+{
+    const QString text = u"Intro\n\n| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int blank = int(text.indexOf(u"\n\nAfter")) + 1;
+    // Prose with pipes is prose, all of it, below the blank line.
+    view.select(blank, blank);
+    pasteText(view, u"note | with | tail\n"_s);
+    QVERIFY2(view.text().contains(u"| one | two |\n\nnote | with | tail\n"_s), qPrintable(view.text()));
+    QCOMPARE(cells(view), u"A|B / one|two"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    // A whole row joins the table.
+    view.select(blank, blank);
+    pasteText(view, u"| three | four |\n"_s);
+    QCOMPARE(cells(view), u"A|B / one|two / three|four"_s);
+}
+
+void anEditThatWouldJoinCellsIsRefused()
+{
+    // A backtick before aaa would open code that the one after bbb closes.
+    const QString text = u"| A | B |\n| --- | --- |\n| aaa | bbb` |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int aaa = int(text.indexOf(u"aaa"));
+    view.select(aaa, aaa);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    view.type(u"`"_s);
+    QCOMPARE(refused.count(), 1);
+    QCOMPARE(view.text(), text);
+    QCOMPARE(cells(view), u"A|B / aaa|bbb`"_s);
+}
+
+void slowRichPastesGoInAsACellsText()
+{
+    const QString text = u"Intro\n\n| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    Attachments attachments(AppPaths::under(view.root.path()));
+    view.binding->setAttachments(&attachments);
+    const int one = int(text.indexOf(u"one"));
+    view.select(one, one + 3);
+    // A page large enough to be converted off the window's thread.
+    pasteText(view, u"First paragraph.\n\nSecond paragraph."_s,
+              u"<p>First paragraph.</p><p>Second paragraph.</p><!--"_s + QString(65536, u' ') + u"-->"_s);
+    QTRY_VERIFY(view.text().contains(u"Second paragraph."_s));
+    QCOMPARE(cells(view), u"A|B / First paragraph. Second paragraph.|two"_s);
+    view.binding->setAttachments(nullptr);
+}
+
+void anEditReachingIntoTwoTablesIsRefused()
+{
+    const QString text = u"| A | B |\n| --- | --- |\n| first | side |\n\nmiddle\n\n| C | D |\n| --- | --- |\n| last | tail |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(2));
+    view.select(int(text.indexOf(u"first")) + 2, int(text.indexOf(u"After")));
+    pasteText(view, u"replacement\nline"_s);
+    QCOMPARE(view.text(), text);
+}
+
+void aDropOnRowsNoLongerThereMovesNothing()
+{
+    const QString text = u"| A |\n| --- |\n| r1 |\n| r2 |\n| r3 |\n| r4 |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrids *tables = view.binding->tables();
+    tables->selectRow(view.grid(), 1, false);
+    // Another window takes the last two rows away while a drag is held.
+    const int r3 = int(text.indexOf(u"| r3"));
+    view.document->buffer()->replace({r3, int(text.indexOf(u"\n\nAfter")) - r3 + 1}, QString(), EditKind::Other);
+    const QString now = view.text();
+    QVERIFY(!tables->moveRowsTo(view.grid(), 5));
+    QCOMPARE(view.text(), now);
+}
+
+void anEmojiReplacesAnotherInACell()
+{
+    const QString text = u"| A   | B   |\n| --- | --- |\n| 😀  | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int emoji = int(text.indexOf(u"😀"_s));
+    view.select(emoji, emoji + 2);
+    pasteText(view, u"😃"_s);
+    QVERIFY2(view.text().contains(u"| 😃  | two |"_s), qPrintable(view.text()));
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+}
+
+void cellsAShortRowLeavesOutAreReachedOneByOne()
+{
+    const QString text = u"| A | B | C |\n| --- | --- | --- |\n| x |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int x = int(text.indexOf(u"x |"));
+    view.select(x + 1, x + 1);
+    view.key(Qt::Key_Tab);
+    QCOMPARE(view.grid()->placeOf(view.cursor()), (TableGrid::Place{1, 1}));
+    view.key(Qt::Key_Tab);
+    QCOMPARE(view.grid()->placeOf(view.cursor()), (TableGrid::Place{1, 2}));
+    view.type(u"C"_s);
+    QCOMPARE(cells(view), u"A|B|C / x||C"_s);
+}
+
+void aSecondViewsCaretStaysWithItsRow()
+{
+    const QString text = u"| Colour |\n| --- |\n| red |\n| tan |\n| blue |\n| gold |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    auto second = view.secondView();
+    QVERIFY(second && second->binding);
+    QTRY_COMPARE(second->binding->tables()->grids().size(), 1);
+    const int blue = int(text.indexOf(u"blue"));
+    second->binding->select(blue + 2, blue + 2);
+    // The first view deletes a row above it.
+    const int red = int(text.indexOf(u"red"));
+    view.select(red, red);
+    QVERIFY(view.binding->tables()->runCommand(u"deleteTableRow"_s));
+    const int now = int(view.text().indexOf(u"blue"));
+    QCOMPARE(second->binding->cursorSource(), now + 2);
+}
+
+void aSecondViewsCaretStaysWithItsRowAmongLikeOnes()
+{
+    const QString text = u"| Colour |\n| --- |\n| red |\n| tan |\n| blue |\n| blue |\n| gold |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    auto second = view.secondView();
+    QVERIFY(second && second->binding);
+    QTRY_COMPARE(second->binding->tables()->grids().size(), 1);
+    // In the first of two blue rows, after "bl".
+    const int blue = int(text.indexOf(u"blue"));
+    second->binding->select(blue + 2, blue + 2);
+    // A row deleted above it: the caret is in the same blue row.
+    const int red = int(text.indexOf(u"red"));
+    view.select(red, red);
+    QVERIFY(view.binding->tables()->runCommand(u"deleteTableRow"_s));
+    QCOMPARE(second->binding->cursorSource(), int(view.text().indexOf(u"blue")) + 2);
+    // Its own row written to in the first view: it stays in it.
+    const int first = int(view.text().indexOf(u"blue"));
+    view.select(first + 4, first + 4);
+    view.type(u"X"_s);
+    QCOMPARE(second->binding->cursorSource(), int(view.text().indexOf(u"blueX")) + 2);
+}
+
+void aChangeOfDialectReadsTheTableAgain()
+{
+    GridEditor view(u"| A | B | C |\n| --- | --- | --- |\n| left || end |\n\nAfter"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrids *tables = view.binding->tables();
+    const int left = int(view.text().indexOf(u"left"));
+    view.select(left, left);
+    QCOMPARE(view.grid()->cellCount(1), 2);
+    QVERIFY(tables->can(u"splitTableCell"_s));
+    // In the Standard dialect two pipes make an empty cell.
+    Dialect::Layers standard;
+    standard.document.profile = md::Profile::Standard;
+    view.document->setSavedDialect(standard);
+    QTRY_COMPARE(view.grid()->cellCount(1), 3);
+    QVERIFY(!tables->can(u"splitTableCell"_s));
+}
+
+void vimRowCopiesKeepMergedCells()
+{
+    GridEditor view(u"| A | B | C |\n| --- | --- | --- |\n| one || end |\n| two | x | y |\n\nAfter"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.pane->setProperty("vimKeys", true);
+    QVERIFY(view.grids(1));
+    const int one = int(view.text().indexOf(u"one"));
+    view.select(one, one);
+    typeText(&view.window, u"yyp"_s);
+    QCOMPARE(cells(view), u"A|B|C / one|end / one|end / two|x|y"_s);
+    QCOMPARE(view.grid()->cellAt({2, 0}).span, 2);
+}
+
+void copiedCellsKeepTheirQuotes()
+{
+    GridEditor view(u"| A | B |\n| --- | --- |\n| \"q\" | two |\n| r | s |\n\nAfter"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    view.select(int(view.text().indexOf(u"\"q\"")), int(view.text().indexOf(u"two")) + 3);
+    view.binding->copy();
+    const int r = int(view.text().indexOf(u"| r |")) + 2;
+    view.select(r, r);
+    view.binding->paste();
+    QCOMPARE(cells(view), u"A|B / \"q\"|two / \"q\"|two"_s);
+}
+
+void inlineCommandsFormatEachSelectedCell()
+{
+    const QString text = u"| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    view.select(int(text.indexOf(u"A")), int(text.indexOf(u"two")) + 3);
+    QVERIFY(view.binding->format(u"bold"_s));
+    QCOMPARE(cells(view), u"**A**|**B** / **one**|**two**"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+}
+
+void aColumnAlignedAnewIsDrawnAligned()
+{
+    GridEditor view(u"| Wide heading |\n| --- |\n| x |\n\nAfter"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int x = int(view.text().indexOf(u"x |"));
+    view.select(x, x);
+    QTextLayout *before = drawnLayout(view, {1, 0});
+    QVERIFY(before);
+    QCOMPARE(before->textOption().alignment() & Qt::AlignHorizontal_Mask, Qt::AlignLeft);
+    QVERIFY(view.binding->tables()->runCommand(u"alignTableColumnRight"_s));
+    QTextLayout *after = drawnLayout(view, {1, 0});
+    QVERIFY(after);
+    QCOMPARE(after->textOption().alignment() & Qt::AlignHorizontal_Mask, Qt::AlignRight);
+}
+
+void aCompositionShowsInItsCell()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north + 5, north + 5);
+    sendPreedit(&view.window, u"ka"_s);
+    QTextLayout *layout = drawnLayout(view, {1, 1});
+    QVERIFY(layout);
+    QCOMPARE(layout->preeditAreaText(), u"ka"_s);
+    QCOMPARE(layout->preeditAreaPosition(), 5);
+    sendPreedit(&view.window, QString());
+    layout = drawnLayout(view, {1, 1});
+    QVERIFY(layout);
+    QVERIFY(layout->preeditAreaText().isEmpty());
+}
+
+void findSeesATableShownAsMarkdown()
+{
+    GridEditor view(u"Intro\n\n| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    DocumentFind find;
+    find.setDocument(view.document);
+    find.setBinding(view.binding);
+    find.setActive(true);
+    find.setPattern(u"|"_s);
+    QTRY_COMPARE(find.count(), 0);
+    const int one = int(view.text().indexOf(u"one"));
+    view.select(one, one);
+    QVERIFY(view.binding->tables()->runCommand(u"showTableMarkdown"_s));
+    QTRY_COMPARE(find.count(), 9);
+}
+
+void doubleAndTripleClicksSelectInACell()
+{
+    GridEditor view(u"| A | B |\n| --- | --- |\n| one two | x |\n\nAfter"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrid *grid = view.grid();
+    QQuickItem *drawn = findItem(view.window.contentItem(), u"tableGrid"_s);
+    QVERIFY(drawn);
+    // Over "two", the second word of the cell.
+    QTextLayout *layout = drawnLayout(view, {1, 0});
+    QVERIFY(layout);
+    const QRectF cell = grid->cellRect({1, 0});
+    const qreal x = cell.left() + grid->padding() + layout->lineAt(0).cursorToX(5);
+    const QPoint at = drawn->mapToScene(QPointF(x, cell.center().y())).toPoint();
+    QTest::mouseDClick(&view.window, Qt::LeftButton, Qt::NoModifier, at);
+    QCOMPARE(selected(view), u"two"_s);
+    QTest::mouseClick(&view.window, Qt::LeftButton, Qt::NoModifier, at);
+    QCOMPARE(selected(view), u"one two"_s);
+    // A click elsewhere just after a double click puts the caret there.
+    QTest::qWait(QGuiApplication::styleHints()->mouseDoubleClickInterval() + 50);
+    QTest::mouseDClick(&view.window, Qt::LeftButton, Qt::NoModifier, at);
+    const QRectF other = grid->cellRect({1, 1});
+    QTest::mouseClick(&view.window, Qt::LeftButton, Qt::NoModifier,
+                      drawn->mapToScene(QPointF(other.left() + grid->padding() + 1, other.center().y())).toPoint());
+    QCOMPARE(view.anchor(), view.cursor());
+    QCOMPARE(view.cell(), u"x"_s);
+}
+
+void homeAndEndKeepToTheLineInAWrappedCell()
+{
+    GridEditor view(u"| A |\n| --- |\n| "_s + QStringLiteral("word ").repeated(45).trimmed() + u" |\n\nAfter"_s,
+                    QSize(320, 480));
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrid *grid = view.grid();
+    const TableGrid::Place place{1, 0};
+    QTRY_VERIFY(grid->lineCount(place) > 2);
+    const auto [start, end] = grid->lineRange(place, 1);
+    view.select(start + 2, start + 2);
+    view.key(Qt::Key_Home);
+    QCOMPARE(view.cursor(), start);
+    view.key(Qt::Key_End);
+    QCOMPARE(view.cursor(), end);
+    QCOMPARE(grid->lineOf(place, view.cursor()), 1);
+    QVERIFY(start > grid->cellAt(place).start && end < grid->cellAt(place).end);
+}
+
+void selectAllTakesThreePressesToTheWholeText()
+{
+    const QString text = u"Before.\n\n| A | B |\n| --- | --- |\n| one |  |\n\nAfter."_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrid *grid = view.grid();
+    // From an empty cell: the cell, every cell, then the whole text.
+    const int empty = grid->cellAt({1, 1}).start;
+    view.select(empty, empty);
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(view.anchor(), empty);
+    QCOMPARE(view.cursor(), empty);
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(view.anchor(), grid->cellAt({0, 0}).start);
+    QCOMPARE(view.cursor(), grid->cellAt({1, 1}).end);
+    view.key(Qt::Key_Delete);
+    QCOMPARE(cells(view), u"| / |"_s);
+    QVERIFY(view.text().startsWith(u"Before."_s) && view.text().endsWith(u"After."_s));
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    view.select(empty, empty);
+    for (int press = 0; press < 3; ++press) view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(selected(view), view.text());
+}
+
+void selectAllInATableOfOneCellStillStopsAtTheCell()
+{
+    GridEditor view(u"Before.\n\n| Alone |\n| --- |\n\nAfter."_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int alone = int(view.text().indexOf(u"Alone"));
+    view.select(alone, alone);
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(selected(view), u"Alone"_s);
+    // Every cell, though there is one, copies as cells.
+    view.binding->copy();
+    QCOMPARE(QGuiApplication::clipboard()->text(), u"Alone\n"_s);
+    QVERIFY(QGuiApplication::clipboard()->mimeData()->hasHtml());
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(selected(view), view.text());
+}
+
+void aSlowPasteGoesWhereItWasMadeAfterTheViewMovesOn()
+{
+    const QString text = u"Intro\n\n| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    Attachments attachments(AppPaths::under(view.root.path()));
+    view.binding->setAttachments(&attachments);
+    const QString otherText = u"Other\n\n| A | B |\n| --- | --- |\n| red | two |\n\nAfter"_s;
+    writeFile(view.root.filePath(u"other.md"_s), otherText.toUtf8());
+    Document *other = view.store->open(view.root.filePath(u"other.md"_s));
+    QVERIFY(other);
+    Document *pasted = view.document;
+    const int one = int(text.indexOf(u"one"));
+    view.select(one, one + 3);
+    pasteText(view, u"First paragraph.\n\nSecond paragraph."_s,
+              u"<p>First paragraph.</p><p>Second paragraph.</p><!--"_s + QString(65536, u' ') + u"-->"_s);
+    // The window shows another document before the paste is converted.
+    view.pane->setProperty("document", QVariant::fromValue(other));
+    QTRY_VERIFY(pasted->buffer()->text().contains(u"Second paragraph."_s));
+    QVERIFY2(pasted->buffer()->text().contains(u"| First paragraph. Second paragraph. | two |"_s),
+             qPrintable(pasted->buffer()->text()));
+    QCOMPARE(other->buffer()->text(), otherText);
+    // The same text pasted again over itself changes nothing.
+    const QString now = pasted->buffer()->text();
+    view.pane->setProperty("document", QVariant::fromValue(pasted));
+    QVERIFY(view.grids(1));
+    const int first = int(now.indexOf(u"First"));
+    view.select(first, first + int(QStringLiteral("First paragraph. Second paragraph.").size()));
+    pasteText(view, u"First paragraph.\n\nSecond paragraph."_s,
+              u"<p>First paragraph.</p><p>Second paragraph.</p><!--"_s + QString(65536, u' ') + u"-->"_s);
+    view.pane->setProperty("document", QVariant::fromValue(other));
+    QTest::qWait(1500);
+    QCOMPARE(pasted->buffer()->text(), now);
+    view.binding->setAttachments(nullptr);
+}
+
+void aSlowPasteLeavesACaretTakenElsewhere()
+{
+    const QString text = u"Intro\n\n| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    Attachments attachments(AppPaths::under(view.root.path()));
+    view.binding->setAttachments(&attachments);
+    const int one = int(text.indexOf(u"one"));
+    view.select(one, one + 3);
+    pasteText(view, u"First paragraph.\n\nSecond paragraph."_s,
+              u"<p>First paragraph.</p><p>Second paragraph.</p><!--"_s + QString(65536, u' ') + u"-->"_s);
+    // The caret goes on into the paragraph after the table meanwhile.
+    const int after = int(text.indexOf(u"After"));
+    view.select(after + 2, after + 2);
+    QTRY_VERIFY(view.text().contains(u"Second paragraph."_s));
+    QCOMPARE(view.cursor(), int(view.text().indexOf(u"After")) + 2);
+    view.type(u"X"_s);
+    QVERIFY(view.text().endsWith(u"AfXter"_s));
+    view.binding->setAttachments(nullptr);
+}
+
+void anImagePastedInACellAsksForItsDescription()
+{
+    const QString text = u"Intro\n\n| A | B |\n| --- | --- |\n| one | two |\n\nAfter"_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    Attachments attachments(AppPaths::under(view.root.path()));
+    view.binding->setAttachments(&attachments);
+    const int one = int(text.indexOf(u"one"));
+    view.select(one, one + 3);
+    QImage image(4, 4, QImage::Format_RGB32);
+    image.fill(Qt::red);
+    auto *mime = new QMimeData;
+    mime->setImageData(image);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    view.binding->paste();
+    QTRY_VERIFY(view.text().contains(u"![]("_s));
+    // The caret waits between the brackets for the image's description.
+    QTRY_COMPARE(view.cursor(), int(view.text().indexOf(u"![]("_s)) + 2);
+    view.type(u"Red"_s);
+    QVERIFY2(view.text().contains(u"![Red]("_s), qPrintable(view.text()));
+    view.binding->setAttachments(nullptr);
 }
 
 } // namespace TableGridTests

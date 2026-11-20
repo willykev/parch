@@ -238,11 +238,13 @@ padded to its widest cell.
 asks for its size: point at the little grid of cells, use the arrow keys, or
 type the number of columns and rows, the header counting as a row. `Enter`
 puts the table in, on a line of its own, with the caret in its first cell;
-`Esc` leaves without one. A table you type by hand, pipes and all, becomes a
-grid as soon as the caret leaves it.
+`Esc` leaves without one. With the caret in a table, the same keys and
+button open that table's menu instead. A table you type by hand, pipes and
+all, becomes a grid as soon as the caret leaves it.
 
 **Write in the cells.** Click a cell to put the caret where you clicked, and
-type. A cell's Markdown stays in view, styled as in the rest of the text, so
+type; double-click to select a word, triple-click to select the cell's text.
+A cell's Markdown stays in view, styled as in the rest of the text, so
 `**bold**`, `[links](…)` and `code` work in cells as anywhere. A `|` you type
 is written `\|`, as Markdown needs it in a table. Spaces at the start or end
 of a cell are dropped, since Markdown ignores them. Typing in a cell is one
@@ -260,14 +262,15 @@ you type.
   adds a row; on a last row left empty, it takes that row away and puts the
   caret below the table.
 - `Shift+Enter` breaks the line inside a cell, written `<br>`.
-- `Home` and `End` go to the start and end of the cell's text, and
+- `Home` and `End` go to the start and end of the line in the cell's text, and
   `Ctrl+Left` and `Ctrl+Right` go a word at a time.
 
 **Select cells.** Drag across cells, or hold `Shift` and move past the edge
 of a cell's text, to select a block of cells. `Delete` empties them, and
-typing replaces them, writing into the first. `Ctrl+A` selects the cell's
-text, then the whole table, then the whole document; `Esc` lets go of a
-block. A selection that starts in a paragraph and reaches into a table takes
+typing replaces them, writing into the first. **Bold**, **Italic** and the
+other inline commands format each cell of a block. `Ctrl+A` selects the
+cell's text, then every cell of the table, then the whole document; `Esc`
+lets go of a block. A selection that starts in a paragraph and reaches into a table takes
 the whole table.
 
 **Copy and paste.** A block of cells copies as cells, which paste into a
@@ -295,9 +298,10 @@ or delete them together.
   column: numbers as numbers and before text, empty cells last, Markdown
   marks left out of the comparison, and rows that compare the same in the
   order they were.
-- A right click in a cell, or the `Menu` key there, offers the spellings of
-  a misspelled word first, and otherwise all of these with **Merge cells**,
-  **Split cell**, **Show as Markdown** and **Delete table**.
+- A right click in a cell, or the `Menu` key there, offers all of these with
+  **Merge cells**, **Split cell**, **Show as Markdown** and **Delete table**.
+  On a misspelled word it offers its spellings first, and the table's
+  commands under **Table**.
 - `Alt+Shift+Up` and `Alt+Shift+Down` move the caret's row, or the rows
   selected; `Alt+Shift+Left` and `Alt+Shift+Right` move its column.
 
@@ -338,8 +342,9 @@ every table as Markdown; **Format table** lines up one shown that way.
 
 A table stays as Markdown, as it is written, when it could not be written as
 a grid without losing something: a row with more cells than the header, a
-row that starts with `||`, a `//` comment line between its rows, or more
-than 128 columns or 20,000 cells.
+row that starts with `||`, a `//` comment line between its rows, lines
+indented or quoted differently from each other, or more than 128 columns or
+20,000 cells.
 
 With Vim keys, in Normal mode the block caret sits in a cell's text. `h`,
 `l`, `w`, `b`, `0` and `$` go from cell to cell along the row, and `j` and

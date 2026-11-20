@@ -8,10 +8,12 @@
 #include "pathtext.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
+#include "tablegrids.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QScopeGuard>
 #include <QTimer>
 #include <QVariantMap>
@@ -208,6 +210,35 @@ bool Insertion::insert(const QString &text, bool block)
             range = {std::max(0, at), 0};
         }
         fittedText = fitted(source, range, text, block);
+    }
+    if (m_writer) {
+        const int at = m_writer(document, range, text, block);
+        if (at != Buffer) {
+            m_insertedAt = at;
+            return at >= 0;
+        }
+    }
+    // Text going into a table's cell, with no view of it to take it, is
+    // the cell's text: on its line, and the table written tidy around it.
+    const md::Options options = document->markdownOptions();
+    if (options.tables) {
+        const MdTable::Dialect dialect = TableGrids::dialectOf(options);
+        bool inCell = false;
+        QList<SourceEdit> edits;
+        {
+            const QString source = buffer->text();
+            inCell = TableGrids::inTableCell(source, range, dialect);
+            if (inCell) {
+                static const QRegularExpression breaks(QStringLiteral("\\s*[\\r\\n\\x{2028}\\x{2029}]+\\s*"));
+                edits = TableGrids::tidyCellEdits(source, {{range, QString(text).replace(breaks, QStringLiteral(" "))}}, dialect);
+            }
+        }
+        if (inCell) {
+            // Text the cell holds already changes nothing.
+            if (!edits.isEmpty() && buffer->replace(edits) != SourceBuffer::EditOutcome::Applied) return false;
+            m_insertedAt = range.start;
+            return true;
+        }
     }
     // The line breaks fitting puts before the text, in the document's own.
     QString lead = fittedText.left(fittedText.indexOf(text));

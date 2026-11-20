@@ -534,8 +534,8 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     // A caret in a grid's cell stays in that cell, at the same place in its
     // text, however the table is written around it.
     // This view's own undo leaves the caret where the change ends, as in any text.
-    const TableGrids::Spot anchorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(anchor);
-    const TableGrids::Spot cursorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(cursor);
+    const TableGrids::Spot anchorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(anchor, range);
+    const TableGrids::Spot cursorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(cursor, range);
     m_pairs.update(source, range, inserted);
     emit sourceEdited(revision, range, inserted);
     // Qt shows CRLF as one separator, so where the edit joins or splits a
@@ -569,8 +569,8 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
         if (position >= oldEnd) return position + delta;
         return newEnd;
     };
-    const int newAnchor = m_tables->positionOf(anchorSpot).value_or(track(anchor));
-    const int newCursor = m_tables->positionOf(cursorSpot).value_or(track(cursor));
+    const int newAnchor = m_tables->positionOf(anchorSpot, range, inserted).value_or(track(anchor));
+    const int newCursor = m_tables->positionOf(cursorSpot, range, inserted).value_or(track(cursor));
     selectEditor(m_pairs.toEditor(newAnchor), m_pairs.toEditor(newCursor));
     m_projecting = false;
     if ((oldLength > largeTextUnits) != (source.size() > largeTextUnits))
@@ -756,6 +756,8 @@ bool EditorBinding::applyEditing(const std::function<std::optional<TextChange>(Q
 {
     if (!editable() || m_projecting || m_blocked) return false;
     cancelComposition();
+    // Over a block of a grid's cells, the command is made on each.
+    if (const std::optional<bool> done = m_tables->formatCells(operation)) return *done;
     // The selection as whole graphemes, keeping its direction.
     const SourceRange range = selection();
     const bool backwards = editorCursor() < editorAnchor();
@@ -1110,6 +1112,7 @@ bool EditorBinding::replace(SourceRange range, const QString &text, EditKind kin
             return false;
         m_tableRunCaret = kind != EditKind::Other ? adapted.cursor : -1;
         m_tableRunKind = kind;
+        if (m_keepCaret) return true;
         m_placedCaret = adapted.cursor;
         const int caret = m_pairs.toEditor(qBound(0, adapted.cursor, m_buffer->length()));
         selectEditor(caret, caret);
@@ -1275,6 +1278,8 @@ void EditorBinding::cancelComposition()
 {
     if (!m_composing) return;
     m_composing = false;
+    m_preedit.clear();
+    m_tables->compositionChanged();
     if (!m_editor || !m_loaded) return;
     // An empty event takes Qt's preedit away. The selection was collapsed
     // while the preedit showed, so Qt has nothing to delete with it, and the
@@ -1400,6 +1405,11 @@ void EditorBinding::handleInputMethod(QInputMethodEvent *event)
         QCoreApplication::sendEvent(m_editor, &shown);
         m_dispatching = false;
         m_composing = true;
+        // A grid draws the composition in its cell.
+        if (preedit != m_preedit) {
+            m_preedit = preedit;
+            m_tables->compositionChanged();
+        }
     }
     revealCursor();
 }

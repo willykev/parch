@@ -864,6 +864,9 @@ private slots:
     void pipesTypedInCellsAreEscapedByDialect() { TableTests::pipesTypedInCellsAreEscapedByDialect(); }
     void tablesInQuotesKeepTheirPrefix() { TableTests::tablesInQuotesKeepTheirPrefix(); }
     void insertedTablesAreTidyAndEmpty() { TableTests::insertedTablesAreTidyAndEmpty(); }
+    void anEditOutsideARunIsAStepOfItsOwn() { TableTests::anEditOutsideARunIsAStepOfItsOwn(); }
+    void cellEditsWithoutAViewKeepTablesTidy() { TableTests::cellEditsWithoutAViewKeepTablesTidy(); }
+    void focusLightsAWholeTable() { TableTests::focusLightsAWholeTable(); }
     void editsInsideACellBecomeCellEdits() { TableGridTests::editsInsideACellBecomeCellEdits(); }
     void editsAcrossTableSyntaxAreRefusedWithAReason() { TableGridTests::editsAcrossTableSyntaxAreRefusedWithAReason(); }
     void wholeTableEditsPassThrough() { TableGridTests::wholeTableEditsPassThrough(); }
@@ -893,6 +896,31 @@ private slots:
     void everyGeometryQuestionHasAnAnswerInATable() { TableGridTests::everyGeometryQuestionHasAnAnswerInATable(); }
     void fontAndWidthChangesKeepTheGrid() { TableGridTests::fontAndWidthChangesKeepTheGrid(); }
     void tablesTheGridCannotHoldStayMarkdown() { TableGridTests::tablesTheGridCannotHoldStayMarkdown(); }
+    void aColumnsHandleActsOnTheColumnItPicked() { TableGridTests::aColumnsHandleActsOnTheColumnItPicked(); }
+    void aRefusedPasteOfCellsChangesNothing() { TableGridTests::aRefusedPasteOfCellsChangesNothing(); }
+    void textWrittenBelowATableStaysText() { TableGridTests::textWrittenBelowATableStaysText(); }
+    void anEditThatWouldJoinCellsIsRefused() { TableGridTests::anEditThatWouldJoinCellsIsRefused(); }
+    void slowRichPastesGoInAsACellsText() { TableGridTests::slowRichPastesGoInAsACellsText(); }
+    void anEditReachingIntoTwoTablesIsRefused() { TableGridTests::anEditReachingIntoTwoTablesIsRefused(); }
+    void aDropOnRowsNoLongerThereMovesNothing() { TableGridTests::aDropOnRowsNoLongerThereMovesNothing(); }
+    void anEmojiReplacesAnotherInACell() { TableGridTests::anEmojiReplacesAnotherInACell(); }
+    void cellsAShortRowLeavesOutAreReachedOneByOne() { TableGridTests::cellsAShortRowLeavesOutAreReachedOneByOne(); }
+    void aSecondViewsCaretStaysWithItsRow() { TableGridTests::aSecondViewsCaretStaysWithItsRow(); }
+    void aChangeOfDialectReadsTheTableAgain() { TableGridTests::aChangeOfDialectReadsTheTableAgain(); }
+    void vimRowCopiesKeepMergedCells() { TableGridTests::vimRowCopiesKeepMergedCells(); }
+    void copiedCellsKeepTheirQuotes() { TableGridTests::copiedCellsKeepTheirQuotes(); }
+    void inlineCommandsFormatEachSelectedCell() { TableGridTests::inlineCommandsFormatEachSelectedCell(); }
+    void aColumnAlignedAnewIsDrawnAligned() { TableGridTests::aColumnAlignedAnewIsDrawnAligned(); }
+    void aCompositionShowsInItsCell() { TableGridTests::aCompositionShowsInItsCell(); }
+    void findSeesATableShownAsMarkdown() { TableGridTests::findSeesATableShownAsMarkdown(); }
+    void doubleAndTripleClicksSelectInACell() { TableGridTests::doubleAndTripleClicksSelectInACell(); }
+    void homeAndEndKeepToTheLineInAWrappedCell() { TableGridTests::homeAndEndKeepToTheLineInAWrappedCell(); }
+    void aSecondViewsCaretStaysWithItsRowAmongLikeOnes() { TableGridTests::aSecondViewsCaretStaysWithItsRowAmongLikeOnes(); }
+    void selectAllTakesThreePressesToTheWholeText() { TableGridTests::selectAllTakesThreePressesToTheWholeText(); }
+    void selectAllInATableOfOneCellStillStopsAtTheCell() { TableGridTests::selectAllInATableOfOneCellStillStopsAtTheCell(); }
+    void aSlowPasteGoesWhereItWasMadeAfterTheViewMovesOn() { TableGridTests::aSlowPasteGoesWhereItWasMadeAfterTheViewMovesOn(); }
+    void aSlowPasteLeavesACaretTakenElsewhere() { TableGridTests::aSlowPasteLeavesACaretTakenElsewhere(); }
+    void anImagePastedInACellAsksForItsDescription() { TableGridTests::anImagePastedInACellAsksForItsDescription(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

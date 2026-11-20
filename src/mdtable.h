@@ -91,6 +91,7 @@ enum class Unfit {
     LeadingMerge, // a row starts with a merge marker, with no cell to widen
     CommentLine,  // a // comment line sits between its rows
     TooLarge,     // more columns or cells than a table is laid out with
+    MixedPrefixes, // its lines are indented, or quoted, differently
 };
 
 struct Table {
@@ -165,6 +166,11 @@ struct Layout {
 };
 
 Layout write(const Model &model);
+// Whether a row of a written table reads back as the model has it, the
+// same cells over the same columns with the same text: a code span opened
+// in one cell and closed in the next, for one, would join them.
+// `columns` is the model's column count, worked out when it is not given.
+bool readsBack(const Layout &layout, const Model &model, int row, const Dialect &dialect = {}, int columns = -1);
 
 // ---- Changes to a table ------------------------------------------------------
 

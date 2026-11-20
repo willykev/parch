@@ -1,6 +1,8 @@
 #include "documentfind.h"
 
+#include "editorbinding.h"
 #include "sourcebuffer.h"
+#include "tablegrids.h"
 #include "workerfailure.h"
 
 #include <QtConcurrent>
@@ -178,7 +180,14 @@ void DocumentFind::failed(const QString &reason)
 void DocumentFind::setBinding(EditorBinding *binding)
 {
     if (binding == m_binding) return;
+    if (m_binding) disconnect(m_binding->tables(), nullptr, this, nullptr);
     m_binding = binding;
+    // A table shown as a grid, or as its Markdown again, changes what is to
+    // be found in it: the text is looked in again.
+    if (binding)
+        connect(binding->tables(), &TableGrids::gridsChanged, this, [this] {
+            if (m_active && m_document && m_expression) queryEdited();
+        });
     emit bindingChanged();
 }
 

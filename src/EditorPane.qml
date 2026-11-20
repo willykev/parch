@@ -138,7 +138,8 @@ Rectangle {
         const found = spelling.misspellingAt(binding.editorToSource(position))
         if (found.word === undefined || !spellChecker)
             return false
-        spellingMenu.offer(found.start, found.end, found.word, spellChecker.suggestions(found.word))
+        spellingMenu.offer(found.start, found.end, found.word, spellChecker.suggestions(found.word),
+                           binding.tables.caretInGrid)
         spellingMenu.popup(editor, point.x, point.y)
         return true
     }
@@ -169,6 +170,11 @@ Rectangle {
     // Asks for the size of a new table beside the caret, and puts it in.
     function chooseTable() {
         const caret = binding.caretRectangle()
+        // In a table, its menu: no table goes inside a cell.
+        if (binding.tables.caretInGrid) {
+            offerTableMenu(Qt.point(caret.x, caret.y + caret.height))
+            return
+        }
         const at = editor.mapToItem(pane, caret.x, caret.y + caret.height)
         tablePicker.x = Math.max(0, Math.min(at.x, pane.width - tablePicker.implicitWidth))
         tablePicker.y = Math.max(0, Math.min(at.y, pane.height - tablePicker.implicitHeight))
@@ -511,12 +517,30 @@ Rectangle {
                             acceptedButtons: Qt.LeftButton | Qt.RightButton
                             cursorShape: Qt.IBeamCursor
                             property int pressedAt: -1
+                            // When and where a double click came, for a third there to select the cell's text.
+                            property double doubleAt: 0
+                            property point doublePoint
                             function sourceAt(mouse) {
                                 return gridSlot.modelData.sourceAt(mouse.x + gridSlot.modelData.scrollX, mouse.y)
+                            }
+                            onDoubleClicked: (mouse) => {
+                                if (mouse.button !== Qt.LeftButton)
+                                    return
+                                binding.tables.selectWordAt(sourceAt(mouse))
+                                doubleAt = Date.now()
+                                doublePoint = Qt.point(mouse.x, mouse.y)
                             }
                             onPressed: (mouse) => {
                                 editor.forceActiveFocus()
                                 const at = sourceAt(mouse)
+                                const near = Math.abs(mouse.x - doublePoint.x) <= Qt.styleHints.startDragDistance
+                                             && Math.abs(mouse.y - doublePoint.y) <= Qt.styleHints.startDragDistance
+                                if (mouse.button === Qt.LeftButton && near && Date.now() - doubleAt < Qt.styleHints.mouseDoubleClickInterval) {
+                                    doubleAt = 0
+                                    binding.tables.selectCellAt(at)
+                                    pressedAt = -1
+                                    return
+                                }
                                 if (mouse.button === Qt.RightButton) {
                                     const point = mapToItem(editor, mouse.x, mouse.y)
                                     // A right click in a block keeps it, for its cells' commands.
@@ -532,7 +556,7 @@ Rectangle {
                                 binding.select(pressedAt, at)
                             }
                             onPositionChanged: (mouse) => {
-                                if (pressed && pressedButtons & Qt.LeftButton)
+                                if (pressed && pressedButtons & Qt.LeftButton && pressedAt >= 0)
                                     binding.select(pressedAt, sourceAt(mouse))
                             }
                         }
@@ -638,8 +662,10 @@ Rectangle {
                                 gridSlot.dropRow = Math.max(1, at > rect.y + rect.height / 2 ? over + 1 : over)
                             }
                             onReleased: {
+                                // A drop the table no longer has, as another window's edit leaves, moves nothing.
                                 if (dragging) {
-                                    binding.tables.moveRowsTo(gridSlot.modelData, gridSlot.dropRow)
+                                    if (gridSlot.dropRow >= 1 && gridSlot.dropRow <= gridSlot.modelData.rows)
+                                        binding.tables.moveRowsTo(gridSlot.modelData, gridSlot.dropRow)
                                 } else if (row > 0) {
                                     tableMenu.kind = "row"
                                     tableMenu.popup(rowHandle, rowHandle.width, 0)
@@ -704,7 +730,8 @@ Rectangle {
                             }
                             onReleased: {
                                 if (dragging) {
-                                    binding.tables.moveColumnsTo(gridSlot.modelData, gridSlot.dropColumn)
+                                    if (gridSlot.dropColumn >= 0 && gridSlot.dropColumn <= gridSlot.modelData.columns)
+                                        binding.tables.moveColumnsTo(gridSlot.modelData, gridSlot.dropColumn)
                                 } else {
                                     tableMenu.kind = "column"
                                     tableMenu.popup(columnHandle, 0, columnHandle.height)
@@ -938,6 +965,7 @@ Rectangle {
     SpellingMenu {
         id: spellingMenu
         objectName: "spellingMenu"
+        tables: binding.tables
         onReplace: (start, end, word, replacement) => spelling.replaceWord(start, end, word, replacement)
         onAddWord: (word) => pane.spellChecker.addToDictionary(word)
         onIgnoreWord: (word) => pane.spellChecker.ignore(word)

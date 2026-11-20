@@ -876,6 +876,21 @@ void vimOperatorsActOnCellsAndRows()
     view.select(int(view.text().indexOf(u"South")) + 2, int(view.text().indexOf(u"South")) + 2);
     sendKey(&view.window, u'D');
     QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|So|7.8 / 10:00|East|12"_s);
+    // x takes a character and . takes another; r replaces one.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east, east);
+    sendKey(&view.window, u'x');
+    QCOMPARE(view.cell(), u"ast"_s);
+    sendKey(&view.window, u'.');
+    QCOMPARE(view.cell(), u"st"_s);
+    typeText(&view.window, u"rS"_s);
+    QCOMPARE(view.cell(), u"St"_s);
+    // x empties the cell and stops there, the table whole.
+    typeText(&view.window, u"xx"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|So|7.8 / 10:00||12"_s);
+    const QString emptied = view.text();
+    sendKey(&view.window, u'x');
+    QCOMPARE(view.text(), emptied);
     // J would join the row to the next: nothing changes.
     const QString now = view.text();
     sendKey(&view.window, u'J');

@@ -159,6 +159,9 @@ public:
     // selected. False when the command is unknown, changes nothing, or the
     // view takes no edits now.
     Q_INVOKABLE bool format(const QString &command);
+    // Puts in a new table of empty cells after the caret's line, `rows`
+    // counting the header, and the caret in its first cell, as one step.
+    Q_INVOKABLE bool insertTable(int columns, int rows);
     // Whether a formatting command would change the text with the
     // selection as it is now, or with the caret at a source position; for
     // commands that act only on what is at the caret.
@@ -204,6 +207,9 @@ public:
     // The answers to includeAsked() and copyAsked(); a DropChoice for the first.
     Q_INVOKABLE void answerInclude(int choice);
     Q_INVOKABLE void answerCopy(bool copy);
+    // Where the caret is drawn, in the editor's coordinates: in a grid's
+    // cell as the grid draws it.
+    Q_INVOKABLE QRectF caretRectangle() const;
     // The TextEdit's own insert, remove and clear, in its positions.
     Q_INVOKABLE void replaceEditorRange(int start, int end, const QString &text);
     // The TextEdit's own append: a new paragraph at the end.

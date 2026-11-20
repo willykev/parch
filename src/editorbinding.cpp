@@ -692,6 +692,17 @@ bool EditorBinding::format(const QString &command)
     });
 }
 
+bool EditorBinding::insertTable(int columns, int rows)
+{
+    const MarkdownEditing::Options options = editingOptions();
+    const bool done = applyEditing([&](QStringView text, int, int cursor) {
+        return std::optional(MarkdownEditing::insertTable(text, cursor, qBound(1, columns, 64), qBound(1, rows, 1000), options));
+    });
+    // A table put in here is a grid at once, the caret in its first cell.
+    if (done) m_tables->adoptAt(m_cursorSource);
+    return done;
+}
+
 bool EditorBinding::applyEditing(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation)
 {
     if (!editable() || m_projecting || m_blocked) return false;
@@ -1137,6 +1148,8 @@ void EditorBinding::redo()
 void EditorBinding::copy()
 {
     if (!m_loaded) return;
+    // A block of a grid's cells goes as cells.
+    if (m_tables->copyBlock()) return;
     // The source's own text, not Qt's, which turns CRLF into LF and NBSP into spaces.
     const SourceRange range = selection();
     if (range.length > 0) QGuiApplication::clipboard()->setText(m_buffer->text().mid(range.start, range.length));
@@ -1146,6 +1159,7 @@ void EditorBinding::cut()
 {
     if (!editable()) return;
     cancelComposition();
+    if (m_tables->cutBlock()) return;
     const SourceRange range = selection();
     if (range.length == 0) return;
     copy();
@@ -1516,6 +1530,12 @@ void EditorBinding::keepCursorInView(qreal formerHeight)
     const qreal top = view->property("contentY").toReal();
     if (caret.top() < top || caret.bottom() > top + formerHeight) return;
     revealCursor();
+}
+
+QRectF EditorBinding::caretRectangle() const
+{
+    if (!m_loaded || !m_editor) return {};
+    return rectangleAt(editorCursor());
 }
 
 QRectF EditorBinding::rectangleAt(int editorPosition) const

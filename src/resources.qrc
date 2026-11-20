@@ -3,6 +3,8 @@
         <file>Main.qml</file>
         <file>EditorPane.qml</file>
         <file>SpellingMenu.qml</file>
+        <file>TableMenu.qml</file>
+        <file>TableSizePicker.qml</file>
         <file>HeaderBar.qml</file>
         <file>WindowMenu.qml</file>
         <file>LibraryPanel.qml</file>

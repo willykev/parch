@@ -1102,6 +1102,19 @@ TextChange insertTable(QStringView text, int position, const Options &options)
     return insertBlock(text, position, block, 2, 8, options);
 }
 
+} // namespace
+
+TextChange insertTable(QStringView text, int position, int columns, int rows, const Options &options)
+{
+    const QString block = MdTable::write(MdTable::emptyTable(columns, rows, QString(), options.newline)).text;
+    // The first cell is empty: the caret goes just before its closing pipe,
+    // where its text begins, as the table reads it.
+    const int first = int(block.indexOf(u'|', 1));
+    return insertBlock(text, position, block, first, 0, options);
+}
+
+namespace {
+
 // A note's definition, `reference: `, at the end of the text, after a
 // blank line or straight after other definitions; and where the caret goes
 // in it, as an offset into the text after the edit.

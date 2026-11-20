@@ -391,6 +391,8 @@ void Backend::addCommands()
     // So is the Markdown styled as it is written.
     m_commands->setAction(QStringLiteral("liveFormatting"),
                           [this](WindowContext *) { m_settings->setLiveFormatting(!m_settings->liveFormatting()); });
+    m_commands->setAction(QStringLiteral("tableGrids"),
+                          [this](WindowContext *) { m_settings->setTableGrids(!m_settings->tableGrids()); });
     m_commands->setAction(QStringLiteral("clearRecent"), inWindow(&Backend::clearRecent));
     m_commands->setAction(QStringLiteral("userGuide"), inWindow(&Backend::openUserGuide));
     m_commands->setAction(QStringLiteral("markdownGuide"), inWindow(&Backend::openMarkdownGuide));

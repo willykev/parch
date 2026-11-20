@@ -104,6 +104,8 @@ void EditorBinding::pastePlainText()
 
 void EditorBinding::pasteFrom(const QMimeData *mime)
 {
+    // Cells from a spreadsheet, or another grid, fill a grid's cells from the caret's.
+    if (m_tables->pasteCells(mime)) return;
     cancelComposition();
     // Files copied in a file manager come in as when they are dropped.
     const QStringList files = mime->hasUrls() ? localFiles(mime->urls()) : QStringList();

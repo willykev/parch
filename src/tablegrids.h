@@ -22,6 +22,7 @@
 class EditorBinding;
 class EditorDecorations;
 class QKeyEvent;
+class QMimeData;
 class QTextDocument;
 class TableGrids;
 
@@ -97,6 +98,15 @@ public:
     Place placeAt(QPointF point) const;
     // The source position at a point of the grid, in its cell.
     Q_INVOKABLE int sourceAt(qreal x, qreal y) const;
+    // For the handles: the row and the column under a point of the grid, the
+    // nearest outside it, and where each is, rules excluded.
+    Q_INVOKABLE int rowAt(qreal y) const;
+    Q_INVOKABLE int columnAt(qreal x) const;
+    Q_INVOKABLE QRectF rowRect(int row) const;
+    Q_INVOKABLE QRectF columnRect(int column) const;
+    // The row and the column of the cell the view's caret is in, or -1.
+    Q_INVOKABLE int caretRow() const;
+    Q_INVOKABLE int caretColumn() const;
     // Where a caret at a source position in a cell is drawn, in the grid's coordinates.
     QRectF caretAt(int position) const;
     // The text lines of a cell: how many, and the source position at x on
@@ -254,6 +264,41 @@ public:
     Spot spotOf(int position) const;
     std::optional<int> positionOf(const Spot &spot) const;
 
+    // The commands for a grid's rows, columns, cells and the table as a
+    // whole, by id, in the order a menu lists them.
+    static QStringList commands();
+    static bool isCommand(const QString &id);
+    // Whether a command acts at the caret now, and runs it there, on the
+    // rows or columns the selection covers.
+    Q_INVOKABLE bool can(const QString &command) const;
+    Q_INVOKABLE bool runCommand(const QString &command);
+    // From a row's or a column's handle: selects it whole, or the rows or
+    // columns from the selection's to it.
+    Q_INVOKABLE void selectRow(TableGrid *grid, int row, bool extend);
+    Q_INVOKABLE void selectColumn(TableGrid *grid, int column, bool extend);
+    // Moves the selected rows, or the caret's, to before row `to` of the
+    // table as it is; columns to before column `to`.
+    Q_INVOKABLE bool moveRowsTo(TableGrid *grid, int to);
+    Q_INVOKABLE bool moveColumnsTo(TableGrid *grid, int to);
+    // Adds a row after the last, or a column after the last, from the
+    // grid's plus buttons.
+    Q_INVOKABLE bool appendRow(TableGrid *grid);
+    Q_INVOKABLE bool appendColumn(TableGrid *grid);
+    // A table the binding has just put in, shown as a grid at once.
+    void adoptAt(int position);
+    // The clipboard and a block of cells: copied as cells, tab-separated
+    // text and an HTML table; cut, then emptied. False when the selection is
+    // no block, for the view's own copy and cut.
+    bool copyBlock();
+    bool cutBlock();
+    // Cells from a spreadsheet pasted at the caret's cell, or over a block
+    // of them: they fill it and grow the table where they reach past it. A
+    // single value fills every cell of a block. False for anything else.
+    bool pasteCells(const QMimeData *mime);
+    // The cells a clipboard holds, row by row: from an HTML table, or text
+    // with tabs between them; none for anything else.
+    static std::optional<QList<QStringList>> cellsOf(const QMimeData *mime);
+
     // The binding's projection: shown anew, a change followed, laid out anew.
     void loaded();
     void sourceChanged(SourceRange range, int inserted);
@@ -302,6 +347,16 @@ private:
     // Runs a change on the grid as the view's own edit, one undo step, and
     // places the selection it says; false when it is refused.
     bool run(const Adapted &change);
+    // The rows and columns the selection covers in a grid: a block, or the caret's cell.
+    struct Span {
+        int firstRow = 0, lastRow = 0, firstColumn = 0, lastColumn = 0;
+    };
+    std::optional<Span> span(const TableGrid *grid) const;
+    // A change that leaves a block selected, from one cell to another.
+    Adapted changeBlock(const TableGrid *grid, const std::function<QString(MdTable::Model &)> &operation,
+                        const Span &selected) const;
+    // The table, shown as Markdown in this view, that holds a position.
+    std::optional<MdTable::Table> markdownTableAt(int position) const;
     bool enterFromProse(int position, bool down);
 
     EditorBinding *m_binding;
@@ -312,6 +367,8 @@ private:
     // Tables the parse found that hold the caret: shown as Markdown until
     // the caret leaves them, so that one being typed is not drawn under it.
     QList<std::pair<int, int>> m_waiting;
+    // Tables this view shows as Markdown, by where they start.
+    QList<int> m_markdown;
     QString m_problem;
     // Where the cursor was last, for the direction a move into syntax came from.
     int m_lastCursor = 0;

@@ -691,6 +691,12 @@ ApplicationWindow {
     // while the caret is on one, and superscript and subscript where the
     // dialect reads what they write: after a letter or a digit.
     function fitsCaret(command) {
+        // A table's commands where the caret is in one shown as a grid, and
+        // no new table inside a cell.
+        if (tableCommands.indexOf(command) >= 0)
+            return editorPane.binding.tables.can(command)
+        if (command === "table")
+            return !editorPane.binding.tables.caretInGrid
         if (command !== "inlineNote" && command !== "defineNote" && command !== "superscript" && command !== "subscript")
             return true
         return editorPane.cursorSource >= 0 && editorPane.binding.acts(command)
@@ -758,8 +764,17 @@ ApplicationWindow {
         moveDocument: () => libraryPanel.moveDocument(window.tabs.activePath),
         trashDocument: () => libraryPanel.trashDocument(window.tabs.activePath),
         reopenWithEncoding: () => encodingDialog.made().choose(window.document),
+        // A new table, of the size chosen in the picker beside the caret.
+        table: () => editorPane.chooseTable(),
         shortcuts: () => shortcutsDialog.made().show()
     })
+
+    // The commands of a table shown as a grid, which its view runs.
+    readonly property var tableCommands: ["insertTableRowAbove", "insertTableRowBelow", "duplicateTableRow",
+        "moveTableRowUp", "moveTableRowDown", "deleteTableRow", "insertTableColumnLeft", "insertTableColumnRight",
+        "moveTableColumnLeft", "moveTableColumnRight", "alignTableColumnDefault", "alignTableColumnLeft",
+        "alignTableColumnCenter", "alignTableColumnRight", "sortTableAscending", "sortTableDescending",
+        "deleteTableColumn", "mergeTableCells", "splitTableCell", "showTableMarkdown", "showTableGrid", "deleteTable"]
 
     // Runs a command in this window, however it was asked for.
     function run(command) {
@@ -768,6 +783,9 @@ ApplicationWindow {
         const action = windowActions[command]
         if (action) {
             action()
+        } else if (tableCommands.indexOf(command) >= 0) {
+            if (editorPane.binding.tables.runCommand(command))
+                window.focusText()
         } else if (editorPane.format(command)) {
             // Chosen from a button or the menu, the text has the keys again.
             window.focusText()
@@ -838,6 +856,7 @@ ApplicationWindow {
                 distractionFree: window.distractionFree
                 spellingWanted: backend.spelling.wanted
                 liveFormatting: settings.liveFormatting
+                tableGrids: settings.tableGrids
                 canRun: window.canRun
                 // Each command is this window's, whichever window the backend last
                 // heard was in front. Finding a document and showing the outline
@@ -1179,6 +1198,7 @@ ApplicationWindow {
                     focusUnit: settings.focusUnit
                     focusDimming: settings.focusDimming
                     liveFormatting: settings.liveFormatting
+                    tableGrids: settings.tableGrids
                     onIncludeAsked: (name, canInclude) => attachmentDialog.made().askInclude(name, canInclude)
                     onCopyAsked: (names, bytes) => attachmentDialog.made().askCopy(names, bytes)
                     // Where the view is goes into the session, but not in a

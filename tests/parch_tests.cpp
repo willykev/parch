@@ -879,6 +879,13 @@ private slots:
     void backspaceAfterATableSelectsThenDeletesIt() { TableGridTests::backspaceAfterATableSelectsThenDeletesIt(); }
     void vimMotionsFlowAcrossCells() { TableGridTests::vimMotionsFlowAcrossCells(); }
     void vimOperatorsActOnCellsAndRows() { TableGridTests::vimOperatorsActOnCellsAndRows(); }
+    void everyTableCommandRunsFromMenuPaletteAndHandle() { TableGridTests::everyTableCommandRunsFromMenuPaletteAndHandle(); }
+    void handlesMoveRowsAndColumnsByDragging() { TableGridTests::handlesMoveRowsAndColumnsByDragging(); }
+    void theSizePickerInsertsATidyEmptyTable() { TableGridTests::theSizePickerInsertsATidyEmptyTable(); }
+    void tablesCanBeShownAsMarkdownPerView() { TableGridTests::tablesCanBeShownAsMarkdownPerView(); }
+    void readOnlyTablesTakeNoEdits() { TableGridTests::readOnlyTablesTakeNoEdits(); }
+    void copyingCellsGivesTabsAndAnHtmlTable() { TableGridTests::copyingCellsGivesTabsAndAnHtmlTable(); }
+    void pastingCellsFillsOverwritesAndGrows() { TableGridTests::pastingCellsFillsOverwritesAndGrows(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

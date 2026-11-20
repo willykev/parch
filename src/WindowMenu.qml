@@ -22,6 +22,7 @@ ThemedMenu {
     property bool distractionFree: false
     property bool spellingWanted: false
     property bool liveFormatting: true
+    property bool tableGrids: true
     // Whether a command can run now, as the window says.
     property var canRun: function(command) { return true }
 
@@ -87,6 +88,36 @@ ThemedMenu {
         CommandEntry { command: "toggleTask" }
         CommandEntry { command: "codeBlock" }
         CommandEntry { command: "formatTable" }
+        // What the table at the caret, shown as a grid, can do.
+        ThemedMenu {
+            objectName: "tableMenu"
+            title: qsTr("Table")
+
+            CommandEntry { command: "insertTableRowAbove" }
+            CommandEntry { command: "insertTableRowBelow" }
+            CommandEntry { command: "duplicateTableRow" }
+            CommandEntry { command: "moveTableRowUp" }
+            CommandEntry { command: "moveTableRowDown" }
+            CommandEntry { command: "deleteTableRow" }
+            MenuLine {}
+            CommandEntry { command: "insertTableColumnLeft" }
+            CommandEntry { command: "insertTableColumnRight" }
+            CommandEntry { command: "moveTableColumnLeft" }
+            CommandEntry { command: "moveTableColumnRight" }
+            CommandEntry { command: "alignTableColumnDefault" }
+            CommandEntry { command: "alignTableColumnLeft" }
+            CommandEntry { command: "alignTableColumnCenter" }
+            CommandEntry { command: "alignTableColumnRight" }
+            CommandEntry { command: "sortTableAscending" }
+            CommandEntry { command: "sortTableDescending" }
+            CommandEntry { command: "deleteTableColumn" }
+            MenuLine {}
+            CommandEntry { command: "mergeTableCells" }
+            CommandEntry { command: "splitTableCell" }
+            CommandEntry { command: "showTableMarkdown" }
+            CommandEntry { command: "showTableGrid" }
+            CommandEntry { command: "deleteTable" }
+        }
         MenuLine {}
         CommandEntry { command: "link" }
         CommandEntry { command: "image" }
@@ -145,6 +176,11 @@ ThemedMenu {
         objectName: "liveFormattingEntry"
         command: "liveFormatting"
         text: windowMenu.liveFormatting ? qsTr("Turn off live formatting") : qsTr("Turn on live formatting")
+    }
+    CommandEntry {
+        objectName: "tableGridsEntry"
+        command: "tableGrids"
+        text: windowMenu.tableGrids ? qsTr("Show tables as Markdown") : qsTr("Show tables as grids")
     }
     CommandEntry {
         objectName: "focusModeEntry"

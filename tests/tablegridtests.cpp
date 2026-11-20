@@ -17,6 +17,7 @@
 #include <QGuiApplication>
 #include <QSignalSpy>
 #include <QInputMethodQueryEvent>
+#include <QMimeData>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -839,6 +840,304 @@ void vimOperatorsActOnCellsAndRows()
     const QString now = view.text();
     sendKey(&view.window, u'J');
     QCOMPARE(view.text(), now);
+}
+
+void everyTableCommandRunsFromMenuPaletteAndHandle()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrids *tables = view.binding->tables();
+    const auto at = [&](const QString &text) {
+        const int position = int(view.text().indexOf(text));
+        view.select(position, position);
+    };
+    const auto runs = [&](const QString &command) {
+        QVERIFY2(tables->can(command), qPrintable(command));
+        QVERIFY2(tables->runCommand(command), qPrintable(command));
+    };
+    // Every command is one the registry and Format → Table know.
+    QCOMPARE(TableGrids::commands().size(), 22);
+    at(u"North"_s);
+    runs(u"insertTableRowBelow"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / || / 10:00|East|12"_s);
+    QCOMPARE(view.grid()->placeOf(view.cursor()), (TableGrid::Place{2, 1}));
+    view.binding->undo();
+    at(u"North"_s);
+    runs(u"insertTableRowAbove"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / || / 06:00|North|7.8 / 10:00|East|12"_s);
+    view.binding->undo();
+    at(u"North"_s);
+    runs(u"duplicateTableRow"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / 06:00|North|7.8 / 10:00|East|12"_s);
+    view.binding->undo();
+    at(u"North"_s);
+    runs(u"moveTableRowDown"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 10:00|East|12 / 06:00|North|7.8"_s);
+    QCOMPARE(view.cell(), u"North"_s);
+    runs(u"moveTableRowUp"_s);
+    QCOMPARE(view.text(), weather);
+    QVERIFY(!tables->can(u"moveTableRowUp"_s));
+    runs(u"deleteTableRow"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 10:00|East|12"_s);
+    view.binding->undo();
+    at(u"North"_s);
+    runs(u"insertTableColumnLeft"_s);
+    QCOMPARE(cells(view), u"Time||Shelter|Air / 06:00||North|7.8 / 10:00||East|12"_s);
+    view.binding->undo();
+    at(u"North"_s);
+    runs(u"moveTableColumnRight"_s);
+    QCOMPARE(cells(view), u"Time|Air|Shelter / 06:00|7.8|North / 10:00|12|East"_s);
+    QCOMPARE(view.cell(), u"North"_s);
+    runs(u"moveTableColumnLeft"_s);
+    QCOMPARE(view.text(), weather);
+    runs(u"alignTableColumnRight"_s);
+    QVERIFY2(view.text().contains(u"| ----- | ------: | --- |"_s), qPrintable(view.text()));
+    runs(u"alignTableColumnDefault"_s);
+    QCOMPARE(view.text(), weather);
+    at(u"7.8"_s);
+    runs(u"sortTableDescending"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 10:00|East|12 / 06:00|North|7.8"_s);
+    view.binding->undo();
+    at(u"North"_s);
+    runs(u"deleteTableColumn"_s);
+    QCOMPARE(cells(view), u"Time|Air / 06:00|7.8 / 10:00|12"_s);
+    view.binding->undo();
+    // Merge and split, in the Writer dialect.
+    at(u"North"_s);
+    runs(u"mergeTableCells"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North 7.8 / 10:00|East|12"_s);
+    QVERIFY(view.text().contains(u"||"_s));
+    runs(u"splitTableCell"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North 7.8| / 10:00|East|12"_s);
+    while (view.document->buffer()->canUndo()) view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    // The table goes whole, its line with it.
+    QVERIFY(view.grids(1));
+    at(u"North"_s);
+    runs(u"deleteTable"_s);
+    QCOMPARE(view.text(), u"Before the table.\n\n\nAfter the table."_s);
+    view.binding->undo();
+    // Outside a table, none of them runs.
+    QVERIFY(view.grids(1));
+    at(u"After"_s);
+    for (const QString &command : TableGrids::commands()) QVERIFY2(!tables->can(command), qPrintable(command));
+    // From a row's handle: the row selected whole, its menu offered.
+    at(u"North"_s);
+    tables->selectRow(view.grid(), 1, false);
+    int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
+    QVERIFY(tables->block(view.grid(), &r0, &r1, &c0, &c1));
+    QCOMPARE(QList<int>({r0, r1, c0, c1}), QList<int>({1, 1, 0, 2}));
+    tables->selectColumn(view.grid(), 2, true);
+    QVERIFY(tables->block(view.grid(), &r0, &r1, &c0, &c1));
+    QCOMPARE(QList<int>({r0, r1, c0, c1}), QList<int>({0, 2, 0, 2}));
+    QQuickItem *rowHandle = findItem(view.window.contentItem(), u"rowHandle"_s);
+    QVERIFY(rowHandle && rowHandle->isVisible());
+}
+
+void handlesMoveRowsAndColumnsByDragging()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east, east);
+    QQuickItem *handle = findItem(view.window.contentItem(), u"rowHandle"_s);
+    QTRY_VERIFY(handle && handle->isVisible());
+    // Drag the last row's handle above the first row.
+    const QPointF from = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2));
+    TableGrid *grid = view.grid();
+    QQuickItem *slot = handle->parentItem();
+    const QRectF first = grid->rowRect(1);
+    const QPointF to = slot->mapToScene(QPointF(-handle->width() / 2, first.y() + 2));
+    QTest::mousePress(&view.window, Qt::LeftButton, Qt::NoModifier, from.toPoint());
+    for (int step = 1; step <= 6; ++step)
+        QTest::mouseMove(&view.window, (from + (to - from) * step / 6.0).toPoint());
+    QQuickItem *line = findItem(view.window.contentItem(), u"rowDropLine"_s);
+    QVERIFY(line && line->isVisible());
+    QTest::mouseRelease(&view.window, Qt::LeftButton, Qt::NoModifier, to.toPoint());
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 10:00|East|12 / 06:00|North|7.8"_s);
+    QVERIFY(!line->isVisible());
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    // A column's handle, dragged to the right edge, moves it last.
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north, north);
+    QQuickItem *columnHandle = findItem(view.window.contentItem(), u"columnHandle"_s);
+    QTRY_VERIFY(columnHandle && columnHandle->isVisible());
+    const QPointF grab = columnHandle->mapToScene(QPointF(columnHandle->width() / 2, columnHandle->height() / 2));
+    const QPointF drop = slot->mapToScene(QPointF(view.grid()->width() - 3, -columnHandle->height()));
+    QTest::mousePress(&view.window, Qt::LeftButton, Qt::NoModifier, grab.toPoint());
+    for (int step = 1; step <= 6; ++step)
+        QTest::mouseMove(&view.window, (grab + (drop - grab) * step / 6.0).toPoint());
+    QTest::mouseRelease(&view.window, Qt::LeftButton, Qt::NoModifier, drop.toPoint());
+    QCOMPARE(cells(view), u"Time|Air|Shelter / 06:00|7.8|North / 10:00|12|East"_s);
+    // The plus buttons add a column and a row.
+    view.binding->undo();
+    view.select(north, north);
+    QQuickItem *addColumn = findItem(view.window.contentItem(), u"addColumnButton"_s);
+    QTRY_VERIFY(addColumn && addColumn->isVisible());
+    QTest::mouseClick(&view.window, Qt::LeftButton, Qt::NoModifier, centreOf(addColumn));
+    QCOMPARE(cells(view), u"Time|Shelter|Air| / 06:00|North|7.8| / 10:00|East|12|"_s);
+    QQuickItem *addRow = findItem(view.window.contentItem(), u"addRowButton"_s);
+    QTRY_VERIFY(addRow && addRow->isVisible());
+    QTest::mouseClick(&view.window, Qt::LeftButton, Qt::NoModifier, centreOf(addRow));
+    QCOMPARE(cells(view), u"Time|Shelter|Air| / 06:00|North|7.8| / 10:00|East|12| / |||"_s);
+}
+
+void theSizePickerInsertsATidyEmptyTable()
+{
+    GridEditor view(u"A paragraph.\n\nAnother one."_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.select(5, 5);
+    QMetaObject::invokeMethod(view.pane, "chooseTable");
+    QObject *picker = view.pane->findChild<QObject *>(u"tablePicker"_s);
+    QVERIFY(picker);
+    QTRY_VERIFY(picker->property("opened").toBool());
+    QCOMPARE(picker->property("columns").toInt(), 3);
+    QCOMPARE(picker->property("rows").toInt(), 3);
+    // The arrows grow it to four columns and five rows; Enter puts it in.
+    view.key(Qt::Key_Right);
+    view.key(Qt::Key_Down);
+    view.key(Qt::Key_Down);
+    QCOMPARE(picker->property("columns").toInt(), 4);
+    QCOMPARE(picker->property("rows").toInt(), 5);
+    view.key(Qt::Key_Return);
+    QTRY_VERIFY(!picker->property("visible").toBool());
+    QCOMPARE(view.text(), u"A paragraph.\n\n|     |     |     |     |\n| --- | --- | --- | --- |\n|     |     |     |     |\n"
+                          "|     |     |     |     |\n|     |     |     |     |\n|     |     |     |     |\n\nAnother one."_s);
+    // A grid at once, the caret in its first cell, ready to write the header.
+    QCOMPARE(view.binding->tables()->grids().size(), 1);
+    QCOMPARE(view.grid()->placeOf(view.cursor()), (TableGrid::Place{0, 0}));
+    view.type(u"Time"_s);
+    QCOMPARE(view.cell(), u"Time"_s);
+    view.key(Qt::Key_Tab);
+    view.type(u"Shelter"_s);
+    QVERIFY2(view.text().contains(u"| Time | Shelter |     |     |"_s), qPrintable(view.text()));
+    // Escape leaves the picker without a table; and there is none to put in a cell.
+    QMetaObject::invokeMethod(view.pane, "chooseTable");
+    QTRY_VERIFY(picker->property("opened").toBool());
+    const QString before = view.text();
+    view.key(Qt::Key_Escape);
+    QTRY_VERIFY(!picker->property("visible").toBool());
+    QCOMPARE(view.text(), before);
+}
+
+void tablesCanBeShownAsMarkdownPerView()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    auto second = view.secondView();
+    QVERIFY(second && second->binding);
+    QTRY_COMPARE(second->binding->tables()->grids().size(), 1);
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north + 2, north + 2);
+    QVERIFY(view.binding->tables()->runCommand(u"showTableMarkdown"_s));
+    // This view shows the table's Markdown, every line of it; the other its grid.
+    QCOMPARE(view.binding->tables()->grids().size(), 0);
+    QCOMPARE(view.text(), weather);
+    QCOMPARE(view.cursor(), north + 2);
+    for (QTextBlock block = view.binding->textDocument()->begin(); block.isValid(); block = block.next())
+        QVERIFY(block.isVisible());
+    QCOMPARE(second->binding->tables()->grids().size(), 1);
+    // A parse of the text later keeps it so, and an edit in it is the writer's own.
+    view.type(u"x"_s);
+    QTest::qWait(300);
+    QCOMPARE(view.binding->tables()->grids().size(), 0);
+    QVERIFY2(view.text().contains(u"| Noxrth   |"_s), qPrintable(view.text()));
+    QVERIFY(view.binding->tables()->can(u"showTableGrid"_s));
+    QVERIFY(view.binding->tables()->runCommand(u"showTableGrid"_s));
+    QCOMPARE(view.binding->tables()->grids().size(), 1);
+}
+
+void readOnlyTablesTakeNoEdits()
+{
+    GridEditor view{QString()};
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    writeFile(view.root.filePath(u"bytes.md"_s), QByteArray("caf\xe9\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"));
+    Document *readOnly = view.store->open(view.root.filePath(u"bytes.md"_s));
+    QCOMPARE(readOnly->state(), Document::State::ReadOnly);
+    view.pane->setProperty("document", QVariant::fromValue(readOnly));
+    QTRY_VERIFY(view.binding->document() == readOnly);
+    QTRY_COMPARE(view.binding->tables()->grids().size(), 1);
+    const QString before = readOnly->buffer()->text();
+    const int one = int(before.indexOf(u"1 |"));
+    view.binding->select(one, one);
+    view.type(u"x"_s);
+    view.key(Qt::Key_Tab);
+    QCOMPARE(readOnly->buffer()->text(), before);
+    for (const QString &command : TableGrids::commands())
+        if (command != u"showTableMarkdown"_s) QVERIFY2(!view.binding->tables()->can(command), qPrintable(command));
+    // The handles and buttons that would change it are not there.
+    QQuickItem *handle = findItem(view.window.contentItem(), u"rowHandle"_s);
+    QVERIFY(!handle || !handle->isVisible());
+}
+
+void copyingCellsGivesTabsAndAnHtmlTable()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // A block from North to 12: two rows, two columns.
+    view.select(int(view.text().indexOf(u"North")), int(view.text().indexOf(u"12")) + 1);
+    view.binding->copy();
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    QVERIFY(mime);
+    QCOMPARE(mime->text(), u"North\t7.8\nEast\t12\n"_s);
+    QVERIFY2(mime->html().contains(u"<tr><td>North</td><td>7.8</td></tr>"_s), qPrintable(mime->html()));
+    // Cut copies, then empties the cells; one step back brings them.
+    view.binding->cut();
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|| / 10:00||"_s);
+    QCOMPARE(QGuiApplication::clipboard()->text(), u"North\t7.8\nEast\t12\n"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    // A selection in one cell copies its text as text does.
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north, north + 3);
+    view.binding->copy();
+    QCOMPARE(QGuiApplication::clipboard()->text(), u"Nor"_s);
+}
+
+void pastingCellsFillsOverwritesAndGrows()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Two rows of three from a spreadsheet, at East: they overwrite and grow the table.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east, east);
+    auto *sheet = new QMimeData;
+    sheet->setText(u"South\t17.1\t55\nWest | gate\t13.4\t70\n"_s);
+    sheet->setHtml(u"<table><tr><td>ignored</td></tr></table>"_s);
+    QGuiApplication::clipboard()->setMimeData(sheet);
+    view.binding->paste();
+    QCOMPARE(cells(view), u"Time|Shelter|Air| / 06:00|North|7.8| / 10:00|South|17.1|55 / |West \\| gate|13.4|70"_s);
+    // One step back.
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    // An HTML table alone, as a web page copies one.
+    auto *page = new QMimeData;
+    page->setHtml(u"<meta charset='utf-8'><table><tr><td>A&amp;B</td><td><b>bold</b></td></tr></table>"_s);
+    QGuiApplication::clipboard()->setMimeData(page);
+    view.select(east, east);
+    view.binding->paste();
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / 10:00|A&B|bold"_s);
+    view.binding->undo();
+    // One value over a block fills every cell of it.
+    view.select(int(view.text().indexOf(u"North")), int(view.text().indexOf(u"12")) + 1);
+    auto *one = new QMimeData;
+    one->setText(u"n/a\n"_s);
+    one->setHtml(u"<table><tr><td>n/a</td></tr></table>"_s);
+    QGuiApplication::clipboard()->setMimeData(one);
+    view.binding->paste();
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|n/a|n/a / 10:00|n/a|n/a"_s);
+    view.binding->undo();
+    // Plain text with no tabs goes into the cell as text, its lines as spaces.
+    view.select(east + 4, east + 4);
+    QGuiApplication::clipboard()->setText(u" gate\nopen"_s);
+    view.binding->paste();
+    QCOMPARE(view.cell(), u"East gate open"_s);
 }
 
 } // namespace TableGridTests

@@ -28,5 +28,12 @@ void tablesAtTheEndsOfTheTextHaveACaretBesideThem();
 void backspaceAfterATableSelectsThenDeletesIt();
 void vimMotionsFlowAcrossCells();
 void vimOperatorsActOnCellsAndRows();
+void everyTableCommandRunsFromMenuPaletteAndHandle();
+void handlesMoveRowsAndColumnsByDragging();
+void theSizePickerInsertsATidyEmptyTable();
+void tablesCanBeShownAsMarkdownPerView();
+void readOnlyTablesTakeNoEdits();
+void copyingCellsGivesTabsAndAnHtmlTable();
+void pastingCellsFillsOverwritesAndGrows();
 
 } // namespace TableGridTests

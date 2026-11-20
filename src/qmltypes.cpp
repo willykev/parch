@@ -27,6 +27,7 @@
 #include "spellinglayer.h"
 #include "tabmodel.h"
 #include "theme.h"
+#include "touchpadscroll.h"
 #include "vimmode.h"
 #include "windowcontext.h"
 #include "wordcounter.h"
@@ -71,6 +72,7 @@ void registerQmlTypes()
     // it and the editor at the same place.
     qmlRegisterType<Preview>("Parch", 1, 0, "Preview");
     qmlRegisterType<ScrollSync>("Parch", 1, 0, "ScrollSync");
+    qmlRegisterType<TouchpadScroll>("Parch", 1, 0, "TouchpadScroll");
     qmlRegisterUncreatableType<PreviewMarks>("Parch", 1, 0, "PreviewMarks", QStringLiteral("A preview has its marks"));
     // QML reaches the one theme as a context property, and hands it to a preview.
     qmlRegisterUncreatableType<Theme>("Parch", 1, 0, "Theme", QStringLiteral("There is one theme"));

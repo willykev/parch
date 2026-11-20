@@ -1417,6 +1417,12 @@ The preview marks it, and pointing at it says why.
 document has no citation style. `parch check` names each key and what is
 missing (see [Citations and bibliographies](#citations-and-bibliographies)).
 
+**Scrolling with the touchpad feels slow.** A swipe glides on after your
+fingers lift, and a quicker swipe goes further. How far the text moves while
+your fingers are on the touchpad is the desktop's touchpad scroll speed, which
+Omarchy sets to 0.4 for every app. To raise it for parch alone, add
+`o.window("parch", { scroll_touchpad = 1.0 })` to `~/.config/hypr/input.lua`.
+
 **Opening a file from the terminal adds a tab instead of a window.** A
 running parch takes the files it is given. `Ctrl+Shift+N` opens a new window,
 and **New view** shows one document in two tabs.

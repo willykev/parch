@@ -39,6 +39,7 @@
 #include "outline.h"
 #include "markdown_tests.h"
 #include "previewtests.h"
+#include "touchpadtests.h"
 #include "frametests.h"
 #include "securitytests.h"
 #include "pathtext.h"
@@ -837,6 +838,17 @@ private slots:
     void textIsDrawnWhereverTheViewGoes() { FrameTests::textIsDrawnWhereverTheViewGoes(); }
     void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
     void newWidthsMoveEachViewOnce() { FrameTests::newWidthsMoveEachViewOnce(); }
+    // Scrolling with a touchpad, written in touchpadtests.cpp.
+    void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
+    void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
+    void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }
+    void fingersHeldStillLeaveNoGlide() { TouchpadTests::fingersHeldStillLeaveNoGlide(); }
+    void aMouseWheelDoesNotGlide() { TouchpadTests::aMouseWheelDoesNotGlide(); }
+    void aGlideStopsAtTheEndOfTheView() { TouchpadTests::aGlideStopsAtTheEndOfTheView(); }
+    void scrollingClicksAndKeysStopAGlide() { TouchpadTests::scrollingClicksAndKeysStopAGlide(); }
+    void aViewMovedElsewhereStopsItsGlide() { TouchpadTests::aViewMovedElsewhereStopsItsGlide(); }
+    void aShortSwipeAlongAGlideAddsToIt() { TouchpadTests::aShortSwipeAlongAGlideAddsToIt(); }
+    void theEditorAndThePreviewGlide() { TouchpadTests::theEditorAndThePreviewGlide(); }
     // What parch refuses to reach or write, written in securitytests.cpp.
     void webPictureRequestsKeepTheirHost() { SecurityTests::webPictureRequestsKeepTheirHost(); }
     void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }

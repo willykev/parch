@@ -631,6 +631,13 @@ ApplicationWindow {
         function onActiveViewChanged() { window.showView() }
     }
 
+    // Every view of the window that scrolls follows a touchpad swipe from its
+    // first move, and glides on after the fingers lift.
+    TouchpadScroll {
+        objectName: "touchpadScroll"
+        target: window
+    }
+
     Connections {
         target: window.context
         function onViewCaptureRequested() { window.captureView() }

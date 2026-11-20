@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Touchpad scrolling moves the text, the preview and every list as far as
+  the fingers move, from the start of a swipe, and a swipe glides on after
+  the fingers lift and slows to a stop instead of stopping dead. Another
+  quick swipe along a glide adds to its speed. Scrolling again, a click or a
+  key stops it; a mouse wheel scrolls as before.
 - Recovery keeps the text shown in an unresolved conflict, even if an
   externally deleted file quickly returns with different contents.
 - Vim commands survive modifier presses. Character commands compose dead

@@ -123,6 +123,7 @@ HEADERS += \
     src/tabmodel.h \
     src/textsearch.h \
     src/theme.h \
+    src/touchpadscroll.h \
     src/treejson.h \
     src/themefolder.h \
     src/vimmode.h \
@@ -239,6 +240,7 @@ SOURCES += \
     src/tabmodel.cpp \
     src/textsearch.cpp \
     src/theme.cpp \
+    src/touchpadscroll.cpp \
     src/treejson.cpp \
     src/vimmode.cpp \
     src/windowcontext.cpp \

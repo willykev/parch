@@ -890,10 +890,13 @@ int TableGrids::settle(const TableGrid *grid, int position, int direction) const
     for (int i = 0; i < cells.size(); ++i) {
         const MdTable::Cell &cell = cells[i];
         if (position > cell.rawEnd) continue;
-        const bool fromInside = m_lastCursor >= cell.start && m_lastCursor <= cell.end;
+        // A step is one character, or a move onto the cell's closing pipe, as Vim's word motions make.
+        const bool fromInside = m_stepping && m_lastCursor >= cell.start && m_lastCursor <= cell.end
+                                && (position - m_lastCursor == 1 || position >= cell.rawEnd);
         if (position < cell.start) {
-            // A step back out of a cell's text goes on to the end of the cell before it.
-            if (direction < 0 && fromInside && i > 0) return cells[i - 1].end;
+            // A step back from the start of a cell's text goes on to the end of the cell before it.
+            if (direction < 0 && m_stepping && m_lastCursor == cell.start && m_lastCursor - position == 1 && i > 0)
+                return cells[i - 1].end;
             return cell.start;
         }
         if (position > cell.end) {

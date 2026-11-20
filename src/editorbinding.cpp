@@ -181,7 +181,10 @@ public:
     {
         if (!b->m_loaded) return;
         const int length = b->m_buffer->length();
+        const bool stepping = b->m_tables->stepping();
+        b->m_tables->setStepping(true);
         b->selectEditor(b->m_pairs.toEditor(qBound(0, anchor, length)), b->m_pairs.toEditor(qBound(0, cursor, length)));
+        b->m_tables->setStepping(stepping);
         b->revealCursor();
     }
     bool apply(const TextChange &change) override { return b->m_loaded && b->apply(change); }

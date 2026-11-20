@@ -239,6 +239,10 @@ public:
     // The caret or the selection moved: one in a table's syntax is moved
     // into its cells' text.
     void cursorMoved();
+    // Vim's motion keys are moving the caret a step at a time: a step out of
+    // a cell's text goes on into the next cell.
+    void setStepping(bool stepping) { m_stepping = stepping; }
+    bool stepping() const { return m_stepping; }
 
     // Where a position is in a grid's cell, to find it again once the table
     // is written anew, as another view's edit writes it; and where that is then.
@@ -312,6 +316,7 @@ private:
     // Where the cursor was last, for the direction a move into syntax came from.
     int m_lastCursor = 0;
     bool m_settling = false;
+    bool m_stepping = false;
     // The x a vertical move keeps, in the grid's coordinates.
     qreal m_goalX = -1;
     QMetaObject::Connection m_parseConnection;

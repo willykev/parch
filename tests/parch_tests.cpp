@@ -881,6 +881,7 @@ private slots:
     void vimMotionsFlowAcrossCells() { TableGridTests::vimMotionsFlowAcrossCells(); }
     void vimOperatorsActOnCellsAndRows() { TableGridTests::vimOperatorsActOnCellsAndRows(); }
     void everyTableCommandRunsFromMenuPaletteAndHandle() { TableGridTests::everyTableCommandRunsFromMenuPaletteAndHandle(); }
+    void handlesStayPutAsThePointerReachesThem() { TableGridTests::handlesStayPutAsThePointerReachesThem(); }
     void handlesMoveRowsAndColumnsByDragging() { TableGridTests::handlesMoveRowsAndColumnsByDragging(); }
     void theSizePickerInsertsATidyEmptyTable() { TableGridTests::theSizePickerInsertsATidyEmptyTable(); }
     void tablesCanBeShownAsMarkdownPerView() { TableGridTests::tablesCanBeShownAsMarkdownPerView(); }

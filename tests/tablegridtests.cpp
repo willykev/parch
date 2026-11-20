@@ -990,6 +990,55 @@ void everyTableCommandRunsFromMenuPaletteAndHandle()
     QVERIFY(rowHandle && rowHandle->isVisible());
 }
 
+void handlesStayPutAsThePointerReachesThem()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // The caret in the text before the table: only the pointer shows handles.
+    view.select(0, 0);
+    TableGrid *grid = view.grid();
+    QQuickItem *drawn = findItem(view.window.contentItem(), u"tableGrid"_s);
+    QQuickItem *columnHandle = findItem(view.window.contentItem(), u"columnHandle"_s);
+    QQuickItem *addColumn = findItem(view.window.contentItem(), u"addColumnButton"_s);
+    QVERIFY(drawn && columnHandle && addColumn);
+    QVERIFY(!columnHandle->isVisible());
+    const auto glide = [&](QPointF from, QPointF to) {
+        for (int step = 1; step <= 8; ++step)
+            QTest::mouseMove(&view.window, (from + (to - from) * step / 8.0).toPoint());
+    };
+    // Over the second column's first body cell, then up onto its handle.
+    const QRectF shelter = grid->columnRect(1);
+    const QPointF cell = drawn->mapToScene(QPointF(shelter.center().x(), grid->rowRect(1).center().y()));
+    QTest::mouseMove(&view.window, cell.toPoint());
+    QTRY_VERIFY(columnHandle->isVisible());
+    const qreal above = columnHandle->x();
+    const QPointF handle = columnHandle->mapToScene(QPointF(columnHandle->width() / 2, columnHandle->height() / 2));
+    glide(cell, handle);
+    QTest::qWait(50);
+    QVERIFY(columnHandle->isVisible());
+    QCOMPARE(columnHandle->x(), above);
+    // A click there selects the column, and its menu opens.
+    QTest::mouseClick(&view.window, Qt::LeftButton, Qt::NoModifier, handle.toPoint());
+    int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
+    QTRY_VERIFY(view.binding->tables()->block(grid, &r0, &r1, &c0, &c1));
+    QCOMPARE(QList<int>({r0, r1, c0, c1}), QList<int>({0, 2, 1, 1}));
+    QTRY_VERIFY(findItem(view.window.contentItem(), u"insertColumnLeftEntry"_s)
+                && findItem(view.window.contentItem(), u"insertColumnLeftEntry"_s)->isVisible());
+    view.key(Qt::Key_Escape);
+    view.select(0, 0);
+    // The + on the right edge stays while the pointer goes onto it.
+    const QPointF right = drawn->mapToScene(QPointF(grid->columnRect(2).center().x(), grid->rowRect(1).center().y()));
+    QTest::mouseMove(&view.window, right.toPoint());
+    QTRY_VERIFY(addColumn->isVisible());
+    const QPointF plus = addColumn->mapToScene(QPointF(addColumn->width() / 2, addColumn->height() / 2));
+    glide(right, plus);
+    QTest::qWait(50);
+    QVERIFY(addColumn->isVisible());
+    QTest::mouseClick(&view.window, Qt::LeftButton, Qt::NoModifier, plus.toPoint());
+    QTRY_COMPARE(grid->columnCount(), 4);
+}
+
 void handlesMoveRowsAndColumnsByDragging()
 {
     GridEditor view(weather);

@@ -30,6 +30,7 @@ void backspaceAfterATableSelectsThenDeletesIt();
 void vimMotionsFlowAcrossCells();
 void vimOperatorsActOnCellsAndRows();
 void everyTableCommandRunsFromMenuPaletteAndHandle();
+void handlesStayPutAsThePointerReachesThem();
 void handlesMoveRowsAndColumnsByDragging();
 void theSizePickerInsertsATidyEmptyTable();
 void tablesCanBeShownAsMarkdownPerView();

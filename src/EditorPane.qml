@@ -546,7 +546,21 @@ Rectangle {
                     readonly property int caretColumn: modelData.hasCaret, modelData.caretRect, modelData.caretColumn()
                     readonly property int shownRow: hoverRow >= 0 ? hoverRow : caretRow
                     readonly property int shownColumn: hoverColumn >= 0 ? hoverColumn : caretColumn
-                    readonly property bool lit: near.hovered || modelData.hasCaret
+                    // The pointer on a handle or a button, which takes the
+                    // hover from the room around the grid.
+                    readonly property bool chromeHovered: rowDrag.containsMouse || columnDrag.containsMouse
+                                                          || addColumnArea.containsMouse || addRowArea.containsMouse
+                    readonly property bool lit: near.hovered || chromeHovered || modelData.hasCaret
+                    // The pointer has left the grid and its handles: the caret's
+                    // row and column have the handles again. Asked once both
+                    // hovers have changed, whichever changes first.
+                    function settleHover() {
+                        if (!near.hovered && !chromeHovered) {
+                            hoverRow = -1
+                            hoverColumn = -1
+                        }
+                    }
+                    onChromeHoveredChanged: Qt.callLater(settleHover)
                     readonly property real handleSize: Math.round(pane.fontPixelSize * 0.8)
                     // Where a dragged row or column would go: a boundary between two, or -1.
                     property int dropRow: -1
@@ -567,7 +581,7 @@ Rectangle {
                                 gridSlot.hoverRow = gridSlot.modelData.rowAt(at.y)
                                 gridSlot.hoverColumn = gridSlot.modelData.columnAt(at.x + gridSlot.modelData.scrollX)
                             }
-                            onHoveredChanged: if (!hovered) { gridSlot.hoverRow = -1; gridSlot.hoverColumn = -1 }
+                            onHoveredChanged: Qt.callLater(gridSlot.settleHover)
                         }
                     }
 

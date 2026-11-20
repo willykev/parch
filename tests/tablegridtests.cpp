@@ -26,6 +26,7 @@
 #include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextDocument>
+#include <QStyleHints>
 #include <QWheelEvent>
 #include <QtTest>
 #include <memory>
@@ -1267,21 +1268,13 @@ void wideTablesScrollSidewaysAndTheTextScrollsOver()
     flickable->setProperty("contentY", 0);
     QTRY_VERIFY(drawn->mapToScene(QPointF(0, 0)).y() >= 0);
     const QPointF at = drawn->mapToScene(QPointF(drawn->width() / 2, drawn->height() / 2));
-    const auto scroll = [&](QPoint pixels, QPoint angle, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    // A turn of the wheel, which reports a few pixels too, as Wayland's does.
+    const auto wheel = [&](QPoint pixels, QPoint angle, Qt::KeyboardModifiers modifiers) {
         QWheelEvent event(at, view.window.mapToGlobal(at), pixels, angle, Qt::NoButton, modifiers,
                           Qt::NoScrollPhase, false);
         QCoreApplication::sendEvent(&view.window, &event);
     };
-    // Sideways on the touchpad moves the table and leaves the text.
-    scroll({-30, 0}, {-360, 0});
-    QCOMPARE(grid->scrollX(), 30.0);
-    QCOMPARE(flickable->property("contentY").toReal(), 0.0);
-    // Shift and the wheel move it too.
-    scroll({}, {0, -120}, Qt::ShiftModifier);
-    QVERIFY(grid->scrollX() > 30.0);
-    const qreal across = grid->scrollX();
-    // A swipe on the touchpad mostly downward, even a little sideways,
-    // scrolls the text and leaves the table.
+    // A swipe on the touchpad: the fingers down, moves, the fingers up.
     quint64 time = 1000;
     const auto send = [&](Qt::ScrollPhase phase, QPoint pixels, Qt::MouseEventSource source) {
         QWheelEvent event(at, view.window.mapToGlobal(at), pixels, pixels * 12, Qt::NoButton, Qt::NoModifier, phase,
@@ -1289,9 +1282,27 @@ void wideTablesScrollSidewaysAndTheTextScrollsOver()
         event.setTimestamp(time += 10);
         QCoreApplication::sendEvent(&view.window, &event);
     };
-    send(Qt::ScrollBegin, {}, Qt::MouseEventNotSynthesized);
-    for (int i = 0; i < 5; ++i) send(Qt::ScrollUpdate, {-2, -20}, Qt::MouseEventSynthesizedBySystem);
-    send(Qt::ScrollEnd, {}, Qt::MouseEventSynthesizedBySystem);
+    const auto swipe = [&](QPoint pixels, int moves) {
+        send(Qt::ScrollBegin, {}, Qt::MouseEventNotSynthesized);
+        for (int i = 0; i < moves; ++i) send(Qt::ScrollUpdate, pixels, Qt::MouseEventSynthesizedBySystem);
+        send(Qt::ScrollEnd, {}, Qt::MouseEventSynthesizedBySystem);
+    };
+    // Sideways on the touchpad moves the table as far as the fingers go,
+    // and leaves the text.
+    swipe({-10, 0}, 3);
+    QCOMPARE(grid->scrollX(), 30.0);
+    QCOMPARE(flickable->property("contentY").toReal(), 0.0);
+    // Shift and a click of the wheel move it as far as the text scrolls
+    // for one, whatever few pixels come with the click.
+    const qreal click = QGuiApplication::styleHints()->wheelScrollLines() * view.binding->tables()->lineHeight();
+    wheel({0, -15}, {0, -120}, Qt::ShiftModifier);
+    QCOMPARE(grid->scrollX(), 30.0 + click);
+    wheel({0, 15}, {0, 120}, Qt::ShiftModifier);
+    QCOMPARE(grid->scrollX(), 30.0);
+    // A swipe mostly downward, even a little sideways, scrolls the text and
+    // leaves the table.
+    const qreal across = grid->scrollX();
+    swipe({-2, -20}, 5);
     QCOMPARE(grid->scrollX(), across);
     QTRY_VERIFY(flickable->property("contentY").toReal() > 0);
 }

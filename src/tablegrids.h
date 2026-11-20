@@ -132,6 +132,8 @@ public:
     QList<qreal> columnLefts() const { return m_columnLeft; }
     QList<qreal> rowTops() const { return m_rowTop; }
     qreal padding() const;
+    // The height of a line of the text it stands in.
+    qreal lineHeight() const;
 
 signals:
     void geometryChanged();

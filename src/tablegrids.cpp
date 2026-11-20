@@ -10,6 +10,7 @@
 #include <QAbstractTextDocumentLayout>
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QStyleHints>
 #include <QMimeData>
 #include <QRegularExpression>
 #include <QTextDocumentFragment>
@@ -127,6 +128,8 @@ TableGrid::Place TableGrid::placeOf(int position) const
 }
 
 qreal TableGrid::padding() const { return std::round(m_owner->lineHeight() * 0.4); }
+
+qreal TableGrid::lineHeight() const { return m_owner->lineHeight(); }
 
 qreal TableGrid::viewWidth() const { return qMin(m_width, qMax<qreal>(1, m_owner->availableWidth())); }
 
@@ -1919,8 +1922,13 @@ void TableGridView::wheelEvent(QWheelEvent *event)
         event->ignore();
         return;
     }
+    // A touchpad moves it as far as the fingers go. A wheel's click, whose
+    // few pixels the system also reports, moves it as far as the text
+    // scrolls for one: the desktop's lines per click.
     QPointF delta = event->pixelDelta();
-    if (delta.isNull()) delta = QPointF(event->angleDelta()) / 8.0 * 2;
+    if (event->phase() == Qt::NoScrollPhase || delta.isNull())
+        delta = QPointF(event->angleDelta()) / 120.0 * QGuiApplication::styleHints()->wheelScrollLines()
+              * m_grid->lineHeight();
     // Shift turns the wheel's turn into a sideways one, as everywhere.
     qreal across = delta.x(), down = delta.y();
     if (qFuzzyIsNull(across) && (event->modifiers() & Qt::ShiftModifier)) std::swap(across, down);

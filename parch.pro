@@ -87,6 +87,7 @@ HEADERS += \
     src/mdhtml.h \
     src/mdinclude.h \
     src/mdparser_p.h \
+    src/mdtable.h \
     src/mdtree.h \
     src/pathtext.h \
     src/portalfilepicker.h \
@@ -207,6 +208,7 @@ SOURCES += \
     src/mdrawhtml.cpp \
     src/mdresolve.cpp \
     src/mdscan.cpp \
+    src/mdtable.cpp \
     src/mdtree.cpp \
     src/pathtext.cpp \
     src/portalfilepicker.cpp \

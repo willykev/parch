@@ -9,6 +9,7 @@
 // made of, and the inline parser reads those once every file is in the tree.
 #include "mdparser_p.h"
 #include "mdinclude.h"
+#include "mdtable.h"
 
 namespace md::detail {
 
@@ -1169,85 +1170,49 @@ bool BlockParser::listItem(Block *container)
 // --- Tables ----------------------------------------------------------------------
 
 // Splits the row in [from, to) into cells at its unescaped pipes. With
-// `protectCode`, a pipe inside a code span belongs to the code.
+// `protectCode`, a pipe inside a code span belongs to the code. The editor
+// reads tables with the same splitter, so that it finds the cells read here.
 bool BlockParser::splitRow(int from, int to, bool protectCode, std::vector<Cell> &cells,
                            std::vector<Range> *pipes) const
 {
+    thread_local QList<MdTable::Field> fields;
+    thread_local QList<int> at;
+    at.clear();
+    MdTable::splitRow(QStringView(s, n), from, to, protectCode, fields, pipes ? &at : nullptr);
     cells.clear();
-    int i = from;
-    if (i < to && s[i] == u'|') {
-        if (pipes) pipes->push_back({i, i + 1});
-        ++i;
+    cells.reserve(fields.size());
+    for (const MdTable::Field &field : fields) {
+        Cell cell;
+        cell.start = field.start;
+        cell.end = field.end;
+        cell.zeroWidth = field.zeroWidth;
+        cells.push_back(cell);
     }
-    quint64 unclosed = 0; // lengths of backtick runs known to have no partner
-    while (i < to) {
-        const int start = i;
-        while (i < to) {
-            const char16_t c = s[i].unicode();
-            if (c == u'\\' && i + 1 < to && isAsciiPunct(s[i + 1].unicode())) {
-                i += 2;
-                continue;
-            }
-            if (c == u'|') break;
-            if (c == u'`' && protectCode) {
-                int run = i;
-                while (run < to && s[run] == u'`') ++run;
-                const int length = run - i;
-                int close = -1;
-                if (length < 64 && !(unclosed & (quint64(1) << length))) {
-                    for (int k = run; k < to;) {
-                        if (s[k] != u'`') {
-                            ++k;
-                            continue;
-                        }
-                        int e = k;
-                        while (e < to && s[e] == u'`') ++e;
-                        if (e - k == length) {
-                            close = e;
-                            break;
-                        }
-                        k = e;
-                    }
-                    if (close < 0) unclosed |= quint64(1) << length;
-                }
-                i = close >= 0 ? close : run;
-                continue;
-            }
-            ++i;
-        }
-        const bool pipe = i < to;
-        if (i > start || pipe) {
-            Cell cell;
-            cell.start = start;
-            cell.end = i;
-            cell.zeroWidth = i == start;
-            while (cell.start < cell.end && isSpaceOrTab(s[cell.start].unicode())) ++cell.start;
-            while (cell.end > cell.start && isSpaceOrTab(s[cell.end - 1].unicode())) --cell.end;
-            cells.push_back(cell);
-        }
-        if (pipe) {
-            if (pipes) pipes->push_back({i, i + 1});
-            ++i;
-        }
-    }
+    if (pipes)
+        for (int pipe : at) pipes->push_back({pipe, pipe + 1});
     return !cells.empty();
 }
 
 bool BlockParser::delimiterRow(int from, int to, std::vector<Align> &aligns) const
 {
-    std::vector<Cell> cells;
-    if (!splitRow(from, to, false, cells, nullptr)) return false;
+    const auto read = MdTable::delimiterRow(QStringView(s, n), from, to);
+    if (!read) return false;
     aligns.clear();
-    for (const Cell &cell : cells) {
-        int a = cell.start, b = cell.end;
-        const bool left = a < b && s[a] == u':';
-        if (left) ++a;
-        const bool right = b > a && s[b - 1] == u':';
-        if (right) --b;
-        if (a >= b) return false;
-        for (int i = a; i < b; ++i)
-            if (s[i] != u'-') return false;
-        aligns.push_back(left && right ? Align::Center : left ? Align::Left : right ? Align::Right : Align::None);
+    for (MdTable::Align align : *read) {
+        switch (align) {
+        case MdTable::Align::Left:
+            aligns.push_back(Align::Left);
+            break;
+        case MdTable::Align::Center:
+            aligns.push_back(Align::Center);
+            break;
+        case MdTable::Align::Right:
+            aligns.push_back(Align::Right);
+            break;
+        default:
+            aligns.push_back(Align::None);
+            break;
+        }
     }
     return true;
 }

@@ -39,6 +39,7 @@
 #include "outline.h"
 #include "markdown_tests.h"
 #include "previewtests.h"
+#include "tabletests.h"
 #include "touchpadtests.h"
 #include "frametests.h"
 #include "securitytests.h"
@@ -839,6 +840,12 @@ private slots:
     void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
     void newWidthsMoveEachViewOnce() { FrameTests::newWidthsMoveEachViewOnce(); }
     // Scrolling with a touchpad, written in touchpadtests.cpp.
+    void formatKeepsMergedCellsWhole() { TableTests::formatKeepsMergedCellsWhole(); }
+    void scannerAgreesWithTheParser() { TableTests::scannerAgreesWithTheParser(); }
+    void formatIsIdempotentAndKeepsPayloadBytes() { TableTests::formatIsIdempotentAndKeepsPayloadBytes(); }
+    void formatKeepsPrefixesAndLineEndings() { TableTests::formatKeepsPrefixesAndLineEndings(); }
+    void formatAlignsWideAndCombiningText() { TableTests::formatAlignsWideAndCombiningText(); }
+    void tablesTheGridCannotHoldSayWhy() { TableTests::tablesTheGridCannotHoldSayWhy(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

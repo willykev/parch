@@ -37,6 +37,12 @@ struct Options {
     // profile does, `[^a note of its own.]` as an inline note.
     bool footnotes = true;
     bool inlineNotes = true;
+    // How the dialect reads a table's pipes: a pipe inside a code span is
+    // code (Writer), two pipes side by side merge cells (Writer with merged
+    // cells on), and a line starting `//` is a comment.
+    bool protectCodePipes = true;
+    bool mergedCells = true;
+    bool lineComments = true;
 };
 
 // Every formatting command's id, in the order a menu lists them.

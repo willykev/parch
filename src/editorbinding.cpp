@@ -606,6 +606,9 @@ MarkdownEditing::Options EditorBinding::editingOptions() const
         const md::Options dialect = m_document->markdownOptions();
         options.footnotes = dialect.footnotes;
         options.inlineNotes = dialect.footnotes && dialect.profile == md::Profile::Writer;
+        options.protectCodePipes = dialect.profile == md::Profile::Writer;
+        options.mergedCells = dialect.profile == md::Profile::Writer && dialect.mergedCells;
+        options.lineComments = dialect.lineComments;
     }
     return options;
 }

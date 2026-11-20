@@ -1,5 +1,7 @@
 #include "markdownediting.h"
 
+#include "mdtable.h"
+
 #include <QHash>
 #include <QRegularExpression>
 #include <QTextBoundaryFinder>
@@ -1136,210 +1138,31 @@ TextChange insertFootnote(QStringView text, int anchor, int cursor, const Option
 
 // ---- Tables ----------------------------------------------------------------
 
-// A cell of a table row: [start, end) between its pipes, and its text
-// without the spaces around it, all as offsets into the row's line.
-struct Cell {
-    int start = 0;
-    int end = 0;
-    int textStart = 0;
-    int textEnd = 0;
-};
-
-struct Row {
-    Line line;
-    // Quote markers and indentation, kept as they are.
-    int prefix = 0;
-    QList<Cell> cells;
-};
-
-// Splits a row at its pipes. A pipe escaped with a backslash or inside a
-// code span is text.
-std::optional<Row> rowOf(QStringView text, const Line &line)
+MdTable::Dialect dialectOf(const Options &options)
 {
-    const QStringView own = textOf(text, line);
-    Row row;
-    row.line = line;
-    const Parts parts = partsOf(own);
-    row.prefix = parts.quoteEnd + leadingSpaces(own, parts.quoteEnd);
-    QList<int> pipes;
-    const int size = int(own.size());
-    for (int i = row.prefix; i < size;) {
-        const QChar c = own[i];
-        if (c == u'\\') {
-            i += 2;
-        } else if (c == u'`') {
-            const int length = runAfter(own, i, u'`');
-            int close = -1;
-            for (int j = i + length; j < size;) {
-                const int run = runAfter(own, j, u'`');
-                if (run == length) {
-                    close = j;
-                    break;
-                }
-                j += qMax(1, run);
-            }
-            i = close >= 0 ? close + length : i + length;
-        } else {
-            if (c == u'|') pipes.append(i);
-            ++i;
-        }
-    }
-    if (pipes.isEmpty()) return std::nullopt;
-    int contentEnd = size;
-    while (contentEnd > row.prefix && (own[contentEnd - 1] == u' ' || own[contentEnd - 1] == u'\t')) --contentEnd;
-    const bool leading = pipes.first() == row.prefix;
-    const bool trailing = pipes.last() == contentEnd - 1 && (!leading || pipes.size() > 1);
-    QList<std::pair<int, int>> spans;
-    int from = leading ? row.prefix + 1 : row.prefix;
-    for (int pipe : pipes) {
-        if (leading && pipe == row.prefix) continue;
-        spans.append({from, pipe});
-        from = pipe + 1;
-    }
-    if (!trailing) spans.append({from, contentEnd});
-    for (const auto &[start, end] : spans) {
-        Cell cell{start, end, start, end};
-        while (cell.textStart < cell.textEnd && own[cell.textStart].isSpace()) ++cell.textStart;
-        while (cell.textEnd > cell.textStart && own[cell.textEnd - 1].isSpace()) --cell.textEnd;
-        row.cells.append(cell);
-    }
-    return row;
-}
-
-enum class Align { None, Left, Center, Right };
-
-std::optional<QList<Align>> delimiterRow(QStringView text, const Row &row)
-{
-    QList<Align> aligns;
-    for (const Cell &cell : row.cells) {
-        const QStringView own = text.mid(row.line.start + cell.textStart, cell.textEnd - cell.textStart);
-        if (own.isEmpty()) return std::nullopt;
-        const bool left = own.startsWith(u':'), right = own.endsWith(u':');
-        const QStringView dashes = own.mid(left ? 1 : 0, own.size() - (left ? 1 : 0) - (right ? 1 : 0));
-        if (dashes.isEmpty() || !std::all_of(dashes.begin(), dashes.end(), [](QChar c) { return c == u'-'; }))
-            return std::nullopt;
-        aligns.append(left && right ? Align::Center : right ? Align::Right : left ? Align::Left : Align::None);
-    }
-    return aligns;
-}
-
-// The pipe table holding a position: its header, its delimiter row and the
-// rows after it, up to a line with no pipe.
-struct Table {
-    QList<Row> rows;
-    int delimiter = 1;
-    QList<Align> aligns;
-};
-
-std::optional<Table> tableAt(QStringView text, int position)
-{
-    const Line here = lineAt(text, position);
-    if (!rowOf(text, here)) return std::nullopt;
-    Line first = here;
-    while (const auto above = lineBefore(text, first)) {
-        if (isBlank(textOf(text, *above)) || !rowOf(text, *above)) break;
-        first = *above;
-    }
-    QList<Row> rows;
-    for (std::optional<Line> line = first; line; line = lineAfter(text, *line)) {
-        if (isBlank(textOf(text, *line))) break;
-        const auto row = rowOf(text, *line);
-        if (!row) break;
-        rows.append(*row);
-    }
-    // The header is the row just above the first delimiter row.
-    for (int i = 1; i < rows.size(); ++i) {
-        const auto aligns = delimiterRow(text, rows[i]);
-        if (!aligns) continue;
-        Table table;
-        table.rows = rows.mid(i - 1);
-        table.delimiter = 1;
-        table.aligns = *aligns;
-        if (table.rows.first().line.start > here.start) return std::nullopt;
-        return table;
-    }
-    return std::nullopt;
-}
-
-// Which cell of a row a position is in: the one whose pipes surround it,
-// or the nearest.
-int cellIndexAt(const Row &row, int position)
-{
-    const int offset = position - row.line.start;
-    for (int i = 0; i < row.cells.size(); ++i)
-        if (offset <= row.cells[i].end) return i;
-    return int(row.cells.size()) - 1;
+    MdTable::Dialect dialect;
+    dialect.protectCode = options.protectCodePipes;
+    dialect.mergedCells = options.mergedCells;
+    dialect.lineComments = options.lineComments;
+    return dialect;
 }
 
 // The cell's text selected, or a caret inside an empty cell.
-TextChange selectCell(const Row &row, int index)
+TextChange selectCell(const MdTable::Cell &cell)
 {
-    const Cell &cell = row.cells[index];
-    const int start = row.line.start + cell.textStart, end = row.line.start + cell.textEnd;
-    if (start < end) return {{}, start, end};
-    const int caret = row.line.start + qMin(cell.start + 1, cell.end);
+    if (cell.start < cell.end) return {{}, cell.start, cell.end};
+    const int caret = qMin(cell.rawStart + 1, cell.rawEnd);
     return {{}, caret, caret};
 }
 
-QString padded(const QString &cell, int width, Align align)
+// The cells a row has written, without those the header gives it beyond.
+QList<int> writtenCells(const MdTable::Table &table, int row)
 {
-    const int room = qMax(0, width - displayWidth(cell));
-    switch (align) {
-    case Align::Right:
-        return QString(room, u' ') + cell;
-    case Align::Center:
-        return QString(room / 2, u' ') + cell + QString(room - room / 2, u' ');
-    default:
-        return cell + QString(room, u' ');
-    }
-}
-
-QString dashes(int width, Align align)
-{
-    switch (align) {
-    case Align::Left:
-        return u':' + QString(width - 1, u'-');
-    case Align::Right:
-        return QString(width - 1, u'-') + u':';
-    case Align::Center:
-        return u':' + QString(width - 2, u'-') + u':';
-    default:
-        return QString(width, u'-');
-    }
-}
-
-// ---- Display width -------------------------------------------------------
-
-int codePointWidth(char32_t c)
-{
-    switch (QChar::category(c)) {
-    case QChar::Mark_NonSpacing:
-    case QChar::Mark_Enclosing:
-    case QChar::Other_Format:
-    case QChar::Other_Control:
-        return 0;
-    default:
-        break;
-    }
-    // East Asian Wide and Fullwidth characters, and emoji shown as wide.
-    static const std::pair<char32_t, char32_t> wide[] = {
-        {0x1100, 0x115F},   {0x231A, 0x231B},   {0x2329, 0x232A},   {0x23E9, 0x23EC},   {0x23F0, 0x23F0},
-        {0x23F3, 0x23F3},   {0x25FD, 0x25FE},   {0x2614, 0x2615},   {0x2648, 0x2653},   {0x267F, 0x267F},
-        {0x2693, 0x2693},   {0x26A1, 0x26A1},   {0x26AA, 0x26AB},   {0x26BD, 0x26BE},   {0x26C4, 0x26C5},
-        {0x26CE, 0x26CE},   {0x26D4, 0x26D4},   {0x26EA, 0x26EA},   {0x26F2, 0x26F3},   {0x26F5, 0x26F5},
-        {0x26FA, 0x26FA},   {0x26FD, 0x26FD},   {0x2705, 0x2705},   {0x270A, 0x270B},   {0x2728, 0x2728},
-        {0x274C, 0x274C},   {0x274E, 0x274E},   {0x2753, 0x2755},   {0x2757, 0x2757},   {0x2795, 0x2797},
-        {0x27B0, 0x27B0},   {0x27BF, 0x27BF},   {0x2B1B, 0x2B1C},   {0x2B50, 0x2B50},   {0x2B55, 0x2B55},
-        {0x2E80, 0x303E},   {0x3041, 0x33FF},   {0x3400, 0x4DBF},   {0x4E00, 0x9FFF},   {0xA000, 0xA4CF},
-        {0xA960, 0xA97F},   {0xAC00, 0xD7A3},   {0xF900, 0xFAFF},   {0xFE10, 0xFE19},   {0xFE30, 0xFE6F},
-        {0xFF00, 0xFF60},   {0xFFE0, 0xFFE6},   {0x16FE0, 0x16FE4}, {0x17000, 0x18AFF}, {0x1B000, 0x1B2FF},
-        {0x1F004, 0x1F004}, {0x1F0CF, 0x1F0CF}, {0x1F18E, 0x1F18E}, {0x1F191, 0x1F19A}, {0x1F200, 0x1F251},
-        {0x1F300, 0x1F64F}, {0x1F680, 0x1F6FF}, {0x1F7E0, 0x1F7EB}, {0x1F90C, 0x1F9FF}, {0x1FA70, 0x1FAFF},
-        {0x20000, 0x2FFFD}, {0x30000, 0x3FFFD},
-    };
-    for (const auto &[first, last] : wide)
-        if (c >= first && c <= last) return 2;
-    return 1;
+    QList<int> cells;
+    if (row == 1) return cells;
+    for (int i = 0; i < table.rows[row].cells.size(); ++i)
+        if (!table.rows[row].cells[i].missing) cells.append(i);
+    return cells;
 }
 
 // ---- Notes that nothing defines -------------------------------------------
@@ -1681,113 +1504,73 @@ std::optional<TextChange> indent(QStringView text, int anchor, int cursor, bool 
 
 std::optional<TextChange> moveToCell(QStringView text, int anchor, int cursor, bool backwards, const Options &options)
 {
-    const auto table = tableAt(text, cursor);
+    const auto table = MdTable::locate(text, cursor, dialectOf(options));
     if (!table) return std::nullopt;
-    const Line here = lineAt(text, cursor);
-    int rowIndex = 0;
-    while (rowIndex < table->rows.size() && table->rows[rowIndex].line.start != here.start) ++rowIndex;
-    if (rowIndex >= table->rows.size()) return std::nullopt;
-    int cell = cellIndexAt(table->rows[rowIndex], cursor);
-    const auto skip = [&](int row) { return row == table->delimiter; };
+    int row = MdTable::rowAt(*table, cursor);
+    if (row < 0) return std::nullopt;
+    const int rows = int(table->rows.size());
     if (!backwards) {
-        if (cell + 1 < table->rows[rowIndex].cells.size()) return selectCell(table->rows[rowIndex], cell + 1);
-        int row = rowIndex + 1;
-        if (row < table->rows.size() && skip(row)) ++row;
-        if (row < table->rows.size()) return selectCell(table->rows[row], 0);
+        if (row != 1) {
+            const QList<int> cells = writtenCells(*table, row);
+            const int here = MdTable::cellAt(*table, row, cursor);
+            for (int i : cells)
+                if (i > here) return selectCell(table->rows[row].cells[i]);
+        }
+        int next = row + 1;
+        if (next == 1) ++next;
+        if (next < rows) return selectCell(table->rows[next].cells[writtenCells(*table, next).value(0)]);
         // Past the last cell: a new row as wide as the header.
-        const Row &last = table->rows.last();
-        const int columns = int(table->rows.first().cells.size());
-        QString added = text.mid(last.line.start, last.prefix).toString() + u'|';
-        for (int i = 0; i < columns; ++i) added += QStringLiteral("  |");
-        const int caret = last.line.end + int(options.newline.size()) + last.prefix + 2;
-        return TextChange{{{{last.line.end, 0}, options.newline + added}}, caret, caret};
+        const MdTable::Line &last = table->rows.last().line;
+        const int prefix = last.content - last.start;
+        QString added = text.mid(last.start, prefix).toString() + u'|';
+        for (int i = 0; i < table->columns; ++i) added += QStringLiteral("  |");
+        const int caret = last.end + int(options.newline.size()) + prefix + 2;
+        return TextChange{{{{last.end, 0}, options.newline + added}}, caret, caret};
     }
-    if (cell > 0) return selectCell(table->rows[rowIndex], cell - 1);
-    int row = rowIndex - 1;
-    if (row >= 0 && skip(row)) --row;
-    if (row < 0) return TextChange{{}, anchor, cursor};
-    return selectCell(table->rows[row], int(table->rows[row].cells.size()) - 1);
+    if (row != 1) {
+        const QList<int> cells = writtenCells(*table, row);
+        const int here = MdTable::cellAt(*table, row, cursor);
+        for (auto i = cells.rbegin(); i != cells.rend(); ++i)
+            if (*i < here) return selectCell(table->rows[row].cells[*i]);
+        // Before the first cell there is nothing to go back to.
+        if (row == 0) return TextChange{{}, anchor, cursor};
+    }
+    const int previous = row <= 2 ? 0 : row - 1;
+    return selectCell(table->rows[previous].cells[writtenCells(*table, previous).last()]);
 }
 
-std::optional<TextChange> formatTable(QStringView text, int anchor, int cursor, const Options &)
+std::optional<TextChange> formatTable(QStringView text, int anchor, int cursor, const Options &options)
 {
-    const auto table = tableAt(text, cursor);
+    const auto table = MdTable::locate(text, cursor, dialectOf(options));
     if (!table) return std::nullopt;
-    const int columns = int(table->aligns.size());
-    // Each column as wide as its widest cell, and at least three.
-    QList<int> widths;
-    for (int r = 0; r < table->rows.size(); ++r) {
-        if (r == table->delimiter) continue;
-        const Row &row = table->rows[r];
-        for (int c = 0; c < row.cells.size(); ++c) {
-            const Cell &cell = row.cells[c];
-            const int width = displayWidth(text.mid(row.line.start + cell.textStart, cell.textEnd - cell.textStart));
-            if (c >= widths.size()) widths.append(3);
-            widths[c] = qMax(widths[c], width);
-        }
-    }
-    while (widths.size() < columns) widths.append(3);
-    const auto alignOf = [&](int c) { return c < columns ? table->aligns[c] : Align::None; };
-
-    QList<SourceEdit> edits;
-    // Where the cursor and the anchor were, as a cell and an offset into its text.
-    struct Place {
-        int row = -1;
-        int cell = 0;
-        int offset = 0;
-    };
-    const auto placeOf = [&](int position) {
-        Place place;
-        for (int r = 0; r < table->rows.size(); ++r) {
-            const Row &row = table->rows[r];
-            if (position < row.line.start || position > row.line.end) continue;
-            place.row = r;
-            place.cell = cellIndexAt(row, position);
-            const Cell &cell = row.cells[place.cell];
-            place.offset = qBound(0, position - row.line.start - cell.textStart, cell.textEnd - cell.textStart);
-        }
-        return place;
-    };
-    const Place anchorPlace = placeOf(anchor), cursorPlace = placeOf(cursor);
-    QHash<int, QList<int>> cellStarts;
-    for (int r = 0; r < table->rows.size(); ++r) {
-        const Row &row = table->rows[r];
-        const int count = r == table->delimiter ? columns : qMax(columns, int(row.cells.size()));
-        QString line = text.mid(row.line.start, row.prefix).toString() + u'|';
-        QList<int> starts;
-        for (int c = 0; c < count; ++c) {
-            line += u' ';
-            QString cell;
-            if (r == table->delimiter) {
-                cell = dashes(widths[c], alignOf(c));
-            } else {
-                const QString own = c < row.cells.size()
-                    ? text.mid(row.line.start + row.cells[c].textStart, row.cells[c].textEnd - row.cells[c].textStart).toString()
-                    : QString();
-                cell = padded(own, widths[c], alignOf(c));
-                const int room = qMax(0, widths[c] - displayWidth(own));
-                const int lead = alignOf(c) == Align::Right ? room : alignOf(c) == Align::Center ? room / 2 : 0;
-                starts.append(int(line.size()) + lead);
-            }
-            line += cell + QStringLiteral(" |");
-        }
-        cellStarts[r] = starts;
-        if (textOf(text, row.line) != line) edits.append(SourceEdit{{row.line.start, row.line.length()}, line});
-    }
-    if (edits.isEmpty()) return std::nullopt;
+    const MdTable::Layout layout = MdTable::write(MdTable::model(text, *table));
+    const QStringView before = text.mid(table->start, table->end - table->start);
+    if (before == layout.text) return std::nullopt;
     // The selection keeps its cells, at the same place in their text.
-    TextChange change = mapped(edits, anchor, cursor);
-    const auto reposition = [&](const Place &place, int fallback) {
-        if (place.row < 0) return fallback;
-        const QList<int> &starts = cellStarts[place.row];
-        if (place.cell >= starts.size()) return fallback;
-        // The new start of the row's line is the mapped start of its old line.
-        const int lineStart = mapPosition(table->rows[place.row].line.start, change.edits, false);
-        return lineStart + starts[place.cell] + place.offset;
+    const int shift = int(layout.text.size() - before.size());
+    const auto place = [&](int position) {
+        if (position < table->start) return position;
+        if (position > table->end) return position + shift;
+        const int row = MdTable::rowAt(*table, position);
+        const int modelRow = MdTable::modelRowOf(row);
+        if (modelRow < 0) {
+            const int line = table->start + layout.lineStarts[1];
+            const int next = table->start + layout.lineStarts.value(2, int(layout.text.size()) + 1) - 1;
+            return qMin(line + position - table->rows[1].line.start, next);
+        }
+        const int index = MdTable::cellAt(*table, row, position);
+        const MdTable::Cell &cell = table->rows[row].cells[index];
+        const MdTable::Placed &placed = layout.cells[modelRow][index];
+        return table->start + placed.start + qBound(0, position - cell.start, placed.length);
     };
-    change.anchor = reposition(anchorPlace, change.anchor);
-    change.cursor = reposition(cursorPlace, change.cursor);
-    return change;
+    int same = 0;
+    const int shortest = int(qMin(before.size(), layout.text.size()));
+    while (same < shortest && before[same] == layout.text[same]) ++same;
+    int tail = 0;
+    while (tail < shortest - same && before[before.size() - 1 - tail] == layout.text[layout.text.size() - 1 - tail]) ++tail;
+    const SourceEdit edit{{table->start + same, int(before.size()) - same - tail},
+                          layout.text.mid(same, layout.text.size() - same - tail)};
+    return TextChange{{edit}, place(anchor), place(cursor)};
 }
 
 QString undefinedNoteAt(QStringView text, int position)
@@ -1797,19 +1580,6 @@ QString undefinedNoteAt(QStringView text, int position)
     return reference ? reference->label : QString();
 }
 
-int displayWidth(QStringView text)
-{
-    int width = 0;
-    QTextBoundaryFinder graphemes(QTextBoundaryFinder::Grapheme, text);
-    int start = 0;
-    for (qsizetype end = graphemes.toNextBoundary(); end > 0; end = graphemes.toNextBoundary()) {
-        int widest = 0;
-        const QStringView grapheme = text.mid(start, end - start);
-        for (char32_t c : grapheme.toUcs4()) widest = qMax(widest, codePointWidth(c));
-        width += widest;
-        start = int(end);
-    }
-    return width;
-}
+int displayWidth(QStringView text) { return MdTable::displayWidth(text); }
 
 } // namespace MarkdownEditing

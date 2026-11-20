@@ -1538,6 +1538,12 @@ QRectF EditorBinding::caretRectangle() const
     return rectangleAt(editorCursor());
 }
 
+QRectF EditorBinding::sourceRectangle(int source) const
+{
+    if (!m_loaded || !m_editor) return {};
+    return rectangleAt(m_pairs.toEditor(qBound(0, source, m_buffer->length())));
+}
+
 QRectF EditorBinding::rectangleAt(int editorPosition) const
 {
     if (m_loaded)

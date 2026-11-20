@@ -210,6 +210,9 @@ public:
     // Where the caret is drawn, in the editor's coordinates: in a grid's
     // cell as the grid draws it.
     Q_INVOKABLE QRectF caretRectangle() const;
+    // Where a caret at a source position would be drawn, in the editor's
+    // coordinates, a grid's cells and rows included.
+    QRectF sourceRectangle(int source) const;
     // The TextEdit's own insert, remove and clear, in its positions.
     Q_INVOKABLE void replaceEditorRange(int start, int end, const QString &text);
     // The TextEdit's own append: a new paragraph at the end.

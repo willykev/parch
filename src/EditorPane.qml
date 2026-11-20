@@ -63,6 +63,9 @@ Rectangle {
     property bool liveFormatting: true
     // Tables show as grids to write in, rather than as their Markdown.
     property bool tableGrids: false
+    // Why the last edit was refused, as one that would break a table's
+    // rows; for a few seconds, for the status line to say.
+    property string editHint
 
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
@@ -944,6 +947,20 @@ Rectangle {
         onActivity: pane.wakeCaret()
         onIncludeAsked: (name, canInclude) => pane.includeAsked(name, canInclude)
         onCopyAsked: (names, bytes) => pane.copyAsked(names, bytes)
+    }
+
+    Connections {
+        target: binding.tables
+        function onRefused(reason) {
+            pane.editHint = reason
+            hintTime.restart()
+        }
+    }
+    QuietTimer {
+        id: hintTime
+        objectName: "editHintTime"
+        interval: 4000
+        onTriggered: pane.editHint = ""
     }
 
     Connections {

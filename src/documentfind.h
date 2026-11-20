@@ -131,8 +131,10 @@ private:
 
     static Found findJob(QSharedPointer<const SourceSnapshot> snapshot, QRegularExpression expression,
                          std::shared_ptr<std::atomic<bool>> cancel);
+    // With `each`, every replacement is kept besides, for a view's grids to
+    // write into their cells; otherwise they go with the worker.
     static Replaced replaceJob(QSharedPointer<const SourceSnapshot> snapshot, QRegularExpression expression,
-                               QString replacement, bool regex);
+                               QString replacement, bool regex, bool each);
 
     void queryEdited();
     void schedule(int delayMs);

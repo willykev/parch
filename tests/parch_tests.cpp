@@ -886,6 +886,10 @@ private slots:
     void readOnlyTablesTakeNoEdits() { TableGridTests::readOnlyTablesTakeNoEdits(); }
     void copyingCellsGivesTabsAndAnHtmlTable() { TableGridTests::copyingCellsGivesTabsAndAnHtmlTable(); }
     void pastingCellsFillsOverwritesAndGrows() { TableGridTests::pastingCellsFillsOverwritesAndGrows(); }
+    void handTypedTablesWaitUntilTheCaretLeaves() { TableGridTests::handTypedTablesWaitUntilTheCaretLeaves(); }
+    void everyGeometryQuestionHasAnAnswerInATable() { TableGridTests::everyGeometryQuestionHasAnAnswerInATable(); }
+    void fontAndWidthChangesKeepTheGrid() { TableGridTests::fontAndWidthChangesKeepTheGrid(); }
+    void tablesTheGridCannotHoldStayMarkdown() { TableGridTests::tablesTheGridCannotHoldStayMarkdown(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

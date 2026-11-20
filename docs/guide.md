@@ -1,8 +1,8 @@
 # parch guide
 
 parch is a Markdown writing app for Omarchy. It edits Markdown as plain text,
-with every `#`, `*` and `[link](…)` in view, and keeps what you write safe
-while you work.
+with every `#`, `*` and `[link](…)` in view, shows tables as grids you write
+in, and keeps what you write safe while you work.
 
 This guide is also in parch: **User guide** in the menu, or `F1`, opens it
 in a read-only tab. The package installs it as
@@ -13,6 +13,7 @@ teaches the Markdown parch reads, with examples you can edit; see
 **Contents:** [Install](#install) · [First steps](#first-steps) ·
 [Start and open documents](#start-and-open-documents) ·
 [Format your writing](#format-your-writing) ·
+[Write in tables](#write-in-tables) ·
 [See formatting as you write](#see-formatting-as-you-write) ·
 [Paste text, images and files](#paste-text-images-and-files) ·
 [Learn the Markdown parch reads](#learn-the-markdown-parch-reads) ·
@@ -197,9 +198,11 @@ keys.
   its own, and **Add a definition for the note**, which puts `[^source]: `
   at the end of the document for you to write the note. Both are in the
   command palette while the caret is on such a reference.
-- **Table** inserts a two-column table; **Format table** lines up a table's
-  pipes and padding by its alignment row without changing a cell, and keeps
-  wide characters, escaped pipes and pipes in code in their place.
+- **Table** (`Ctrl+T`) asks for the size of a new table and puts it in, as
+  a grid to write in; see [Write in tables](#write-in-tables). **Format
+  table** lines up the pipes and padding of a table shown as Markdown, by its
+  alignment row, without changing a cell, and keeps wide characters, escaped
+  pipes, pipes in code and merged cells as they are.
 - **Thematic break** and **Page break** (`+++`) go on a line of their own,
   with a blank line before them.
 
@@ -213,8 +216,8 @@ While you type:
   at the caret up from its first number.
 - `Tab` and `Shift+Tab` indent and outdent a list item, or every line of a
   selection; elsewhere `Tab` types a tab.
-- In a table, `Tab` and `Shift+Tab` go to the next and previous cell, and
-  `Tab` in the last cell adds a row.
+- In a table shown as Markdown, `Tab` and `Shift+Tab` go to the next and
+  previous cell, and `Tab` in the last cell adds a row.
 - `Shift+Enter` ends the line with a Markdown hard line break.
 
 The status line counts the words of the document, or of the selection, and
@@ -222,6 +225,129 @@ how many minutes they take to read at 200 words a minute. It counts what a
 reader sees: link addresses, task boxes, comments, front matter and
 Markdown punctuation are not words. Chinese and Japanese count each
 character as a word.
+
+## Write in tables
+
+A Markdown table shows as a grid between your paragraphs, and you write in
+its cells as you write anywhere else. The file keeps the table as plain
+Markdown, and parch keeps that Markdown lined up for you: every change made
+in the grid writes the whole table again, its pipes aligned and each column
+padded to its widest cell.
+
+**Make a table.** `Ctrl+T`, the toolbar's table button or **Format → Table**
+asks for its size: point at the little grid of cells, use the arrow keys, or
+type the number of columns and rows, the header counting as a row. `Enter`
+puts the table in, on a line of its own, with the caret in its first cell;
+`Esc` leaves without one. A table you type by hand, pipes and all, becomes a
+grid as soon as the caret leaves it.
+
+**Write in the cells.** Click a cell to put the caret where you clicked, and
+type. A cell's Markdown stays in view, styled as in the rest of the text, so
+`**bold**`, `[links](…)` and `code` work in cells as anywhere. A `|` you type
+is written `\|`, as Markdown needs it in a table. Spaces at the start or end
+of a cell are dropped, since Markdown ignores them. Typing in a cell is one
+step for `Ctrl+Z`, as in a paragraph, and the preview and saving follow as
+you type.
+
+**Move from cell to cell.**
+
+- The arrow keys move through a cell's text and on into the next cell at its
+  edge. Up and down they go a line at a time in a cell that wraps, then to
+  the cell above or below, and out of the table at its top and bottom.
+- `Tab` and `Shift+Tab` go to the next and the previous cell and select its
+  text, so that typing replaces it. `Tab` in the last cell adds a row.
+- `Enter` goes to the cell below and selects its text. On the last row it
+  adds a row; on a last row left empty, it takes that row away and puts the
+  caret below the table.
+- `Shift+Enter` breaks the line inside a cell, written `<br>`.
+- `Home` and `End` go to the start and end of the cell's text, and
+  `Ctrl+Left` and `Ctrl+Right` go a word at a time.
+
+**Select cells.** Drag across cells, or hold `Shift` and move past the edge
+of a cell's text, to select a block of cells. `Delete` empties them, and
+typing replaces them, writing into the first. `Ctrl+A` selects the cell's
+text, then the whole table, then the whole document; `Esc` lets go of a
+block. A selection that starts in a paragraph and reaches into a table takes
+the whole table.
+
+**Copy and paste.** A block of cells copies as cells, which paste into a
+spreadsheet as cells; **Cut** copies them and empties them. Cells copied from
+a spreadsheet, a web page or another table paste from the caret's cell on,
+over what is there, and add rows and columns where they reach past the
+table. One value pasted over a block fills each of its cells. Any other text
+pastes into the cell, its line breaks made spaces.
+
+**Add, move and delete rows and columns.** Pointing at a table, or having the
+caret in it, shows a handle beside the row and above the column, a **+** on
+the table's right edge and another under its last row. A **+** adds a column
+or a row. Clicking a handle selects its row or column and opens its menu;
+dragging it moves the row or column, a line showing where it will go.
+`Shift`-click another handle to select the rows or columns between, to move
+or delete them together.
+
+- A row's menu: **Insert row above**, **Insert row below**, **Duplicate
+  row**, **Move up**, **Move down** and **Delete row**. The header row stays
+  first.
+- A column's menu: **Insert column left** and **right**, **Move left** and
+  **right**, **Align as written**, **Align left**, **center** and **right**,
+  **Sort ascending**, **Sort descending** and **Delete column**. A table keeps
+  at least one column. Sorting orders the rows under the header by the
+  column: numbers as numbers and before text, empty cells last, Markdown
+  marks left out of the comparison, and rows that compare the same in the
+  order they were.
+- A right click in a cell, or the `Menu` key there, offers the spellings of
+  a misspelled word first, and otherwise all of these with **Merge cells**,
+  **Split cell**, **Show as Markdown** and **Delete table**.
+- `Alt+Shift+Up` and `Alt+Shift+Down` move the caret's row, or the rows
+  selected; `Alt+Shift+Left` and `Alt+Shift+Right` move its column.
+
+The same commands are under **Format → Table** and in the command palette,
+and any of them can be given keys of its own in **Keyboard shortcuts…**.
+Each change is one step for `Ctrl+Z`.
+
+**Merged cells.** In the Writer-compatible dialect, with merged cells on,
+`||` joins a cell with the next (see
+[Learn the Markdown parch reads](#learn-the-markdown-parch-reads)). In a grid
+a merged cell is one wide cell. **Merge cells** joins the selected cells of
+each row, their texts with a space between, or the caret's cell with the
+next; **Split cell** parts them again, the text staying in the first.
+Inserting a column inside a merged cell widens it and deleting a column it
+covers narrows it. A move or a paste that would cut one in two says so in the
+status line and changes nothing.
+
+**Around a table.** The line after a table stays blank: text you write on it
+goes on the line below, so that it never becomes a row of the table, and
+nothing pulls the text below up against it. `Backspace` on that blank line
+selects the table, and pressed again deletes it, as **Delete table** does.
+For a table at the very start or end of the document, `Up` from its first
+row or `Down` from its last makes a line beside it to write on. A table
+wider than the text takes the room beside it, and past that scrolls sideways
+on its own: with `Shift` and the wheel, or sideways on the touchpad.
+
+**Its Markdown.** Each change writes the table tidy: a pipe at each end of
+every row, one space inside each, every column padded to its widest cell
+(wide characters and emoji counting as two), the row under the header as
+wide, with its colons for alignment. Opening, reading or selecting a table
+changes nothing in the file. One written untidily elsewhere is tidied by its
+first change, and `Ctrl+Z` brings back exactly what was there.
+
+**Show as Markdown**, in a cell's menu, shows that table's Markdown in this
+window, as text you edit directly, until **Show table as grid**. **Show
+tables as Markdown** in the menu, or **Tables** in **Preferences**, shows
+every table as Markdown; **Format table** lines up one shown that way.
+
+A table stays as Markdown, as it is written, when it could not be written as
+a grid without losing something: a row with more cells than the header, a
+row that starts with `||`, a `//` comment line between its rows, or more
+than 128 columns or 20,000 cells.
+
+With Vim keys, in Normal mode the block caret sits in a cell's text. `h`,
+`l`, `w`, `b`, `0` and `$` go from cell to cell along the row, and `j` and
+`k` from row to row and out of the table. `x`, `r`, `cw`, `D` and the other
+commands that edit text act in the cell and stop at its end; `dd`, `yy` and
+`p`, and `o` and `O`, act on whole rows. A command that would break the
+table, such as `J` or deleting the header row, does nothing and says why in
+the status line.
 
 ## See formatting as you write
 
@@ -1064,7 +1190,7 @@ another command has can be swapped. **Remove** leaves a command without keys,
 | `F6` / `Shift+F6` | Move between the library, tabs, text, preview and notices |
 | `Ctrl+Shift+D` | Focus mode |
 | `F11` | Distraction-free writing |
-| `Menu` / `Shift+F10` | Spelling suggestions for the word at the caret |
+| `Menu` / `Shift+F10` | Spelling suggestions for the word at the caret; in a table, its menu |
 | `F10` | Open the menu |
 | `Esc` | Close the find bar, leave distraction-free writing, or dismiss a notice |
 | `Ctrl+Shift+P` | Command palette |
@@ -1081,6 +1207,8 @@ another command has can be swapped. **Remove** leaves a command without keys,
 | `Ctrl+K` / `Ctrl+Shift+I` | Link / image |
 | `Ctrl+Alt+F` | Footnote |
 | `Ctrl+T` | Table |
+| `Alt+Shift+Up` / `Alt+Shift+Down` | Move the table row up / down |
+| `Alt+Shift+Left` / `Alt+Shift+Right` | Move the table column left / right |
 | `Ctrl+M` / `Ctrl+Shift+M` | Inline / display math |
 | `Ctrl+Enter` | Page break |
 | `Shift+Enter` | Hard line break |
@@ -1257,8 +1385,8 @@ alone.
 
 **Preferences…** (`Ctrl+,`) sets the writing font, any installed family or
 the theme's; the text size; the line height; the longest line, in
-characters; whether the Markdown is styled as you write; how headings are
-written; whether the formatting toolbar shows; whether parch starts with a
+characters; whether the Markdown is styled as you write; whether tables
+show as grids (**Tables**); how headings are written; whether the formatting toolbar shows; whether parch starts with a
 new draft in front of the documents it reopens (**Start with a new
 draft**); whether spelling is checked;
 what focus mode keeps bright, and how strongly it dims the rest; and how many
@@ -1372,6 +1500,13 @@ be: the reason is shown in its place, and **Check document** lists every one.
 A TeX command parch cannot draw is listed under [Math](#math), and a Mermaid
 syntax error is said as Merman reports it. If none is drawn at all, the
 helpers are missing from `/usr/lib/parch`: install the package again.
+
+**A table shows as Markdown, not as a grid.** It may be shown so on purpose:
+**Show table as grid** in the command palette, with the caret in it, shows
+it as a grid again, and **Show tables as grids** in the menu turns grids on
+for every table. Otherwise parch could not write it as a grid without losing
+something; [Write in tables](#write-in-tables) says what that is. A table you
+are typing by hand becomes a grid once the caret leaves it.
 
 **Words are not underlined, or parch says spelling is not checked.** The
 English dictionary is missing: `sudo pacman -S hunspell-en_us`. Spelling may
@@ -1504,7 +1639,11 @@ report each of these as a note.
 ## What parch does not do
 
 - **Hide the Markdown.** Every `#`, `*` and `[link](…)` stays in the text;
-  the preview is where it reads as formatted.
+  the preview is where it reads as formatted. Tables show as grids, with
+  each cell's Markdown in view.
+- **Spreadsheet sums.** Table cells hold text; nothing in a table is
+  worked out. A column is as wide as its widest cell, or as the room allows,
+  with no width of its own to drag.
 - **Sync or share.** There is no account, cloud or collaboration; put your
   documents in a folder another tool syncs if you want them elsewhere.
 - **Languages other than English.** The window, spelling and the bundled

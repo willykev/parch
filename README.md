@@ -14,6 +14,9 @@ computer, and there is no account.
 
 - **Preview beside the text.** `Ctrl+Alt+2` shows tables, coloured code,
   math and footnotes beside the Markdown, scrolling with it.
+- **Tables to write in.** A table shows as a grid between your paragraphs:
+  `Tab` and `Enter` go from cell to cell, its edges add rows and columns, and
+  its Markdown stays lined up for you.
 - **Mermaid diagrams.** A `mermaid` block becomes a flowchart, sequence
   diagram, pie or Gantt chart, or any of 23 kinds, redrawn as you type, in
   your theme's colours and with no browser.
@@ -75,6 +78,16 @@ are drawn the same way, in your theme's colours.
 
 ![A pie chart of what the weather station cost: its Mermaid block on the left and the chart on the right](screenshots/pie-chart.png)
 
+### Write in a table
+
+`Ctrl+T` asks how many columns and rows, and puts in a grid with the caret in
+its first cell. `Tab` and `Enter` go from cell to cell and add a row at the
+end; the handle beside a row or above a column opens its menu or drags it to
+another place, and the **+** at an edge adds one. The Markdown underneath is
+written again, lined up, with each change.
+
+![The write-up's table of readings as a grid in the text, the caret in a cell and the handles of its row and column showing](screenshots/tables.png)
+
 ### See code and math as they read
 
 Fenced code is coloured by its language, and `$…$` and `$$…$$` become
@@ -112,6 +125,7 @@ changes when the theme does.
 | `Ctrl+O` / `Ctrl+Shift+O` | Open a file / find a document by name |
 | `Ctrl+S` | Save now |
 | `Ctrl+Alt+1` / `2` / `3` | The text / both / the preview |
+| `Ctrl+T` | A table, to write in as a grid |
 | `F9` | Show or hide the library |
 | `Ctrl+F` / `Ctrl+H` | Find / find and replace |
 | `Ctrl+Shift+F` | Search the library |

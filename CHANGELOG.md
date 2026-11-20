@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Tables show as grids in the text, between the paragraphs, and you write in
+  their cells as anywhere else. `Tab`, `Enter` and the arrows go from cell to
+  cell, and `Tab` or `Enter` on the last row adds one. Handles beside each row
+  and above each column select it, open its menu and move it by dragging; a
+  **+** on the right edge and under the last row adds a column or a row. The
+  menus insert, duplicate, move and delete rows and columns, align and sort
+  columns, and merge and split cells. Blocks of cells copy and paste as
+  cells, to and from spreadsheets. Each change writes the table's Markdown
+  again with its pipes lined up, as one step to undo. **Table** (`Ctrl+T`)
+  asks for the new table's size. **Show as Markdown** shows one table's pipes,
+  and **Tables** in Preferences turns grids off.
+- **Format table** keeps merged cells (`||`) whole, where it used to split
+  them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as
   the fingers move, from the start of a swipe, and a swipe glides on after
   the fingers lift and slows to a stop instead of stopping dead. Another

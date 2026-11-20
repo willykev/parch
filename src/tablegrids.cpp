@@ -634,7 +634,12 @@ std::optional<QRectF> TableGrids::rectangleFor(int position) const
     TableGrid *grid = gridAt(position);
     if (!grid) return std::nullopt;
     QRectF caret = grid->caretAt(position);
-    if (caret.isNull()) caret = QRectF(0, 0, 0, lineHeight());
+    if (caret.isNull()) {
+        // Outside the cells, as in the pipes or at a row's end: the row's place.
+        const int row = MdTable::rowAt(grid->table(), position);
+        const QRectF rect = grid->rowRect(row <= 1 ? 0 : row - 1);
+        caret = QRectF(0, rect.top() + std::round(grid->padding() / 2), 0, lineHeight());
+    }
     return caret.translated(grid->x() - grid->scrollX(), grid->y());
 }
 
@@ -678,6 +683,13 @@ bool TableGrids::inCellText(int start, int end) const
         return start >= cell.start && end <= cell.end;
     }
     return true;
+}
+
+bool TableGrids::settled() const
+{
+    if (!m_enabled || !m_binding->m_loaded || !m_binding->m_document) return true;
+    const ParsedTextPtr parse = m_binding->m_document->parse()->current();
+    return parse && parse->revision == m_binding->m_buffer->revision();
 }
 
 void TableGrids::setProblem(const QString &problem)

@@ -1140,4 +1140,83 @@ void pastingCellsFillsOverwritesAndGrows()
     QCOMPARE(view.cell(), u"East gate open"_s);
 }
 
+void handTypedTablesWaitUntilTheCaretLeaves()
+{
+    GridEditor view(u"Readings.\n\n\n\nAfter."_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(0));
+    view.select(11, 11);
+    view.type(u"| a | b |"_s);
+    view.key(Qt::Key_Return);
+    view.type(u"|---|---|"_s);
+    view.key(Qt::Key_Return);
+    view.type(u"| c | d |"_s);
+    // While the caret is in it, the table being written stays as it is typed.
+    QTest::qWait(300);
+    QCOMPARE(view.binding->tables()->grids().size(), 0);
+    QVERIFY(view.text().contains(u"| a | b |\n|---|---|\n| c | d |"_s));
+    // Once the caret leaves it, it is a grid; its text is not touched.
+    view.select(int(view.text().indexOf(u"After")), int(view.text().indexOf(u"After")));
+    QVERIFY(view.grids(1));
+    QVERIFY(view.text().contains(u"| a | b |\n|---|---|\n| c | d |"_s));
+}
+
+void everyGeometryQuestionHasAnAnswerInATable()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrid *grid = view.grid();
+    // Every position of the table, pipes and hidden rows too, is somewhere in its grid.
+    for (int position = grid->start(); position <= grid->end(); ++position) {
+        const QRectF rect = view.binding->sourceRectangle(position);
+        QVERIFY2(rect.top() >= grid->y() - 0.5 && rect.bottom() <= grid->y() + grid->height() + 0.5,
+                 qPrintable(QString::number(position)));
+    }
+    // Later rows are lower down, so that a view scrolled through the table moves steadily.
+    const qreal first = view.binding->sourceRectangle(int(view.text().indexOf(u"North"))).top();
+    const qreal second = view.binding->sourceRectangle(int(view.text().indexOf(u"East"))).top();
+    QVERIFY(second > first);
+    QVERIFY(view.binding->sourceRectangle(grid->end()).top() >= second);
+    // The text after the table is below it.
+    QVERIFY(view.binding->sourceRectangle(int(view.text().indexOf(u"After"))).top() >= grid->y() + grid->height());
+}
+
+void fontAndWidthChangesKeepTheGrid()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const qreal before = view.grid()->height();
+    // A larger font makes a taller grid, and the line it stands in grows with it.
+    view.pane->setProperty("fontPixelSize", 26);
+    QTRY_VERIFY(view.grid()->height() > before);
+    QTextDocument *doc = view.binding->textDocument();
+    const QTextBlock header = doc->findBlock(view.binding->sourceToEditor(view.grid()->start()));
+    QTRY_COMPARE(header.blockFormat().lineHeight(), std::ceil(view.grid()->height()));
+    // A narrow view wraps the long cells rather than drawing past it.
+    GridEditor narrow(u"| A long heading that takes room | B |\n|---|---|\n| some words in a cell that needs room | x |"_s,
+                      QSize(320, 480));
+    QVERIFY(narrow.grids(1));
+    QVERIFY2(narrow.grid()->width() <= narrow.binding->tables()->availableWidth() + 1,
+             qPrintable(QString::number(narrow.grid()->width())));
+    QVERIFY(narrow.grid()->lineCount({1, 0}) > 1);
+}
+
+void tablesTheGridCannotHoldStayMarkdown()
+{
+    GridEditor view(u"| a | b |\n|---|---|\n| 1 | 2 | 3 |\n\nText.\n\n| c | d |\n|---|---|\n| 4 | 5 |"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    // The first has a cell past its header: it shows as Markdown; the second is a grid.
+    QVERIFY(view.grids(1));
+    QCOMPARE(view.grid()->start(), int(view.text().indexOf(u"| c |")));
+    for (QTextBlock block = view.binding->textDocument()->begin(); block.position() < view.binding->sourceToEditor(view.grid()->start());
+         block = block.next())
+        QVERIFY(block.isVisible());
+    // Typed in, it takes edits as text does.
+    view.select(3, 3);
+    view.type(u"z"_s);
+    QVERIFY(view.text().startsWith(u"| az | b |"_s));
+}
+
 } // namespace TableGridTests

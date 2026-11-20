@@ -35,5 +35,9 @@ void tablesCanBeShownAsMarkdownPerView();
 void readOnlyTablesTakeNoEdits();
 void copyingCellsGivesTabsAndAnHtmlTable();
 void pastingCellsFillsOverwritesAndGrows();
+void handTypedTablesWaitUntilTheCaretLeaves();
+void everyGeometryQuestionHasAnAnswerInATable();
+void fontAndWidthChangesKeepTheGrid();
+void tablesTheGridCannotHoldStayMarkdown();
 
 } // namespace TableGridTests

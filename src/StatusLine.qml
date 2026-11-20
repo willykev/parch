@@ -22,6 +22,8 @@ Rectangle {
     // Why the last action could not be done, in a few words, and in full.
     property string problem
     property string problemDetail
+    // Why an edit was refused, as one that would break a table's rows, for a moment.
+    property string hint
     // The view's selection, as source offsets, whose words are counted when it has any.
     property int selectionStart: 0
     property int selectionEnd: 0
@@ -134,6 +136,24 @@ Rectangle {
             Accessible.role: Accessible.StaticText
             Accessible.name: text
         }
+    }
+
+    Text {
+        id: hintText
+        objectName: "editHint"
+        visible: line.hint.length > 0
+        anchors.left: saving.right
+        anchors.leftMargin: line.gap
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.max(0, Math.min(implicitWidth, line.width / 3))
+        text: line.hint
+        textFormat: Text.PlainText
+        font.family: theme.fontFamily
+        font.pixelSize: theme.fontSize
+        color: theme.warning
+        elide: Text.ElideRight
+        Accessible.role: Accessible.StaticText
+        Accessible.name: text
     }
 
     // In a few words, which take focus from the keyboard: the whole reason

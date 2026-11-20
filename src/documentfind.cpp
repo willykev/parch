@@ -379,8 +379,9 @@ void DocumentFind::startReplaceAll(const QString &replacement)
 {
     m_replacing = true;
     const QPointer<Document> document = m_document;
+    const bool each = m_binding && !m_binding->tables()->grids().isEmpty();
     QtConcurrent::run(&m_pool, &DocumentFind::replaceJob, m_document->buffer()->snapshot(), *m_expression, replacement,
-                      m_query.regex)
+                      m_query.regex, each)
         .then(this, [this, document, replacement](const Replaced &replaced) {
             m_replacing = false;
             if (!document || document != m_document || !m_canReplace) return;
@@ -391,7 +392,7 @@ void DocumentFind::startReplaceAll(const QString &replacement)
                 return;
             }
             int count = replaced.count;
-            if (count > 0 && m_binding && !m_binding->tables()->grids().isEmpty()) {
+            if (count > 0 && m_binding && !m_binding->tables()->grids().isEmpty() && !replaced.edits.isEmpty()) {
                 // Matches in a table's syntax are none; those in cells are
                 // written into them, each table tidy, all one step.
                 QList<SourceEdit> edits;
@@ -419,7 +420,8 @@ void DocumentFind::startReplaceAll(const QString &replacement)
 }
 
 DocumentFind::Replaced DocumentFind::replaceJob(QSharedPointer<const SourceSnapshot> snapshot,
-                                                QRegularExpression expression, QString replacement, bool regex)
+                                                QRegularExpression expression, QString replacement, bool regex,
+                                                bool each)
 {
     WorkerFailure::check(WorkerFailure::Job::Search);
     Replaced replaced;
@@ -433,7 +435,7 @@ DocumentFind::Replaced DocumentFind::replaceJob(QSharedPointer<const SourceSnaps
     });
     replaced.count = int(edits.size());
     replaced.edit = TextSearch::combine(text, edits);
-    replaced.edits = edits;
+    if (each) replaced.edits = std::move(edits);
     return replaced;
 }
 

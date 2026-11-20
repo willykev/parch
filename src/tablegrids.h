@@ -196,6 +196,9 @@ public:
     QList<QObject *> gridObjects() const;
     const QList<TableGrid *> &grids() const { return m_grids; }
     bool caretInGrid() const { return m_caretGrid != nullptr; }
+    // The tables of the text as it is now have been looked for: those that
+    // are to be grids are.
+    bool settled() const;
     QString problem() const { return m_problem; }
 
     EditorBinding *binding() const { return m_binding; }

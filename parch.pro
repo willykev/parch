@@ -122,6 +122,7 @@ HEADERS += \
     src/spellchecker.h \
     src/spellinglayer.h \
     src/tabmodel.h \
+    src/tablegrids.h \
     src/textsearch.h \
     src/theme.h \
     src/touchpadscroll.h \
@@ -240,6 +241,7 @@ SOURCES += \
     src/spellchecker.cpp \
     src/spellinglayer.cpp \
     src/tabmodel.cpp \
+    src/tablegrids.cpp \
     src/textsearch.cpp \
     src/theme.cpp \
     src/touchpadscroll.cpp \

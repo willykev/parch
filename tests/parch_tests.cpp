@@ -39,6 +39,7 @@
 #include "outline.h"
 #include "markdown_tests.h"
 #include "previewtests.h"
+#include "tablegridtests.h"
 #include "tabletests.h"
 #include "touchpadtests.h"
 #include "frametests.h"
@@ -846,6 +847,13 @@ private slots:
     void formatKeepsPrefixesAndLineEndings() { TableTests::formatKeepsPrefixesAndLineEndings(); }
     void formatAlignsWideAndCombiningText() { TableTests::formatAlignsWideAndCombiningText(); }
     void tablesTheGridCannotHoldSayWhy() { TableTests::tablesTheGridCannotHoldSayWhy(); }
+    void caretRestsInAHiddenRowAndNoKeyEjectsIt() { TableGridTests::caretRestsInAHiddenRowAndNoKeyEjectsIt(); }
+    void typingInACellEditsTheSourceAndKeepsItTidy() { TableGridTests::typingInACellEditsTheSourceAndKeepsItTidy(); }
+    void inputMethodComposesAtTheGridCaret() { TableGridTests::inputMethodComposesAtTheGridCaret(); }
+    void vimLinesMoveFromCellToCell() { TableGridTests::vimLinesMoveFromCellToCell(); }
+    void draggingFromProseOverATableSelectsItWhole() { TableGridTests::draggingFromProseOverATableSelectsItWhole(); }
+    void clicksBelowATableLandInProseAfterItMoves() { TableGridTests::clicksBelowATableLandInProseAfterItMoves(); }
+    void tableItemsPassTheWindowChecks() { TableGridTests::tableItemsPassTheWindowChecks(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

@@ -27,6 +27,7 @@
 #include "spellinglayer.h"
 #include "tabmodel.h"
 #include "theme.h"
+#include "tablegrids.h"
 #include "touchpadscroll.h"
 #include "vimmode.h"
 #include "windowcontext.h"
@@ -37,6 +38,9 @@
 void registerQmlTypes()
 {
     qmlRegisterType<EditorBinding>("Parch", 1, 0, "EditorBinding");
+    qmlRegisterUncreatableType<TableGrids>("Parch", 1, 0, "TableGrids", QStringLiteral("A view's binding keeps its grids"));
+    qmlRegisterUncreatableType<TableGrid>("Parch", 1, 0, "TableGrid", QStringLiteral("A view's binding keeps its grids"));
+    qmlRegisterType<TableGridView>("Parch", 1, 0, "TableGridView");
     qmlRegisterType<EditorDecorations>("Parch", 1, 0, "EditorDecorations");
     qmlRegisterType<SpellingLayer>("Parch", 1, 0, "SpellingLayer");
     qmlRegisterType<MarkdownStyling>("Parch", 1, 0, "MarkdownStyling");

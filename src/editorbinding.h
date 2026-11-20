@@ -5,6 +5,7 @@
 #include "markdownediting.h"
 #include "sourcebuffer.h"
 #include "sourcetypes.h"
+#include "tablegrids.h"
 // The binding's Vim keys are a property QML reads, so the type must be complete here.
 #include "vimmode.h"
 
@@ -23,6 +24,7 @@
 
 class QInputMethodEvent;
 class QKeyEvent;
+
 class QMimeData;
 class QTextBlockFormat;
 class QTextDocument;
@@ -113,6 +115,8 @@ class EditorBinding : public QObject {
     // make still goes through the source. Off, keys type as always.
     Q_PROPERTY(bool vimKeys READ vimKeys WRITE setVimKeys NOTIFY vimKeysChanged)
     Q_PROPERTY(VimMode *vim READ vim CONSTANT)
+    // The view's tables drawn as grids, and what they make of its editing.
+    Q_PROPERTY(TableGrids *tables READ tables CONSTANT)
 
 public:
     // What the writer chose for a dropped Markdown file.
@@ -144,6 +148,7 @@ public:
     bool vimKeys() const { return m_vimKeys; }
     void setVimKeys(bool on);
     VimMode *vim() const { return m_vim; }
+    TableGrids *tables() const { return m_tables; }
 
     // Runs one of MarkdownEditing's formatting commands on this view's
     // selection, as one undo step, and selects what the command leaves
@@ -256,6 +261,11 @@ private slots:
     void applyInputMethod();
 
 private:
+    friend class TableGrids;
+    friend class TableGrid;
+    // Where a caret at a projection position is drawn, in the editor's
+    // coordinates: in a grid as the grid draws it, elsewhere as Qt lays it out.
+    QRectF rectangleAt(int editorPosition) const;
     void attach();
     void detach();
     void load();
@@ -397,4 +407,8 @@ private:
     bool m_vimKeys = false;
     // Whether the TextEdit takes input method text: Vim keys allow it only in Insert mode.
     bool m_inputMethodAllowed = true;
+    TableGrids *m_tables = nullptr;
+    // Where the last edit through replace() left the caret, as the grids
+    // placed it, in source offsets; -1 when the edit placed nothing.
+    int m_placedCaret = -1;
 };

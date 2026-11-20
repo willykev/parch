@@ -60,6 +60,8 @@ Rectangle {
     // Live formatting styles the Markdown as it is written, its punctuation
     // kept and dimmed; without it the source is plain text.
     property bool liveFormatting: true
+    // Tables show as grids to write in, rather than as their Markdown.
+    property bool tableGrids: false
 
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
@@ -289,7 +291,7 @@ Rectangle {
                 objectName: "caret"
                 width: Math.max(1, Math.round(pane.fontPixelSize / 8))
                 color: theme.accent
-                visible: pane.caretFocused && pane.caretLit && !pane.blockCaret
+                visible: pane.caretFocused && pane.caretLit && !pane.blockCaret && !binding.tables.caretInGrid
             }
 
             // Vim's block caret, over the character the cursor is on, or
@@ -322,7 +324,7 @@ Rectangle {
                     editor.font
                     return boxAt(pane.vim.cursorEnd)
                 }
-                visible: pane.blockCaret && pane.caretFocused && pane.caretLit
+                visible: pane.blockCaret && pane.caretFocused && pane.caretLit && !binding.tables.caretInGrid
                 x: from.x
                 y: from.y
                 width: to.y === from.y && to.x > from.x ? to.x - from.x : pane.characterWidth
@@ -409,6 +411,74 @@ Rectangle {
                                     points.push(Qt.point(Math.min(x, wave.width), up ? 0 : wave.height))
                                 return points
                             }
+                        }
+                    }
+                }
+            }
+
+            // Tables drawn as grids, over the lines of their Markdown, which
+            // stay in the text. Each grid draws its caret and selection; the
+            // text keeps the keys.
+            Repeater {
+                model: binding.tables.grids
+
+                delegate: TableGridView {
+                    id: gridView
+
+                    required property TableGrid modelData
+
+                    objectName: "tableGrid"
+                    grid: modelData
+                    x: modelData.x
+                    y: modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    viewTop: flickable.contentY - editor.y - y
+                    viewHeight: flickable.height
+                    bandWidth: flickable.width - editor.x
+                    textColor: theme.foreground
+                    ruleColor: theme.controlBorder
+                    headerColor: theme.raised
+                    backgroundColor: theme.background
+                    selectionColor: theme.selection
+                    selectedTextColor: theme.foreground
+                    nativeRendering: pane.nativeRendering
+
+                    Rectangle {
+                        objectName: "gridCaret"
+                        x: gridView.modelData.caretRect.x
+                        y: gridView.modelData.caretRect.y
+                        width: Math.max(1, Math.round(pane.fontPixelSize / 8))
+                        height: gridView.modelData.caretRect.height
+                        color: theme.accent
+                        visible: gridView.modelData.hasCaret && pane.caretFocused && pane.caretLit && !pane.blockCaret
+                    }
+                    Rectangle {
+                        objectName: "gridBlockCaret"
+                        x: gridView.modelData.blockRect.x
+                        y: gridView.modelData.blockRect.y
+                        width: gridView.modelData.blockRect.width
+                        height: gridView.modelData.blockRect.height
+                        color: theme.accent
+                        opacity: 0.45
+                        visible: gridView.modelData.hasCaret && pane.blockCaret && pane.caretFocused && pane.caretLit
+                    }
+                    // A click puts the caret where it is in a cell's text, and
+                    // a drag selects from there.
+                    MouseArea {
+                        objectName: "gridPointer"
+                        anchors.fill: parent
+                        cursorShape: Qt.IBeamCursor
+                        property int pressedAt: -1
+                        onPressed: (mouse) => {
+                            editor.forceActiveFocus()
+                            const at = gridView.modelData.sourceAt(mouse.x, mouse.y)
+                            pressedAt = (mouse.modifiers & Qt.ShiftModifier) ? binding.anchorSource : at
+                            binding.select(pressedAt, at)
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (pressed)
+                                binding.select(pressedAt, gridView.modelData.sourceAt(mouse.x, mouse.y))
                         }
                     }
                 }
@@ -555,6 +625,12 @@ Rectangle {
         onActivity: pane.wakeCaret()
         onIncludeAsked: (name, canInclude) => pane.includeAsked(name, canInclude)
         onCopyAsked: (names, bytes) => pane.copyAsked(names, bytes)
+    }
+
+    Binding {
+        target: binding.tables
+        property: "enabled"
+        value: pane.tableGrids
     }
 
     Connections {

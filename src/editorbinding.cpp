@@ -2,6 +2,7 @@
 
 #include "caretrest.h"
 #include "sourceboundaries.h"
+#include "tablegrids.h"
 
 #include <QClipboard>
 #include <QCoreApplication>
@@ -208,7 +209,8 @@ private:
 };
 
 EditorBinding::EditorBinding(QObject *parent)
-    : QObject(parent), m_vimHost(std::make_unique<VimAdapter>(this)), m_vim(new VimMode(m_vimHost.get(), this))
+    : QObject(parent), m_vimHost(std::make_unique<VimAdapter>(this)), m_vim(new VimMode(m_vimHost.get(), this)),
+      m_tables(new TableGrids(this))
 {
     // Wherever the cursor moves, Vim keys follow; their own moves they know of.
     connect(this, &EditorBinding::cursorChanged, m_vim, &VimMode::selectionMoved);
@@ -329,10 +331,17 @@ void EditorBinding::attach()
         connect(m_editor, SIGNAL(selectionStartChanged()), this, SLOT(editorSelectionChanged())),
         connect(m_editor, SIGNAL(selectionEndChanged()), this, SLOT(editorSelectionChanged())),
         connect(m_editor, &QQuickItem::widthChanged, this, &EditorBinding::editorWidthChanged),
+        // The room beside the column is the grids' too.
+        connect(m_editor, &QQuickItem::xChanged, this, [this] {
+            if (m_loaded) m_tables->relayout();
+        }),
     };
     // The line height is a multiple of the font's size, so it follows a zoom or another font.
-    if (meta->indexOfSignal("fontChanged(QFont)") >= 0)
+    if (meta->indexOfSignal("fontChanged(QFont)") >= 0) {
         m_connections.append(connect(m_editor, SIGNAL(fontChanged(QFont)), this, SLOT(applyLineHeight())));
+        // Another font measures the grids' cells anew, the same height or not.
+        m_connections.append(connect(m_editor, SIGNAL(fontChanged(QFont)), m_tables, SLOT(relayoutLater())));
+    }
     // Being made read-only or editable again starts Qt's blinking anew.
     if (meta->indexOfSignal("readOnlyChanged(bool)") >= 0)
         m_connections.append(connect(m_editor, SIGNAL(readOnlyChanged(bool)), this, SLOT(stillQtCursor()),
@@ -361,6 +370,7 @@ void EditorBinding::detach()
     // Called also while the document, the TextEdit or its text document is
     // being destroyed: whatever has gone reads as null here and is left alone.
     cancelComposition();
+    m_tables->clear();
     for (const QMetaObject::Connection &connection : std::as_const(m_connections)) disconnect(connection);
     m_connections.clear();
     if (m_editor) m_editor->removeEventFilter(this);
@@ -385,6 +395,7 @@ void EditorBinding::detach()
 void EditorBinding::editorWidthChanged()
 {
     if (!m_loaded) load();
+    else m_tables->relayout();
 }
 
 void EditorBinding::load()
@@ -418,6 +429,7 @@ void EditorBinding::load()
     refreshCursor();
     refreshEditable();
     emit projectionLoaded();
+    m_tables->loaded();
 }
 
 bool EditorBinding::hasLongWord(QStringView text, qsizetype from, qsizetype to)
@@ -488,12 +500,11 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     int top = 0;
     qreal intoTop = 0;
     if (view) {
-        QRectF line;
-        m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(range.start)));
+        QRectF line = rectangleAt(m_pairs.toEditor(range.start));
         const qreal contentY = view->property("contentY").toReal();
         if (m_editor->y() + line.y() < contentY) top = topSourcePosition();
         if (top > 0) {
-            m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(top)));
+            line = rectangleAt(m_pairs.toEditor(top));
             intoTop = contentY - (m_editor->y() + line.y());
         }
     }
@@ -533,6 +544,8 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     // Qt turns the line breaks in the inserted source into separators itself,
     // exactly as the pairs table counts them.
     edit.insertText(source.mid(spanStart, spanEnd - spanStart));
+    // The grids follow the change, before the selection does.
+    m_tables->sourceChanged(range, inserted);
     // Positions before the edit stay, positions after it move by its length,
     // and positions inside what it replaced go to its end; the selection keeps
     // its direction.
@@ -547,8 +560,7 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
         m_editor->setFlag(QQuickItem::ItemObservesViewport, source.size() > largeTextUnits);
     refreshCursor();
     if (top > 0 && oldEnd <= top) {
-        QRectF line;
-        m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(top + delta)));
+        const QRectF line = rectangleAt(m_pairs.toEditor(top + delta));
         scrollView(view, m_editor->y() + line.y() + intoTop);
     }
 }
@@ -715,6 +727,7 @@ void EditorBinding::applyLineHeight()
     all.select(QTextCursor::Document);
     all.mergeBlockFormat(format);
     m_projecting = false;
+    m_tables->relayout();
 }
 
 void EditorBinding::checkNativeChange(int position, int removed, int added)
@@ -908,6 +921,7 @@ void EditorBinding::refreshCursor()
     m_cursorSource = cursor;
     m_anchorSource = anchor;
     emit cursorChanged();
+    m_tables->cursorMoved();
 }
 
 void EditorBinding::editorCursorMoved()
@@ -977,6 +991,24 @@ bool EditorBinding::replace(SourceRange range, const QString &text, EditKind kin
 {
     // A view never edits the source while it follows a change of it, nor while it is blocked.
     if (!editable() || m_projecting || m_blocked) return false;
+    m_placedCaret = -1;
+    // An edit that reaches into a grid is made an edit of its cell, the
+    // table written tidy around it, or refused.
+    const TableGrids::Adapted adapted = m_tables->adapt(range, text);
+    if (adapted.kind == TableGrids::Adapted::Refused) {
+        emit m_tables->refused(adapted.reason);
+        return false;
+    }
+    if (adapted.kind == TableGrids::Adapted::Changed) {
+        if (!adapted.edits.isEmpty() && m_buffer->replace(adapted.edits) == SourceBuffer::EditOutcome::Rejected)
+            return false;
+        m_placedCaret = adapted.cursor;
+        const int caret = m_pairs.toEditor(qBound(0, adapted.cursor, m_buffer->length()));
+        selectEditor(caret, caret);
+        refreshCursor();
+        revealCursor();
+        return true;
+    }
     const auto outcome = m_buffer->replace(range, text, kind);
     if (outcome == SourceBuffer::EditOutcome::Rejected) return false;
     if (placeCaret) {
@@ -1149,6 +1181,8 @@ bool EditorBinding::commitInput(const QInputMethodEvent *event, SourceRange sele
     // The copy of the text is gone before the edit, or the buffer would copy all of it to change it.
     if (!planInput(event, commit, selected, &span, &replacement, &replaceFrom)) return false;
     if (!replace(span, replacement, EditKind::Other, false)) return false;
+    // In a grid the table was written anew around the commit, and the grids placed the caret.
+    if (m_placedCaret >= 0) return true;
     const int caret = m_pairs.toEditor(replaceFrom + int(commit.size()));
     selectEditor(caret, caret);
     return true;
@@ -1257,6 +1291,11 @@ void EditorBinding::handleInputMethod(QInputMethodEvent *event)
 
 bool EditorBinding::handleKey(QKeyEvent *key)
 {
+    // Keys that move the caret in a grid move it from cell to cell.
+    if (m_tables->key(key)) {
+        key->accept();
+        return true;
+    }
     if (key->matches(QKeySequence::Undo)) {
         undo();
     } else if (key->matches(QKeySequence::Redo)) {
@@ -1361,6 +1400,22 @@ bool EditorBinding::eventFilter(QObject *watched, QEvent *event)
             if (!m_vim->handleInputMethod(input)) handleInputMethod(input);
             return true;
         }
+        if (event->type() == QEvent::InputMethodQuery && m_tables->caretInGrid()) {
+            // The caret in a grid is where the grid draws it, which the input
+            // method places its window by; Qt answers the rest.
+            auto *query = static_cast<QInputMethodQueryEvent *>(event);
+            m_dispatching = true;
+            QCoreApplication::sendEvent(m_editor, query);
+            m_dispatching = false;
+            if (const auto caret = m_tables->rectangleFor(m_cursorSource)) {
+                if (query->queries() & Qt::ImCursorRectangle) query->setValue(Qt::ImCursorRectangle, *caret);
+                if (query->queries() & Qt::ImAnchorRectangle) {
+                    const auto anchor = m_tables->rectangleFor(m_anchorSource);
+                    query->setValue(Qt::ImAnchorRectangle, anchor ? *anchor : *caret);
+                }
+            }
+            return true;
+        }
         if (event->type() == QEvent::KeyPress) {
             auto *key = static_cast<QKeyEvent *>(event);
             if (m_vim->handleKey(key)) {
@@ -1391,7 +1446,7 @@ void EditorBinding::revealCursor()
 {
     QQuickItem *view = viewport();
     if (!view || !m_loaded) return;
-    const QRectF caret = m_cursorRectangle.read(m_editor).toRectF().translated(m_editor->position());
+    const QRectF caret = rectangleAt(editorCursor()).translated(m_editor->position());
     const qreal top = view->property("contentY").toReal();
     const qreal height = view->height();
     qreal target = top;
@@ -1405,10 +1460,20 @@ void EditorBinding::keepCursorInView(qreal formerHeight)
 {
     QQuickItem *view = viewport();
     if (!view || !m_loaded) return;
-    const QRectF caret = m_cursorRectangle.read(m_editor).toRectF().translated(m_editor->position());
+    const QRectF caret = rectangleAt(editorCursor()).translated(m_editor->position());
     const qreal top = view->property("contentY").toReal();
     if (caret.top() < top || caret.bottom() > top + formerHeight) return;
     revealCursor();
+}
+
+QRectF EditorBinding::rectangleAt(int editorPosition) const
+{
+    if (m_loaded)
+        if (const auto inGrid = m_tables->rectangleFor(m_pairs.toSource(editorPosition))) return *inGrid;
+    if (editorPosition == editorCursor()) return m_cursorRectangle.read(m_editor).toRectF();
+    QRectF rect;
+    m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, rect), Q_ARG(int, editorPosition));
+    return rect;
 }
 
 QTextDocument *EditorBinding::textDocument() const { return m_loaded ? m_textDocument.data() : nullptr; }
@@ -1458,8 +1523,7 @@ void EditorBinding::restore(int cursor, int anchor, int top)
     QQuickItem *view = viewport();
     if (!view) return;
     const int position = fit(top);
-    QRectF line;
-    m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, line), Q_ARG(int, m_pairs.toEditor(position)));
+    const QRectF line = rectangleAt(m_pairs.toEditor(position));
     // The first line keeps the margin above it in view.
     scrollView(view, line.y() <= 0 ? 0 : m_editor->y() + line.y());
     m_topAnchor = {true, position, view->property("contentY").toReal()};

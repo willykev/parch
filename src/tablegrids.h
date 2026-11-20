@@ -17,8 +17,10 @@
 #include <memory>
 #include <vector>
 #include <optional>
+#include <tuple>
 
 class EditorBinding;
+class EditorDecorations;
 class QKeyEvent;
 class QTextDocument;
 class TableGrids;
@@ -39,6 +41,10 @@ class TableGrid : public QObject {
     Q_PROPERTY(qreal y READ y NOTIFY geometryChanged)
     Q_PROPERTY(qreal width READ width NOTIFY geometryChanged)
     Q_PROPERTY(qreal height READ height NOTIFY geometryChanged)
+    // How wide the grid shows: all of it, or as much as the room allows,
+    // the rest scrolled to sideways, `scrollX` across.
+    Q_PROPERTY(qreal viewWidth READ viewWidth NOTIFY geometryChanged)
+    Q_PROPERTY(qreal scrollX READ scrollX WRITE setScrollX NOTIFY scrollChanged)
     Q_PROPERTY(int rows READ rowCount NOTIFY geometryChanged)
     Q_PROPERTY(int columns READ columnCount NOTIFY geometryChanged)
     // The caret, while the view's cursor is in this table: its rectangle
@@ -56,6 +62,11 @@ public:
     qreal y() const { return m_top; }
     qreal width() const { return m_width; }
     qreal height() const { return m_height; }
+    qreal viewWidth() const;
+    qreal scrollX() const { return m_scrollX; }
+    void setScrollX(qreal x);
+    // Scrolls sideways as little as shows a rectangle of the grid.
+    void reveal(const QRectF &rect);
     int rowCount() const { return int(m_rowTop.size()); }
     int columnCount() const { return int(m_columnLeft.size()); }
     bool hasCaret() const { return m_hasCaret; }
@@ -104,6 +115,8 @@ public:
         int selectionStart = -1;
         int selectionLength = 0;
         bool selected = false; // the whole cell, as part of a block or table selection
+        // Wavy underlines, as offsets into the cell's text, and their colours.
+        QList<std::tuple<int, int, QColor>> waves;
     };
     QList<Drawn> drawn(qreal top, qreal bottom);
     QList<qreal> columnLefts() const { return m_columnLeft; }
@@ -114,6 +127,7 @@ signals:
     void geometryChanged();
     void caretChanged();
     void contentChanged();
+    void scrollChanged();
 
 private:
     friend class TableGrids;
@@ -127,6 +141,8 @@ private:
     void read(const MdTable::Table &table, QStringView text);
     void measure();
     QTextLayout *layoutOf(Place place) const;
+    // The formatting changed between source positions: those cells are laid out again.
+    void restyle(int start, int end);
     // Where a cell's columns start and end, across.
     std::pair<qreal, qreal> extent(const MdTable::Cell &cell) const;
     int indexOf(Place place) const;
@@ -142,6 +158,7 @@ private:
     qreal m_top = 0;
     qreal m_width = 0;
     qreal m_height = 0;
+    qreal m_scrollX = 0;
     bool m_hasCaret = false;
     QRectF m_caretRect, m_blockRect;
 };
@@ -172,6 +189,9 @@ public:
     QString problem() const { return m_problem; }
 
     EditorBinding *binding() const { return m_binding; }
+    // The view's formatting, which the grids draw their cells' text with.
+    void setDecorations(EditorDecorations *decorations);
+    EditorDecorations *decorations() const;
     QFont font() const;
     QFont headerFont() const;
     qreal lineHeight() const;
@@ -268,6 +288,7 @@ private:
     bool enterFromProse(int position, bool down);
 
     EditorBinding *m_binding;
+    QPointer<QObject> m_decorations;
     bool m_enabled = false;
     QList<TableGrid *> m_grids;
     TableGrid *m_caretGrid = nullptr;
@@ -297,9 +318,6 @@ class TableGridView : public QQuickItem {
     Q_PROPERTY(QColor selectionColor MEMBER m_selectionColor NOTIFY lookChanged)
     Q_PROPERTY(QColor selectedTextColor MEMBER m_selectedTextColor NOTIFY lookChanged)
     Q_PROPERTY(bool nativeRendering MEMBER m_nativeRendering NOTIFY lookChanged)
-    // How far right of the grid its band of background reaches, to cover
-    // the header line's own text beneath.
-    Q_PROPERTY(qreal bandWidth MEMBER m_bandWidth NOTIFY lookChanged)
 
 public:
     explicit TableGridView(QQuickItem *parent = nullptr);
@@ -318,6 +336,9 @@ signals:
 
 protected:
     QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *) override;
+    // A sideways scroll over a grid wider than its room scrolls it; any
+    // other goes on to the text.
+    void wheelEvent(QWheelEvent *event) override;
 
 private:
     QPointer<TableGrid> m_grid;
@@ -325,5 +346,4 @@ private:
     qreal m_viewHeight = 0;
     QColor m_textColor, m_ruleColor, m_headerColor, m_backgroundColor, m_selectionColor, m_selectedTextColor;
     bool m_nativeRendering = true;
-    qreal m_bandWidth = 0;
 };

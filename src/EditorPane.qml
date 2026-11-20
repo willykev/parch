@@ -422,63 +422,90 @@ Rectangle {
             Repeater {
                 model: binding.tables.grids
 
-                delegate: TableGridView {
-                    id: gridView
+                delegate: Item {
+                    id: gridSlot
 
                     required property TableGrid modelData
 
-                    objectName: "tableGrid"
-                    grid: modelData
-                    x: modelData.x
+                    x: 0
                     y: modelData.y
-                    width: modelData.width
+                    width: modelData.viewWidth
                     height: modelData.height
-                    viewTop: flickable.contentY - editor.y - y
-                    viewHeight: flickable.height
-                    bandWidth: flickable.width - editor.x
-                    textColor: theme.foreground
-                    ruleColor: theme.controlBorder
-                    headerColor: theme.raised
-                    backgroundColor: theme.background
-                    selectionColor: theme.selection
-                    selectedTextColor: theme.foreground
-                    nativeRendering: pane.nativeRendering
+                    z: 1
 
+                    // The band hides the table's Markdown beneath, its header
+                    // line's text too, to the edge of the view.
                     Rectangle {
-                        objectName: "gridCaret"
-                        x: gridView.modelData.caretRect.x
-                        y: gridView.modelData.caretRect.y
-                        width: Math.max(1, Math.round(pane.fontPixelSize / 8))
-                        height: gridView.modelData.caretRect.height
-                        color: theme.accent
-                        visible: gridView.modelData.hasCaret && pane.caretFocused && pane.caretLit && !pane.blockCaret
+                        objectName: "gridBand"
+                        width: Math.max(gridSlot.width, flickable.width - editor.x)
+                        height: gridSlot.height
+                        color: theme.background
                     }
-                    Rectangle {
-                        objectName: "gridBlockCaret"
-                        x: gridView.modelData.blockRect.x
-                        y: gridView.modelData.blockRect.y
-                        width: gridView.modelData.blockRect.width
-                        height: gridView.modelData.blockRect.height
-                        color: theme.accent
-                        opacity: 0.45
-                        visible: gridView.modelData.hasCaret && pane.blockCaret && pane.caretFocused && pane.caretLit
-                    }
-                    // A click puts the caret where it is in a cell's text, and
-                    // a drag selects from there.
-                    MouseArea {
-                        objectName: "gridPointer"
+
+                    TableGridView {
+                        id: gridView
+                        objectName: "tableGrid"
                         anchors.fill: parent
-                        cursorShape: Qt.IBeamCursor
-                        property int pressedAt: -1
-                        onPressed: (mouse) => {
-                            editor.forceActiveFocus()
-                            const at = gridView.modelData.sourceAt(mouse.x, mouse.y)
-                            pressedAt = (mouse.modifiers & Qt.ShiftModifier) ? binding.anchorSource : at
-                            binding.select(pressedAt, at)
+                        clip: true
+                        grid: gridSlot.modelData
+                        viewTop: flickable.contentY - editor.y - gridSlot.y
+                        viewHeight: flickable.height
+                        // In focus mode the text outside the focus is dim, cells too.
+                        textColor: editor.color
+                        ruleColor: theme.controlBorder
+                        headerColor: theme.raised
+                        backgroundColor: theme.background
+                        selectionColor: theme.selection
+                        selectedTextColor: theme.foreground
+                        nativeRendering: pane.nativeRendering
+
+                        Rectangle {
+                            objectName: "gridCaret"
+                            x: gridSlot.modelData.caretRect.x - gridSlot.modelData.scrollX
+                            y: gridSlot.modelData.caretRect.y
+                            width: Math.max(1, Math.round(pane.fontPixelSize / 8))
+                            height: gridSlot.modelData.caretRect.height
+                            color: theme.accent
+                            visible: gridSlot.modelData.hasCaret && pane.caretFocused && pane.caretLit && !pane.blockCaret
                         }
-                        onPositionChanged: (mouse) => {
-                            if (pressed)
-                                binding.select(pressedAt, gridView.modelData.sourceAt(mouse.x, mouse.y))
+                        Rectangle {
+                            objectName: "gridBlockCaret"
+                            x: gridSlot.modelData.blockRect.x - gridSlot.modelData.scrollX
+                            y: gridSlot.modelData.blockRect.y
+                            width: gridSlot.modelData.blockRect.width
+                            height: gridSlot.modelData.blockRect.height
+                            color: theme.accent
+                            opacity: 0.45
+                            visible: gridSlot.modelData.hasCaret && pane.blockCaret && pane.caretFocused && pane.caretLit
+                        }
+                        // A click puts the caret where it is in a cell's text,
+                        // and a drag selects from there; a right click offers
+                        // the spelling of a misspelled word.
+                        MouseArea {
+                            objectName: "gridPointer"
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            cursorShape: Qt.IBeamCursor
+                            property int pressedAt: -1
+                            function sourceAt(mouse) {
+                                return gridSlot.modelData.sourceAt(mouse.x + gridSlot.modelData.scrollX, mouse.y)
+                            }
+                            onPressed: (mouse) => {
+                                editor.forceActiveFocus()
+                                const at = sourceAt(mouse)
+                                if (mouse.button === Qt.RightButton) {
+                                    const point = mapToItem(editor, mouse.x, mouse.y)
+                                    binding.select(at, at)
+                                    pane.offerSpelling(binding.sourceToEditor(at), point)
+                                    return
+                                }
+                                pressedAt = (mouse.modifiers & Qt.ShiftModifier) ? binding.anchorSource : at
+                                binding.select(pressedAt, at)
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (pressed && pressedButtons & Qt.LeftButton)
+                                    binding.select(pressedAt, sourceAt(mouse))
+                            }
                         }
                     }
                 }

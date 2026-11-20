@@ -356,6 +356,7 @@ void clicksBelowATableLandInProseAfterItMoves()
 
 void tableItemsPassTheWindowChecks()
 {
+
     GridEditor view(weather);
     QVERIFY2(view.ok(), qPrintable(view.error));
     QVERIFY(view.grids(1));

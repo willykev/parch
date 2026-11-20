@@ -3,6 +3,7 @@
 #include "document.h"
 #include "documentparse.h"
 #include "editorbinding.h"
+#include "editordecorations.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
 
@@ -10,7 +11,10 @@
 #include <QFontMetricsF>
 #include <QKeyEvent>
 #include <QQuickWindow>
+#include <QSGFlatColorMaterial>
+#include <QSGGeometryNode>
 #include <QSGRectangleNode>
+#include <QWheelEvent>
 #include <QSGTextNode>
 #include <QTextBlock>
 #include <QTextCursor>
@@ -117,6 +121,29 @@ TableGrid::Place TableGrid::placeOf(int position) const
 
 qreal TableGrid::padding() const { return std::round(m_owner->lineHeight() * 0.4); }
 
+qreal TableGrid::viewWidth() const { return qMin(m_width, qMax<qreal>(1, m_owner->availableWidth())); }
+
+void TableGrid::setScrollX(qreal x)
+{
+    x = std::round(qBound<qreal>(0, x, qMax<qreal>(0, m_width - viewWidth())));
+    if (qFuzzyCompare(x + 1, m_scrollX + 1)) return;
+    m_scrollX = x;
+    emit scrollChanged();
+    emit contentChanged();
+}
+
+void TableGrid::reveal(const QRectF &rect)
+{
+    const qreal room = viewWidth();
+    if (m_width <= room) {
+        setScrollX(0);
+        return;
+    }
+    const qreal margin = padding();
+    if (rect.left() - margin < m_scrollX) setScrollX(rect.left() - margin);
+    else if (rect.right() + margin > m_scrollX + room) setScrollX(rect.right() + margin - room);
+}
+
 std::pair<qreal, qreal> TableGrid::extent(const MdTable::Cell &cell) const
 {
     if (m_columnLeft.isEmpty()) return {0, 0};
@@ -164,6 +191,9 @@ QTextLayout *TableGrid::layoutOf(Place place) const
                                                           : Qt::AlignLeft);
     cell.layout->setTextOption(option);
     cell.layout->setCacheEnabled(true);
+    // Formatted as the text view formats the Markdown around it.
+    if (EditorDecorations *decorations = m_owner->decorations())
+        cell.layout->setFormats(decorations->formatsFor(source.start, int(cell.text.size())));
     const qreal lineHeight = m_owner->lineHeight();
     cell.layout->beginLayout();
     int lines = 0;
@@ -178,6 +208,23 @@ QTextLayout *TableGrid::layoutOf(Place place) const
     cell.width = width;
     cell.lines = qMax(1, lines);
     return cell.layout.get();
+}
+
+void TableGrid::restyle(int start, int end)
+{
+    bool any = false;
+    for (int row = 0; row < m_rowFirst.size(); ++row) {
+        for (int i = 0; i < cellCount(row); ++i) {
+            const MdTable::Cell &cell = cellAt({row, i});
+            if (cell.end < start || cell.start > end) continue;
+            CellText &text = m_cells[size_t(indexOf({row, i}))];
+            if (text.layout) {
+                text.layout.reset();
+                any = true;
+            }
+        }
+    }
+    if (any) emit contentChanged();
 }
 
 int TableGrid::lineCount(Place place) const
@@ -399,6 +446,9 @@ QList<TableGrid::Drawn> TableGrid::drawn(qreal top, qreal bottom)
             d.rect = cellRect({row, i});
             d.layout = layoutOf({row, i});
             d.header = row == 0;
+            if (EditorDecorations *decorations = m_owner->decorations())
+                for (const EditorDecorations::Wave &wave : decorations->wavesFor(cell.start, cell.end - cell.start))
+                    d.waves.append({wave.start - cell.start, wave.end - cell.start, wave.color});
             if (whole || (from <= cell.start && to >= cell.end && from < to && (from < cell.rawStart || to > cell.rawEnd)))
                 d.selected = true;
             else if (from < to && from >= cell.rawStart && to <= cell.rawEnd) {
@@ -425,6 +475,8 @@ void TableGrid::updateCaret()
                                                                      : QFontMetricsF(m_owner->font()).horizontalAdvance(u'0');
         block = QRectF(caret.x(), caret.y(), width, caret.height());
     }
+    if (has) reveal(block);
+    else setScrollX(qMin(m_scrollX, qMax<qreal>(0, m_width - viewWidth())));
     if (has == m_hasCaret && caret == m_caretRect && block == m_blockRect) return;
     m_hasCaret = has;
     m_caretRect = caret;
@@ -437,6 +489,23 @@ void TableGrid::updateCaret()
 TableGrids::TableGrids(EditorBinding *binding) : QObject(binding), m_binding(binding) {}
 
 TableGrids::~TableGrids() = default;
+
+EditorDecorations *TableGrids::decorations() const { return static_cast<EditorDecorations *>(m_decorations.data()); }
+
+void TableGrids::setDecorations(EditorDecorations *decorations)
+{
+    if (decorations == m_decorations) return;
+    if (m_decorations) disconnect(m_decorations, nullptr, this, nullptr);
+    m_decorations = decorations;
+    if (!decorations) return;
+    // Cells whose formatting changed are laid out again as they are next drawn.
+    connect(decorations, &EditorDecorations::formatsChanged, this, [this](int start, int end) {
+        for (TableGrid *grid : std::as_const(m_grids)) {
+            if (end < grid->start() || start > grid->end()) continue;
+            grid->restyle(start, end);
+        }
+    });
+}
 
 void TableGrids::setEnabled(bool on)
 {
@@ -519,14 +588,14 @@ std::optional<QRectF> TableGrids::rectangleFor(int position) const
     if (!grid) return std::nullopt;
     QRectF caret = grid->caretAt(position);
     if (caret.isNull()) caret = QRectF(0, 0, 0, lineHeight());
-    return caret.translated(grid->x(), grid->y());
+    return caret.translated(grid->x() - grid->scrollX(), grid->y());
 }
 
 int TableGrids::sourceAt(QPointF point) const
 {
     for (TableGrid *grid : m_grids)
         if (point.y() >= grid->y() && point.y() < grid->y() + grid->height())
-            return grid->sourceAt(point.x() - grid->x(), point.y() - grid->y());
+            return grid->sourceAt(point.x() - grid->x() + grid->scrollX(), point.y() - grid->y());
     return -1;
 }
 
@@ -1287,7 +1356,10 @@ QSGNode *TableGridView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
 {
     delete old;
     if (!m_grid || !window()) return nullptr;
-    auto *root = new QSGNode;
+    auto *root = new QSGTransformNode;
+    QMatrix4x4 shift;
+    shift.translate(float(-m_grid->scrollX()), 0);
+    root->setMatrix(shift);
     const auto rect = [&](const QRectF &r, const QColor &color) {
         QSGRectangleNode *node = window()->createRectangleNode();
         node->setRect(r);
@@ -1297,8 +1369,6 @@ QSGNode *TableGridView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     const qreal top = qMax<qreal>(0, m_viewTop);
     const qreal bottom = qMin(m_grid->height(), m_viewTop + m_viewHeight);
     if (bottom <= top) return root;
-    // The band hides the table's Markdown beneath, the header line's text too.
-    rect(QRectF(0, top, qMax(m_bandWidth, m_grid->width()), bottom - top), m_backgroundColor);
     const QList<TableGrid::Drawn> cells = m_grid->drawn(top, bottom);
     if (cells.isEmpty()) return root;
     qreal firstTop = cells.first().rect.top(), lastBottom = 0;
@@ -1320,5 +1390,55 @@ QSGNode *TableGridView::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
                             cell.selectionLength > 0 ? cell.selectionLength : -1);
     }
     root->appendChildNode(text);
+    // Wavy underlines where the text view would draw them, one zigzag a line.
+    for (const TableGrid::Drawn &cell : cells) {
+        if (!cell.layout || cell.waves.isEmpty()) continue;
+        const QPointF origin(cell.rect.left() + pad, cell.rect.top() + std::round(pad / 2));
+        const QFontMetricsF metrics(cell.layout->font());
+        const qreal height = qMax<qreal>(2, std::round(cell.layout->font().pixelSize() / 6.0));
+        for (const auto &[from, to, color] : cell.waves) {
+            for (int i = 0; i < cell.layout->lineCount(); ++i) {
+                const QTextLine line = cell.layout->lineAt(i);
+                const int start = qMax(from, line.textStart()), end = qMin(to, line.textStart() + line.textLength());
+                if (start >= end) continue;
+                const qreal left = origin.x() + line.cursorToX(start), right = origin.x() + line.cursorToX(end);
+                const qreal base = origin.y() + line.y() + line.ascent() + qMax<qreal>(1, std::round(metrics.underlinePos()));
+                const int steps = qMax(1, int(std::ceil((right - left) / height)));
+                auto *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), steps + 1);
+                geometry->setDrawingMode(QSGGeometry::DrawLineStrip);
+                geometry->setLineWidth(qMax<float>(1, float(std::round(cell.layout->font().pixelSize() / 14.0))));
+                QSGGeometry::Point2D *points = geometry->vertexDataAsPoint2D();
+                for (int k = 0; k <= steps; ++k)
+                    points[k].set(float(qMin(right, left + k * height)), float(base + (k % 2 ? height : 0)));
+                auto *node = new QSGGeometryNode;
+                node->setGeometry(geometry);
+                node->setFlag(QSGNode::OwnsGeometry);
+                auto *material = new QSGFlatColorMaterial;
+                material->setColor(color);
+                node->setMaterial(material);
+                node->setFlag(QSGNode::OwnsMaterial);
+                root->appendChildNode(node);
+            }
+        }
+    }
     return root;
+}
+
+void TableGridView::wheelEvent(QWheelEvent *event)
+{
+    if (!m_grid || m_grid->width() <= m_grid->viewWidth()) {
+        event->ignore();
+        return;
+    }
+    QPointF delta = event->pixelDelta();
+    if (delta.isNull()) delta = QPointF(event->angleDelta()) / 8.0 * 2;
+    // Shift turns the wheel's turn into a sideways one, as everywhere.
+    qreal across = delta.x();
+    if (qFuzzyIsNull(across) && (event->modifiers() & Qt::ShiftModifier)) across = delta.y();
+    if (qFuzzyIsNull(across)) {
+        event->ignore();
+        return;
+    }
+    m_grid->setScrollX(m_grid->scrollX() - across);
+    event->accept();
 }

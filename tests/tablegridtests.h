@@ -20,5 +20,13 @@ void everyWayOfEditingKeepsTheTableTidy();
 void replaceAndReplaceAllKeepTablesTidy();
 void findSkipsTableSyntax();
 void aSecondViewKeepsItsCaretWhenATableIsRetidied();
+void arrowsWalkThroughCellsAndOutOfTheTable();
+void tabAndEnterMoveAddAndLeave();
+void selectionsAreACellABlockOrTheWholeTable();
+void theLineAfterATableStaysBlank();
+void tablesAtTheEndsOfTheTextHaveACaretBesideThem();
+void backspaceAfterATableSelectsThenDeletesIt();
+void vimMotionsFlowAcrossCells();
+void vimOperatorsActOnCellsAndRows();
 
 } // namespace TableGridTests

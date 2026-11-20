@@ -18,6 +18,7 @@
 #include <QSGTextNode>
 #include <QTextBlock>
 #include <QTextCursor>
+#include <QTextBoundaryFinder>
 #include <QTextDocument>
 #include <algorithm>
 #include <cmath>
@@ -435,7 +436,9 @@ QList<TableGrid::Drawn> TableGrid::drawn(qreal top, qreal bottom)
     QList<Drawn> out;
     const int cursor = m_owner->cursor(), anchor = m_owner->anchor();
     const int from = qMin(cursor, anchor), to = qMax(cursor, anchor);
-    const bool whole = from < m_table.start && to > m_table.end;
+    const bool whole = from <= m_table.start && to >= m_table.end && from < to;
+    int r0 = -1, r1 = -1, c0 = -1, c1 = -1;
+    const bool block = m_owner->block(this, &r0, &r1, &c0, &c1);
     for (int row = 0; row < m_rowTop.size(); ++row) {
         if (m_rowTop[row] + m_rowHeight[row] < top) continue;
         if (m_rowTop[row] > bottom) break;
@@ -449,9 +452,9 @@ QList<TableGrid::Drawn> TableGrid::drawn(qreal top, qreal bottom)
             if (EditorDecorations *decorations = m_owner->decorations())
                 for (const EditorDecorations::Wave &wave : decorations->wavesFor(cell.start, cell.end - cell.start))
                     d.waves.append({wave.start - cell.start, wave.end - cell.start, wave.color});
-            if (whole || (from <= cell.start && to >= cell.end && from < to && (from < cell.rawStart || to > cell.rawEnd)))
+            if (whole || (block && row >= r0 && row <= r1 && cell.column + cell.span - 1 >= c0 && cell.column <= c1))
                 d.selected = true;
-            else if (from < to && from >= cell.rawStart && to <= cell.rawEnd) {
+            else if (!block && from < to && from >= cell.rawStart && to <= cell.rawEnd) {
                 d.selectionStart = qMax(0, from - cell.start);
                 d.selectionLength = qMin(to, cell.end) - qMax(from, cell.start);
             }
@@ -814,7 +817,10 @@ void TableGrids::sourceChanged(SourceRange range, int inserted)
     bool removed = false;
     for (qsizetype i = 0; i < m_grids.size(); ++i) {
         TableGrid *grid = m_grids[i];
-        if (oldEnd < grid->start()) {
+        // Lines put in just before the table move it down, as text before it does.
+        const bool linesBefore = range.length == 0 && range.start == grid->start() && inserted > 0
+                                 && (source[range.start + inserted - 1] == u'\n' || source[range.start + inserted - 1] == u'\r');
+        if (oldEnd < grid->start() || linesBefore) {
             shiftTable(grid->m_table, delta);
             continue;
         }
@@ -881,12 +887,23 @@ int TableGrids::settle(const TableGrid *grid, int position, int direction) const
         return direction >= 0 ? to.cells[index].start : to.cells[index].start;
     }
     const QList<MdTable::Cell> &cells = table.rows[row].cells;
-    for (const MdTable::Cell &cell : cells) {
+    for (int i = 0; i < cells.size(); ++i) {
+        const MdTable::Cell &cell = cells[i];
         if (position > cell.rawEnd) continue;
-        if (position < cell.start) return cell.start;
-        // Past its text, the caret rests only where typing put it, after spaces typed there.
-        if (position > cell.end && position == m_binding->m_placedCaret) return qMin(position, cell.end + tailOf(source, cell));
-        return qMin(position, cell.end);
+        const bool fromInside = m_lastCursor >= cell.start && m_lastCursor <= cell.end;
+        if (position < cell.start) {
+            // A step back out of a cell's text goes on to the end of the cell before it.
+            if (direction < 0 && fromInside && i > 0) return cells[i - 1].end;
+            return cell.start;
+        }
+        if (position > cell.end) {
+            // Past its text, the caret rests only where typing put it, after spaces typed there.
+            if (position == m_binding->m_placedCaret) return qMin(position, cell.end + tailOf(source, cell));
+            // A step forward out of a cell's text goes on to the next cell.
+            if (direction > 0 && fromInside && i + 1 < cells.size()) return cells[i + 1].start;
+            return cell.end;
+        }
+        return position;
     }
     return cells.last().end;
 }
@@ -1009,6 +1026,20 @@ bool TableGrids::enterFromProse(int position, bool down)
     return true;
 }
 
+bool TableGrids::run(const Adapted &change)
+{
+    if (change.kind == Adapted::Refused) {
+        emit refused(change.reason);
+        return false;
+    }
+    if (change.kind != Adapted::Changed || !m_binding->editable() || m_binding->m_blocked) return false;
+    if (!change.edits.isEmpty()
+        && m_binding->m_buffer->replace(change.edits) == SourceBuffer::EditOutcome::Rejected)
+        return false;
+    select(change.anchor, change.cursor);
+    return true;
+}
+
 bool TableGrids::key(QKeyEvent *event)
 {
     if (m_grids.isEmpty()) return false;
@@ -1017,16 +1048,30 @@ bool TableGrids::key(QKeyEvent *event)
     const Qt::KeyboardModifiers mods = event->modifiers() & ~Qt::KeypadModifier;
     const bool shift = mods & Qt::ShiftModifier;
     const bool plain = (mods & ~Qt::ShiftModifier) == Qt::NoModifier;
+    const bool control = (mods & ~Qt::ShiftModifier) == Qt::ControlModifier;
     const int key = event->key();
+    const QString source = text();
     if (!grid) {
         if (plain && !shift && (key == Qt::Key_Down || key == Qt::Key_Up)) return enterFromProse(cursor, key == Qt::Key_Down);
+        // Backspace on the blank line after a table, or Delete at the end of
+        // the line before one, selects it; again, it goes.
+        if (mods == Qt::NoModifier && (key == Qt::Key_Backspace || key == Qt::Key_Delete) && cursor == anchor()) {
+            for (TableGrid *g : std::as_const(m_grids)) {
+                const bool after = key == Qt::Key_Backspace && cursor == lineAfter(g);
+                const bool before = key == Qt::Key_Delete && cursor == g->start() - breakBefore(source, g->start());
+                if (!after && !before) continue;
+                select(g->start(), g->end() + breakAfter(source, g->end()));
+                return true;
+            }
+        }
         return false;
     }
-    if (key != Qt::Key_Up && key != Qt::Key_Down) m_goalX = -1;
-    const QString source = text();
+    if (key != Qt::Key_Up && key != Qt::Key_Down && key != Qt::Key_PageUp && key != Qt::Key_PageDown) m_goalX = -1;
     const TableGrid::Place place = grid->placeOf(cursor);
     if (!place.valid()) return false;
     const MdTable::Cell &cell = grid->cellAt(place);
+    int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
+    const bool inBlock = block(grid, &r0, &r1, &c0, &c1);
     // A move with Shift extends the selection; without, it collapses it at the new place.
     const auto moveTo = [&](int target) { select(shift ? this->anchor() : target, target); };
     const auto previousCell = [&](TableGrid::Place p) -> TableGrid::Place {
@@ -1039,6 +1084,28 @@ bool TableGrids::key(QKeyEvent *event)
         if (p.row + 1 < grid->rowCount()) return {p.row + 1, 0};
         return {};
     };
+    // The cell of a row under a column.
+    const auto cellUnder = [&](int row, int column) {
+        TableGrid::Place to{row, 0};
+        for (int i = 0; i < grid->cellCount(row); ++i)
+            if (grid->cellAt({row, i}).column <= column) to.cell = i;
+        return to;
+    };
+    const QString newline = m_binding->m_document ? m_binding->m_document->newline() : QStringLiteral("\n");
+    // A row added at the end, the caret in its cell under a column.
+    const auto appendRow = [&](int column) {
+        const int rows = grid->rowCount();
+        return run(change(grid, [&](MdTable::Model &model) { return MdTable::insertRows(model, rows, 1, newline); },
+                          rows, column));
+    };
+    const auto selectCell = [&](TableGrid::Place to) {
+        const MdTable::Cell &target = grid->cellAt(to);
+        select(target.start, target.end);
+    };
+    if (mods == Qt::NoModifier && key == Qt::Key_Escape && cursor != anchor()) {
+        select(cursor, cursor);
+        return true;
+    }
     if (plain && (key == Qt::Key_Left || key == Qt::Key_Right)) {
         const bool left = key == Qt::Key_Left;
         if (!shift && cursor != this->anchor()) {
@@ -1054,21 +1121,85 @@ bool TableGrids::key(QKeyEvent *event)
             moveTo(qMax(cell.start, previousSourceGrapheme(source, cursor)));
         } else if (!left && cursor < cell.end) {
             moveTo(qMin(cell.end, nextSourceGrapheme(source, cursor)));
-        } else if (!shift) {
+        } else {
+            // Past the edge of a cell's text: the next cell, or out of the table;
+            // with Shift, a block of cells grows into the next.
             const TableGrid::Place to = left ? previousCell(place) : nextCell(place);
-            if (to.valid()) {
+            if (to.valid() && (!shift || to.row == place.row)) {
                 const MdTable::Cell &target = grid->cellAt(to);
-                const int at = left ? target.end : target.start;
-                select(at, at);
-            } else {
+                moveTo(left ? target.end : target.start);
+            } else if (!shift) {
                 const int at = left ? grid->start() - breakBefore(source, grid->start())
                                     : grid->end() + breakAfter(source, grid->end());
-                select(qMax(0, at), qMax(0, at));
+                if (at < 0 || at > source.size() || (!left && breakAfter(source, grid->end()) == 0)) return true;
+                select(at, at);
             }
         }
         return true;
     }
-    if (plain && (key == Qt::Key_Up || key == Qt::Key_Down)) return moveVertically(grid, cursor, key == Qt::Key_Down ? 1 : -1, shift);
+    if (control && (key == Qt::Key_Left || key == Qt::Key_Right)) {
+        // A word at a time in a cell's text, and on to the next cell at its edge.
+        const bool left = key == Qt::Key_Left;
+        const QString cellText = source.mid(cell.start, cell.end - cell.start);
+        QTextBoundaryFinder words(QTextBoundaryFinder::Word, cellText);
+        int offset = qBound(0, cursor - cell.start, int(cellText.size()));
+        words.setPosition(offset);
+        int target = -1;
+        if (left) {
+            for (qsizetype at = words.toPreviousBoundary(); at >= 0; at = words.toPreviousBoundary())
+                if (words.boundaryReasons() & QTextBoundaryFinder::StartOfItem) {
+                    target = int(at);
+                    break;
+                }
+        } else {
+            for (qsizetype at = words.toNextBoundary(); at >= 0; at = words.toNextBoundary())
+                if (words.boundaryReasons() & QTextBoundaryFinder::EndOfItem) {
+                    target = int(at);
+                    break;
+                }
+        }
+        if (target >= 0 && target != offset) {
+            moveTo(cell.start + target);
+        } else {
+            const TableGrid::Place to = left ? previousCell(place) : nextCell(place);
+            if (to.valid()) moveTo(left ? grid->cellAt(to).end : grid->cellAt(to).start);
+        }
+        return true;
+    }
+    if (plain && (key == Qt::Key_Up || key == Qt::Key_Down)) {
+        const bool down = key == Qt::Key_Down;
+        if (shift && inBlock) {
+            // A block grows a row at a time.
+            const int row = place.row + (down ? 1 : -1);
+            if (row >= 0 && row < grid->rowCount()) moveTo(grid->cellAt(cellUnder(row, cell.column)).start);
+            return true;
+        }
+        // A table at the very start or end of the text has a line made beside it to write on.
+        const bool edgeRow = down ? place.row == grid->rowCount() - 1 : place.row == 0;
+        if (!shift && edgeRow && grid->lineOf(place, cursor) == (down ? grid->lineCount(place) - 1 : 0)) {
+            if (!down && grid->start() == 0) {
+                Adapted line;
+                line.kind = Adapted::Changed;
+                line.edits.append({{0, 0}, newline});
+                return run(line);
+            }
+            if (down && breakAfter(source, grid->end()) == 0) {
+                Adapted line;
+                line.kind = Adapted::Changed;
+                line.edits.append({{grid->end(), 0}, newline + newline});
+                line.anchor = line.cursor = grid->end() + int(2 * newline.size());
+                return run(line);
+            }
+        }
+        return moveVertically(grid, cursor, down ? 1 : -1, shift);
+    }
+    if (plain && (key == Qt::Key_PageUp || key == Qt::Key_PageDown)) {
+        // A page from a table goes to its first or last row, and then on.
+        const int row = key == Qt::Key_PageDown ? grid->rowCount() - 1 : 0;
+        if (place.row == row) return false;
+        moveTo(grid->cellAt(cellUnder(row, cell.column)).start);
+        return true;
+    }
     if (plain && key == Qt::Key_Home) {
         moveTo(cell.start);
         return true;
@@ -1077,23 +1208,63 @@ bool TableGrids::key(QKeyEvent *event)
         moveTo(cell.end);
         return true;
     }
+    if (control && !shift && key == Qt::Key_A) {
+        // The cell's text, then the whole table, then the whole text.
+        const int from = qMin(cursor, anchor()), to = qMax(cursor, anchor());
+        if (from == cell.start && to == cell.end && cell.end > cell.start) {
+            select(grid->start(), grid->end());
+            return true;
+        }
+        if (from <= grid->start() && to >= grid->end()) return false;
+        if (cell.start == cell.end) {
+            select(grid->start(), grid->end());
+            return true;
+        }
+        select(cell.start, cell.end);
+        return true;
+    }
+    if (mods == Qt::NoModifier && inBlock && (key == Qt::Key_Backspace || key == Qt::Key_Delete)) {
+        // A block's cells are emptied, rows and columns kept.
+        return run(change(grid, [&](MdTable::Model &model) { return MdTable::clearCells(model, r0, r1, c0, c1); },
+                          r0, c0));
+    }
     if ((key == Qt::Key_Tab && mods == Qt::NoModifier) || key == Qt::Key_Backtab
         || (key == Qt::Key_Tab && mods == Qt::ShiftModifier)) {
         const bool back = key == Qt::Key_Backtab || shift;
         const TableGrid::Place to = back ? previousCell(place) : nextCell(place);
-        if (!to.valid()) return back;
-        const MdTable::Cell &target = grid->cellAt(to);
-        select(target.start, target.end);
+        // Tab in the last cell adds a row; Shift+Tab in the first stays.
+        if (!to.valid()) return back ? true : appendRow(0);
+        selectCell(to);
         return true;
     }
     if (mods == Qt::NoModifier && (key == Qt::Key_Return || key == Qt::Key_Enter)) {
         if (place.row + 1 < grid->rowCount()) {
-            TableGrid::Place to{place.row + 1, 0};
-            for (int i = 0; i < grid->cellCount(to.row); ++i)
-                if (grid->cellAt({to.row, i}).column <= cell.column) to.cell = i;
-            const MdTable::Cell &target = grid->cellAt(to);
-            select(target.start, target.end);
+            selectCell(cellUnder(place.row + 1, cell.column));
+            return true;
         }
+        // On the last row a row is added; on a last row left empty, it goes,
+        // and the caret goes on below the table.
+        bool empty = place.row > 0;
+        for (int i = 0; empty && i < grid->cellCount(place.row); ++i) {
+            const MdTable::Cell &c = grid->cellAt({place.row, i});
+            empty = c.start == c.end;
+        }
+        if (!empty) return appendRow(cell.column);
+        const int row = place.row;
+        Adapted removed = change(grid, [&](MdTable::Model &model) { return MdTable::deleteRows(model, row, 1); }, 0, 0);
+        if (removed.kind != Adapted::Changed) return run(removed);
+        // Below the table, on the blank line after it, made if it is missing.
+        const int lengthBefore = grid->end() - grid->start();
+        int tableEnd = grid->start() + lengthBefore;
+        for (const SourceEdit &e : std::as_const(removed.edits)) tableEnd += int(e.replacement.size()) - e.range.length;
+        const int gap = breakAfter(source, grid->end());
+        if (gap == 0) removed.edits.append({{grid->end(), 0}, newline + newline});
+        removed.anchor = removed.cursor = tableEnd + (gap == 0 ? int(2 * newline.size()) : gap);
+        return run(removed);
+    }
+    if (mods == Qt::ShiftModifier && (key == Qt::Key_Return || key == Qt::Key_Enter)) {
+        // A line break inside a cell, as HTML has it.
+        m_binding->insertText(QStringLiteral("<br>"), EditKind::Typing);
         return true;
     }
     return false;
@@ -1121,10 +1292,215 @@ SourceEdit coveringEdit(int start, QStringView before, const QString &after)
 
 } // namespace
 
+int TableGrids::lineAfter(const TableGrid *grid) const
+{
+    const QString source = text();
+    const int gap = breakAfter(source, grid->end());
+    return gap == 0 ? -1 : grid->end() + gap;
+}
+
+bool TableGrids::block(const TableGrid *grid, int *firstRow, int *lastRow, int *firstColumn, int *lastColumn) const
+{
+    const int a = anchor(), c = cursor();
+    if (a == c || !gridAt(a) || gridAt(a) != gridAt(c) || gridAt(a) != grid) return false;
+    const TableGrid::Place from = grid->placeOf(a), to = grid->placeOf(c);
+    if (!from.valid() || !to.valid() || from == to) return false;
+    const MdTable::Cell &one = grid->cellAt(from), &other = grid->cellAt(to);
+    *firstRow = qMin(from.row, to.row);
+    *lastRow = qMax(from.row, to.row);
+    *firstColumn = qMin(one.column, other.column);
+    *lastColumn = qMax(one.column + one.span, other.column + other.span) - 1;
+    // The block grows until it cuts no merged cell.
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (int row = *firstRow; row <= *lastRow; ++row) {
+            for (int i = 0; i < grid->cellCount(row); ++i) {
+                const MdTable::Cell &cell = grid->cellAt({row, i});
+                const int last = cell.column + cell.span - 1;
+                if (last < *firstColumn || cell.column > *lastColumn) continue;
+                if (cell.column < *firstColumn) {
+                    *firstColumn = cell.column;
+                    grew = true;
+                }
+                if (last > *lastColumn) {
+                    *lastColumn = last;
+                    grew = true;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+namespace {
+
+// The lines of a text put between a table's rows, each a row of cells, or
+// none when one is not a table row; empty lines are empty rows.
+std::optional<QList<QStringList>> rowsOf(const QString &text, const MdTable::Dialect &dialect)
+{
+    QList<QStringList> rows;
+    const QStringList lines = QString(text).replace(QStringLiteral("\r\n"), QStringLiteral("\n")).replace(u'\r', u'\n').split(u'\n');
+    for (const QString &line : lines) {
+        int content = 0;
+        while (content < line.size() && (line[content] == u' ' || line[content] == u'\t' || line[content] == u'>'))
+            ++content;
+        QString trimmed = line.mid(content).trimmed();
+        if (trimmed.isEmpty()) {
+            rows.append(QStringList{});
+            continue;
+        }
+        QList<MdTable::Field> fields;
+        QList<int> pipes;
+        MdTable::splitRow(trimmed, 0, int(trimmed.size()), dialect.protectCode, fields, &pipes);
+        if (pipes.isEmpty()) return std::nullopt;
+        QStringList cells;
+        for (const MdTable::Field &field : std::as_const(fields)) cells.append(trimmed.mid(field.start, field.end - field.start));
+        rows.append(cells);
+    }
+    return rows;
+}
+
+} // namespace
+
+std::optional<TableGrids::Adapted> TableGrids::adaptOne(const SourceEdit &edit) const
+{
+    const QString source = text();
+    const int from = edit.range.start, to = edit.range.start + edit.range.length;
+    const MdTable::Dialect dialect = this->dialect();
+    const QString newline = m_binding->m_document ? m_binding->m_document->newline() : QStringLiteral("\n");
+    const auto refuse = [&](const QString &reason) {
+        Adapted refused;
+        refused.kind = Adapted::Refused;
+        refused.reason = reason;
+        return refused;
+    };
+    for (const TableGrid *grid : m_grids) {
+        // What replaces a block of cells empties them and goes in the first.
+        int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
+        if (from == qMin(anchor(), cursor()) && to == qMax(anchor(), cursor()) && block(grid, &r0, &r1, &c0, &c1)) {
+            const QString written = MdTable::encodeCell(edit.replacement, dialect);
+            Adapted cleared = change(grid, [&](MdTable::Model &model) {
+                MdTable::clearCells(model, r0, r1, c0, c1);
+                const int item = MdTable::itemAt(model.rows[r0], c0);
+                if (item >= 0) model.rows[r0][item].text = written;
+                return QString();
+            }, r0, c0, true);
+            cleared.anchor = cleared.cursor;
+            return cleared;
+        }
+        // Text written on the blank line after a table starts a paragraph
+        // a line lower, so that the blank line stays and the text is no row.
+        const int blank = lineAfter(grid);
+        if (blank >= 0 && from == to && from >= blank && !edit.replacement.isEmpty()) {
+            int end = blank;
+            while (end < source.size() && (source[end] == u' ' || source[end] == u'\t')) ++end;
+            const bool blankLine = end == source.size() || breakAfter(source, end) > 0;
+            const QChar first = edit.replacement.front();
+            if (blankLine && from <= end && first != u'\n' && first != u'\r') {
+                // Whole table rows put there join the table, as a row put after its last.
+                const bool rows = edit.replacement.endsWith(u'\n') || edit.replacement.endsWith(u'\r');
+                const auto parsed = rows ? rowsOf(edit.replacement.trimmed(), dialect) : std::nullopt;
+                if (parsed && from == blank) {
+                    const QList<QStringList> values = *parsed;
+                    const int at = grid->rowCount();
+                    return change(grid, [&](MdTable::Model &model) {
+                        MdTable::insertRows(model, at, int(values.size()), newline);
+                        for (int i = 0; i < values.size(); ++i)
+                            for (int c = 0; c < values[i].size() && c < MdTable::columnCount(model); ++c)
+                                model.rows[at + i][MdTable::itemAt(model.rows[at + i], c)].text = values[i][c];
+                        return QString();
+                    }, at, 0);
+                }
+                Adapted below;
+                below.kind = Adapted::Changed;
+                below.edits.append({{from, 0}, newline + edit.replacement});
+                below.anchor = below.cursor = from + int(newline.size() + edit.replacement.size());
+                return below;
+            }
+        }
+        if (to < grid->start() || from > grid->end()) continue;
+        // A table taken whole is the writer's to take.
+        if (from <= grid->start() && to >= grid->end()) continue;
+        // Whole rows: the lines of body rows, with their breaks.
+        const MdTable::Table &table = grid->table();
+        const int rows = int(table.rows.size());
+        const auto lineOf = [&](int row) -> const MdTable::Line & { return table.rows[row].line; };
+        const auto rowStartingAt = [&](int position) {
+            for (int r = 0; r < rows; ++r)
+                if (lineOf(r).start == position) return r;
+            return -1;
+        };
+        const auto rowEndingAt = [&](int position) {
+            for (int r = 0; r < rows; ++r)
+                if (lineOf(r).end == position) return r;
+            return -1;
+        };
+        const auto rowNextAt = [&](int position) {
+            for (int r = 0; r < rows; ++r)
+                if (lineOf(r).next == position && lineOf(r).next > lineOf(r).end) return r;
+            return -1;
+        };
+        const QString headerStays = tr("The header row and the line under it stay; delete the table to remove them.");
+        if (edit.replacement.isEmpty()) {
+            int first = -1, last = -1;
+            if (const int r = rowStartingAt(from); r >= 0) {
+                first = r;
+                last = rowNextAt(to);
+                // Rows emptied but kept, their line breaks too, as when a line is changed.
+                if (last < 0 && rowEndingAt(to) >= first) {
+                    const int lastRow = rowEndingAt(to);
+                    if (first < 2) return refuse(headerStays);
+                    return change(grid, [&](MdTable::Model &model) {
+                        return MdTable::clearCells(model, first - 1, lastRow - 1, 0, MdTable::columnCount(model) - 1);
+                    }, first - 1, 0);
+                }
+            } else if (const int r = rowEndingAt(from); r >= 0 && rowEndingAt(to) > r) {
+                // The last rows of a table, with the break before them.
+                first = r + 1;
+                last = rowEndingAt(to);
+            }
+            if (first >= 0 && last >= first) {
+                if (first < 2) return refuse(headerStays);
+                const int count = last - first + 1;
+                return change(grid, [&](MdTable::Model &model) { return MdTable::deleteRows(model, first - 1, count); },
+                              qMin(first - 1, rows - 2 - count), 0);
+            }
+        } else if (from == to) {
+            // Lines put in between rows: table rows, or empty lines as empty rows.
+            const bool before = rowStartingAt(from) >= 0 && (edit.replacement.endsWith(u'\n') || edit.replacement.endsWith(u'\r'));
+            const bool after = rowEndingAt(from) >= 0 && (edit.replacement.startsWith(u'\n') || edit.replacement.startsWith(u'\r'));
+            if (before || after) {
+                const int row = before ? rowStartingAt(from) : rowEndingAt(from);
+                QString lines = edit.replacement;
+                if (before) lines.chop(lines.endsWith(QStringLiteral("\r\n")) ? 2 : 1);
+                else lines.remove(0, lines.startsWith(QStringLiteral("\r\n")) ? 2 : 1);
+                const auto parsed = rowsOf(lines, dialect);
+                if (!parsed) return refuse(tr("Only table rows fit between the rows of a table."));
+                // Model rows: the header is 0, and a row put before or after
+                // the header or its delimiter goes first among the body.
+                int at = before ? row - 1 : row;
+                at = qMax(1, at);
+                const QList<QStringList> values = *parsed;
+                return change(grid, [&](MdTable::Model &model) {
+                    MdTable::insertRows(model, at, int(values.size()), newline);
+                    for (int i = 0; i < values.size(); ++i)
+                        for (int c = 0; c < values[i].size() && c < MdTable::columnCount(model); ++c)
+                            model.rows[at + i][MdTable::itemAt(model.rows[at + i], c)].text =
+                                MdTable::encodeCell(values[i][c], dialect);
+                    return QString();
+                }, at, 0);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 TableGrids::Adapted TableGrids::adapt(const QList<SourceEdit> &edits, int anchor, int cursor) const
 {
     Adapted out;
     if (m_grids.isEmpty()) return out;
+    if (edits.size() == 1)
+        if (std::optional<Adapted> one = adaptOne(edits.first())) return *one;
     const auto refuse = [&](const QString &reason) {
         Adapted refused;
         refused.kind = Adapted::Refused;
@@ -1144,12 +1520,35 @@ TableGrids::Adapted TableGrids::adapt(const QList<SourceEdit> &edits, int anchor
         const TableGrid *grid = nullptr;
         for (const TableGrid *g : m_grids)
             if (to >= g->start() && from <= g->end()) grid = g;
-        // An edit outside the grids, or of a table whole, is the writer's to make.
+        // An edit outside the grids, or of a table whole, is the writer's
+        // to make; but none takes away the blank line after a table, which
+        // would make the text after it the table's next row.
         if (!grid || (from <= grid->start() && to >= grid->end())) {
+            for (const TableGrid *g : m_grids) {
+                if (from <= g->start() && to >= g->end()) continue;
+                const int blank = lineAfter(g);
+                if (blank < 0 || from > blank + 1) continue;
+                const QString source = text();
+                int next = blank;
+                while (next < source.size() && (source[next] == u' ' || source[next] == u'\t')) ++next;
+                const int afterBlank = next + breakAfter(source, next);
+                if (next < source.size() && breakAfter(source, next) == 0) continue;
+                if (from < afterBlank && to > g->end() && edit.replacement.count(u'\n') + edit.replacement.count(u'\r') == 0)
+                    return refuse(tr("A table keeps a blank line after it."));
+            }
             passing.append(edit);
             continue;
         }
         const TableGrid::Place place = grid->placeOf(from);
+        // A deletion from a cell's text on along its row, as to the end of a
+        // line or a word, stops at the end of the cell's text.
+        if (place.valid() && edit.replacement.isEmpty() && !(place == grid->placeOf(to))
+            && MdTable::rowAt(grid->table(), from) == MdTable::rowAt(grid->table(), to) && from <= grid->cellAt(place).end) {
+            SourceEdit clamped = edit;
+            clamped.range.length = qMax(0, grid->cellAt(place).end - from);
+            inCells.append({grid, place, clamped});
+            continue;
+        }
         if (!place.valid() || !(place == grid->placeOf(to)))
             return refuse(tr("Select the whole table, or stay inside one cell."));
         inCells.append({grid, place, edit});

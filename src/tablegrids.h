@@ -209,6 +209,9 @@ public:
     int sourceAt(QPointF point) const;
     // Whether a range is text a grid shows: in no grid, or inside one cell's text.
     bool inCellText(int start, int end) const;
+    // The block of cells the view's selection makes in a grid: from one
+    // cell to another, as rows and columns of the model; false for none.
+    bool block(const TableGrid *grid, int *firstRow, int *lastRow, int *firstColumn, int *lastColumn) const;
 
     // What an edit of the view becomes: the same, when it touches no grid;
     // an edit of a cell, the table written tidy around it, with where the
@@ -285,6 +288,16 @@ private:
     // in the direction of travel.
     int settle(const TableGrid *grid, int position, int direction) const;
     bool moveVertically(TableGrid *grid, int position, int lines, bool extend);
+    // An edit the rows of a grid, the line after one, or a block of its
+    // cells make something other than a cell's edit; nothing for any other.
+    std::optional<Adapted> adaptOne(const SourceEdit &edit) const;
+    // Where the line after a grid starts, and the line after that, when the
+    // first is blank; -1 where there is none.
+    int lineAfter(const TableGrid *grid) const;
+
+    // Runs a change on the grid as the view's own edit, one undo step, and
+    // places the selection it says; false when it is refused.
+    bool run(const Adapted &change);
     bool enterFromProse(int position, bool down);
 
     EditorBinding *m_binding;

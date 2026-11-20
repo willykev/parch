@@ -871,6 +871,14 @@ private slots:
     void replaceAndReplaceAllKeepTablesTidy() { TableGridTests::replaceAndReplaceAllKeepTablesTidy(); }
     void findSkipsTableSyntax() { TableGridTests::findSkipsTableSyntax(); }
     void aSecondViewKeepsItsCaretWhenATableIsRetidied() { TableGridTests::aSecondViewKeepsItsCaretWhenATableIsRetidied(); }
+    void arrowsWalkThroughCellsAndOutOfTheTable() { TableGridTests::arrowsWalkThroughCellsAndOutOfTheTable(); }
+    void tabAndEnterMoveAddAndLeave() { TableGridTests::tabAndEnterMoveAddAndLeave(); }
+    void selectionsAreACellABlockOrTheWholeTable() { TableGridTests::selectionsAreACellABlockOrTheWholeTable(); }
+    void theLineAfterATableStaysBlank() { TableGridTests::theLineAfterATableStaysBlank(); }
+    void tablesAtTheEndsOfTheTextHaveACaretBesideThem() { TableGridTests::tablesAtTheEndsOfTheTextHaveACaretBesideThem(); }
+    void backspaceAfterATableSelectsThenDeletesIt() { TableGridTests::backspaceAfterATableSelectsThenDeletesIt(); }
+    void vimMotionsFlowAcrossCells() { TableGridTests::vimMotionsFlowAcrossCells(); }
+    void vimOperatorsActOnCellsAndRows() { TableGridTests::vimOperatorsActOnCellsAndRows(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

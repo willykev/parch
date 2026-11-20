@@ -562,4 +562,283 @@ void aSecondViewKeepsItsCaretWhenATableIsRetidied()
     QCOMPARE(second->binding->tables()->grids().first()->end(), view.grid()->end());
 }
 
+namespace {
+
+// The cells of the table as a grid shows them, row by row, "|" between cells.
+QString cells(GridEditor &view)
+{
+    TableGrid *grid = view.grid();
+    if (!grid) return u"(no grid)"_s;
+    QStringList rows;
+    for (int r = 0; r < grid->rowCount(); ++r) {
+        QStringList row;
+        for (int i = 0; i < grid->cellCount(r); ++i) {
+            const MdTable::Cell &cell = grid->cellAt({r, i});
+            row.append(view.text().mid(cell.start, cell.end - cell.start));
+        }
+        rows.append(row.join(u'|'));
+    }
+    return rows.join(u" / "_s);
+}
+
+QString selected(GridEditor &view)
+{
+    return view.text().mid(qMin(view.anchor(), view.cursor()), qAbs(view.cursor() - view.anchor()));
+}
+
+} // namespace
+
+void arrowsWalkThroughCellsAndOutOfTheTable()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Down from the last row leaves the table below it.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east, east);
+    view.key(Qt::Key_Down);
+    QCOMPARE(view.cell(), u"-"_s);
+    QCOMPARE(view.cursor(), view.grid()->end() + 1);
+    // Up from below enters the last row.
+    view.key(Qt::Key_Up);
+    QVERIFY2(view.cell() == u"10:00"_s || view.cell() == u"East"_s || view.cell() == u"12"_s, qPrintable(view.cell()));
+    // A word at a time, and on into the next cell.
+    const QString text = u"| A | B |\n|---|---|\n| one two | x |"_s;
+    GridEditor words(text);
+    QVERIFY(words.grids(1));
+    const int one = int(words.text().indexOf(u"one"));
+    words.select(one, one);
+    words.key(Qt::Key_Right, Qt::ControlModifier);
+    QCOMPARE(words.cursor(), one + 3);
+    words.key(Qt::Key_Right, Qt::ControlModifier);
+    QCOMPARE(words.cursor(), one + 7);
+    words.key(Qt::Key_Right, Qt::ControlModifier);
+    QCOMPARE(words.cell(), u"x"_s);
+    words.key(Qt::Key_Left, Qt::ControlModifier);
+    QCOMPARE(words.cell(), u"one two"_s);
+    // A page down goes to the last row.
+    words.select(int(words.text().indexOf(u"A")), int(words.text().indexOf(u"A")));
+    words.key(Qt::Key_PageDown);
+    QCOMPARE(words.cell(), u"one two"_s);
+}
+
+void tabAndEnterMoveAddAndLeave()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Tab in the last cell adds a row and goes to its first cell.
+    const int twelve = int(view.text().indexOf(u"12"));
+    view.select(twelve, twelve);
+    view.key(Qt::Key_Tab);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / 10:00|East|12 / ||"_s);
+    QCOMPARE(view.grid()->placeOf(view.cursor()), (TableGrid::Place{3, 0}));
+    view.type(u"14:00"_s);
+    // Enter goes down a column, adding a row from the last.
+    view.key(Qt::Key_Return);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / 10:00|East|12 / 14:00|| / ||"_s);
+    QCOMPARE(view.grid()->placeOf(view.cursor()), (TableGrid::Place{4, 0}));
+    // Enter on an empty last row takes it away and goes on below the table.
+    view.key(Qt::Key_Return);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / 10:00|East|12 / 14:00||"_s);
+    QCOMPARE(view.cell(), u"-"_s);
+    QCOMPARE(view.cursor(), view.grid()->end() + 1);
+    // Enter above the last row selects the text of the cell below.
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north, north);
+    view.key(Qt::Key_Return);
+    QCOMPARE(selected(view), u"East"_s);
+    // Shift+Enter breaks the line in a cell, as HTML has it.
+    view.select(north + 5, north + 5);
+    view.key(Qt::Key_Return, Qt::ShiftModifier);
+    view.type(u"side"_s);
+    QCOMPARE(view.cell(), u"North<br>side"_s);
+    // Shift+Tab at the first cell stays.
+    const int time = int(view.text().indexOf(u"Time"));
+    view.select(time, time);
+    const QString before = view.text();
+    view.key(Qt::Key_Backtab, Qt::ShiftModifier);
+    QCOMPARE(view.text(), before);
+    QCOMPARE(view.cell(), u"Time"_s);
+}
+
+void selectionsAreACellABlockOrTheWholeTable()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Shift+Right past a cell's text makes a block of cells.
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north, north + 5);
+    view.key(Qt::Key_Right, Qt::ShiftModifier);
+    view.key(Qt::Key_Down, Qt::ShiftModifier);
+    int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
+    QVERIFY(view.binding->tables()->block(view.grid(), &r0, &r1, &c0, &c1));
+    QCOMPARE(QList<int>({r0, r1, c0, c1}), QList<int>({1, 2, 1, 2}));
+    const QList<TableGrid::Drawn> drawn = view.grid()->drawn(0, view.grid()->height());
+    int lit = 0;
+    for (const TableGrid::Drawn &cell : drawn) lit += cell.selected;
+    QCOMPARE(lit, 4);
+    // Delete empties the block's cells.
+    view.key(Qt::Key_Delete);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|| / 10:00||"_s);
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    // Typing over a block empties it and writes in its first cell.
+    view.select(north, int(view.text().indexOf(u"12")) + 1);
+    view.type(u"x"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|x| / 10:00||"_s);
+    view.binding->undo();
+    // Ctrl+A: the cell's text, then the table, then everything.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east + 1, east + 1);
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(selected(view), u"East"_s);
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(view.anchor(), view.grid()->start());
+    QCOMPARE(view.cursor(), view.grid()->end());
+    view.key(Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(selected(view), view.text());
+    // Escape collapses a block.
+    view.select(north, int(view.text().indexOf(u"7.8")));
+    view.key(Qt::Key_Escape);
+    QCOMPARE(view.anchor(), view.cursor());
+}
+
+void theLineAfterATableStaysBlank()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrid *grid = view.grid();
+    // Writing on the blank line after the table writes a line lower.
+    const int blank = grid->end() + 1;
+    view.select(blank, blank);
+    view.type(u"Note"_s);
+    QVERIFY2(view.text().contains(u"| 12  |\n\nNote\nAfter"_s), qPrintable(view.text()));
+    QCOMPARE(view.binding->tables()->grids().size(), 1);
+    // Nothing pulls the text below up against the table.
+    view.binding->undo();
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    const int after = int(view.text().indexOf(u"After"));
+    view.select(after, after);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    view.key(Qt::Key_Backspace);
+    QCOMPARE(view.text(), weather);
+    QCOMPARE(refused.count(), 1);
+}
+
+void tablesAtTheEndsOfTheTextHaveACaretBesideThem()
+{
+    GridEditor view(u"| A | B |\n|---|---|\n| 1 | 2 |"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Up from the first row of a table that starts the text makes a line to write on.
+    view.select(2, 2);
+    QCOMPARE(view.cell(), u"A"_s);
+    view.key(Qt::Key_Up);
+    QCOMPARE(view.cursor(), 0);
+    QCOMPARE(view.cell(), u"-"_s);
+    view.type(u"Title"_s);
+    QVERIFY2(view.text().startsWith(u"Title\n| A | B |"_s), qPrintable(view.text()));
+    // Down from the last row of a table that ends it makes a line below, after a blank one.
+    const int two = int(view.text().indexOf(u"2 |"));
+    view.select(two, two);
+    view.key(Qt::Key_Down);
+    QCOMPARE(view.cell(), u"-"_s);
+    QCOMPARE(view.cursor(), int(view.text().size()));
+    view.type(u"End"_s);
+    QVERIFY2(view.text().endsWith(u"| 1 | 2 |\n\nEnd"_s), qPrintable(view.text()));
+}
+
+void backspaceAfterATableSelectsThenDeletesIt()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int blank = view.grid()->end() + 1;
+    view.select(blank, blank);
+    view.key(Qt::Key_Backspace);
+    QCOMPARE(view.anchor(), view.grid()->start());
+    QCOMPARE(view.cursor(), view.grid()->end() + 1);
+    view.key(Qt::Key_Backspace);
+    QCOMPARE(view.text(), u"Before the table.\n\n\nAfter the table."_s);
+    QVERIFY(view.grids(0));
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    // Delete at the end of the line before a table selects it too.
+    QVERIFY(view.grids(1));
+    view.select(view.grid()->start() - 1, view.grid()->start() - 1);
+    view.key(Qt::Key_Delete);
+    QCOMPARE(view.anchor(), view.grid()->start());
+}
+
+void vimMotionsFlowAcrossCells()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.pane->setProperty("vimKeys", true);
+    QVERIFY(view.grids(1));
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north + 4, north + 4);
+    // l past a cell's last character, and on into the next cell.
+    sendKey(&view.window, u'l');
+    sendKey(&view.window, u'l');
+    QCOMPARE(view.cell(), u"7.8"_s);
+    // h back, out of the cell and into the one before.
+    sendKey(&view.window, u'h');
+    QCOMPARE(view.cell(), u"North"_s);
+    // 0 and $ go to the first and last cell of the row.
+    sendKey(&view.window, u'0');
+    QCOMPARE(view.cell(), u"06:00"_s);
+    sendKey(&view.window, u'$');
+    QCOMPARE(view.cell(), u"7.8"_s);
+    // w goes word by word, cell by cell.
+    sendKey(&view.window, u'0');
+    sendKey(&view.window, u'w');
+    QVERIFY2(view.cell() != u"(syntax)"_s && view.cell() != u"-"_s, qPrintable(view.cell()));
+}
+
+void vimOperatorsActOnCellsAndRows()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    view.pane->setProperty("vimKeys", true);
+    QVERIFY(view.grids(1));
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north, north);
+    // dd takes the row away, and u brings it back.
+    typeText(&view.window, u"dd"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 10:00|East|12"_s);
+    sendKey(&view.window, u'u');
+    QCOMPARE(view.text(), weather);
+    // yy and p put a copy of the row below it.
+    view.select(north, north);
+    typeText(&view.window, u"yyp"_s);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / 06:00|North|7.8 / 10:00|East|12"_s);
+    sendKey(&view.window, u'u');
+    QCOMPARE(view.text(), weather);
+    // o opens an empty row below and writes in it; Escape keeps what was written.
+    view.select(north, north);
+    sendKey(&view.window, u'o');
+    typeText(&view.window, u"08:00"_s);
+    view.key(Qt::Key_Escape);
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|North|7.8 / 08:00|| / 10:00|East|12"_s);
+    sendKey(&view.window, u'u');
+    QCOMPARE(view.text(), weather);
+    // cw changes a word in a cell; D deletes to the end of the cell, no further.
+    view.select(north, north);
+    typeText(&view.window, u"cwSouth"_s);
+    view.key(Qt::Key_Escape);
+    QCOMPARE(view.cell(), u"South"_s);
+    view.select(int(view.text().indexOf(u"South")) + 2, int(view.text().indexOf(u"South")) + 2);
+    sendKey(&view.window, u'D');
+    QCOMPARE(cells(view), u"Time|Shelter|Air / 06:00|So|7.8 / 10:00|East|12"_s);
+    // J would join the row to the next: nothing changes.
+    const QString now = view.text();
+    sendKey(&view.window, u'J');
+    QCOMPARE(view.text(), now);
+}
+
 } // namespace TableGridTests

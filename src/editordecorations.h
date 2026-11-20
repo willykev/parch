@@ -11,6 +11,7 @@
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
 #include <QTextDocument>
+#include <QTextLayout>
 #include <QTimer>
 #include <deque>
 #include <vector>
@@ -146,6 +147,17 @@ public:
     bool focusing() const { return m_focusing; }
     SourceRange focusRange() const { return {m_focus.start, m_focus.end - m_focus.start}; }
 
+    // The formats the layers give a run of the source, as ranges counted
+    // from its start: what Qt draws a paragraph with, and a table's cell.
+    QList<QTextLayout::FormatRange> formatsFor(int sourceStart, int length) const;
+    // The wavy underlines over a run of the source, in source offsets.
+    struct Wave {
+        int start = 0;
+        int end = 0;
+        QColor color;
+    };
+    QList<Wave> wavesFor(int sourceStart, int length) const;
+
     // How many paragraphs have been formatted since this was made; for
     // checking that a change formats only what it changes.
     int formattedParagraphs() const { return m_formatted; }
@@ -153,6 +165,9 @@ public:
     bool pending() const { return !m_dirty.empty(); }
     // Formats every waiting paragraph now.
     void flush();
+    // Paragraphs of the source that were hidden and are shown again, which
+    // were left unformatted while hidden: they are formatted again.
+    void reshown(int start, int end);
 
 public slots:
     // The view scrolled or changed size.
@@ -164,6 +179,9 @@ signals:
     // The view shows its document anew, after edits this did not see or for
     // the first time: the layers were cleared, and their owners fill them.
     void layersReset();
+    // What the layers give the source from `start` to `end` changed, as a
+    // grid's cells there are to show.
+    void formatsChanged(int start, int end);
 
 protected:
     void highlightBlock(const QString &text) override;

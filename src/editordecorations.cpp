@@ -166,6 +166,8 @@ void EditorDecorations::setBinding(EditorBinding *binding)
     m_connections.clear();
     m_binding = binding;
     if (binding) {
+        // The view's grids draw their cells with these layers too.
+        binding->tables()->setDecorations(this);
         m_connections = {
             connect(binding, &EditorBinding::sourceEdited, this, &EditorDecorations::sourceEdited),
             connect(binding, &EditorBinding::projectionLoaded, this, &EditorDecorations::projectionLoaded),
@@ -530,6 +532,7 @@ void EditorDecorations::clearFocus()
 void EditorDecorations::markDirty(int start, int end)
 {
     Range range{start, qMax(start, end)};
+    emit formatsChanged(range.start, range.end);
     // In order and apart: the new range swallows those it meets.
     auto it = std::partition_point(m_dirty.begin(), m_dirty.end(),
                                    [&](const Range &waiting) { return waiting.end < range.start; });
@@ -541,6 +544,12 @@ void EditorDecorations::markDirty(int start, int end)
     }
     it = m_dirty.erase(it, last);
     m_dirty.insert(it, range);
+}
+
+void EditorDecorations::reshown(int start, int end)
+{
+    markDirty(start, end);
+    schedule();
 }
 
 void EditorDecorations::schedule()
@@ -630,9 +639,11 @@ bool EditorDecorations::format(Range range, const QElapsedTimer *budget, int *re
     const bool formatting = std::exchange(m_formatting, true);
     QTextBlock block = m_document->findBlock(start);
     bool whole = true;
-    // Every paragraph the range reaches into, and the one an empty range is in.
+    // Every paragraph the range reaches into, and the one an empty range is
+    // in. A hidden one, a table's row that its grid draws, waits until it
+    // is shown.
     while (block.isValid() && (block.position() < end || block.position() <= start)) {
-        rehighlightBlock(block);
+        if (block.isVisible()) rehighlightBlock(block);
         block = block.next();
         if (budget && budget->elapsed() >= SliceMs && block.isValid() && block.position() < end) {
             whole = false;
@@ -723,11 +734,20 @@ void EditorDecorations::highlightBlock(const QString &text)
 {
     ++m_formatted;
     if (!m_loaded || !m_binding) return;
+    // A hidden paragraph, a table's row that its grid draws, is formatted
+    // when it is shown again.
+    if (!currentBlock().isVisible()) return;
     const int sourceStart = m_binding->editorToSource(currentBlock().position());
     if (sourceStart < 0) return;
     // Inside a paragraph the source and the projection agree unit for unit:
     // only line breaks differ, and they lie between paragraphs.
-    const int length = int(text.size());
+    for (const QTextLayout::FormatRange &range : formatsFor(sourceStart, int(text.size())))
+        setFormat(range.start, range.length, range.format);
+}
+
+QList<QTextLayout::FormatRange> EditorDecorations::formatsFor(int sourceStart, int length) const
+{
+    QList<QTextLayout::FormatRange> formats;
     const int sourceEnd = sourceStart + length;
     const auto local = [&](int position) { return qBound(0, position - sourceStart, length); };
 
@@ -745,7 +765,7 @@ void EditorDecorations::highlightBlock(const QString &text)
         cuts.append(local(m_focus.start));
         cuts.append(local(m_focus.end));
     }
-    if (cuts.size() == 2 && !m_focusing) return;
+    if (cuts.size() == 2 && !m_focusing) return formats;
     std::sort(cuts.begin(), cuts.end());
     const auto unique = std::unique(cuts.begin(), cuts.end());
     for (auto cut = cuts.begin(); cut + 1 < unique; ++cut) {
@@ -764,6 +784,24 @@ void EditorDecorations::highlightBlock(const QString &text)
             if (inside && !coloured && m_normal.isValid()) format.setForeground(m_normal);
             else if (!inside && coloured && m_dim.isValid()) format.setForeground(m_dim);
         }
-        if (format.propertyCount() > 0) setFormat(start, end - start, format);
+        if (format.propertyCount() > 0) formats.append({start, end - start, format});
     }
+    return formats;
+}
+
+QList<EditorDecorations::Wave> EditorDecorations::wavesFor(int sourceStart, int length) const
+{
+    QList<Wave> waves;
+    const int sourceEnd = sourceStart + length;
+    for (const Layer &layer : m_layers) {
+        if (std::none_of(layer.waves.cbegin(), layer.waves.cend(), [](const QColor &wave) { return wave.isValid(); }))
+            continue;
+        for (auto span = firstEndingAfter(layer.spans, sourceStart); span != layer.spans.cend() && span->start < sourceEnd;
+             ++span) {
+            const QColor color = layer.waves.value(span->style);
+            if (!color.isValid()) continue;
+            waves.append({qMax(span->start, sourceStart), qMin(span->end, sourceEnd), color});
+        }
+    }
+    return waves;
 }

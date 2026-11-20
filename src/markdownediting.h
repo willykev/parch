@@ -37,6 +37,12 @@ struct Options {
     // profile does, `[^a note of its own.]` as an inline note.
     bool footnotes = true;
     bool inlineNotes = true;
+    // How the dialect reads a table's pipes: a pipe inside a code span is
+    // code (Writer), two pipes side by side merge cells (Writer with merged
+    // cells on), and a line starting `//` is a comment.
+    bool protectCodePipes = true;
+    bool mergedCells = true;
+    bool lineComments = true;
 };
 
 // Every formatting command's id, in the order a menu lists them.
@@ -69,6 +75,10 @@ std::optional<TextChange> indent(QStringView text, int anchor, int cursor, bool 
 // outside a table.
 std::optional<TextChange> moveToCell(QStringView text, int anchor, int cursor, bool backwards,
                                      const Options &options = {});
+// A new table of empty cells, `rows` counting the header, written tidy as
+// a block of its own after the caret's line, with the caret in its first
+// cell.
+TextChange insertTable(QStringView text, int position, int columns, int rows, const Options &options = {});
 // Aligns the pipes and padding of the pipe table holding the cursor, as its
 // delimiter row aligns each column, without changing any cell's text. Pipes
 // that are escaped or inside code spans are text; columns are measured in

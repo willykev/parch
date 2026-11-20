@@ -219,6 +219,10 @@ In this guide's profile, two pipes together join a cell with the next one:
 
 A pipe inside a cell needs a backslash: `a \| b` shows as a | b.
 
+In the text, parch shows a table as a grid to write in, and writes its
+Markdown tidy, pipes lined up, as you change it. **Show as Markdown** in a
+cell's menu (a right click) shows the pipes and dashes themselves.
+
 *Watch out:* without the line of dashes there is no table, only text with
 pipes in it:
 

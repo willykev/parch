@@ -25,6 +25,8 @@ HEADERS += \
     librarytests.h \
     previewtests.h \
     frametests.h \
+    tablegridtests.h \
+    tabletests.h \
     touchpadtests.h \
     parsetests.h \
     stylingtests.h \
@@ -111,6 +113,7 @@ HEADERS += \
     ../src/mdhtml.h \
     ../src/mdinclude.h \
     ../src/mdparser_p.h \
+    ../src/mdtable.h \
     ../src/mdtree.h \
     ../src/pathtext.h \
     ../src/portalfilepicker.h \
@@ -145,6 +148,7 @@ HEADERS += \
     ../src/spellchecker.h \
     ../src/spellinglayer.h \
     ../src/tabmodel.h \
+    ../src/tablegrids.h \
     ../src/textsearch.h \
     ../src/theme.h \
     ../src/touchpadscroll.h \
@@ -164,6 +168,8 @@ SOURCES += \
     librarytests.cpp \
     previewtests.cpp \
     frametests.cpp \
+    tablegridtests.cpp \
+    tabletests.cpp \
     touchpadtests.cpp \
     parsetests.cpp \
     stylingtests.cpp \
@@ -254,6 +260,7 @@ SOURCES += \
     ../src/mdrawhtml.cpp \
     ../src/mdresolve.cpp \
     ../src/mdscan.cpp \
+    ../src/mdtable.cpp \
     ../src/mdtree.cpp \
     ../src/pathtext.cpp \
     ../src/portalfilepicker.cpp \
@@ -285,6 +292,7 @@ SOURCES += \
     ../src/spellchecker.cpp \
     ../src/spellinglayer.cpp \
     ../src/tabmodel.cpp \
+    ../src/tablegrids.cpp \
     ../src/textsearch.cpp \
     ../src/theme.cpp \
     ../src/touchpadscroll.cpp \

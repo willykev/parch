@@ -39,6 +39,8 @@
 #include "outline.h"
 #include "markdown_tests.h"
 #include "previewtests.h"
+#include "tablegridtests.h"
+#include "tabletests.h"
 #include "touchpadtests.h"
 #include "frametests.h"
 #include "securitytests.h"
@@ -839,6 +841,86 @@ private slots:
     void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
     void newWidthsMoveEachViewOnce() { FrameTests::newWidthsMoveEachViewOnce(); }
     // Scrolling with a touchpad, written in touchpadtests.cpp.
+    void formatKeepsMergedCellsWhole() { TableTests::formatKeepsMergedCellsWhole(); }
+    void scannerAgreesWithTheParser() { TableTests::scannerAgreesWithTheParser(); }
+    void formatIsIdempotentAndKeepsPayloadBytes() { TableTests::formatIsIdempotentAndKeepsPayloadBytes(); }
+    void formatKeepsPrefixesAndLineEndings() { TableTests::formatKeepsPrefixesAndLineEndings(); }
+    void formatAlignsWideAndCombiningText() { TableTests::formatAlignsWideAndCombiningText(); }
+    void tablesTheGridCannotHoldSayWhy() { TableTests::tablesTheGridCannotHoldSayWhy(); }
+    void caretRestsInAHiddenRowAndNoKeyEjectsIt() { TableGridTests::caretRestsInAHiddenRowAndNoKeyEjectsIt(); }
+    void typingInACellEditsTheSourceAndKeepsItTidy() { TableGridTests::typingInACellEditsTheSourceAndKeepsItTidy(); }
+    void inputMethodComposesAtTheGridCaret() { TableGridTests::inputMethodComposesAtTheGridCaret(); }
+    void vimLinesMoveFromCellToCell() { TableGridTests::vimLinesMoveFromCellToCell(); }
+    void draggingFromProseOverATableSelectsItWhole() { TableGridTests::draggingFromProseOverATableSelectsItWhole(); }
+    void clicksBelowATableLandInProseAfterItMoves() { TableGridTests::clicksBelowATableLandInProseAfterItMoves(); }
+    void tableItemsPassTheWindowChecks() { TableGridTests::tableItemsPassTheWindowChecks(); }
+    void runsOfReplacementsUndoAsOneChange() { TableTests::runsOfReplacementsUndoAsOneChange(); }
+    void aRunEndsAtASaveAPauseOrAnUndo() { TableTests::aRunEndsAtASaveAPauseOrAnUndo(); }
+    void composedRunsRestoreTheExactBytes() { TableTests::composedRunsRestoreTheExactBytes(); }
+    void everyOperationLeavesOneTidyEdit() { TableTests::everyOperationLeavesOneTidyEdit(); }
+    void mergedCellsWidenNarrowAndRefuseCuts() { TableTests::mergedCellsWidenNarrowAndRefuseCuts(); }
+    void sortingOrdersNumbersAsNumbersAndKeepsTies() { TableTests::sortingOrdersNumbersAsNumbersAndKeepsTies(); }
+    void movedRowsKeepTheirLineEndings() { TableTests::movedRowsKeepTheirLineEndings(); }
+    void pipesTypedInCellsAreEscapedByDialect() { TableTests::pipesTypedInCellsAreEscapedByDialect(); }
+    void tablesInQuotesKeepTheirPrefix() { TableTests::tablesInQuotesKeepTheirPrefix(); }
+    void insertedTablesAreTidyAndEmpty() { TableTests::insertedTablesAreTidyAndEmpty(); }
+    void anEditOutsideARunIsAStepOfItsOwn() { TableTests::anEditOutsideARunIsAStepOfItsOwn(); }
+    void cellEditsWithoutAViewKeepTablesTidy() { TableTests::cellEditsWithoutAViewKeepTablesTidy(); }
+    void focusLightsAWholeTable() { TableTests::focusLightsAWholeTable(); }
+    void editsInsideACellBecomeCellEdits() { TableGridTests::editsInsideACellBecomeCellEdits(); }
+    void editsAcrossTableSyntaxAreRefusedWithAReason() { TableGridTests::editsAcrossTableSyntaxAreRefusedWithAReason(); }
+    void wholeTableEditsPassThrough() { TableGridTests::wholeTableEditsPassThrough(); }
+    void everyWayOfEditingKeepsTheTableTidy() { TableGridTests::everyWayOfEditingKeepsTheTableTidy(); }
+    void replaceAndReplaceAllKeepTablesTidy() { TableGridTests::replaceAndReplaceAllKeepTablesTidy(); }
+    void findSkipsTableSyntax() { TableGridTests::findSkipsTableSyntax(); }
+    void aSecondViewKeepsItsCaretWhenATableIsRetidied() { TableGridTests::aSecondViewKeepsItsCaretWhenATableIsRetidied(); }
+    void aRetidyChangesOnlyTheLinesItMustAndStylesRowsShownAgain() { TableGridTests::aRetidyChangesOnlyTheLinesItMustAndStylesRowsShownAgain(); }
+    void arrowsWalkThroughCellsAndOutOfTheTable() { TableGridTests::arrowsWalkThroughCellsAndOutOfTheTable(); }
+    void tabAndEnterMoveAddAndLeave() { TableGridTests::tabAndEnterMoveAddAndLeave(); }
+    void selectionsAreACellABlockOrTheWholeTable() { TableGridTests::selectionsAreACellABlockOrTheWholeTable(); }
+    void theLineAfterATableStaysBlank() { TableGridTests::theLineAfterATableStaysBlank(); }
+    void tablesAtTheEndsOfTheTextHaveACaretBesideThem() { TableGridTests::tablesAtTheEndsOfTheTextHaveACaretBesideThem(); }
+    void backspaceAfterATableSelectsThenDeletesIt() { TableGridTests::backspaceAfterATableSelectsThenDeletesIt(); }
+    void vimMotionsFlowAcrossCells() { TableGridTests::vimMotionsFlowAcrossCells(); }
+    void vimOperatorsActOnCellsAndRows() { TableGridTests::vimOperatorsActOnCellsAndRows(); }
+    void everyTableCommandRunsFromMenuPaletteAndHandle() { TableGridTests::everyTableCommandRunsFromMenuPaletteAndHandle(); }
+    void handlesStayPutAsThePointerReachesThem() { TableGridTests::handlesStayPutAsThePointerReachesThem(); }
+    void handlesMoveRowsAndColumnsByDragging() { TableGridTests::handlesMoveRowsAndColumnsByDragging(); }
+    void theSizePickerInsertsATidyEmptyTable() { TableGridTests::theSizePickerInsertsATidyEmptyTable(); }
+    void tablesCanBeShownAsMarkdownPerView() { TableGridTests::tablesCanBeShownAsMarkdownPerView(); }
+    void readOnlyTablesTakeNoEdits() { TableGridTests::readOnlyTablesTakeNoEdits(); }
+    void copyingCellsGivesTabsAndAnHtmlTable() { TableGridTests::copyingCellsGivesTabsAndAnHtmlTable(); }
+    void pastingCellsFillsOverwritesAndGrows() { TableGridTests::pastingCellsFillsOverwritesAndGrows(); }
+    void wideTablesScrollSidewaysAndTheTextScrollsOver() { TableGridTests::wideTablesScrollSidewaysAndTheTextScrollsOver(); }
+    void handTypedTablesWaitUntilTheCaretLeaves() { TableGridTests::handTypedTablesWaitUntilTheCaretLeaves(); }
+    void everyGeometryQuestionHasAnAnswerInATable() { TableGridTests::everyGeometryQuestionHasAnAnswerInATable(); }
+    void fontAndWidthChangesKeepTheGrid() { TableGridTests::fontAndWidthChangesKeepTheGrid(); }
+    void tablesTheGridCannotHoldStayMarkdown() { TableGridTests::tablesTheGridCannotHoldStayMarkdown(); }
+    void aColumnsHandleActsOnTheColumnItPicked() { TableGridTests::aColumnsHandleActsOnTheColumnItPicked(); }
+    void aRefusedPasteOfCellsChangesNothing() { TableGridTests::aRefusedPasteOfCellsChangesNothing(); }
+    void textWrittenBelowATableStaysText() { TableGridTests::textWrittenBelowATableStaysText(); }
+    void anEditThatWouldJoinCellsIsRefused() { TableGridTests::anEditThatWouldJoinCellsIsRefused(); }
+    void slowRichPastesGoInAsACellsText() { TableGridTests::slowRichPastesGoInAsACellsText(); }
+    void anEditReachingIntoTwoTablesIsRefused() { TableGridTests::anEditReachingIntoTwoTablesIsRefused(); }
+    void aDropOnRowsNoLongerThereMovesNothing() { TableGridTests::aDropOnRowsNoLongerThereMovesNothing(); }
+    void anEmojiReplacesAnotherInACell() { TableGridTests::anEmojiReplacesAnotherInACell(); }
+    void cellsAShortRowLeavesOutAreReachedOneByOne() { TableGridTests::cellsAShortRowLeavesOutAreReachedOneByOne(); }
+    void aSecondViewsCaretStaysWithItsRow() { TableGridTests::aSecondViewsCaretStaysWithItsRow(); }
+    void aChangeOfDialectReadsTheTableAgain() { TableGridTests::aChangeOfDialectReadsTheTableAgain(); }
+    void vimRowCopiesKeepMergedCells() { TableGridTests::vimRowCopiesKeepMergedCells(); }
+    void copiedCellsKeepTheirQuotes() { TableGridTests::copiedCellsKeepTheirQuotes(); }
+    void inlineCommandsFormatEachSelectedCell() { TableGridTests::inlineCommandsFormatEachSelectedCell(); }
+    void aColumnAlignedAnewIsDrawnAligned() { TableGridTests::aColumnAlignedAnewIsDrawnAligned(); }
+    void aCompositionShowsInItsCell() { TableGridTests::aCompositionShowsInItsCell(); }
+    void findSeesATableShownAsMarkdown() { TableGridTests::findSeesATableShownAsMarkdown(); }
+    void doubleAndTripleClicksSelectInACell() { TableGridTests::doubleAndTripleClicksSelectInACell(); }
+    void homeAndEndKeepToTheLineInAWrappedCell() { TableGridTests::homeAndEndKeepToTheLineInAWrappedCell(); }
+    void aSecondViewsCaretStaysWithItsRowAmongLikeOnes() { TableGridTests::aSecondViewsCaretStaysWithItsRowAmongLikeOnes(); }
+    void selectAllTakesThreePressesToTheWholeText() { TableGridTests::selectAllTakesThreePressesToTheWholeText(); }
+    void selectAllInATableOfOneCellStillStopsAtTheCell() { TableGridTests::selectAllInATableOfOneCellStillStopsAtTheCell(); }
+    void aSlowPasteGoesWhereItWasMadeAfterTheViewMovesOn() { TableGridTests::aSlowPasteGoesWhereItWasMadeAfterTheViewMovesOn(); }
+    void aSlowPasteLeavesACaretTakenElsewhere() { TableGridTests::aSlowPasteLeavesACaretTakenElsewhere(); }
+    void anImagePastedInACellAsksForItsDescription() { TableGridTests::anImagePastedInACellAsksForItsDescription(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

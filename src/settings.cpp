@@ -36,6 +36,7 @@ const auto spellcheckKey = QStringLiteral("spellcheck");
 const auto focusUnitKey = QStringLiteral("focusUnit");
 const auto focusDimmingKey = QStringLiteral("focusDimming");
 const auto liveFormattingKey = QStringLiteral("liveFormatting");
+const auto tableGridsKey = QStringLiteral("tableGrids");
 const auto historyVersionsKey = QStringLiteral("historyVersions");
 const auto historyDaysKey = QStringLiteral("historyDays");
 const auto historyGigabytesKey = QStringLiteral("historyGigabytes");
@@ -310,6 +311,15 @@ void Settings::setLiveFormatting(bool on)
     emit changed();
 }
 
+void Settings::setTableGrids(bool on)
+{
+    if (on == m_tableGrids) return;
+    m_tableGrids = on;
+    m_stored.insert(tableGridsKey, on);
+    write();
+    emit changed();
+}
+
 void Settings::setHistoryVersions(int versions)
 {
     if (versions < MinHistoryVersions || versions > MaxHistoryVersions || versions == m_historyVersions) return;
@@ -555,6 +565,12 @@ void Settings::load()
             m_liveFormatting = m_stored.value(liveFormattingKey).toBool();
         else
             ignored << liveFormattingKey;
+    }
+    if (present(tableGridsKey)) {
+        if (m_stored.value(tableGridsKey).isBool())
+            m_tableGrids = m_stored.value(tableGridsKey).toBool();
+        else
+            ignored << tableGridsKey;
     }
     if (present(historyVersionsKey)) {
         if (wholeIn(m_stored.value(historyVersionsKey), MinHistoryVersions, MaxHistoryVersions, &whole))

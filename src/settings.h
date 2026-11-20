@@ -74,6 +74,8 @@ class Settings : public QObject {
     Q_PROPERTY(QString focusDimming READ focusDimming NOTIFY changed)
     // Whether the editor styles its Markdown as it is written; on by default.
     Q_PROPERTY(bool liveFormatting READ liveFormatting NOTIFY changed)
+    // Tables in the text show as grids to write in, rather than as their Markdown.
+    Q_PROPERTY(bool tableGrids READ tableGrids NOTIFY changed)
     // How much history keeps: at most historyVersions unnamed versions of
     // each document, none older than historyDays, and every document's
     // versions together within historyGigabytes (GiB, in tenths). Versions
@@ -138,6 +140,8 @@ public:
     Q_INVOKABLE void setFocusDimming(const QString &strength);
     bool liveFormatting() const { return m_liveFormatting; }
     Q_INVOKABLE void setLiveFormatting(bool on);
+    bool tableGrids() const { return m_tableGrids; }
+    Q_INVOKABLE void setTableGrids(bool on);
     int historyVersions() const { return m_historyVersions; }
     int historyDays() const { return m_historyDays; }
     qreal historyGigabytes() const { return m_historyGigabytes; }
@@ -236,6 +240,7 @@ private:
     QString m_focusUnit = QStringLiteral("sentence");
     QString m_focusDimming = QStringLiteral("strong");
     bool m_liveFormatting = true;
+    bool m_tableGrids = true;
     int m_historyVersions = 100;
     int m_historyDays = 30;
     qreal m_historyGigabytes = 1.0;

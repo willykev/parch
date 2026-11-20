@@ -73,9 +73,8 @@ qreal ScrollSync::editorHeightOf(int source) const
 {
     QQuickItem *editor = m_binding->editor();
     const int length = m_binding->document()->buffer()->length();
-    const int position = m_binding->sourceToEditor(std::clamp(source, 0, length));
-    QRectF line;
-    QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, line), Q_ARG(int, std::max(0, position)));
+    // Where the text view draws the position, in a table's grid too.
+    const QRectF line = m_binding->sourceRectangle(std::clamp(source, 0, length));
     return editor->y() + line.y();
 }
 

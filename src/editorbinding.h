@@ -5,6 +5,7 @@
 #include "markdownediting.h"
 #include "sourcebuffer.h"
 #include "sourcetypes.h"
+#include "tablegrids.h"
 // The binding's Vim keys are a property QML reads, so the type must be complete here.
 #include "vimmode.h"
 
@@ -21,10 +22,13 @@
 #include <optional>
 #include <vector>
 
+class Insertion;
 class QInputMethodEvent;
 class QKeyEvent;
+
 class QMimeData;
 class QTextBlockFormat;
+class QTextCursor;
 class QTextDocument;
 
 // Where the CRLF pairs of a source are. Qt shows CRLF as one paragraph
@@ -113,6 +117,10 @@ class EditorBinding : public QObject {
     // make still goes through the source. Off, keys type as always.
     Q_PROPERTY(bool vimKeys READ vimKeys WRITE setVimKeys NOTIFY vimKeysChanged)
     Q_PROPERTY(VimMode *vim READ vim CONSTANT)
+    // The view's tables drawn as grids, and what they make of its editing.
+    Q_PROPERTY(TableGrids *tables READ tables CONSTANT)
+    // The view shows its tables as grids; off, as their Markdown.
+    Q_PROPERTY(bool tableGrids READ tableGrids WRITE setTableGrids NOTIFY tableGridsChanged)
 
 public:
     // What the writer chose for a dropped Markdown file.
@@ -144,12 +152,18 @@ public:
     bool vimKeys() const { return m_vimKeys; }
     void setVimKeys(bool on);
     VimMode *vim() const { return m_vim; }
+    TableGrids *tables() const { return m_tables; }
+    bool tableGrids() const;
+    void setTableGrids(bool on);
 
     // Runs one of MarkdownEditing's formatting commands on this view's
     // selection, as one undo step, and selects what the command leaves
     // selected. False when the command is unknown, changes nothing, or the
     // view takes no edits now.
     Q_INVOKABLE bool format(const QString &command);
+    // Puts in a new table of empty cells after the caret's line, `rows`
+    // counting the header, and the caret in its first cell, as one step.
+    Q_INVOKABLE bool insertTable(int columns, int rows);
     // Whether a formatting command would change the text with the
     // selection as it is now, or with the caret at a source position; for
     // commands that act only on what is at the caret.
@@ -195,6 +209,16 @@ public:
     // The answers to includeAsked() and copyAsked(); a DropChoice for the first.
     Q_INVOKABLE void answerInclude(int choice);
     Q_INVOKABLE void answerCopy(bool copy);
+    // Where the caret is drawn, in the editor's coordinates: in a grid's
+    // cell as the grid draws it.
+    Q_INVOKABLE QRectF caretRectangle() const;
+    // What an input method is composing, shown where the composition
+    // starts, a source position; empty while it composes nothing.
+    QString preedit() const { return m_composing ? m_preedit : QString(); }
+    int preeditAt() const { return m_compositionSelection.start; }
+    // Where a caret at a source position would be drawn, in the editor's
+    // coordinates, a grid's cells and rows included.
+    QRectF sourceRectangle(int source) const;
     // The TextEdit's own insert, remove and clear, in its positions.
     Q_INVOKABLE void replaceEditorRange(int start, int end, const QString &text);
     // The TextEdit's own append: a new paragraph at the end.
@@ -243,6 +267,7 @@ signals:
     // first shown or shown again after a write that did not come from it.
     void projectionLoaded();
     void vimKeysChanged();
+    void tableGridsChanged();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -256,10 +281,18 @@ private slots:
     void applyInputMethod();
 
 private:
+    friend class TableGrids;
+    friend class TableGrid;
+    // Where a caret at a projection position is drawn, in the editor's
+    // coordinates: in a grid as the grid draws it, elsewhere as Qt lays it out.
+    QRectF rectangleAt(int editorPosition) const;
     void attach();
     void detach();
     void load();
     void applySourceChange(Revision revision, SourceRange range, const QString &replacement);
+    // Writes a span of the projection anew, line for line, where the lines
+    // are as many as before; otherwise whole.
+    void applyByLines(QTextCursor &span, const QString &written);
     // The format every paragraph takes: lines lineHeight × the font's pixel size apart.
     QTextBlockFormat lineFormat() const;
     // Notices a change of the TextEdit's text that did not come from the source.
@@ -296,6 +329,9 @@ private:
     // grow far past it.
     bool insertHtml(const QString &html, SourceRange range, const QString &plain = {});
     void pasteImage(const QMimeData *mime, const QString &alt, SourceRange range);
+    // Text an insertion puts in later goes in as this view's own edit, so
+    // that a cell takes it as its text and no table is broken.
+    void writeThrough(Insertion *insertion);
     // An image with no alt text, `length` long, came into the document at
     // `at`: a caret that followed it in, in this view, goes between its
     // brackets, for the alt text to be written there.
@@ -376,6 +412,11 @@ private:
     };
     ForeignWrite m_foreign;
     bool m_composing = false;
+    // What the input method shows while it composes.
+    QString m_preedit;
+    // An edit made for something that finished later, as a paste converted
+    // off the window's thread, leaves the caret where it is.
+    bool m_keepCaret = false;
     // The source range a composition will replace, kept while Qt shows its preedit.
     SourceRange m_compositionSelection{0, 0};
     // The anchor restore() last set, kept while the view stays where restore()
@@ -397,4 +438,15 @@ private:
     bool m_vimKeys = false;
     // Whether the TextEdit takes input method text: Vim keys allow it only in Insert mode.
     bool m_inputMethodAllowed = true;
+    TableGrids *m_tables = nullptr;
+    // Where the last edit through replace() left the caret, as the grids
+    // placed it, in source offsets; -1 when the edit placed nothing.
+    int m_placedCaret = -1;
+    // The run of typing or deleting in a grid's cell this view is making,
+    // and where its last edit left the caret: the next key there joins it.
+    quint64 m_tableRun = 0;
+    // This view's undo or redo is being applied: its caret goes where the change ends.
+    bool m_undoing = false;
+    int m_tableRunCaret = -1;
+    EditKind m_tableRunKind = EditKind::Other;
 };

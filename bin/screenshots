@@ -219,6 +219,11 @@ def main():
         # the table.
         stage.draw(drawn / "hero.png", WHOLE, "--view", "split", "--library",
                    "--line", line_of(text, "## Reading the sensor"))
+        # The table of readings as a grid in the text, the caret in a cell so
+        # that its row's and column's handles show.
+        reading = text.index("| 10:00 |") + len("| 10:00 |   1")
+        stage.draw(drawn / "tables.png", CLOSE, "--view", "source", "--no-library",
+                   "--line", line_of(text, "## A Saturday"), "--select", f"{reading},{reading}")
         # The code blocks, coloured in the preview, beside their source.
         stage.draw(drawn / "code.png", CLOSE, "--view", "split", "--no-library",
                    "--line", line_of(text, "```sh"))

@@ -572,6 +572,7 @@ void Benchmark::waitForEditor()
         m_readyNs = t;
         m_document = m_binding->document();
         m_units = m_document->buffer()->length();
+        m_marks = int(m_document->buffer()->text().count(u'x'));
         // A window already showing asks for a frame of its own.
         m_window->update();
     }
@@ -988,9 +989,12 @@ void Benchmark::planTyping()
         const int typed = m_document->buffer()->length();
         m_out["lengthAfterTyping"] = typed;
         m_out["expectedLength"] = m_units + m_typed;
-        if (typed != m_units + m_typed) {
+        // Each key typed an x. In a table shown as a grid, a key can also
+        // pad the table's other rows, so the x's are counted, not the length.
+        const int marks = int(m_document->buffer()->text().count(u'x'));
+        if (marks != m_marks + m_typed) {
             fail(tr("%1 of %2 keys reached the text; the window must stay in front while it is measured")
-                     .arg(typed - m_units)
+                     .arg(marks - m_marks)
                      .arg(m_typed));
             return;
         }

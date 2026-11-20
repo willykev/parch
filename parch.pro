@@ -87,6 +87,7 @@ HEADERS += \
     src/mdhtml.h \
     src/mdinclude.h \
     src/mdparser_p.h \
+    src/mdtable.h \
     src/mdtree.h \
     src/pathtext.h \
     src/portalfilepicker.h \
@@ -121,6 +122,7 @@ HEADERS += \
     src/spellchecker.h \
     src/spellinglayer.h \
     src/tabmodel.h \
+    src/tablegrids.h \
     src/textsearch.h \
     src/theme.h \
     src/touchpadscroll.h \
@@ -207,6 +209,7 @@ SOURCES += \
     src/mdrawhtml.cpp \
     src/mdresolve.cpp \
     src/mdscan.cpp \
+    src/mdtable.cpp \
     src/mdtree.cpp \
     src/pathtext.cpp \
     src/portalfilepicker.cpp \
@@ -238,6 +241,7 @@ SOURCES += \
     src/spellchecker.cpp \
     src/spellinglayer.cpp \
     src/tabmodel.cpp \
+    src/tablegrids.cpp \
     src/textsearch.cpp \
     src/theme.cpp \
     src/touchpadscroll.cpp \

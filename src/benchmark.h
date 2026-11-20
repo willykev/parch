@@ -188,6 +188,8 @@ private:
     qint64 m_openedNs = 0;
     qint64 m_readyNs = 0;
     int m_units = 0;
+    // How many x's the text had before the keys typed theirs.
+    int m_marks = 0;
     int m_typed = 0;
     std::vector<qint64> m_widthChanges;
     std::vector<qint64> m_stepTimes;

@@ -34,6 +34,14 @@ public:
     // they are sorted and do not overlap. Either all are applied or, should
     // one of them split a grapheme or the ranges be out of order, none.
     EditOutcome replace(const QList<SourceEdit> &edits);
+    // The same, as one of a run of edits in one place: typed (or deleted)
+    // there, each joins the step of the run's edit before it, within the
+    // pause that ends typing, as typed text does, though each may rewrite
+    // more than the text typed, as writing in a table's cell writes the
+    // table. Edits of a run that overlap are kept as one, so that a long
+    // run keeps no more than its first text and its last. A run is a number
+    // other than 0 that its maker chose.
+    EditOutcome replace(const QList<SourceEdit> &edits, EditKind kind, quint64 run);
     // Every edit from beginStep() to the matching endStep() undoes and redoes
     // as one step, whatever its kind; steps begun inside another join it.
     void beginStep();
@@ -86,6 +94,8 @@ private:
         EditKind kind;
         qint64 lastTime;
         bool hasLineBreak;
+        // The run its edits are of, or 0.
+        quint64 run = 0;
     };
     // An edit asked for while a step was being applied, waiting for it to end.
     struct Waiting {
@@ -95,14 +105,16 @@ private:
         bool together;
         // Text one of them addresses was changed after it was asked for.
         bool dropped = false;
+        quint64 run = 0;
     };
-    bool joinsLastStep(const Transaction &edit, EditKind kind, bool lineBreak, qint64 now) const;
+    bool joinsLastStep(const Transaction &edit, EditKind kind, bool lineBreak, qint64 now, quint64 run = 0) const;
     // Records an edit already checked and applies it.
-    void record(SourceRange range, const QString &removed, const QString &replacement, EditKind kind);
+    void record(SourceRange range, const QString &removed, const QString &replacement, EditKind kind,
+                quint64 run = 0);
     void apply(SourceRange range, const QString &replacement);
     // Undoes or redoes a step, and then applies the edits asked for while it did.
     void replay(bool backwards);
-    void wait(const QList<SourceEdit> &edits, EditKind kind, bool together);
+    void wait(const QList<SourceEdit> &edits, EditKind kind, bool together, quint64 run = 0);
 
     QString m_text;
     Revision m_revision = 0;

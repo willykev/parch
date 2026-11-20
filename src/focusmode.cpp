@@ -1,6 +1,7 @@
 #include "focusmode.h"
 
 #include "document.h"
+#include "mdtable.h"
 #include "sourcebuffer.h"
 #include "theme.h"
 
@@ -214,6 +215,9 @@ SourceRange FocusMode::rangeAt(QStringView text, int position, Unit unit)
     const int last = lineEnd(text, position);
     const QStringView line = text.sliced(first, last - first);
     if (blank(line)) return {position, 0};
+    // A table is one part, every row of it lit, by sentence as by paragraph.
+    if (const auto table = MdTable::locate(text, position); table && position >= table->start && position <= table->end)
+        return {table->start, table->end - table->start};
     int start = first, end = last;
     if (!heading(line)) {
         // Back to the line that starts the paragraph, and on to its last.

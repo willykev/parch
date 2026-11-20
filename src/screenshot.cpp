@@ -129,6 +129,7 @@ QStringList Screenshot::pending() const
         } else if (m_window->property("editorShown").toBool()) {
             QObject *styling = editorPane->findChild<QObject *>(QStringLiteral("styling"));
             if (styling && styling->property("busy").toBool()) waiting.append(tr("live formatting"));
+            if (binding && !binding->tables()->settled()) waiting.append(tr("the tables"));
             SpellChecker *spelling = m_backend ? m_backend->spelling() : nullptr;
             QObject *layer = editorPane->findChild<QObject *>(QStringLiteral("spelling"));
             if ((spelling && spelling->wanted() && !spelling->settled()) || (layer && layer->property("checking").toBool()))

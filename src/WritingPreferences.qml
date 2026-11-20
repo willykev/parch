@@ -102,6 +102,23 @@ PreferenceSection {
 
     PreferenceRow {
         width: parent.width
+        label: qsTr("Tables")
+
+        ThemedCheck {
+            objectName: "tableGridsChoice"
+            width: Math.min(implicitWidth, parent.width)
+            text: qsTr("Show tables as grids to write in")
+            checked: settings.tableGrids
+            Accessible.name: text
+            onToggled: {
+                settings.setTableGrids(checked)
+                checked = Qt.binding(() => settings.tableGrids)
+            }
+        }
+    }
+
+    PreferenceRow {
+        width: parent.width
         label: qsTr("Headings")
 
         ThemedComboBox {

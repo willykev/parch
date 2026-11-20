@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Shapes
 import QtQuick.Window
 import Parch
+import "icons.js" as Icons
 
 // The writing surface for one view of a document: one TextEdit over the whole
 // text in a clipped Flickable, centred in a column at most maxLineLength
@@ -60,6 +61,11 @@ Rectangle {
     // Live formatting styles the Markdown as it is written, its punctuation
     // kept and dimmed; without it the source is plain text.
     property bool liveFormatting: true
+    // Tables show as grids to write in, rather than as their Markdown.
+    property bool tableGrids: false
+    // Why the last edit was refused, as one that would break a table's
+    // rows; for a few seconds, for the status line to say.
+    property string editHint
 
     // The advance of "0", the width CSS calls one character, as the editor draws it.
     readonly property real characterWidth: zero.advanceWidth
@@ -132,7 +138,8 @@ Rectangle {
         const found = spelling.misspellingAt(binding.editorToSource(position))
         if (found.word === undefined || !spellChecker)
             return false
-        spellingMenu.offer(found.start, found.end, found.word, spellChecker.suggestions(found.word))
+        spellingMenu.offer(found.start, found.end, found.word, spellChecker.suggestions(found.word),
+                           binding.tables.caretInGrid)
         spellingMenu.popup(editor, point.x, point.y)
         return true
     }
@@ -149,6 +156,29 @@ Rectangle {
         noteMenu.inline = binding.acts("inlineNote", source)
         noteMenu.popup(editor, point.x, point.y)
         return true
+    }
+
+    // Opens the menu of the table the caret is in, at a point of the editor's.
+    function offerTableMenu(point) {
+        if (!binding.tables.caretInGrid)
+            return false
+        tableMenu.kind = "cell"
+        tableMenu.popup(editor, point.x, point.y)
+        return true
+    }
+
+    // Asks for the size of a new table beside the caret, and puts it in.
+    function chooseTable() {
+        const caret = binding.caretRectangle()
+        // In a table, its menu: no table goes inside a cell.
+        if (binding.tables.caretInGrid) {
+            offerTableMenu(Qt.point(caret.x, caret.y + caret.height))
+            return
+        }
+        const at = editor.mapToItem(pane, caret.x, caret.y + caret.height)
+        tablePicker.x = Math.max(0, Math.min(at.x, pane.width - tablePicker.implicitWidth))
+        tablePicker.y = Math.max(0, Math.min(at.y, pane.height - tablePicker.implicitHeight))
+        tablePicker.open()
     }
 
     // The cursor moved or the text scrolled.
@@ -274,9 +304,11 @@ Rectangle {
             // The Menu key, or Shift+F10, opens the spelling menu on the word at the caret.
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && event.modifiers === Qt.ShiftModifier)) {
-                    const caret = editor.cursorRectangle
+                    const caret = binding.caretRectangle()
                     const point = Qt.point(caret.x, caret.y + caret.height)
+                    // In a grid, a misspelled word's spellings, or else the table's menu.
                     event.accepted = pane.offerSpelling(editor.cursorPosition, point) || pane.offerNote(editor.cursorPosition, point)
+                                     || (binding.tables.caretInGrid && pane.offerTableMenu(point))
                 }
             }
             Accessible.name: pane.title.length > 0 ? pane.title : qsTr("Text")
@@ -289,7 +321,7 @@ Rectangle {
                 objectName: "caret"
                 width: Math.max(1, Math.round(pane.fontPixelSize / 8))
                 color: theme.accent
-                visible: pane.caretFocused && pane.caretLit && !pane.blockCaret
+                visible: pane.caretFocused && pane.caretLit && !pane.blockCaret && !binding.tables.caretInGrid
             }
 
             // Vim's block caret, over the character the cursor is on, or
@@ -322,7 +354,7 @@ Rectangle {
                     editor.font
                     return boxAt(pane.vim.cursorEnd)
                 }
-                visible: pane.blockCaret && pane.caretFocused && pane.caretLit
+                visible: pane.blockCaret && pane.caretFocused && pane.caretLit && !binding.tables.caretInGrid
                 x: from.x
                 y: from.y
                 width: to.y === from.y && to.x > from.x ? to.x - from.x : pane.characterWidth
@@ -408,6 +440,392 @@ Rectangle {
                                 for (let x = 0, up = false; x < wave.width + step; x += step, up = !up)
                                     points.push(Qt.point(Math.min(x, wave.width), up ? 0 : wave.height))
                                 return points
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tables drawn as grids, over the lines of their Markdown, which
+            // stay in the text. Each grid draws its caret and selection; the
+            // text keeps the keys.
+            Repeater {
+                model: binding.tables.grids
+
+                delegate: Item {
+                    id: gridSlot
+
+                    required property TableGrid modelData
+
+                    x: 0
+                    y: modelData.y
+                    width: modelData.viewWidth
+                    height: modelData.height
+                    z: 1
+
+                    // The band hides the table's Markdown beneath, its header
+                    // line's text too, to the edge of the view.
+                    Rectangle {
+                        objectName: "gridBand"
+                        width: Math.max(gridSlot.width, flickable.width - editor.x)
+                        height: gridSlot.height
+                        color: theme.background
+                    }
+
+                    TableGridView {
+                        id: gridView
+                        objectName: "tableGrid"
+                        anchors.fill: parent
+                        clip: true
+                        grid: gridSlot.modelData
+                        viewTop: flickable.contentY - editor.y - gridSlot.y
+                        viewHeight: flickable.height
+                        // In focus mode the text outside the focus is dim, cells too.
+                        textColor: editor.color
+                        ruleColor: theme.controlBorder
+                        headerColor: theme.raised
+                        backgroundColor: theme.background
+                        selectionColor: theme.selection
+                        selectedTextColor: theme.foreground
+                        nativeRendering: pane.nativeRendering
+
+                        Rectangle {
+                            objectName: "gridCaret"
+                            x: gridSlot.modelData.caretRect.x - gridSlot.modelData.scrollX
+                            y: gridSlot.modelData.caretRect.y
+                            width: Math.max(1, Math.round(pane.fontPixelSize / 8))
+                            height: gridSlot.modelData.caretRect.height
+                            color: theme.accent
+                            visible: gridSlot.modelData.hasCaret && pane.caretFocused && pane.caretLit && !pane.blockCaret
+                        }
+                        Rectangle {
+                            objectName: "gridBlockCaret"
+                            x: gridSlot.modelData.blockRect.x - gridSlot.modelData.scrollX
+                            y: gridSlot.modelData.blockRect.y
+                            width: gridSlot.modelData.blockRect.width
+                            height: gridSlot.modelData.blockRect.height
+                            color: theme.accent
+                            opacity: 0.45
+                            visible: gridSlot.modelData.hasCaret && pane.blockCaret && pane.caretFocused && pane.caretLit
+                        }
+                        // A click puts the caret where it is in a cell's text,
+                        // and a drag selects from there; a right click offers
+                        // the spelling of a misspelled word.
+                        MouseArea {
+                            objectName: "gridPointer"
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            cursorShape: Qt.IBeamCursor
+                            property int pressedAt: -1
+                            // When and where a double click came, for a third there to select the cell's text.
+                            property double doubleAt: 0
+                            property point doublePoint
+                            function sourceAt(mouse) {
+                                return gridSlot.modelData.sourceAt(mouse.x + gridSlot.modelData.scrollX, mouse.y)
+                            }
+                            onDoubleClicked: (mouse) => {
+                                if (mouse.button !== Qt.LeftButton)
+                                    return
+                                binding.tables.selectWordAt(sourceAt(mouse))
+                                doubleAt = Date.now()
+                                doublePoint = Qt.point(mouse.x, mouse.y)
+                            }
+                            onPressed: (mouse) => {
+                                editor.forceActiveFocus()
+                                const at = sourceAt(mouse)
+                                const near = Math.abs(mouse.x - doublePoint.x) <= Qt.styleHints.startDragDistance
+                                             && Math.abs(mouse.y - doublePoint.y) <= Qt.styleHints.startDragDistance
+                                if (mouse.button === Qt.LeftButton && near && Date.now() - doubleAt < Qt.styleHints.mouseDoubleClickInterval) {
+                                    doubleAt = 0
+                                    binding.tables.selectCellAt(at)
+                                    pressedAt = -1
+                                    return
+                                }
+                                if (mouse.button === Qt.RightButton) {
+                                    const point = mapToItem(editor, mouse.x, mouse.y)
+                                    // A right click in a block keeps it, for its cells' commands.
+                                    const from = Math.min(binding.anchorSource, binding.cursorSource)
+                                    const to = Math.max(binding.anchorSource, binding.cursorSource)
+                                    if (at < from || at > to || from === to)
+                                        binding.select(at, at)
+                                    if (!pane.offerSpelling(binding.sourceToEditor(at), point))
+                                        pane.offerTableMenu(point)
+                                    return
+                                }
+                                pressedAt = (mouse.modifiers & Qt.ShiftModifier) ? binding.anchorSource : at
+                                binding.select(pressedAt, at)
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (pressed && pressedButtons & Qt.LeftButton && pressedAt >= 0)
+                                    binding.select(pressedAt, sourceAt(mouse))
+                            }
+                        }
+                    }
+
+                    // The row and the column under the pointer, or the caret's,
+                    // whose handles show while the pointer is near or the caret in.
+                    property int hoverRow: -1
+                    property int hoverColumn: -1
+                    readonly property int caretRow: modelData.hasCaret, modelData.caretRect, modelData.caretRow()
+                    readonly property int caretColumn: modelData.hasCaret, modelData.caretRect, modelData.caretColumn()
+                    readonly property int shownRow: hoverRow >= 0 ? hoverRow : caretRow
+                    readonly property int shownColumn: hoverColumn >= 0 ? hoverColumn : caretColumn
+                    // The pointer on a handle or a button, which takes the
+                    // hover from the room around the grid.
+                    readonly property bool chromeHovered: rowDrag.containsMouse || columnDrag.containsMouse
+                                                          || addColumnArea.containsMouse || addRowArea.containsMouse
+                    readonly property bool lit: near.hovered || chromeHovered || modelData.hasCaret
+                    // The pointer has left the grid and its handles: the caret's
+                    // row and column have the handles again. Asked once both
+                    // hovers have changed, whichever changes first.
+                    function settleHover() {
+                        if (!near.hovered && !chromeHovered) {
+                            hoverRow = -1
+                            hoverColumn = -1
+                        }
+                    }
+                    onChromeHoveredChanged: Qt.callLater(settleHover)
+                    readonly property real handleSize: Math.round(pane.fontPixelSize * 0.8)
+                    // Where a dragged row or column would go: a boundary between two, or -1.
+                    property int dropRow: -1
+                    property int dropColumn: -1
+
+                    // The room around the grid its handles and buttons stand in.
+                    Item {
+                        x: -gridSlot.handleSize * 2
+                        y: -gridSlot.handleSize * 2
+                        width: gridSlot.width + gridSlot.handleSize * 4
+                        height: gridSlot.height + gridSlot.handleSize * 4
+                        HoverHandler {
+                            id: near
+                            onPointChanged: {
+                                const at = parent.mapToItem(gridSlot, near.point.position.x, near.point.position.y)
+                                if (at.x < 0 || at.y < 0 || at.x > gridSlot.width || at.y > gridSlot.height)
+                                    return
+                                gridSlot.hoverRow = gridSlot.modelData.rowAt(at.y)
+                                gridSlot.hoverColumn = gridSlot.modelData.columnAt(at.x + gridSlot.modelData.scrollX)
+                            }
+                            onHoveredChanged: Qt.callLater(gridSlot.settleHover)
+                        }
+                    }
+
+                    // A row's handle, beside it on the left, and a column's,
+                    // above it: a click selects it and opens its menu, a drag moves it.
+                    Rectangle {
+                        id: rowHandle
+                        objectName: "rowHandle"
+                        readonly property rect row: { gridSlot.modelData.height; return gridSlot.modelData.rowRect(gridSlot.shownRow) }
+                        visible: gridSlot.lit && gridSlot.shownRow >= 0 && binding.editable
+                        width: gridSlot.handleSize
+                        height: Math.min(Math.max(4, row.height - 4), Math.round(pane.fontPixelSize * 1.4))
+                        x: -width - Math.round(pane.fontPixelSize / 3)
+                        y: row.y + (row.height - height) / 2
+                        radius: Math.round(width / 3)
+                        color: rowDrag.containsMouse || rowDrag.pressed ? theme.hoverFill : theme.controlFill
+                        border.width: Math.max(1, theme.controlBorderWidth)
+                        border.color: theme.controlBorder
+                        Accessible.role: Accessible.Button
+                        Accessible.name: qsTr("Row %1").arg(gridSlot.shownRow + 1)
+                        Icon {
+                            anchors.centerIn: parent
+                            path: Icons.more
+                            size: parent.width
+                            rotation: 90
+                            color: theme.dim
+                        }
+                        MouseArea {
+                            id: rowDrag
+                            objectName: "rowHandleArea"
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                            property bool dragging: false
+                            property real pressedY: 0
+                            property int row: -1
+                            onPressed: (mouse) => {
+                                editor.forceActiveFocus()
+                                row = gridSlot.shownRow
+                                pressedY = mouse.y
+                                dragging = false
+                                binding.tables.selectRow(gridSlot.modelData, row, mouse.modifiers & Qt.ShiftModifier)
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (!pressed)
+                                    return
+                                if (!dragging && Math.abs(mouse.y - pressedY) >= Qt.styleHints.startDragDistance)
+                                    dragging = true
+                                if (!dragging)
+                                    return
+                                const at = mapToItem(gridSlot, mouse.x, mouse.y).y
+                                const over = gridSlot.modelData.rowAt(at)
+                                const rect = gridSlot.modelData.rowRect(over)
+                                gridSlot.dropRow = Math.max(1, at > rect.y + rect.height / 2 ? over + 1 : over)
+                            }
+                            onReleased: {
+                                // A drop the table no longer has, as another window's edit leaves, moves nothing.
+                                if (dragging) {
+                                    if (gridSlot.dropRow >= 1 && gridSlot.dropRow <= gridSlot.modelData.rows)
+                                        binding.tables.moveRowsTo(gridSlot.modelData, gridSlot.dropRow)
+                                } else if (row > 0) {
+                                    tableMenu.kind = "row"
+                                    tableMenu.popup(rowHandle, rowHandle.width, 0)
+                                }
+                                dragging = false
+                                gridSlot.dropRow = -1
+                            }
+                            onCanceled: {
+                                dragging = false
+                                gridSlot.dropRow = -1
+                            }
+                        }
+                    }
+                    Rectangle {
+                        id: columnHandle
+                        objectName: "columnHandle"
+                        readonly property rect column: { gridSlot.modelData.width; return gridSlot.modelData.columnRect(gridSlot.shownColumn) }
+                        visible: gridSlot.lit && gridSlot.shownColumn >= 0 && binding.editable
+                        width: Math.min(Math.max(4, column.width - 4), Math.round(pane.fontPixelSize * 1.4))
+                        height: gridSlot.handleSize
+                        x: column.x - gridSlot.modelData.scrollX + (column.width - width) / 2
+                        y: -height - Math.round(pane.fontPixelSize / 4)
+                        radius: Math.round(height / 3)
+                        color: columnDrag.containsMouse || columnDrag.pressed ? theme.hoverFill : theme.controlFill
+                        border.width: Math.max(1, theme.controlBorderWidth)
+                        border.color: theme.controlBorder
+                        Accessible.role: Accessible.Button
+                        Accessible.name: qsTr("Column %1").arg(gridSlot.shownColumn + 1)
+                        Icon {
+                            anchors.centerIn: parent
+                            path: Icons.more
+                            size: parent.height
+                            color: theme.dim
+                        }
+                        MouseArea {
+                            id: columnDrag
+                            objectName: "columnHandleArea"
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                            property bool dragging: false
+                            property real pressedX: 0
+                            property int column: -1
+                            onPressed: (mouse) => {
+                                editor.forceActiveFocus()
+                                column = gridSlot.shownColumn
+                                pressedX = mouse.x
+                                dragging = false
+                                binding.tables.selectColumn(gridSlot.modelData, column, mouse.modifiers & Qt.ShiftModifier)
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (!pressed)
+                                    return
+                                if (!dragging && Math.abs(mouse.x - pressedX) >= Qt.styleHints.startDragDistance)
+                                    dragging = true
+                                if (!dragging)
+                                    return
+                                const at = mapToItem(gridSlot, mouse.x, mouse.y).x + gridSlot.modelData.scrollX
+                                const over = gridSlot.modelData.columnAt(at)
+                                const rect = gridSlot.modelData.columnRect(over)
+                                gridSlot.dropColumn = at > rect.x + rect.width / 2 ? over + 1 : over
+                            }
+                            onReleased: {
+                                if (dragging) {
+                                    if (gridSlot.dropColumn >= 0 && gridSlot.dropColumn <= gridSlot.modelData.columns)
+                                        binding.tables.moveColumnsTo(gridSlot.modelData, gridSlot.dropColumn)
+                                } else {
+                                    tableMenu.kind = "column"
+                                    tableMenu.popup(columnHandle, 0, columnHandle.height)
+                                }
+                                dragging = false
+                                gridSlot.dropColumn = -1
+                            }
+                            onCanceled: {
+                                dragging = false
+                                gridSlot.dropColumn = -1
+                            }
+                        }
+                    }
+                    // Where a dragged row or column lands, between two.
+                    Rectangle {
+                        objectName: "rowDropLine"
+                        visible: gridSlot.dropRow >= 0
+                        x: 0
+                        y: (gridSlot.dropRow >= gridSlot.modelData.rows ? gridSlot.modelData.height
+                                                                         : gridSlot.modelData.rowRect(gridSlot.dropRow).y) - height
+                        width: gridSlot.width
+                        height: Math.max(2, Math.round(pane.fontPixelSize / 8))
+                        color: theme.accent
+                    }
+                    Rectangle {
+                        objectName: "columnDropLine"
+                        visible: gridSlot.dropColumn >= 0
+                        x: (gridSlot.dropColumn >= gridSlot.modelData.columns ? gridSlot.modelData.width
+                                                                             : gridSlot.modelData.columnRect(gridSlot.dropColumn).x)
+                           - gridSlot.modelData.scrollX - width
+                        y: 0
+                        width: Math.max(2, Math.round(pane.fontPixelSize / 8))
+                        height: gridSlot.height
+                        color: theme.accent
+                    }
+                    // A column added after the last, from the right edge; a row
+                    // added after the last, from below.
+                    Rectangle {
+                        id: addColumn
+                        objectName: "addColumnButton"
+                        visible: gridSlot.lit && binding.editable
+                        width: gridSlot.handleSize
+                        height: Math.min(gridSlot.height, Math.round(pane.fontPixelSize * 1.4))
+                        x: gridSlot.width + Math.round(pane.fontPixelSize / 3)
+                        y: (gridSlot.height - height) / 2
+                        radius: Math.round(width / 3)
+                        color: addColumnArea.containsMouse ? theme.hoverFill : theme.controlFill
+                        border.width: Math.max(1, theme.controlBorderWidth)
+                        border.color: theme.controlBorder
+                        Accessible.role: Accessible.Button
+                        Accessible.name: qsTr("Add a column")
+                        Icon {
+                            anchors.centerIn: parent
+                            path: Icons.plus
+                            size: parent.width
+                            color: theme.dim
+                        }
+                        MouseArea {
+                            id: addColumnArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                editor.forceActiveFocus()
+                                binding.tables.appendColumn(gridSlot.modelData)
+                            }
+                        }
+                    }
+                    Rectangle {
+                        id: addRow
+                        objectName: "addRowButton"
+                        visible: gridSlot.lit && binding.editable
+                        width: Math.min(gridSlot.width, Math.round(pane.fontPixelSize * 1.4))
+                        height: gridSlot.handleSize
+                        x: 0
+                        y: gridSlot.height + Math.round(pane.fontPixelSize / 4)
+                        radius: Math.round(height / 3)
+                        color: addRowArea.containsMouse ? theme.hoverFill : theme.controlFill
+                        border.width: Math.max(1, theme.controlBorderWidth)
+                        border.color: theme.controlBorder
+                        Accessible.role: Accessible.Button
+                        Accessible.name: qsTr("Add a row")
+                        Icon {
+                            anchors.centerIn: parent
+                            path: Icons.plus
+                            size: parent.height
+                            color: theme.dim
+                        }
+                        MouseArea {
+                            id: addRowArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                editor.forceActiveFocus()
+                                binding.tables.appendRow(gridSlot.modelData)
                             }
                         }
                     }
@@ -530,9 +948,24 @@ Rectangle {
         }
     }
 
+    TableMenu {
+        id: tableMenu
+        objectName: "tableMenu"
+        tables: binding.tables
+        onClosed: editor.forceActiveFocus()
+    }
+
+    TableSizePicker {
+        id: tablePicker
+        objectName: "tablePicker"
+        onChosen: (columns, rows) => binding.insertTable(columns, rows)
+        onClosed: editor.forceActiveFocus()
+    }
+
     SpellingMenu {
         id: spellingMenu
         objectName: "spellingMenu"
+        tables: binding.tables
         onReplace: (start, end, word, replacement) => spelling.replaceWord(start, end, word, replacement)
         onAddWord: (word) => pane.spellChecker.addToDictionary(word)
         onIgnoreWord: (word) => pane.spellChecker.ignore(word)
@@ -548,6 +981,7 @@ Rectangle {
         attachments: pane.attachments
         setextHeadings: pane.setextHeadings
         vimKeys: pane.vimKeys
+        tableGrids: pane.tableGrids
         onCursorChanged: {
             pane.viewMoved()
             pane.wakeCaret()
@@ -555,6 +989,20 @@ Rectangle {
         onActivity: pane.wakeCaret()
         onIncludeAsked: (name, canInclude) => pane.includeAsked(name, canInclude)
         onCopyAsked: (names, bytes) => pane.copyAsked(names, bytes)
+    }
+
+    Connections {
+        target: binding.tables
+        function onRefused(reason) {
+            pane.editHint = reason
+            hintTime.restart()
+        }
+    }
+    QuietTimer {
+        id: hintTime
+        objectName: "editHintTime"
+        interval: 4000
+        onTriggered: pane.editHint = ""
     }
 
     Connections {

@@ -45,7 +45,7 @@ void tablesTheGridCannotHoldStayMarkdown();
 void aColumnsHandleActsOnTheColumnItPicked();
 void aRefusedPasteOfCellsChangesNothing();
 void textWrittenBelowATableStaysText();
-void anEditThatWouldJoinCellsIsRefused();
+void aBacktickThatWouldJoinCellsIsWrittenEscaped();
 void slowRichPastesGoInAsACellsText();
 void anEditReachingIntoTwoTablesIsRefused();
 void aDropOnRowsNoLongerThereMovesNothing();
@@ -67,5 +67,19 @@ void selectAllInATableOfOneCellStillStopsAtTheCell();
 void aSlowPasteGoesWhereItWasMadeAfterTheViewMovesOn();
 void aSlowPasteLeavesACaretTakenElsewhere();
 void anImagePastedInACellAsksForItsDescription();
+void aSelectionEndingWhereATableStartsLeavesItOut();
+void textWithATabPastedInACellGoesInAsText();
+void blockCommandsAreRefusedOverABlockOfCells();
+void aTablePastedBelowAGridIsATableOfItsOwn();
+void replaceGoesOnThroughTheMatchesOfATable();
+void aSelectionFromACellOutOfTheTableTakesItWhole();
+void undoInACellLeavesTheCaretWhereItTyped();
+void upAndDownKeepToTheColumnClickedIn();
+void aLineBreakPastedInACellLeavesTheCaretAfterIt();
+void replaceAllMakesTheReplacementsTablesCanTake();
+void slowPastesLeaveTablesShownAsMarkdownAsWritten();
+void aTableGrowsNoLargerThanAGridHolds();
+void escapeWithTextSelectedInACellIsTheViews();
+void theSpellingMenuKeepsOneTableMenu();
 
 } // namespace TableGridTests

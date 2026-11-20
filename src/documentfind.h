@@ -145,6 +145,9 @@ private:
     void sourceChanged(Revision revision, SourceRange range, const QString &replacement);
     void refreshCurrent();
     void refreshCanReplace();
+    // Finds the matches again in the grid's table that holds a position,
+    // in place of those the edit that wrote it anew took with it.
+    void findInTable(int position);
     void runPending();
     void step(bool forward);
     void selectMatch(int index);

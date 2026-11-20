@@ -20,6 +20,7 @@
 #include <optional>
 #include <tuple>
 
+class Document;
 class EditorBinding;
 class EditorDecorations;
 namespace md {
@@ -209,6 +210,9 @@ class TableGrids : public QObject {
     // The view's cursor is in a grid, whose caret the grid draws.
     Q_PROPERTY(bool caretInGrid READ caretInGrid NOTIFY caretChanged)
     Q_PROPERTY(QString problem READ problem NOTIFY problemChanged)
+    // The most cells, the header's counted, and columns a table shown as a grid holds.
+    Q_PROPERTY(int maxCells READ maxCells CONSTANT)
+    Q_PROPERTY(int maxColumns READ maxColumns CONSTANT)
 
 public:
     explicit TableGrids(EditorBinding *binding);
@@ -223,6 +227,8 @@ public:
     // are to be grids are.
     bool settled() const;
     QString problem() const { return m_problem; }
+    int maxCells() const { return int(MdTable::MaxCells); }
+    int maxColumns() const { return MdTable::MaxColumns; }
 
     EditorBinding *binding() const { return m_binding; }
     // The view's formatting, which the grids draw their cells' text with.
@@ -269,8 +275,10 @@ public:
     Adapted adapt(SourceRange range, const QString &text) const;
     // The same for several edits made at once, as a command or Replace All
     // makes them, against the text as it is, sorted and apart; and where
-    // their selection goes, in the text after them.
-    Adapted adapt(const QList<SourceEdit> &edits, int anchor, int cursor) const;
+    // their selection goes, in the text after them. With `left`, those that
+    // cannot be made are left out, as Replace All leaves them, and counted
+    // there, the reason being the first one's; Refused only when none can be.
+    Adapted adapt(const QList<SourceEdit> &edits, int anchor, int cursor, int *left = nullptr) const;
     // A change of a grid's table through its model, as the row and column
     // commands make one: the table written tidy, as one edit, and the
     // caret in the cell at a model row and column, its text selected or at
@@ -279,10 +287,12 @@ public:
                    int column, bool selectText = false) const;
     // A key that moves the caret in or into a grid; false for any other.
     bool key(QKeyEvent *event);
-    // An inline command over a block of cells: made on each cell's text,
-    // the table written once, one step to undo. Nothing when the selection
-    // is no block, for the view to make it as anywhere.
-    std::optional<bool> formatCells(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation);
+    // A command over a block of cells: an inline one, `inCells`, made on
+    // each cell's text, the table written once, one step to undo; any
+    // other refused. Nothing when the selection is no block, for the view
+    // to make it as anywhere.
+    std::optional<bool> formatCells(const std::function<std::optional<TextChange>(QStringView, int, int)> &operation,
+                                    bool inCells);
     // The caret or the selection moved: one in a table's syntax is moved
     // into its cells' text.
     void cursorMoved();
@@ -314,6 +324,18 @@ public:
     std::optional<int> positionOf(const Spot &spot, SourceRange range, int inserted) const;
     // Whether a range of a text lies in the text of one cell of a table.
     static bool inTableCell(QStringView text, SourceRange range, const MdTable::Dialect &dialect);
+    // Whether the parse of a document's text as it is now reads a table at a
+    // position: false in a code block, and while no parse of it is at hand.
+    static bool parsedTableAt(const Document *document, int position);
+    // The texts of the cells of the grid that a range lies in, row by row,
+    // before an edit of it; and once it is made, where it ends in the first
+    // cell whose text it changed, if it changed one.
+    struct CellTexts {
+        QPointer<TableGrid> grid;
+        QList<QStringList> rows;
+    };
+    CellTexts cellTexts(SourceRange range) const;
+    std::optional<int> changeEnd(const CellTexts &before) const;
 
     // The commands for a grid's rows, columns, cells and the table as a
     // whole, by id, in the order a menu lists them.
@@ -344,8 +366,9 @@ public:
     bool cutBlock();
     // Cells from a spreadsheet pasted at the caret's cell, or over a block
     // of them: they fill it and grow the table where they reach past it. A
-    // single value fills every cell of a block. NotCells for anything else,
-    // which the view pastes as text; Refused when they cannot go there.
+    // single value fills every cell of a block, and over a block any text
+    // with tabs is cells. NotCells for anything else, which the view pastes
+    // as text; Refused when they cannot go there.
     enum class Paste { NotCells, Pasted, Refused };
     Paste pasteCells(const QMimeData *mime);
     // A double click selects the word at a position in a cell, a triple
@@ -355,9 +378,10 @@ public:
     // What an input method shows changed: the cell it is in is laid out
     // again with it.
     void compositionChanged();
-    // The cells a clipboard holds, row by row: from an HTML table, or text
-    // with tabs between them; none for anything else.
-    static std::optional<QList<QStringList>> cellsOf(const QMimeData *mime);
+    // The cells a clipboard holds, row by row: from an HTML table, or the
+    // text with tabs between them that a spreadsheet gives beside one; with
+    // `separated`, from any text with tabs; none for anything else.
+    static std::optional<QList<QStringList>> cellsOf(const QMimeData *mime, bool separated = false);
 
     // The binding's projection: shown anew, a change followed, laid out anew.
     void loaded();
@@ -439,8 +463,10 @@ private:
     int m_lastCursor = 0;
     bool m_settling = false;
     bool m_stepping = false;
-    // The x a vertical move keeps, in the grid's coordinates.
+    // The x a vertical move keeps, in the grid's coordinates, and where
+    // that move left the caret: a caret moved from there drops it.
     qreal m_goalX = -1;
+    int m_goalAt = -1;
     // The columns a column's handle selected, while the selection it made
     // stays: the commands act on them, though the block shown takes in the
     // merged cells that reach into them.

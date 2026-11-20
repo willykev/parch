@@ -676,4 +676,17 @@ void focusLightsAWholeTable()
     QCOMPARE(sentence.length, end - start);
 }
 
+void shiftTabIntoARowOfAPipeAloneStopsThere()
+{
+    // A row written as a pipe alone has only the cells the header gives
+    // it, none written: Shift+Tab into it goes to the first.
+    const QString text = u"| a | b |\n|---|---|\n|\n| c | d |"_s;
+    const int c = int(text.indexOf(u"c"));
+    const auto moved = MarkdownEditing::moveToCell(text, c, c, true);
+    QVERIFY(moved);
+    const int pipe = int(text.indexOf(u"\n|\n")) + 2;
+    QCOMPARE(moved->anchor, pipe);
+    QCOMPARE(moved->cursor, pipe);
+}
+
 } // namespace TableTests

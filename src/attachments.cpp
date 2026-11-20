@@ -211,17 +211,21 @@ bool Insertion::insert(const QString &text, bool block)
         }
         fittedText = fitted(source, range, text, block);
     }
+    bool tidy = false;
     if (m_writer) {
         const int at = m_writer(document, range, text, block);
-        if (at != Buffer) {
+        if (at != Buffer && at != Plain) {
             m_insertedAt = at;
             return at >= 0;
         }
+        tidy = at == Buffer;
     }
     // Text going into a table's cell, with no view of it to take it, is
     // the cell's text: on its line, and the table written tidy around it.
+    // Only where tables are grids, and in a table the parser reads, not
+    // one shown in a code block.
     const md::Options options = document->markdownOptions();
-    if (options.tables) {
+    if (tidy && options.tables && TableGrids::parsedTableAt(document, range.start)) {
         const MdTable::Dialect dialect = TableGrids::dialectOf(options);
         bool inCell = false;
         QList<SourceEdit> edits;

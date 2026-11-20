@@ -25,5 +25,6 @@ void insertedTablesAreTidyAndEmpty();
 void anEditOutsideARunIsAStepOfItsOwn();
 void cellEditsWithoutAViewKeepTablesTidy();
 void focusLightsAWholeTable();
+void shiftTabIntoARowOfAPipeAloneStopsThere();
 
 } // namespace TableTests

@@ -48,6 +48,9 @@ struct Options {
 // Every formatting command's id, in the order a menu lists them.
 QStringList commands();
 bool isCommand(const QString &id);
+// Whether a command formats text within a line, as bold or a link does,
+// rather than whole lines or blocks: one that a cell of a table can take.
+bool isInline(const QString &id);
 
 // What a formatting command does with the selection from anchor to cursor.
 // An inline command (bold, italic, strikethrough, highlight, code, inline

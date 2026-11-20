@@ -175,9 +175,27 @@ void DocumentFind::failed(const QString &reason)
     emit resultsChanged();
 }
 
+void DocumentFind::setBinding(EditorBinding *binding)
+{
+    if (binding == m_binding) return;
+    m_binding = binding;
+    emit bindingChanged();
+}
+
+QList<SourceRange> DocumentFind::inCellText(const QList<SourceRange> &matches) const
+{
+    if (!m_binding || m_binding->tables()->grids().isEmpty()) return matches;
+    QList<SourceRange> kept;
+    kept.reserve(matches.size());
+    for (const SourceRange &match : matches)
+        if (m_binding->tables()->inCellText(match.start, match.start + match.length)) kept.append(match);
+    return kept;
+}
+
 void DocumentFind::take(const Found &found)
 {
-    m_matches = found.matches;
+    // A table's pipes and dashes are found nowhere in a grid.
+    m_matches = inCellText(found.matches);
     m_truncated = found.truncated;
     m_forQuery = true;
     emit resultsChanged();
@@ -329,7 +347,13 @@ void DocumentFind::replaceCurrent(const QString &replacement)
         return;
     }
     const QString text = TextSearch::expand(replacement, match, m_query.regex);
-    const auto outcome = buffer->replace(range, text, EditKind::Other);
+    // In a grid, the cell's text is replaced and the table written tidy around it.
+    SourceBuffer::EditOutcome outcome;
+    const TableGrids::Adapted adapted =
+        m_binding ? m_binding->tables()->adapt(range, text) : TableGrids::Adapted{};
+    if (adapted.kind == TableGrids::Adapted::Refused) outcome = SourceBuffer::EditOutcome::Rejected;
+    else if (adapted.kind == TableGrids::Adapted::Changed) outcome = buffer->replace(adapted.edits);
+    else outcome = buffer->replace(range, text, EditKind::Other);
     if (m_matches.isEmpty()) return;
     // The next match after what was written, which a match the replacement
     // made is not.
@@ -366,8 +390,23 @@ void DocumentFind::startReplaceAll(const QString &replacement)
                 startReplaceAll(replacement);
                 return;
             }
-            if (replaced.count > 0) buffer->replace(replaced.edit.range, replaced.edit.text, EditKind::Other);
-            emit replacedAll(replaced.count);
+            int count = replaced.count;
+            if (count > 0 && m_binding && !m_binding->tables()->grids().isEmpty()) {
+                // Matches in a table's syntax are none; those in cells are
+                // written into them, each table tidy, all one step.
+                QList<SourceEdit> edits;
+                for (const TextSearch::Edit &edit : replaced.edits)
+                    if (m_binding->tables()->inCellText(edit.range.start, edit.range.start + edit.range.length))
+                        edits.append({edit.range, edit.text});
+                count = int(edits.size());
+                const TableGrids::Adapted adapted = m_binding->tables()->adapt(edits, 0, 0);
+                if (count > 0 && adapted.kind != TableGrids::Adapted::Refused)
+                    buffer->replace(adapted.kind == TableGrids::Adapted::Changed ? adapted.edits : edits);
+                else count = 0;
+            } else if (count > 0) {
+                buffer->replace(replaced.edit.range, replaced.edit.text, EditKind::Other);
+            }
+            emit replacedAll(count);
         })
         .onFailed(this, [this](const QUnhandledException &failure) {
             m_replacing = false;
@@ -394,6 +433,7 @@ DocumentFind::Replaced DocumentFind::replaceJob(QSharedPointer<const SourceSnaps
     });
     replaced.count = int(edits.size());
     replaced.edit = TextSearch::combine(text, edits);
+    replaced.edits = edits;
     return replaced;
 }
 

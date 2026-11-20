@@ -1354,6 +1354,7 @@ ApplicationWindow {
         id: documentFind
         objectName: "documentFind"
         document: window.document
+        binding: editorPane.binding
         active: findBar.visible
         onSelectRequested: (anchor, cursor) => editorPane.selectSource(anchor, cursor)
     }

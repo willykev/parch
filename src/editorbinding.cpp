@@ -528,6 +528,11 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
     const int shownEnd = m_pairs.toEditor(oldEnd);
     const int shownAfterEnd = oldEnd < oldLength ? m_pairs.toEditor(oldEnd + 1) : shownEnd;
 
+    // A caret in a grid's cell stays in that cell, at the same place in its
+    // text, however the table is written around it.
+    // This view's own undo leaves the caret where the change ends, as in any text.
+    const TableGrids::Spot anchorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(anchor);
+    const TableGrids::Spot cursorSpot = m_undoing ? TableGrids::Spot{} : m_tables->spotOf(cursor);
     m_pairs.update(source, range, inserted);
     emit sourceEdited(revision, range, inserted);
     // Qt shows CRLF as one separator, so where the edit joins or splits a
@@ -554,7 +559,9 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
         if (position >= oldEnd) return position + delta;
         return newEnd;
     };
-    selectEditor(m_pairs.toEditor(track(anchor)), m_pairs.toEditor(track(cursor)));
+    const int newAnchor = m_tables->positionOf(anchorSpot).value_or(track(anchor));
+    const int newCursor = m_tables->positionOf(cursorSpot).value_or(track(cursor));
+    selectEditor(m_pairs.toEditor(newAnchor), m_pairs.toEditor(newCursor));
     m_projecting = false;
     if ((oldLength > largeTextUnits) != (source.size() > largeTextUnits))
         m_editor->setFlag(QQuickItem::ItemObservesViewport, source.size() > largeTextUnits);
@@ -591,6 +598,15 @@ void EditorBinding::setVimKeys(bool on)
     if (on) cancelComposition();
     m_vim->setActive(on);
     emit vimKeysChanged();
+}
+
+bool EditorBinding::tableGrids() const { return m_tables->enabled(); }
+
+void EditorBinding::setTableGrids(bool on)
+{
+    if (on == m_tables->enabled()) return;
+    m_tables->setEnabled(on);
+    emit tableGridsChanged();
 }
 
 void EditorBinding::applyInputMethod()
@@ -691,12 +707,28 @@ bool EditorBinding::applyEditing(const std::function<std::optional<TextChange>(Q
     return change && apply(*change);
 }
 
-bool EditorBinding::apply(const TextChange &change)
+bool EditorBinding::apply(const TextChange &requested)
 {
     if (!editable() || m_projecting || m_blocked) return false;
+    // A command's edits in a grid's cells write the table tidy around them;
+    // one that would break a table's rows is refused.
+    TextChange change = requested;
+    if (!change.edits.isEmpty()) {
+        const TableGrids::Adapted adapted = m_tables->adapt(change.edits, change.anchor, change.cursor);
+        if (adapted.kind == TableGrids::Adapted::Refused) {
+            emit m_tables->refused(adapted.reason);
+            return false;
+        }
+        if (adapted.kind == TableGrids::Adapted::Changed) {
+            change.edits = adapted.edits;
+            change.anchor = adapted.anchor;
+            change.cursor = adapted.cursor;
+        }
+    }
     if (!change.edits.isEmpty() && m_buffer->replace(change.edits) == SourceBuffer::EditOutcome::Rejected) return false;
     const int length = m_buffer->length();
     selectEditor(m_pairs.toEditor(qBound(0, change.anchor, length)), m_pairs.toEditor(qBound(0, change.cursor, length)));
+    refreshCursor();
     revealCursor();
     return true;
 }
@@ -1000,8 +1032,21 @@ bool EditorBinding::replace(SourceRange range, const QString &text, EditKind kin
         return false;
     }
     if (adapted.kind == TableGrids::Adapted::Changed) {
-        if (!adapted.edits.isEmpty() && m_buffer->replace(adapted.edits) == SourceBuffer::EditOutcome::Rejected)
+        // Keys typed or deleted one after another in a cell are one step to
+        // undo, as in a paragraph, though each writes the table anew.
+        quint64 run = 0;
+        if (kind != EditKind::Other) {
+            static quint64 runs = 0;
+            const bool goesOn = kind == m_tableRunKind
+                                && (range.start == m_tableRunCaret || range.start + range.length == m_tableRunCaret);
+            if (!goesOn) m_tableRun = ++runs;
+            run = m_tableRun;
+        }
+        if (!adapted.edits.isEmpty()
+            && m_buffer->replace(adapted.edits, kind, run) == SourceBuffer::EditOutcome::Rejected)
             return false;
+        m_tableRunCaret = kind != EditKind::Other ? adapted.cursor : -1;
+        m_tableRunKind = kind;
         m_placedCaret = adapted.cursor;
         const int caret = m_pairs.toEditor(qBound(0, adapted.cursor, m_buffer->length()));
         selectEditor(caret, caret);
@@ -1072,14 +1117,18 @@ void EditorBinding::undo()
 {
     if (!editable() || m_blocked) return;
     cancelComposition();
+    const bool undoing = std::exchange(m_undoing, true);
     m_buffer->undo();
+    m_undoing = undoing;
 }
 
 void EditorBinding::redo()
 {
     if (!editable() || m_blocked) return;
     cancelComposition();
+    const bool undoing = std::exchange(m_undoing, true);
     m_buffer->redo();
+    m_undoing = undoing;
 }
 
 void EditorBinding::copy()

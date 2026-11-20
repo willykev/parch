@@ -13,5 +13,12 @@ void vimLinesMoveFromCellToCell();
 void draggingFromProseOverATableSelectsItWhole();
 void clicksBelowATableLandInProseAfterItMoves();
 void tableItemsPassTheWindowChecks();
+void editsInsideACellBecomeCellEdits();
+void editsAcrossTableSyntaxAreRefusedWithAReason();
+void wholeTableEditsPassThrough();
+void everyWayOfEditingKeepsTheTableTidy();
+void replaceAndReplaceAllKeepTablesTidy();
+void findSkipsTableSyntax();
+void aSecondViewKeepsItsCaretWhenATableIsRetidied();
 
 } // namespace TableGridTests

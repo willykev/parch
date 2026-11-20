@@ -1,6 +1,7 @@
 #include "tablegridtests.h"
 
 #include "apppaths.h"
+#include "documentfind.h"
 #include "documentstore.h"
 #include "editorbinding.h"
 #include "mdtable.h"
@@ -12,6 +13,9 @@
 #include "windowtesting.h"
 
 #include <QAbstractTextDocumentLayout>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QSignalSpy>
 #include <QInputMethodQueryEvent>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -95,6 +99,29 @@ struct GridEditor {
     }
     void key(Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) { sendKey(&window, key, modifiers); }
     void type(const QString &typed) { typeText(&window, typed); }
+    // A second view of the same document, in a window of its own.
+    struct Second {
+        QQuickWindow window;
+        QQuickItem *pane = nullptr;
+        EditorBinding *binding = nullptr;
+    };
+    std::unique_ptr<Second> secondView()
+    {
+        auto second = std::make_unique<Second>();
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/EditorPane.qml")));
+        second->pane = qobject_cast<QQuickItem *>(component.create());
+        if (!second->pane) return nullptr;
+        second->pane->setParent(&second->window);
+        second->pane->setParentItem(second->window.contentItem());
+        second->pane->setSize(QSizeF(640, 480));
+        second->window.resize(640, 480);
+        second->pane->setProperty("tableGrids", true);
+        second->pane->setProperty("document", QVariant::fromValue(document));
+        second->binding = second->pane->findChild<EditorBinding *>();
+        second->window.show();
+        QCoreApplication::processEvents();
+        return second;
+    }
 };
 
 const QString weather = u"Before the table.\n"
@@ -203,6 +230,11 @@ void typingInACellEditsTheSourceAndKeepsItTidy()
     QCOMPARE(view.cell(), u"East Gate"_s);
     QCOMPARE(view.cursor(), int(view.text().indexOf(u"East Gate")) + 9);
     QVERIFY(view.binding->tables()->gridAt(view.cursor()));
+    // The typing is one step to undo, the table's widening with it.
+    view.binding->undo();
+    QCOMPARE(view.text(), before);
+    view.binding->redo();
+    QCOMPARE(view.cell(), u"East Gate"_s);
     // Deleting shrinks the column again.
     for (int i = 0; i < 5; ++i) view.key(Qt::Key_Backspace);
     QCOMPARE(view.text(), before);
@@ -340,6 +372,193 @@ void tableItemsPassTheWindowChecks()
     QVERIFY(view.grids(0));
     QTextDocument *doc = view.binding->textDocument();
     for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) QVERIFY(block.isVisible());
+}
+
+void editsInsideACellBecomeCellEdits()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    // Bold on a word in a cell: the markers go round it, the table tidy.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east, east + 4);
+    QVERIFY(view.binding->format(u"bold"_s));
+    QVERIFY2(view.text().contains(u"| 10:00 | **East** | 12  |"_s), qPrintable(view.text()));
+    QVERIFY2(view.text().contains(u"| Time  | Shelter  | Air |"_s), qPrintable(view.text()));
+    QCOMPARE(view.text().mid(view.anchor(), view.cursor() - view.anchor()), u"East"_s);
+    // One step back to the table as it was.
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    // Several edits in several cells of one table, as one step, the selection placed in the text it ends in.
+    const QString text = view.text();
+    const int north = int(text.indexOf(u"North")), gate = int(text.indexOf(u"12"));
+    const auto adapted = view.binding->tables()->adapt(
+        QList<SourceEdit>{{{north, 5}, u"N"_s}, {{gate, 2}, u"twelve"_s}}, north + 1, gate - 4 + 6);
+    QCOMPARE(adapted.kind, TableGrids::Adapted::Changed);
+    QCOMPARE(adapted.edits.size(), 1);
+    QString after = text;
+    after.replace(adapted.edits[0].range.start, adapted.edits[0].range.length, adapted.edits[0].replacement);
+    QVERIFY2(after.contains(u"| 06:00 | N       | 7.8    |\n| 10:00 | East    | twelve |"_s), qPrintable(after));
+    QCOMPARE(after.mid(adapted.anchor - 1, 1), u"N"_s);
+    QCOMPARE(after.mid(adapted.cursor - 6, 6), u"twelve"_s);
+}
+
+void editsAcrossTableSyntaxAreRefusedWithAReason()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    // A heading's marks would go before the row's pipe: refused, nothing written.
+    const int north = int(view.text().indexOf(u"North"));
+    view.select(north, north);
+    QVERIFY(!view.binding->format(u"heading1"_s));
+    QCOMPARE(view.text(), weather);
+    QCOMPARE(refused.count(), 1);
+    QVERIFY(!refused.first().first().toString().isEmpty());
+    // An edit from one cell into the next is refused too.
+    const auto across = view.binding->tables()->adapt({north, 9}, u"x"_s);
+    QCOMPARE(across.kind, TableGrids::Adapted::Refused);
+    // So is joining the table's last line with the text after it, from either side.
+    const int end = view.grid()->end();
+    QCOMPARE(view.binding->tables()->adapt({end, 1}, QString()).kind, TableGrids::Adapted::Refused);
+    QCOMPARE(view.binding->tables()->adapt({view.grid()->start() - 1, 1}, QString()).kind,
+             TableGrids::Adapted::Refused);
+}
+
+void wholeTableEditsPassThrough()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    TableGrid *grid = view.grid();
+    // A selection from the text above across the whole table deletes it all.
+    const int before = int(view.text().indexOf(u"table."));
+    view.select(before, int(view.text().indexOf(u"North")));
+    QCOMPARE(view.cursor(), grid->end());
+    view.key(Qt::Key_Delete);
+    QCOMPARE(view.text(), u"Before the \n\nAfter the table."_s);
+    QVERIFY(view.grids(0));
+    view.binding->undo();
+    QCOMPARE(view.text(), weather);
+    QVERIFY(view.grids(1));
+}
+
+void everyWayOfEditingKeepsTheTableTidy()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const auto tidy = [&] {
+        const auto table = MdTable::locate(view.text(), view.grid()->start());
+        if (!table) return false;
+        return MdTable::write(MdTable::model(view.text(), *table)).text
+               == view.text().mid(table->start, table->end - table->start);
+    };
+    // Paste: lines become spaces in the cell.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east + 4, east + 4);
+    QGuiApplication::clipboard()->setText(u" Gate,\nopen"_s);
+    view.binding->paste();
+    QCOMPARE(view.cell(), u"East Gate, open"_s);
+    QVERIFY(tidy());
+    // The editor's own insert and remove, as assistive technology and QML use them.
+    const int open = int(view.text().indexOf(u"open"));
+    view.binding->replaceEditorRange(view.binding->sourceToEditor(open), view.binding->sourceToEditor(open + 4), u"shut"_s);
+    QCOMPARE(view.cell(), u"East Gate, shut"_s);
+    QVERIFY(tidy());
+    // An input method's commit.
+    view.select(int(view.text().indexOf(u"North")) + 5, int(view.text().indexOf(u"North")) + 5);
+    QInputMethodEvent commit;
+    commit.setCommitString(u"ern"_s);
+    QCoreApplication::sendEvent(view.editor, &commit);
+    QCOMPARE(view.cell(), u"Northern"_s);
+    QVERIFY(tidy());
+    // Vim's x, in a cell, deletes in it.
+    view.pane->setProperty("vimKeys", true);
+    view.select(int(view.text().indexOf(u"Northern")), int(view.text().indexOf(u"Northern")));
+    sendKey(&view.window, u'x');
+    QCOMPARE(view.cell(), u"orthern"_s);
+    QVERIFY(tidy());
+}
+
+void replaceAndReplaceAllKeepTablesTidy()
+{
+    GridEditor view(weather + u"\n\nEast is east."_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    DocumentFind find;
+    find.setDocument(view.document);
+    find.setBinding(view.binding);
+    find.setActive(true);
+    find.setCaseSensitive(true);
+    find.setPattern(u"East"_s);
+    QTRY_COMPARE(find.count(), 2);
+    view.select(int(view.text().indexOf(u"East")), int(view.text().indexOf(u"East")) + 4);
+    find.setSelection(view.anchor(), view.cursor());
+    QCOMPARE(find.current(), 0);
+    find.replace(u"Eastern Gate"_s);
+    QVERIFY2(view.text().contains(u"| 10:00 | Eastern Gate | 12  |"_s), qPrintable(view.text()));
+    QVERIFY2(view.text().contains(u"| Time  | Shelter      | Air |"_s), qPrintable(view.text()));
+    view.binding->undo();
+    QVERIFY(view.text().startsWith(weather));
+    // Replace all: in cells and prose, each table tidy, one step.
+    QSignalSpy replaced(&find, &DocumentFind::replacedAll);
+    find.setPattern(u"[0-9]+:00"_s);
+    find.setRegex(true);
+    QTRY_COMPARE(find.count(), 2);
+    find.replaceAll(u"noon"_s);
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(replaced.first().first().toInt(), 2);
+    QVERIFY2(view.text().contains(u"| Time | Shelter | Air |\n| ---- | ------- | --- |\n| noon | North   | 7.8 |"_s),
+             qPrintable(view.text()));
+    view.binding->undo();
+    QVERIFY(view.text().startsWith(weather));
+}
+
+void findSkipsTableSyntax()
+{
+    GridEditor view(weather + u"\n\nA line -- with a dash | and a pipe."_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    DocumentFind find;
+    find.setDocument(view.document);
+    find.setBinding(view.binding);
+    find.setActive(true);
+    // The pipes and dashes of a grid are not its text: only the prose's are found.
+    find.setPattern(u"|"_s);
+    QTRY_COMPARE(find.count(), 1);
+    find.setPattern(u"--"_s);
+    QTRY_COMPARE(find.count(), 1);
+    // A cell's text is.
+    find.setPattern(u"North"_s);
+    QTRY_COMPARE(find.count(), 1);
+    // A table shown as Markdown finds all of it.
+    view.pane->setProperty("tableGrids", false);
+    find.setPattern(u"|"_s);
+    QTRY_VERIFY(find.count() > 1);
+}
+
+void aSecondViewKeepsItsCaretWhenATableIsRetidied()
+{
+    GridEditor view(weather);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    auto second = view.secondView();
+    QVERIFY(second && second->binding);
+    QTRY_COMPARE(second->binding->tables()->grids().size(), 1);
+    const int seven = int(view.text().indexOf(u"7.8"));
+    second->binding->select(seven + 2, seven + 2);
+    // Writing in the first view widens a column before the second's caret.
+    const int east = int(view.text().indexOf(u"East"));
+    view.select(east + 4, east + 4);
+    view.type(u" Gate"_s);
+    QVERIFY(view.text().contains(u"East Gate"_s));
+    // The second view's caret is still after "7." in its cell.
+    const int now = int(view.text().indexOf(u"7.8"));
+    QCOMPARE(second->binding->cursorSource(), now + 2);
+    QCOMPARE(second->binding->anchorSource(), now + 2);
+    QCOMPARE(second->binding->tables()->grids().first()->end(), view.grid()->end());
 }
 
 } // namespace TableGridTests

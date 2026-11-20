@@ -1,5 +1,7 @@
 #include "mdtable.h"
 
+#include <QCoreApplication>
+#include <QRegularExpression>
 #include <QTextBoundaryFinder>
 #include <algorithm>
 
@@ -455,6 +457,360 @@ Layout write(const Model &model)
         if (line + 1 < lines) out += line < model.breaks.size() ? model.breaks[line] : QStringLiteral("\n");
     }
     return layout;
+}
+
+} // namespace MdTable
+
+// ---- Changes to a table ------------------------------------------------------
+
+namespace MdTable {
+
+namespace {
+
+QString refusal(const char *text) { return QCoreApplication::translate("MdTable", text); }
+
+const char *const CutsMerge = QT_TRANSLATE_NOOP("MdTable", "That would cut a merged cell. Split it first.");
+
+// Whether a boundary between two columns falls inside a merged cell of a row.
+bool cuts(const QList<Item> &row, int boundary)
+{
+    int column = 0;
+    for (const Item &item : row) {
+        if (column < boundary && boundary < column + item.span) return true;
+        column += item.span;
+    }
+    return false;
+}
+
+bool cutsAny(const Model &model, int boundary)
+{
+    return std::any_of(model.rows.cbegin(), model.rows.cend(), [&](const QList<Item> &row) { return cuts(row, boundary); });
+}
+
+QList<Item> emptyRow(int columns)
+{
+    QList<Item> row;
+    for (int c = 0; c < columns; ++c) row.append(Item{});
+    return row;
+}
+
+// The cells of a row that start in columns [from, to): whole cells, the
+// boundaries being known to cut none.
+QList<Item> slice(const QList<Item> &row, int from, int to)
+{
+    QList<Item> out;
+    int column = 0;
+    for (const Item &item : row) {
+        if (column >= from && column < to) out.append(item);
+        column += item.span;
+    }
+    return out;
+}
+
+template <typename T> QList<T> reordered(const QList<T> &list, int first, int count, int to)
+{
+    QList<T> out = list;
+    const QList<T> moved = out.mid(first, count);
+    out.remove(first, count);
+    const int at = to > first ? to - count : to;
+    for (int i = 0; i < moved.size(); ++i) out.insert(at + i, moved[i]);
+    return out;
+}
+
+} // namespace
+
+int columnCount(const Model &model)
+{
+    int columns = int(model.aligns.size());
+    for (const QList<Item> &row : model.rows) {
+        int width = 0;
+        for (const Item &item : row) width += item.span;
+        columns = qMax(columns, width);
+    }
+    return columns;
+}
+
+int itemAt(const QList<Item> &row, int column, int *first)
+{
+    int at = 0;
+    for (int i = 0; i < row.size(); ++i) {
+        if (column < at + row[i].span) {
+            if (first) *first = at;
+            return i;
+        }
+        at += row[i].span;
+    }
+    return -1;
+}
+
+QString encodeCell(const QString &text, const Dialect &dialect)
+{
+    QString cell;
+    cell.reserve(text.size());
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        const QChar c = text[i];
+        if (c == u'\r' && i + 1 < text.size() && text[i + 1] == u'\n') continue;
+        cell += c == u'\n' || c == u'\r' || c == QChar::LineSeparator || c == QChar::ParagraphSeparator ? QChar(u' ') : c;
+    }
+    qsizetype start = 0, end = cell.size();
+    while (start < end && (cell[start] == u' ' || cell[start] == u'\t')) ++start;
+    while (end > start && (cell[end - 1] == u' ' || cell[end - 1] == u'\t')) --end;
+    cell = cell.mid(start, end - start);
+    QList<Field> fields;
+    QList<int> pipes;
+    splitRow(cell, 0, int(cell.size()), dialect.protectCode, fields, &pipes);
+    for (auto pipe = pipes.crbegin(); pipe != pipes.crend(); ++pipe) cell.insert(*pipe, u'\\');
+    return cell;
+}
+
+QString insertRows(Model &model, int at, int count, const QString &newline)
+{
+    at = qBound(1, at, int(model.rows.size()));
+    const int columns = columnCount(model);
+    for (int i = 0; i < count; ++i) {
+        model.rows.insert(at + i, emptyRow(columns));
+        const int line = at + i + 1;
+        model.prefixes.insert(line, model.prefixes.value(0));
+        model.breaks.insert(line - 1, newline);
+    }
+    return {};
+}
+
+QString deleteRows(Model &model, int first, int count)
+{
+    if (first < 1) return refusal(QT_TRANSLATE_NOOP("MdTable", "The header row stays; delete the table to remove it."));
+    count = qMin(count, int(model.rows.size()) - first);
+    for (int i = 0; i < count; ++i) {
+        model.rows.removeAt(first);
+        const int line = first + 1;
+        if (line < model.prefixes.size()) model.prefixes.removeAt(line);
+        if (line - 1 < model.breaks.size()) model.breaks.removeAt(line - 1);
+    }
+    return {};
+}
+
+QString duplicateRows(Model &model, int first, int count, const QString &newline)
+{
+    if (first < 1) return refusal(QT_TRANSLATE_NOOP("MdTable", "The header row has no copy; insert a row instead."));
+    const QList<QList<Item>> copies = model.rows.mid(first, count);
+    insertRows(model, first + int(copies.size()), int(copies.size()), newline);
+    for (int i = 0; i < copies.size(); ++i) model.rows[first + copies.size() + i] = copies[i];
+    return {};
+}
+
+QString moveRows(Model &model, int first, int count, int to)
+{
+    if (first < 1 || to < 1) return refusal(QT_TRANSLATE_NOOP("MdTable", "The header row stays first."));
+    if (to >= first && to <= first + count) return {};
+    model.rows = reordered(model.rows, first, count, to);
+    return {};
+}
+
+QString insertColumns(Model &model, int at, int count)
+{
+    const int columns = columnCount(model);
+    at = qBound(0, at, columns);
+    for (QList<Item> &row : model.rows) {
+        if (at >= columns) {
+            for (int i = 0; i < count; ++i) row.append(Item{});
+            continue;
+        }
+        int first = 0;
+        const int index = itemAt(row, at, &first);
+        if (index < 0) {
+            for (int i = 0; i < count; ++i) row.append(Item{});
+        } else if (first == at) {
+            for (int i = 0; i < count; ++i) row.insert(index, Item{});
+        } else {
+            // A column inserted inside a merged cell widens it.
+            row[index].span += count;
+        }
+    }
+    for (int i = 0; i < count; ++i) model.aligns.insert(qMin(at, int(model.aligns.size())), Align::None);
+    return {};
+}
+
+QString deleteColumns(Model &model, int first, int count)
+{
+    const int columns = columnCount(model);
+    if (count >= columns) return refusal(QT_TRANSLATE_NOOP("MdTable", "A table keeps at least one column."));
+    const int last = first + count;
+    for (QList<Item> &row : model.rows) {
+        int column = 0;
+        for (qsizetype i = 0; i < row.size();) {
+            const int from = qMax(column, first), to = qMin(column + row[i].span, last);
+            const int overlap = qMax(0, to - from);
+            column += row[i].span;
+            if (overlap == 0) {
+                ++i;
+            } else if (overlap == row[i].span) {
+                row.removeAt(i);
+            } else {
+                // A merged cell over a deleted column narrows.
+                row[i].span -= overlap;
+                ++i;
+            }
+        }
+    }
+    model.aligns.remove(qMin(first, int(model.aligns.size())), qMax(0, qMin(count, int(model.aligns.size()) - first)));
+    return {};
+}
+
+QString moveColumns(Model &model, int first, int count, int to)
+{
+    const int columns = columnCount(model);
+    if (to >= first && to <= first + count) return {};
+    if (cutsAny(model, first) || cutsAny(model, first + count) || cutsAny(model, to)) return refusal(CutsMerge);
+    for (QList<Item> &row : model.rows) {
+        const QList<Item> moved = slice(row, first, first + count);
+        if (to < first) row = slice(row, 0, to) + moved + slice(row, to, first) + slice(row, first + count, columns);
+        else row = slice(row, 0, first) + slice(row, first + count, to) + moved + slice(row, to, columns);
+    }
+    while (model.aligns.size() < columns) model.aligns.append(Align::None);
+    model.aligns = reordered(model.aligns, first, count, to);
+    return {};
+}
+
+QString setAlignment(Model &model, int first, int count, Align align)
+{
+    for (int c = first; c < first + count && c < model.aligns.size(); ++c) model.aligns[c] = align;
+    return {};
+}
+
+QString plainText(const QString &markdown)
+{
+    QString text = markdown;
+    static const QRegularExpression link(QStringLiteral("!?\\[([^\\]]*)\\]\\([^)]*\\)"));
+    text.replace(link, QStringLiteral("\\1"));
+    static const QRegularExpression escape(QStringLiteral("\\\\([!-/:-@\\[-`{-~])"));
+    text.replace(escape, QStringLiteral("\\1"));
+    static const QRegularExpression markers(QStringLiteral("\\*\\*|__|~~|==|[*_`]"));
+    text.remove(markers);
+    return text.trimmed();
+}
+
+QString sortRows(Model &model, int column, bool descending)
+{
+    if (model.rows.size() < 3) return {};
+    struct Key {
+        int group = 1; // 0 a number, 1 text, 2 empty
+        double number = 0;
+        QString text;
+    };
+    static const QRegularExpression numeric(QStringLiteral("^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$"));
+    const auto keyOf = [&](const QList<Item> &row) {
+        Key key;
+        const int index = itemAt(row, column);
+        key.text = index < 0 ? QString() : plainText(row[index].text);
+        if (key.text.isEmpty()) {
+            key.group = 2;
+        } else if (numeric.match(key.text).hasMatch()) {
+            key.group = 0;
+            key.number = key.text.toDouble();
+        } else {
+            key.text = key.text.toCaseFolded();
+        }
+        return key;
+    };
+    QList<std::pair<Key, QList<Item>>> rows;
+    for (int r = 1; r < model.rows.size(); ++r) rows.append({keyOf(model.rows[r]), model.rows[r]});
+    std::stable_sort(rows.begin(), rows.end(), [&](const auto &a, const auto &b) {
+        const Key &x = a.first, &y = b.first;
+        if (x.group != y.group) return x.group < y.group;
+        if (x.group == 2) return false;
+        if (x.group == 0) return descending ? x.number > y.number : x.number < y.number;
+        const int order = x.text.localeAwareCompare(y.text);
+        return descending ? order > 0 : order < 0;
+    });
+    for (int r = 1; r < model.rows.size(); ++r) model.rows[r] = rows[r - 1].second;
+    return {};
+}
+
+QString mergeCells(Model &model, int row, int first, int last, const Dialect &dialect)
+{
+    if (!dialect.mergedCells)
+        return refusal(QT_TRANSLATE_NOOP("MdTable", "Cells merge only in the Writer dialect, with merged cells on."));
+    if (row < 0 || row >= model.rows.size() || last <= first) return {};
+    QList<Item> &cells = model.rows[row];
+    int from = 0, to = 0;
+    const int a = itemAt(cells, first, &from);
+    const int b = itemAt(cells, last, &to);
+    if (a < 0 || b < 0 || a == b) return {};
+    Item joined;
+    joined.span = to + cells[b].span - from;
+    QStringList texts;
+    for (int i = a; i <= b; ++i)
+        if (!cells[i].text.isEmpty()) texts.append(cells[i].text);
+    joined.text = texts.join(u' ');
+    cells.remove(a, b - a + 1);
+    cells.insert(a, joined);
+    return {};
+}
+
+QString splitCell(Model &model, int row, int column)
+{
+    if (row < 0 || row >= model.rows.size()) return {};
+    QList<Item> &cells = model.rows[row];
+    const int index = itemAt(cells, column);
+    if (index < 0 || cells[index].span < 2)
+        return refusal(QT_TRANSLATE_NOOP("MdTable", "This cell is not merged with another."));
+    const int span = cells[index].span;
+    cells[index].span = 1;
+    for (int i = 1; i < span; ++i) cells.insert(index + i, Item{});
+    return {};
+}
+
+QString clearCells(Model &model, int firstRow, int lastRow, int firstColumn, int lastColumn)
+{
+    for (int r = qMax(0, firstRow); r <= lastRow && r < model.rows.size(); ++r) {
+        int column = 0;
+        for (Item &item : model.rows[r]) {
+            if (column + item.span > firstColumn && column <= lastColumn) item.text.clear();
+            column += item.span;
+        }
+    }
+    return {};
+}
+
+QString pasteCells(Model &model, int row, int column, const QList<QStringList> &values, const Dialect &dialect,
+                   const QString &newline)
+{
+    if (values.isEmpty()) return {};
+    int width = 0;
+    for (const QStringList &line : values) width = qMax(width, int(line.size()));
+    const int rows = row + int(values.size());
+    const int columns = column + width;
+    // Nothing is written over part of a merged cell.
+    for (int r = row; r < rows && r < model.rows.size(); ++r) {
+        if (cuts(model.rows[r], column) || cuts(model.rows[r], qMin(columns, columnCount(model)))) return refusal(CutsMerge);
+        int at = 0;
+        for (const Item &item : model.rows[r]) {
+            if (item.span > 1 && at + item.span > column && at < columns) return refusal(CutsMerge);
+            at += item.span;
+        }
+    }
+    if (rows > model.rows.size()) insertRows(model, int(model.rows.size()), rows - int(model.rows.size()), newline);
+    if (columns > columnCount(model)) insertColumns(model, columnCount(model), columns - columnCount(model));
+    for (int i = 0; i < values.size(); ++i) {
+        for (int j = 0; j < values[i].size(); ++j) {
+            QList<Item> &cells = model.rows[row + i];
+            const int index = itemAt(cells, column + j);
+            if (index >= 0) cells[index].text = encodeCell(values[i][j], dialect);
+        }
+    }
+    return {};
+}
+
+Model emptyTable(int columns, int rows, const QString &prefix, const QString &newline)
+{
+    Model model;
+    columns = qMax(1, columns);
+    rows = qMax(1, rows);
+    for (int c = 0; c < columns; ++c) model.aligns.append(Align::None);
+    for (int r = 0; r < rows; ++r) model.rows.append(emptyRow(columns));
+    for (int line = 0; line <= rows; ++line) model.prefixes.append(prefix);
+    for (int line = 0; line < rows; ++line) model.breaks.append(newline);
+    return model;
 }
 
 } // namespace MdTable

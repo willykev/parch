@@ -618,6 +618,7 @@ Rectangle {
         attachments: pane.attachments
         setextHeadings: pane.setextHeadings
         vimKeys: pane.vimKeys
+        tableGrids: pane.tableGrids
         onCursorChanged: {
             pane.viewMoved()
             pane.wakeCaret()
@@ -625,12 +626,6 @@ Rectangle {
         onActivity: pane.wakeCaret()
         onIncludeAsked: (name, canInclude) => pane.includeAsked(name, canInclude)
         onCopyAsked: (names, bytes) => pane.copyAsked(names, bytes)
-    }
-
-    Binding {
-        target: binding.tables
-        property: "enabled"
-        value: pane.tableGrids
     }
 
     Connections {

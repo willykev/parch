@@ -4,6 +4,7 @@
 #include "textsearch.h"
 // The document is a property QML reads, so its type must be complete here.
 #include "document.h"
+#include "editorbinding.h"
 
 #include <QList>
 #include <QObject>
@@ -48,6 +49,9 @@ class DocumentFind : public QObject {
     Q_PROPERTY(int current READ current NOTIFY currentChanged)
     // The document takes edits: neither read-only nor without text of its own.
     Q_PROPERTY(bool canReplace READ canReplace NOTIFY canReplaceChanged)
+    // The window's text view, whose tables shown as grids find only their
+    // cells' text, and are written tidy when a match in them is replaced.
+    Q_PROPERTY(EditorBinding *binding READ binding WRITE setBinding NOTIFY bindingChanged)
 
 public:
     // How long the text must rest after an edit before it is looked in again.
@@ -75,6 +79,8 @@ public:
     bool searching() const;
     int current() const;
     bool canReplace() const;
+    EditorBinding *binding() const { return m_binding; }
+    void setBinding(EditorBinding *binding);
     // Every match, in order, in the document's source as it is now.
     QList<SourceRange> matches() const;
     // The same for QML, as {start, length}.
@@ -103,6 +109,7 @@ signals:
     void resultsChanged();
     void currentChanged();
     void canReplaceChanged();
+    void bindingChanged();
     // The view is to select from anchor to cursor, source offsets, and show it.
     void selectRequested(int anchor, int cursor);
     // Replace all replaced this many matches.
@@ -117,6 +124,7 @@ private:
     };
     struct Replaced {
         TextSearch::Edit edit;
+        QList<TextSearch::Edit> edits;
         int count = 0;
         Revision revision = 0;
     };
@@ -144,7 +152,11 @@ private:
     // now or moved along with its edits since.
     bool settled() const;
 
+    // The matches a grid of the view shows as no text of a cell, which are left out.
+    QList<SourceRange> inCellText(const QList<SourceRange> &matches) const;
+
     QPointer<Document> m_document;
+    QPointer<EditorBinding> m_binding;
     QList<QMetaObject::Connection> m_connections;
     bool m_active = false;
     TextQuery m_query;

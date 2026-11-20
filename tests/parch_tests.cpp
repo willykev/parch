@@ -854,6 +854,23 @@ private slots:
     void draggingFromProseOverATableSelectsItWhole() { TableGridTests::draggingFromProseOverATableSelectsItWhole(); }
     void clicksBelowATableLandInProseAfterItMoves() { TableGridTests::clicksBelowATableLandInProseAfterItMoves(); }
     void tableItemsPassTheWindowChecks() { TableGridTests::tableItemsPassTheWindowChecks(); }
+    void runsOfReplacementsUndoAsOneChange() { TableTests::runsOfReplacementsUndoAsOneChange(); }
+    void aRunEndsAtASaveAPauseOrAnUndo() { TableTests::aRunEndsAtASaveAPauseOrAnUndo(); }
+    void composedRunsRestoreTheExactBytes() { TableTests::composedRunsRestoreTheExactBytes(); }
+    void everyOperationLeavesOneTidyEdit() { TableTests::everyOperationLeavesOneTidyEdit(); }
+    void mergedCellsWidenNarrowAndRefuseCuts() { TableTests::mergedCellsWidenNarrowAndRefuseCuts(); }
+    void sortingOrdersNumbersAsNumbersAndKeepsTies() { TableTests::sortingOrdersNumbersAsNumbersAndKeepsTies(); }
+    void movedRowsKeepTheirLineEndings() { TableTests::movedRowsKeepTheirLineEndings(); }
+    void pipesTypedInCellsAreEscapedByDialect() { TableTests::pipesTypedInCellsAreEscapedByDialect(); }
+    void tablesInQuotesKeepTheirPrefix() { TableTests::tablesInQuotesKeepTheirPrefix(); }
+    void insertedTablesAreTidyAndEmpty() { TableTests::insertedTablesAreTidyAndEmpty(); }
+    void editsInsideACellBecomeCellEdits() { TableGridTests::editsInsideACellBecomeCellEdits(); }
+    void editsAcrossTableSyntaxAreRefusedWithAReason() { TableGridTests::editsAcrossTableSyntaxAreRefusedWithAReason(); }
+    void wholeTableEditsPassThrough() { TableGridTests::wholeTableEditsPassThrough(); }
+    void everyWayOfEditingKeepsTheTableTidy() { TableGridTests::everyWayOfEditingKeepsTheTableTidy(); }
+    void replaceAndReplaceAllKeepTablesTidy() { TableGridTests::replaceAndReplaceAllKeepTablesTidy(); }
+    void findSkipsTableSyntax() { TableGridTests::findSkipsTableSyntax(); }
+    void aSecondViewKeepsItsCaretWhenATableIsRetidied() { TableGridTests::aSecondViewKeepsItsCaretWhenATableIsRetidied(); }
     void viewsFollowTheFingersFromTheirFirstMove() { TouchpadTests::viewsFollowTheFingersFromTheirFirstMove(); }
     void aSwipeGlidesOnAfterTheFingersLift() { TouchpadTests::aSwipeGlidesOnAfterTheFingersLift(); }
     void sidewaysSwipesGlideSideways() { TouchpadTests::sidewaysSwipesGlideSideways(); }

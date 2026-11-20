@@ -36,8 +36,15 @@ void SourceBuffer::setClock(std::function<qint64()> milliseconds)
     m_clock = std::move(milliseconds);
 }
 
-bool SourceBuffer::joinsLastStep(const Transaction &edit, EditKind kind, bool lineBreak, qint64 now) const
+bool SourceBuffer::joinsLastStep(const Transaction &edit, EditKind kind, bool lineBreak, qint64 now, quint64 run) const
 {
+    if (run != 0) {
+        // A run's edits join wherever they are, and line breaks and all.
+        if (kind == EditKind::Other || !m_canJoin || m_history.isEmpty()) return false;
+        if (m_historyPosition == m_savedPosition) return false;
+        const auto &step = m_history.last();
+        return step.run == run && step.kind == kind && now - step.lastTime < groupingWindowMs;
+    }
     if (kind == EditKind::Other || lineBreak || !m_canJoin || m_history.isEmpty()) return false;
     // An edit at the saved position starts a step, or the saved text could not be told from an edited one.
     if (m_historyPosition == m_savedPosition) return false;
@@ -93,6 +100,40 @@ SourceBuffer::EditOutcome SourceBuffer::replace(const QList<SourceEdit> &edits)
     return EditOutcome::Applied;
 }
 
+SourceBuffer::EditOutcome SourceBuffer::replace(const QList<SourceEdit> &edits, EditKind kind, quint64 run)
+{
+    if (run == 0 || kind == EditKind::Other) return replace(edits);
+    int end = 0;
+    bool changes = false;
+    for (const SourceEdit &edit : edits) {
+        if (edit.range.start < end || !sourceGraphemeRange(m_text, edit.range)) return EditOutcome::Rejected;
+        end = edit.range.start + edit.range.length;
+        changes = changes || QStringView(m_text).mid(edit.range.start, edit.range.length) != edit.replacement;
+    }
+    if (!changes) return EditOutcome::Unchanged;
+    if (m_replaying) {
+        wait(edits, kind, true, run);
+        return EditOutcome::Deferred;
+    }
+    // The first edit joins the run's step or starts it; the rest of these join the first.
+    bool first = true;
+    for (qsizetype i = edits.size(); i-- > 0;) {
+        const SourceEdit &edit = edits.at(i);
+        const QString removed = m_text.mid(edit.range.start, edit.range.length);
+        if (removed == edit.replacement) continue;
+        if (first) {
+            record(edit.range, removed, edit.replacement, kind, run);
+            first = false;
+            beginStep();
+            m_stepStarted = true;
+        } else {
+            record(edit.range, removed, edit.replacement, kind, run);
+        }
+    }
+    if (!first) endStep();
+    return EditOutcome::Applied;
+}
+
 void SourceBuffer::beginStep()
 {
     if (m_stepDepth++ == 0) m_stepStarted = false;
@@ -103,7 +144,8 @@ void SourceBuffer::endStep()
     if (m_stepDepth > 0 && --m_stepDepth == 0) m_stepStarted = false;
 }
 
-void SourceBuffer::record(SourceRange range, const QString &removed, const QString &replacement, EditKind kind)
+void SourceBuffer::record(SourceRange range, const QString &removed, const QString &replacement, EditKind kind,
+                          quint64 run)
 {
     const bool wasModified = modified();
     const Transaction edit{range.start, removed, replacement};
@@ -121,13 +163,33 @@ void SourceBuffer::record(SourceRange range, const QString &removed, const QStri
         step.edits.append(edit);
         step.lastTime = now;
         step.hasLineBreak = step.hasLineBreak || lineBreak;
-    } else if (m_stepDepth == 0 && joinsLastStep(edit, kind, lineBreak, now)) {
+    } else if (m_stepDepth == 0 && joinsLastStep(edit, kind, lineBreak, now, run)) {
         auto &step = m_history.last();
-        step.edits.append(edit);
         step.lastTime = now;
+        step.hasLineBreak = step.hasLineBreak || lineBreak;
+        // An edit of a run over what the run's last edit wrote is made one
+        // with it: removed, what the two removed from the text before them;
+        // inserted, what they leave.
+        Transaction &last = step.edits.last();
+        const qsizetype end1 = last.start + last.inserted.size();
+        const qsizetype end2 = edit.start + edit.removed.size();
+        if (run != 0 && edit.start <= end1 && end2 >= last.start) {
+            const auto part = [](const QString &text, qsizetype from, qsizetype to) {
+                from = qBound<qsizetype>(0, from, text.size());
+                to = qBound<qsizetype>(from, to, text.size());
+                return text.mid(from, to - from);
+            };
+            const QString removedBoth = part(edit.removed, 0, last.start - edit.start) + last.removed
+                                        + part(edit.removed, end1 - edit.start, edit.removed.size());
+            const QString insertedBoth = part(last.inserted, 0, edit.start - last.start) + edit.inserted
+                                         + part(last.inserted, end2 - last.start, last.inserted.size());
+            last = {qMin(last.start, edit.start), removedBoth, insertedBoth};
+        } else {
+            step.edits.append(edit);
+        }
     } else {
         // A step begun with beginStep() is never joined by typing afterwards.
-        m_history.append({{edit}, m_stepDepth > 0 ? EditKind::Other : kind, now, lineBreak});
+        m_history.append({{edit}, m_stepDepth > 0 && run == 0 ? EditKind::Other : kind, now, lineBreak, run});
         ++m_historyPosition;
         m_stepStarted = m_stepDepth > 0;
     }
@@ -173,14 +235,14 @@ void SourceBuffer::replay(bool backwards)
     while (!m_waiting.isEmpty()) {
         const Waiting waiting = m_waiting.takeFirst();
         if (waiting.dropped) continue;
-        if (waiting.together) replace(waiting.edits);
+        if (waiting.together) replace(waiting.edits, waiting.kind, waiting.run);
         else replace(waiting.edits.first().range, waiting.edits.first().replacement, waiting.kind);
     }
 }
 
-void SourceBuffer::wait(const QList<SourceEdit> &edits, EditKind kind, bool together)
+void SourceBuffer::wait(const QList<SourceEdit> &edits, EditKind kind, bool together, quint64 run)
 {
-    m_waiting.append({edits, kind, together});
+    m_waiting.append({edits, kind, together, false, run});
 }
 
 qsizetype SourceBuffer::undoDepth() const { return m_historyPosition; }

@@ -117,6 +117,8 @@ class EditorBinding : public QObject {
     Q_PROPERTY(VimMode *vim READ vim CONSTANT)
     // The view's tables drawn as grids, and what they make of its editing.
     Q_PROPERTY(TableGrids *tables READ tables CONSTANT)
+    // The view shows its tables as grids; off, as their Markdown.
+    Q_PROPERTY(bool tableGrids READ tableGrids WRITE setTableGrids NOTIFY tableGridsChanged)
 
 public:
     // What the writer chose for a dropped Markdown file.
@@ -149,6 +151,8 @@ public:
     void setVimKeys(bool on);
     VimMode *vim() const { return m_vim; }
     TableGrids *tables() const { return m_tables; }
+    bool tableGrids() const;
+    void setTableGrids(bool on);
 
     // Runs one of MarkdownEditing's formatting commands on this view's
     // selection, as one undo step, and selects what the command leaves
@@ -248,6 +252,7 @@ signals:
     // first shown or shown again after a write that did not come from it.
     void projectionLoaded();
     void vimKeysChanged();
+    void tableGridsChanged();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -411,4 +416,11 @@ private:
     // Where the last edit through replace() left the caret, as the grids
     // placed it, in source offsets; -1 when the edit placed nothing.
     int m_placedCaret = -1;
+    // The run of typing or deleting in a grid's cell this view is making,
+    // and where its last edit left the caret: the next key there joins it.
+    quint64 m_tableRun = 0;
+    // This view's undo or redo is being applied: its caret goes where the change ends.
+    bool m_undoing = false;
+    int m_tableRunCaret = -1;
+    EditKind m_tableRunKind = EditKind::Other;
 };

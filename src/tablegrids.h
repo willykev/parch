@@ -13,6 +13,7 @@
 #include <QRectF>
 #include <QString>
 #include <QTextLayout>
+#include <functional>
 #include <memory>
 #include <vector>
 #include <optional>
@@ -186,6 +187,8 @@ public:
     std::optional<QRectF> rectangleFor(int position) const;
     // The source position under a point of the editor in a grid; -1 outside.
     int sourceAt(QPointF point) const;
+    // Whether a range is text a grid shows: in no grid, or inside one cell's text.
+    bool inCellText(int start, int end) const;
 
     // What an edit of the view becomes: the same, when it touches no grid;
     // an edit of a cell, the table written tidy around it, with where the
@@ -198,11 +201,31 @@ public:
         QString reason;
     };
     Adapted adapt(SourceRange range, const QString &text) const;
+    // The same for several edits made at once, as a command or Replace All
+    // makes them, against the text as it is, sorted and apart; and where
+    // their selection goes, in the text after them.
+    Adapted adapt(const QList<SourceEdit> &edits, int anchor, int cursor) const;
+    // A change of a grid's table through its model, as the row and column
+    // commands make one: the table written tidy, as one edit, and the
+    // caret in the cell at a model row and column, its text selected or at
+    // its start; nothing, refused, with the change's reason.
+    Adapted change(const TableGrid *grid, const std::function<QString(MdTable::Model &)> &operation, int row,
+                   int column, bool selectText = false) const;
     // A key that moves the caret in or into a grid; false for any other.
     bool key(QKeyEvent *event);
     // The caret or the selection moved: one in a table's syntax is moved
     // into its cells' text.
     void cursorMoved();
+
+    // Where a position is in a grid's cell, to find it again once the table
+    // is written anew, as another view's edit writes it; and where that is then.
+    struct Spot {
+        QPointer<TableGrid> grid;
+        TableGrid::Place place;
+        int offset = 0;
+    };
+    Spot spotOf(int position) const;
+    std::optional<int> positionOf(const Spot &spot) const;
 
     // The binding's projection: shown anew, a change followed, laid out anew.
     void loaded();

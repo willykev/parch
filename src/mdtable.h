@@ -166,6 +166,49 @@ struct Layout {
 
 Layout write(const Model &model);
 
+// ---- Changes to a table ------------------------------------------------------
+
+// Each change below works on a model and leaves it a table the writer can
+// write; or it changes nothing and says why it cannot be made. Rows are the
+// model's (the header is row 0, the body from 1), columns count from 0.
+
+// A cell's text as the table holds it: on one line, without the spaces
+// around it, a pipe that would end the cell escaped.
+QString encodeCell(const QString &text, const Dialect &dialect = {});
+// The cell of a row that covers a column, and the first column it covers.
+int itemAt(const QList<Item> &row, int column, int *first = nullptr);
+int columnCount(const Model &model);
+
+QString insertRows(Model &model, int at, int count, const QString &newline = QStringLiteral("\n"));
+QString deleteRows(Model &model, int first, int count);
+QString duplicateRows(Model &model, int first, int count, const QString &newline = QStringLiteral("\n"));
+// Moves rows [first, first + count) to before row `to` of the table as it
+// was (count + first at most: after the last row).
+QString moveRows(Model &model, int first, int count, int to);
+QString insertColumns(Model &model, int at, int count);
+QString deleteColumns(Model &model, int first, int count);
+QString moveColumns(Model &model, int first, int count, int to);
+QString setAlignment(Model &model, int first, int count, Align align);
+// Puts the body rows in the order of their text in a column: numbers as
+// numbers and before text, text in the order of its letters, empty cells
+// last; rows whose text is the same keep their order.
+QString sortRows(Model &model, int column, bool descending);
+// Joins the cells of a row from column `first` to `last` into one, their
+// texts joined with a space; splits a joined cell into its columns again,
+// its text in the first.
+QString mergeCells(Model &model, int row, int first, int last, const Dialect &dialect = {});
+QString splitCell(Model &model, int row, int column);
+// Empties the cells over rows [firstRow, lastRow] and columns [firstColumn, lastColumn].
+QString clearCells(Model &model, int firstRow, int lastRow, int firstColumn, int lastColumn);
+// Writes values into the cells from a row and column on, adding rows and
+// columns where they reach past the table. The values are plain text.
+QString pasteCells(Model &model, int row, int column, const QList<QStringList> &values, const Dialect &dialect = {},
+                   const QString &newline = QStringLiteral("\n"));
+// The text of a key for sorting: a cell's Markdown without its markers.
+QString plainText(const QString &markdown);
+// A new table of empty cells: `rows` counts the header.
+Model emptyTable(int columns, int rows, const QString &prefix = {}, const QString &newline = QStringLiteral("\n"));
+
 // The physical line a model row is written on: the header on line 0, the
 // body from line 2.
 inline int lineOf(int modelRow) { return modelRow == 0 ? 0 : modelRow + 1; }

@@ -12,5 +12,15 @@ void formatIsIdempotentAndKeepsPayloadBytes();
 void formatKeepsPrefixesAndLineEndings();
 void formatAlignsWideAndCombiningText();
 void tablesTheGridCannotHoldSayWhy();
+void runsOfReplacementsUndoAsOneChange();
+void aRunEndsAtASaveAPauseOrAnUndo();
+void composedRunsRestoreTheExactBytes();
+void everyOperationLeavesOneTidyEdit();
+void mergedCellsWidenNarrowAndRefuseCuts();
+void sortingOrdersNumbersAsNumbersAndKeepsTies();
+void movedRowsKeepTheirLineEndings();
+void pipesTypedInCellsAreEscapedByDialect();
+void tablesInQuotesKeepTheirPrefix();
+void insertedTablesAreTidyAndEmpty();
 
 } // namespace TableTests

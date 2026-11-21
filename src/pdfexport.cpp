@@ -139,12 +139,13 @@ std::unique_ptr<PdfExporter::Pages> PdfExporter::setPages(const md::Document &do
     writer.setAuthor(Exporters::frontMatterText(document, QStringLiteral("author")));
     writer.setCreator(QStringLiteral("parch " PARCH_VERSION));
     pages->paper = std::make_unique<PaperDocument>(document, recipe.citations.get(), pages->pictures.get(), paper);
+    const QString outputFolder = recipe.output.isEmpty() ? QString() : QFileInfo(recipe.output).absolutePath();
     // Laid out block by block, with its progress, and stopped when asked.
     const bool laidOut = pages->paper->layOut(&writer, [&run](qreal done) {
         if (run.stopped()) return false;
         run.report(0.6 + 0.15 * done, QStringLiteral("Laying out the pages"));
         return true;
-    });
+    }, outputFolder);
     if (!laidOut || run.stopped()) {
         *result = Exporters::cancelled();
         return nullptr;

@@ -33,6 +33,10 @@
   and keeps later independent edits.
 - Document checks look for headings in linked text files. Relative links
   keep their queries and fragments when exported to a new folder.
+- Assembled Markdown links to the included headings it carries and preserves
+  separate blocks, local link definitions and shared notes.
+- Relative links in PDFs work from the export folder. EPUB export names the
+  local link destinations it leaves out of the book.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

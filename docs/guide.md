@@ -757,13 +757,18 @@ page to page.
   through your desktop's print dialog, which chooses the printer and the
   paper; the dialog before it chooses the margins and the type.
 
-Markdown, HTML and DOCX preserve the query and fragment when writing a
+Markdown, HTML, PDF and DOCX preserve the query and fragment when writing a
 relative link from the export folder.
 
 What each format holds:
 
-- **Markdown** assembles the document and its includes into one file. The
-  default image setting, **auto**, links pictures within the new document’s
+- **Markdown** assembles the document and its includes into one file. Lists,
+  definition lists and code blocks stay separate. Link definitions keep
+  their scope, and repeated copies of the same inline note share a number.
+  Links to included headings jump within the new file. A link to an included
+  file goes to its first heading when it has one. An explicit query keeps
+  the link pointing to the separate file.
+  The default image setting, **auto**, links pictures within the new document’s
   folder and copies other readable pictures into `NAME_files` beside it.
   Choose **copy** to carry all its pictures, **link** to point back to the
   originals, or **Write the text as it is** to keep the source text.
@@ -782,7 +787,9 @@ What each format holds:
   points; **modern**, the desktop's sans-serif at 10 points; or **compact**,
   10 points with close lines and 15 mm margins. A font, a size or margins
   you choose go over the template's. The pages are numbered, with text you
-  can search and copy, working links, and an outline of the headings. `+++` starts a new page, and a heading never stays
+  can search and copy, working links, and an outline of the headings.
+  Relative links lead from the folder the PDF is saved in.
+  `+++` starts a new page, and a heading never stays
   at the foot of a page without its text. Formulas and diagrams are vectors;
   a diagram that cannot be drawn as one is printed as a picture at four times
   its size, and the notice says so. Notes and the bibliography follow the
@@ -797,7 +804,9 @@ What each format holds:
   contents from the headings, its images, formulas and diagrams as SVG, and
   its title, author, language, description and date from the front matter.
   Page breaks are hints, since a reader sets its own pages, and pictures from
-  the web are left out with their descriptions in their place.
+  the web are left out with their descriptions in their place. Links to the
+  book's chapters and to the web work in the book. Other local links appear
+  as text, and the export notice names the destinations it leaves out.
 
 Formulas and diagrams are drawn by the same helpers as the preview, dark on
 white whatever the desktop's theme. Without them they are written as their
@@ -1334,8 +1343,8 @@ parch stats book.md                  # Words, characters, reading time, headings
 - **export** writes the document in any of the formats the window's
   [Export](#export-and-print) writes, in the same way: `md`, the document
   as one file with each include in place (an included file's front matter
-  left out and its variables written out, its footnote and link labels kept
-  apart from the document's, and its paths written from the new file's
+  left out and its variables written out, its link definitions kept in
+  scope, and its relative paths written from the new file's
   folder. Markdown’s `--images auto` copies pictures that would otherwise
   be outside the exported document’s folder. Use `--images copy` to copy
   all pictures, `--images link` to keep their original locations, or

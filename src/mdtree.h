@@ -226,7 +226,7 @@ struct Node {
     QString label;
 
     std::vector<Attribute> attributes; // HtmlElement: the attributes the HTML policy allows
-    std::vector<Range> markers;        // BlockQuote, TableRow
+    std::vector<Range> markers;        // BlockQuote, TableRow, InlineNote: syntax outside the note's text
     std::vector<Node> children;
 
     QString attribute(QLatin1StringView name) const
@@ -291,6 +291,7 @@ struct SourceFile {
     QString text;
     FrontMatter frontMatter;
     int includedFrom = -1; // the file that first included it; -1 for the root
+    std::optional<Range> headings; // outline indices in this file's first occurrence
 };
 
 // A heading of the outline, in document order, included files included.
@@ -447,11 +448,12 @@ Destination classifyDestination(const Document &document, const Node &linkOrImag
 // Where in `document` a link to the file `path`, at `fragment`, leads when
 // that file is the document or one it includes: its heading whose anchor,
 // as the file read on its own would number it, is `fragment` (and the
-// file's first heading when there is no fragment, or none matches), as that
-// heading's slug in the whole document. Empty when the file is not part of
-// the document, or holds no heading. An export that holds the whole document
-// links there, not to a file its reader does not have.
+// file's first heading when there is no fragment), as that
+// heading's slug in the whole document. Empty for a missing file or heading.
+// An export that holds the whole document links to its own heading.
 QString includedAnchor(const Document &document, const QString &path, const QString &decodedFragment);
+// A local link's heading inside the assembly. A query keeps the external URL.
+QString includedAnchor(const Document &document, const Destination &destination);
 // The same by the file's index in Document::files, without falling back to
 // its first heading. Takes the fragment as written in the source.
 QString anchorInFile(const Document &document, int file, const QString &encodedFragment);

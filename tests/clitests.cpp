@@ -5,6 +5,7 @@
 #include "clicommands.h"
 #include "dialectchoice.h"
 #include "documentcheck.h"
+#include "documentlinks.h"
 #include "exporter.h"
 #include "htmlexport.h"
 #include "markdownexport.h"
@@ -262,14 +263,20 @@ struct Meaning {
 
 void destinationsOf(const md::Document &document, const md::Node &node, QStringList &out)
 {
-    if (!node.generated && (node.type == md::NodeType::Link || node.type == md::NodeType::Image)) {
-        const md::Destination target = md::classifyDestination(document, node);
-        out.append(target.kind == md::Destination::Kind::LocalFile ? target.path + u'#' + target.fragment : node.dest);
-    }
+    const auto append = [&](const QString &written, bool link) {
+        const md::Destination target = md::classifyDestination(written, md::destinationDirectory(document, node));
+        const QString internal = link ? md::includedAnchor(document, target) : QString();
+        if (!internal.isEmpty()) out.append(u'#' + internal);
+        else if (target.kind == md::Destination::Kind::LocalFile) out.append(target.path + md::destinationSuffix(target));
+        else if (target.kind == md::Destination::Kind::Anchor) out.append(u'#' + target.fragment);
+        else out.append(written);
+    };
+    if (!node.generated && (node.type == md::NodeType::Link || node.type == md::NodeType::Image))
+        append(node.dest, node.type == md::NodeType::Link);
     if (node.type == md::NodeType::HtmlElement)
         for (const md::Attribute &attribute : node.attributes)
             if (attribute.name == u"src" || attribute.name == u"href")
-                out.append(md::classifyDestination(attribute.value, document.files[size_t(node.file)].directory).path);
+                append(attribute.value, attribute.name == u"href");
     for (const md::Node &child : node.children) destinationsOf(document, child, out);
 }
 
@@ -978,9 +985,10 @@ void exportAssemblesMarkdown()
     // variable written out, its notes and definitions relabelled, its paths
     // from the folder the export is in.
     QVERIFY2(text.contains(QStringLiteral(
-                 "\n## One\n\nHi Chapter of [%title]. A [link][1-2], [home][home-2], [home][home-2] and [Book][]. "
-                 "Note[^1-2].\n![fig](chapters/fig.png) <img src=\"chapters/fig.png\" alt=\"f\"> [up](main.md#book)\n\n"
-                 "[^1-2]: One's note.\n\n[1-2]: https://example.org/one\n[home-2]: https://example.org/one-home\n")),
+                 "\n## One\n\nHi Chapter of [%title]. A [link][parch-link-1], [home][parch-link-2], [home][parch-link-2] "
+                 "and [Book][]. Note[^parch-note-1].\n![fig](chapters/fig.png) <img src=\"chapters/fig.png\" alt=\"f\"> "
+                 "[up](#book)\n\n[^parch-note-1]: One's note.\n\n[parch-link-1]: https://example.org/one\n"
+                 "[parch-link-2]: https://example.org/one-home\n")),
              qPrintable(text));
     QVERIFY(!text.contains(QStringLiteral("who: Chapter")));
     QVERIFY(!text.contains(QStringLiteral("chapters/one.md")));
@@ -995,7 +1003,7 @@ void exportAssemblesMarkdown()
     const QString elsewhere = QString::fromUtf8(box.read(QStringLiteral("out/book.md")));
     QVERIFY(elsewhere.contains(QStringLiteral("![cover](book_files/cover.png)")));
     QVERIFY(elsewhere.contains(QStringLiteral("![fig](book_files/fig.png)")));
-    QVERIFY(elsewhere.contains(QStringLiteral("[up](../book/main.md#book)")));
+    QVERIFY(elsewhere.contains(QStringLiteral("[up](#book)")));
     // Remote links are not paths.
     QVERIFY(elsewhere.contains(QStringLiteral("[1]: https://example.org/root")));
     QCOMPARE(box.run({"check", "out/book.md"}).code, Cli::Ok);
@@ -1088,6 +1096,247 @@ void assembledHeadingLinksKeepTheirTarget()
     const Ran assembled = box.run({"render", "assembled.md"});
     QCOMPARE(assembled.out, source.out);
     QCOMPARE(box.run({"check", "assembled.md"}).code, 0);
+}
+
+void assembledLinksReachChaptersWithoutTheirFiles()
+{
+    using namespace Qt::StringLiterals;
+    Sandbox box, standalone;
+    QVERIFY(box.isValid() && standalone.isValid());
+    const QString book = u"# Target\n\n# Café\n\n"
+                          "[Direct](sub/chapter.md#target \"Direct title\") [First](sub/chapter.md) "
+                          "[Accent](sub/chapter.md#caf%C3%A9)\n\n"
+                          "[Reference][jump] <a href='sub/chapter.md#target'>HTML</a>\n\n"
+                          "sub/chapter.md\n\nsub/chapter.md\n\n[jump]: sub/chapter.md#target \"Jump title\"\n"_s;
+    box.write(u"book/main.md"_s, book);
+    box.write(u"book/sub/chapter.md"_s, u"# Café\n\n## Target\n\n[Inherited][jump]\n"_s);
+    QVERIFY(QDir().mkpath(box.path(u"out"_s)));
+    QCOMPARE(box.run({"export", "book/main.md", "-o", "out/verbatim.md", "--as-is"}).code, Cli::Ok);
+    QCOMPARE(box.read("out/verbatim.md"), book.toUtf8());
+
+    for (const char *output : {"book/assembled.md", "out/assembled.md"}) {
+        const Ran made = box.run({u"export"_s, u"book/main.md"_s, u"-o"_s, QString::fromLatin1(output)});
+        QVERIFY2(made.code == Cli::Ok, qPrintable(made.said()));
+        const QString exported = QString::fromUtf8(box.read(QLatin1StringView(output)));
+        standalone.write(u"book.md"_s, exported);
+        const Ran checked = standalone.run({"check", "book.md"});
+        QVERIFY2(checked.code == Cli::Ok, qPrintable(checked.said()));
+        const Ran html = standalone.run({"render", "book.md"});
+        QCOMPARE(html.code, Cli::Ok);
+        QVERIFY(html.out.contains(u"href=\"#target-2\" title=\"Direct title\">Direct</a>"));
+        QVERIFY(html.out.contains(u"href=\"#caf%C3%A9-2\">First</a>"));
+        QVERIFY(html.out.contains(u"href=\"#caf%C3%A9-2\">Accent</a>"));
+        QVERIFY(html.out.contains(u"href=\"#target-2\" title=\"Jump title\">Reference</a>"));
+        QCOMPARE(html.out.count(u"href=\"#target-2\" title=\"Jump title\">Inherited</a>"), 2);
+        QVERIFY(html.out.contains(u"href=\"#target-2\">HTML</a>"));
+        QVERIFY(html.out.contains(u"id=\"target-3\""));
+    }
+
+    box.write(u"book/plain.md"_s, u"A chapter without a heading.\n"_s);
+    box.write(u"book/main.md"_s, book + u"\nplain.md\n\n[Missing](sub/chapter.md#missing) [Plain](plain.md) "
+                 "[Only in the assembly](sub/chapter.md#target-2) "
+                 "[Query](sub/chapter.md?view=plain#target) [Empty query](sub/chapter.md?#target)\n\n"
+                 "[Mixed][both] ![Image][both]\n\n[both]: sub/chapter.md#target 'Shared title'\n"_s);
+    const Ran controls = box.run({"export", "book/main.md", "-o", "out/controls.md", "--images", "link"});
+    QVERIFY2(controls.code == Cli::Ok, qPrintable(controls.said()));
+    const Ran html = box.run({"render", "out/controls.md"});
+    QVERIFY(html.out.contains(u"href=\"../book/sub/chapter.md#missing\">Missing</a>"));
+    QVERIFY(html.out.contains(u"href=\"../book/sub/chapter.md#target-2\">Only in the assembly</a>"));
+    QVERIFY(html.out.contains(u"href=\"../book/plain.md\">Plain</a>"));
+    QVERIFY(html.out.contains(u"href=\"../book/sub/chapter.md?view=plain#target\">Query</a>"));
+    QVERIFY(html.out.contains(u"href=\"../book/sub/chapter.md?#target\">Empty query</a>"));
+    QVERIFY(html.out.contains(u"href=\"#target-2\" title=\"Shared title\">Mixed</a>"));
+    QVERIFY(html.out.contains(u"src=\"../book/sub/chapter.md#target\" alt=\"Image\""));
+    const Ran checked = box.run({"check", "out/controls.md", "--library", ".", "--json"});
+    QCOMPARE(checked.code, Cli::Problems);
+    QCOMPARE(codesOf(checked.json().value(u"documents"_s).toArray().first().toObject()).count(u"broken-link-anchor"_s), 2);
+}
+
+void assembledDestinationsKeepEncodedFragments()
+{
+    using namespace Qt::StringLiterals;
+    Sandbox box;
+    QVERIFY(box.isValid());
+    QVERIFY(QDir().mkpath(box.path(u"out"_s)));
+    box.write(u"work.pdf"_s, u"Attachment"_s);
+    box.write(u"figure.svg"_s, u"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'>"
+                               "<view id='detail' viewBox='0 0 5 5'/><rect width='10' height='10'/></svg>"_s);
+    box.write(u"main.md"_s, u"[Reference](work.pdf#Section%201 \"Plain title\")\n\n"
+                            "[Angle](<work.pdf?view=(thin)&mode=1#café%20%25%28I%29> 'Angle title')\n\n"
+                            "[Defined][doc] <a href='work.pdf?view=one&amp;mode=2#Section%201'>HTML</a>\n\n"
+                            "[doc]: work.pdf#Section%201 'Defined title'\n\n"
+                            "![Map](figure.svg?theme=large#detail)\n"_s);
+    for (const QString &mode : {u"copy"_s, u"link"_s}) {
+        const QString output = u"out/"_s + mode + u".md"_s;
+        const Ran made = box.run({u"export"_s, u"main.md"_s, u"-o"_s, output, u"--images"_s, mode});
+        QVERIFY2(made.code == Cli::Ok, qPrintable(made.said()));
+        const QByteArray bytes = box.read(output);
+        QVERIFY(bytes.contains("[Reference](../work.pdf#Section%201 \"Plain title\")"));
+        QVERIFY(bytes.contains("%20%25%28I%29> 'Angle title')"));
+        QVERIFY(bytes.contains("href='../work.pdf?view=one&amp;mode=2#Section%201'"));
+        const auto doc = loadedFrom(box.path(output));
+        const QString html = md::toHtml(doc.document);
+        QVERIFY2(html.contains(u"<a href=\"../work.pdf#Section%201\" title=\"Plain title\">Reference</a>"), qPrintable(html));
+        QVERIFY(html.contains(u"../work.pdf?view=(thin)&amp;mode=1#caf%C3%A9%20%25%28I%29\" title=\"Angle title\">Angle"));
+        QVERIFY(html.contains(u"href=\"../work.pdf#Section%201\" title=\"Defined title\">Defined</a>"));
+        const auto links = DocumentLinks::find(doc.document, box.path(u"out"_s));
+        QCOMPARE(links.front().destination.fragment, u"Section 1"_s);
+        QCOMPARE(links.at(1).destination.fragment, u"café %(I)"_s);
+        const QString image = mode == u"copy" ? u"copy_files/figure.svg"_s : u"../figure.svg"_s;
+        QVERIFY(html.contains(u"src=\""_s + image + u"?theme=large#detail\""_s));
+        QCOMPARE(box.read(u"out/"_s + image), box.read(u"figure.svg"_s));
+    }
+}
+
+void assembledChaptersKeepIndependentBlocks_data()
+{
+    QTest::addColumn<QByteArray>("book");
+    QTest::addColumn<QByteArray>("chapter");
+    QTest::addColumn<QByteArray>("leaf");
+    const auto row = [](const char *name, QByteArray book, QByteArray chapter, QByteArray leaf = {}) {
+        QTest::newRow(name) << book << chapter << leaf;
+    };
+    row("bullet-code", "- Item\n\nchapter.md\n", "    Chapter code.\n    Still code.\n");
+    row("ordered-code", "3. Item\r\n\r\nchapter.md\r\n", "    Chapter code.\r\n");
+    row("definition-code", "Term\n: Meaning\n\nchapter.md\n", "    Separate code.\n");
+    row("code-code", "    Root code.  \n\nchapter.md\n", "    Chapter code.\n\n    End code.\n");
+    row("definition-definition", "Term\n: Meaning\n\nchapter.md\n", "Other term\n: Another meaning\n");
+    row("include-to-root", "chapter.md\n\n    Root code.\n", "- Chapter item.\n");
+    row("nested", "Term\n: Meaning\n\nchapter.md\n", "leaf.md\n", "    Leaf code.\n");
+    row("between-includes", "chapter.md\n\nleaf.md\n", "- Item\n", "    Leaf code.\n");
+    row("different-markers", "- An item.\n\nchapter.md\n", "+ Another item.\n");
+    row("existing-comment", "- An item.\n\n<!-- A separator -->\n\nchapter.md\n", "    Own code.\n");
+    row("front-matter-only", "- An item.\n\nchapter.md\n\n    Own code.\n", "---\ntitle: Empty\n---\n");
+    row("repeated-definition", "chapter.md\n\n- An item.\n\nchapter.md\n\n    Own code.\n", "[link]: target.html\n");
+    row("unclosed-fence", "chapter.md\n\n    Root code.\n", "- An item.\n\nleaf.md\n", "~~~\nLeaf code.\n");
+}
+
+void assembledChaptersKeepIndependentBlocks()
+{
+    using namespace Qt::StringLiterals;
+    QFETCH(QByteArray, book);
+    QFETCH(QByteArray, chapter);
+    QFETCH(QByteArray, leaf);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    writeFile(box.path(u"book.md"_s), book);
+    writeFile(box.path(u"chapter.md"_s), chapter);
+    if (!leaf.isEmpty()) writeFile(box.path(u"leaf.md"_s), leaf);
+    const auto source = loadedFrom(box.path(u"book.md"_s));
+    QVERIFY(!source.document.incomplete);
+    const Ran made = box.run({"export", "book.md", "-o", "assembled.md"});
+    QVERIFY2(made.code == Cli::Ok, qPrintable(made.said()));
+    const QByteArray written = box.read("assembled.md");
+    QVERIFY(written.count("<!-- -->") <= 1);
+    if (book.contains("<!-- A separator -->")) {
+        QVERIFY(written.contains("<!-- A separator -->"));
+        QCOMPARE(written.count("<!-- -->"), 0);
+    }
+    const auto assembled = loadedFrom(box.path(u"assembled.md"_s));
+    const auto blocks = [](const md::Document &doc) {
+        QStringList kinds;
+        const auto visit = [&](auto &&self, const md::Node &node) -> void {
+            using Type = md::NodeType;
+            if (node.type == Type::CodeBlock) kinds.append(u"code "_s + node.text);
+            if (node.type == Type::List) kinds.append(node.ordered ? u"ordered list"_s : u"bullet list"_s);
+            if (node.type == Type::DefinitionList) kinds.append(u"definition list"_s);
+            for (const md::Node &child : node.children) self(self, child);
+        };
+        visit(visit, doc.root);
+        return kinds;
+    };
+    QCOMPARE(blocks(assembled.document), blocks(source.document));
+    QCOMPARE(md::toHtml(assembled.document), md::toHtml(source.document));
+    QCOMPARE(box.read("chapter.md"), chapter);
+}
+
+void assembledLinksKeepTheirDefinitionScope()
+{
+    using namespace Qt::StringLiterals;
+    Sandbox box;
+    QVERIFY(box.isValid());
+    const QString literal = u"This points to [place]. Leave [parch-link-1] and \\[place] alone.\n"_s;
+    box.write(u"left.md"_s, u"# Section\n\n[place] [place][] [Full][place] ![Badge][badge] [Override][shared]\n\n"
+                            "[place]: page.html 'Place title'\n[badge]: icon.svg 'Icon title'\n"
+                            "[shared]: override.html 'Override title'\n"_s);
+    box.write(u"right.md"_s, u"# Section\n\n"_s + literal + u"\n[Inherited][shared] [Local][Section]\n"_s);
+    for (const auto &order : {u"left.md\n\nright.md"_s, u"right.md\n\nleft.md"_s}) {
+        box.write(u"book.md"_s, u"# Book\n\n"_s + order + u"\n\n[shared]: home.html 'Root title'\n"_s);
+        const Ran source = box.run({"render", "book.md"});
+        QCOMPARE(source.code, Cli::Ok);
+        QVERIFY(source.out.contains(u"<a href=\"page.html\" title=\"Place title\">place</a>"));
+        QVERIFY(source.out.contains(u"<a href=\"home.html\" title=\"Root title\">Inherited</a>"));
+        QVERIFY(source.out.contains(u"<img src=\"icon.svg\" alt=\"Badge\" title=\"Icon title\""));
+        const Ran made = box.run({"export", "book.md", "-o", "assembled.md", "--images", "link", "--force"});
+        QVERIFY2(made.code == Cli::Ok, qPrintable(made.said()));
+        QVERIFY(box.read("assembled.md").contains(literal.toUtf8()));
+        QCOMPARE(box.run({"render", "assembled.md"}).out, source.out);
+    }
+}
+
+void assembledRepeatedChaptersShareTheirInlineNote()
+{
+    using namespace Qt::StringLiterals;
+    Sandbox box;
+    QVERIFY(box.isValid());
+    const QString book = u"# Book\n\nsub/chapter.md\n\nsub/chapter.md\n\nother.md\n\n"
+                         "A named note[^parch-note-1].\n\n[^parch-note-1]: A separate note.\n\n"
+                         "[#Doe]: Jane Doe. A work.\n\n~~~\nUnclosed fence.\n"_s;
+    box.write(u"book.md"_s, book);
+    box.write(u"sub/chapter.md"_s, u"Apples.[^A fruit.] Also.[^See [Details](../details.html) and [#Doe].\n"
+                                     "The second line keeps *emphasis*.]\n"_s);
+    box.write(u"other.md"_s, u"An independent note.[^A fruit.]\n"_s);
+    box.write(u"details.html"_s, u"Details"_s);
+    const auto source = loadedFrom(box.path(u"book.md"_s));
+    QCOMPARE(source.document.footnotes.size(), size_t(4));
+    const Ran made = box.run({"export", "book.md", "-o", "assembled.md"});
+    QVERIFY2(made.code == Cli::Ok, qPrintable(made.said()));
+    const auto assembled = loadedFrom(box.path(u"assembled.md"_s));
+    QCOMPARE(assembled.document.footnotes.size(), size_t(4));
+    QCOMPARE(assembled.document.footnotes.at(0).references, 2);
+    QCOMPARE(assembled.document.footnotes.at(1).references, 2);
+    QCOMPARE(assembled.document.footnotes.at(2).references, 1);
+    QCOMPARE(assembled.document.footnotes.at(3).references, 1);
+    QCOMPARE(box.run({"render", "assembled.md"}).out, box.run({"render", "book.md"}).out);
+    const Ran checked = box.run({"check", "assembled.md"});
+    QVERIFY2(checked.code == Cli::Ok, qPrintable(checked.said()));
+    QVERIFY(box.read("assembled.md").contains("An independent note.[^A fruit.]"));
+    QCOMPARE(box.run({"export", "book.md", "-o", "verbatim.md", "--as-is"}).code, Cli::Ok);
+    QCOMPARE(box.read("verbatim.md"), book.toUtf8());
+
+    box.write(u"quoted.md"_s, u"sub/quote.md\n\nsub/quote.md\n"_s);
+    box.write(u"sub/quote.md"_s, u"> A.[^# Hash stays text.] B.[^See [Details](../details.html).\r\n"
+                                   "> More *there* and `one\r\n> two`.] C.[^$$x$$] D.[^A | B\r\n> --- | ---]\r\n"_s);
+    const Ran quoted = box.run({"export", "quoted.md", "-o", "assembled-quote.md"});
+    QVERIFY2(quoted.code == Cli::Ok, qPrintable(quoted.said()));
+    const Ran originalQuote = box.run({"render", "quoted.md"});
+    QCOMPARE(originalQuote.code, Cli::Ok);
+    QVERIFY(originalQuote.out.contains(u"# Hash stays text.") && originalQuote.out.contains(u"<code>one two</code>"));
+    QVERIFY(originalQuote.out.contains(u"<span class=\"math display\">x</span>"));
+    QVERIFY(originalQuote.out.contains(u"A | B\n--- | ---"));
+    QCOMPARE(box.run({"render", "assembled-quote.md"}).out, originalQuote.out);
+}
+
+void epubReportsOmittedLocalLinksOnTheCli()
+{
+    using namespace Qt::StringLiterals;
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(u"book.md"_s, u"# Book\n\n[Extra](extra.html) and [Again](extra.html).\n"_s);
+    box.write(u"extra.html"_s, u"Extra"_s);
+    const Ran usual = box.run({"export", "book.md", "-o", "book.epub"});
+    QCOMPARE(usual.code, Cli::Ok);
+    QCOMPARE(usual.err.count(u"extra.html"), 1);
+    const Ran json = box.run({"export", "book.md", "-o", "json.epub", "--json"});
+    QCOMPARE(json.code, Cli::Ok);
+    const QJsonArray limitations = json.json().value(u"limitations"_s).toArray();
+    QCOMPARE(limitations.size(), 1);
+    QVERIFY(limitations.first().toString().contains(u"extra.html"));
+    const Ran quiet = box.run({"export", "book.md", "-o", "quiet.epub", "--quiet"});
+    QCOMPARE(quiet.code, Cli::Ok);
+    QVERIFY(quiet.out.isEmpty());
+    QVERIFY(quiet.err.isEmpty());
+    QVERIFY(QFileInfo::exists(box.path(u"quiet.epub"_s)));
 }
 
 void assembledListsKeepTheirNumbering()

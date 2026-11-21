@@ -422,7 +422,8 @@ bool PaperDocument::layOutBlocks(qreal from, qreal to)
     return !stopping(to);
 }
 
-bool PaperDocument::layOut(QPagedPaintDevice *device, const std::function<bool(qreal done)> &going)
+bool PaperDocument::layOut(QPagedPaintDevice *device, const std::function<bool(qreal done)> &going,
+                          const QString &outputFolder)
 {
     m_going = going;
     m_stopped = false;
@@ -438,7 +439,7 @@ bool PaperDocument::layOut(QPagedPaintDevice *device, const std::function<bool(q
     preview::BuildOptions options;
     options.islands = false;
     options.interactive = true;
-    options.portableLinks = true;
+    options.localLinks = Exporters::destinationsFrom(m_source, outputFolder);
     options.citations = m_citations;
     m_text.documentLayout()->registerHandler(QTextFormat::ImageObject, objects);
     if (device) m_text.documentLayout()->setPaintDevice(device);

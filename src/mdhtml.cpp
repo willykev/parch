@@ -71,9 +71,12 @@ private:
         esc(value);
         out.append(u'"');
     }
-    QString url(const Node &node, const QString &written, bool image) const
+    std::optional<QString> destination(const Node &node, const QString &written) const
     {
-        const QString dest = opt.destination ? opt.destination(node, written) : written;
+        return opt.destination ? opt.destination(node, written) : std::optional<QString>(written);
+    }
+    QString url(const QString &dest, bool image) const
+    {
         if (safe && !detail::isSafeUrl(dest, image)) return QString();
         return encodeUrl(dest);
     }
@@ -350,15 +353,13 @@ void Writer::element(const Node &node)
     const bool image = node.label == u"img";
     const QLatin1StringView leads(image ? "src" : "href");
     for (const Attribute &a : node.attributes) {
+        const bool rewritten = opt.destination && (image || node.label == u"a") && a.name == leads;
+        const auto value = rewritten ? destination(node, a.value) : std::optional<QString>(a.value);
+        if (!value) continue;
         out.append(u' ');
         out.append(a.name);
         lit(QLatin1StringView("=\""));
-        if (opt.destination && (image || node.label == u"a") && a.name == leads) {
-            const QString dest = opt.destination(node, a.value);
-            if (!safe || detail::isSafeUrl(dest, image)) esc(dest);
-        } else {
-            esc(a.value);
-        }
+        if (!rewritten || !safe || detail::isSafeUrl(*value, image)) esc(*value);
         out.append(u'"');
     }
     if (info.isVoid) {
@@ -521,21 +522,27 @@ void Writer::inl(const Node &node)
     case NodeType::Superscript: wrap(QLatin1StringView("<sup>"), QLatin1StringView("</sup>")); break;
     case NodeType::Subscript: wrap(QLatin1StringView("<sub>"), QLatin1StringView("</sub>")); break;
     case NodeType::Link:
-    case NodeType::Autolink:
+    case NodeType::Autolink: {
+        const auto dest = destination(node, node.dest);
+        if (!dest) {
+            inlines(node.children);
+            break;
+        }
         lit(QLatin1StringView("<a"));
-        attribute(QLatin1StringView("href"), url(node, node.dest, false));
+        attribute(QLatin1StringView("href"), url(*dest, false));
         if (!node.title.isEmpty()) attribute(QLatin1StringView("title"), node.title);
         out.append(u'>');
         inlines(node.children);
         lit(QLatin1StringView("</a>"));
         break;
+    }
     case NodeType::Image:
         if (const QString drawn = opt.picture ? opt.picture(node) : QString(); !drawn.isEmpty()) {
             out.append(drawn);
             break;
         }
         lit(QLatin1StringView("<img"));
-        attribute(QLatin1StringView("src"), url(node, node.dest, true));
+        attribute(QLatin1StringView("src"), url(destination(node, node.dest).value_or(QString()), true));
         attribute(QLatin1StringView("alt"), plainText(node));
         if (!node.title.isEmpty()) attribute(QLatin1StringView("title"), node.title);
         lit(QLatin1StringView(" />"));

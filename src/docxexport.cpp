@@ -136,7 +136,7 @@ public:
            const QPageSize &page)
         : m_doc(document), m_recipe(recipe), m_pictures(pictures), m_endnotes(endnotes), m_page(page),
           m_citations(recipe.citations && recipe.citations->active ? recipe.citations.get() : nullptr),
-          m_destinations(HtmlExporter::destinationsFrom(document, QFileInfo(recipe.output).absolutePath()))
+          m_destinations(Exporters::destinationsFrom(document, QFileInfo(recipe.output).absolutePath()))
     {
         // Relationships the document part always has, first.
         m_body.next = 1;

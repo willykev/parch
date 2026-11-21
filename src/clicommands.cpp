@@ -6,7 +6,6 @@
 #include "documentcheck.h"
 #include "documentsettings.h"
 #include "exporter.h"
-#include "htmlexport.h"
 #include "mdhtml.h"
 #include "rendercheck.h"
 #include "renderservice.h"
@@ -675,7 +674,7 @@ int render(const QStringList &arguments, const Context &context)
         const QString folder = command.parser.isSet(QStringLiteral("output"))
                                    ? QFileInfo(absolute(command.parser.value(QStringLiteral("output")), context)).absolutePath()
                                    : QFileInfo(loaded.path).absolutePath();
-        options.destination = HtmlExporter::destinationsFrom(document, folder);
+        options.destination = Exporters::destinationsFrom(document, folder);
         text = md::toHtml(document, loaded.htmlOptions(options));
         result = text;
     } else if (to == u"text") {

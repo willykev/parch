@@ -7,7 +7,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QUrl>
 
 namespace {
 
@@ -54,13 +53,14 @@ QString pixels(qreal value) { return QString::number(qRound(value)); }
 namespace ExportWeb {
 
 Body body(const md::Document &document, const ExportRecipe &recipe, const ExportPictures *pictures, Assets &assets,
-          bool book)
+          bool book, const md::HtmlOptions::DestinationWriter &destination)
 {
     const bool remoteImagesAllowed = !book;
     Body result;
     const QString folder = QFileInfo(recipe.output).absolutePath();
     md::HtmlOptions options;
-    options.destination = HtmlExporter::destinationsFrom(document, folder);
+    if (destination) options.destination = destination;
+    else options.destination = Exporters::destinationsFrom(document, folder);
     if (recipe.citations) options.citations = DocumentCitations::html(*recipe.citations);
     const qreal fontSize = pictures ? pictures->options().fontSize : 16;
     options.picture = [&](const md::Node &node) -> QString {
@@ -195,28 +195,6 @@ QString HtmlExporter::assetFolder(const QString &output)
 {
     const QFileInfo info(output);
     return info.absolutePath() + u'/' + info.completeBaseName() + QStringLiteral("_files");
-}
-
-std::function<QString(const md::Node &, const QString &)> HtmlExporter::destinationsFrom(const md::Document &document,
-                                                                                        const QString &folder)
-{
-    return [&document, folder = QDir::cleanPath(folder)](const md::Node &node, const QString &dest) -> QString {
-        if (dest.isEmpty() || dest.startsWith(u'#')) return dest;
-        if (node.file < 0 || size_t(node.file) >= document.files.size()) return dest;
-        const QString directory = md::destinationDirectory(document, node);
-        const md::Destination target = md::classifyDestination(dest, directory);
-        if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return dest;
-        // A link to a file the document includes leads to where that file is
-        // in the export, not to the file, which its reader does not have.
-        const bool link = node.type == md::NodeType::Link || node.type == md::NodeType::Autolink
-                          || (node.type == md::NodeType::HtmlElement && node.label == u"a");
-        if (link && !target.query)
-            if (const QString anchor = md::includedAnchor(document, target.path, target.fragment); !anchor.isEmpty())
-                return u'#' + anchor;
-        if (dest.startsWith(u'/')) return dest;
-        if (directory.isEmpty() || QDir::cleanPath(directory) == folder) return dest;
-        return md::encodeUrlPath(Exporters::relativeTo(folder, target.path)) + md::destinationSuffix(target);
-    };
 }
 
 QStringList HtmlExporter::limitations(const md::Document &document, const ExportRecipe &recipe,

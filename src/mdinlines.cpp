@@ -1978,6 +1978,19 @@ Node InlineParserPrivate::finish(int index)
     node.open = x.openEnd > x.start ? sourceRange(x.start, x.openEnd) : Range{node.range.start, node.range.start};
     node.close = x.closeStart < x.end ? sourceRange(x.closeStart, x.end) : Range{node.range.end, node.range.end};
     if (x.targetEnd > x.targetStart) node.target = sourceRange(x.targetStart, x.targetEnd);
+    if (node.type == NodeType::InlineNote && map.size() > 1) {
+        const PieceMap *piece = &pieceAt(x.openEnd);
+        const QString &source = file->text;
+        for (const PieceMap *next = piece + 1; next < map.data() + map.size() && next->content <= x.closeStart;
+             piece = next++) {
+            int start = piece->src + piece->len;
+            // Keep the source line ending. Quote and list prefixes, and
+            // escapes for grid pipes, belong to the enclosing block.
+            if (start < next->src && source[start] == u'\r') ++start;
+            if (start < next->src && source[start] == u'\n') ++start;
+            if (start < next->src) node.markers.push_back({start, next->src});
+        }
+    }
     if (node.type == NodeType::SoftBreak || node.type == NodeType::HardBreak) {
         // The break ends with the line terminator, which may be two characters.
         const QString &text = file->text;

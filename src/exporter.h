@@ -199,6 +199,13 @@ private:
 // A local file as a link or image in a file written to `outputFolder`
 // gives it: relative to that folder.
 QString relativeTo(const QString &outputFolder, const QString &absolutePath);
+QString rebasedDestination(const md::Destination &destination, const QString &folder,
+                           md::DestinationSyntax syntax = md::DestinationSyntax::Url);
+// Output links use their defining folder, and headings carried by the output
+// have internal destinations. With no output folder, keep the written paths.
+// The document must outlive the callback.
+std::function<QString(const md::Node &, const QString &)> destinationsFrom(const md::Document &document,
+                                                                          const QString &folder = {});
 
 // "1 formula", "3 formulas".
 QString count(int n, const QString &one, const QString &many);

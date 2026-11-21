@@ -671,24 +671,16 @@ Destination classifyDestination(const Document &document, const Node &linkOrImag
 
 namespace {
 
-// The whole-document slug of the heading of `file` (or of a file it
-// includes) that the file read on its own would give the anchor `wanted`;
-// `first` gets the file's own first heading.
-QString headingAnchor(const Document &document, int file, const QString &wanted, QString *first)
+// Number the headings as the source file would, using its first occurrence.
+QString headingAnchor(const Document &document, int file, const QString &wanted)
 {
-    const auto within = [&](int index) {
-        for (int depth = 0; index >= 0 && size_t(index) < document.files.size() && depth <= int(document.files.size()); ++depth) {
-            if (index == file) return true;
-            index = document.files[size_t(index)].includedFrom;
-        }
-        return false;
-    };
+    const auto &range = document.files[size_t(file)].headings;
+    if (!range || range->isEmpty()) return {};
+    if (wanted.isEmpty()) return document.headings[size_t(range->start)].slug;
     QSet<QString> slugs;
     QHash<QString, int> nextSuffix;
-    for (const Heading &heading : document.headings) {
-        if (!within(heading.file)) continue;
-        if (first && first->isEmpty() && heading.file == file) *first = heading.slug;
-        if (wanted.isEmpty()) break;
+    for (int i = range->start; i < range->end; ++i) {
+        const Heading &heading = document.headings[size_t(i)];
         QString base = slugify(heading.text);
         if (base.isEmpty()) base = QStringLiteral("section");
         QString slug = base;
@@ -712,20 +704,23 @@ QString anchorInFile(const Document &document, int file, const QString &encodedF
     if (file < 0 || size_t(file) >= document.files.size()) return {};
     const QString wanted = QUrl::fromPercentEncoding(encodedFragment.toUtf8());
     if (wanted.isEmpty()) return {};
-    return headingAnchor(document, file, wanted, nullptr);
+    return headingAnchor(document, file, wanted);
 }
 
 QString includedAnchor(const Document &document, const QString &path, const QString &decodedFragment)
 {
     const QFileInfo info(path);
     const QString target = info.exists() ? info.canonicalFilePath() : QDir::cleanPath(info.absoluteFilePath());
-    int file = -1;
-    for (size_t i = 0; i < document.files.size() && file < 0; ++i)
-        if (!document.files[i].path.isEmpty() && document.files[i].path == target) file = int(i);
-    if (file < 0) return {};
-    QString first;
-    const QString found = headingAnchor(document, file, decodedFragment, &first);
-    return found.isEmpty() ? first : found;
+    for (size_t i = 0; i < document.files.size(); ++i)
+        if (!target.isEmpty() && document.files[i].path == target)
+            return headingAnchor(document, int(i), decodedFragment);
+    return {};
+}
+
+QString includedAnchor(const Document &document, const Destination &destination)
+{
+    if (destination.kind != Destination::Kind::LocalFile || !destination.absolute || destination.query) return {};
+    return includedAnchor(document, destination.path, destination.fragment);
 }
 
 } // namespace md

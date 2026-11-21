@@ -1391,6 +1391,102 @@ void exportsLinkIncludedFilesWithinThemselves()
     QVERIFY(!bytes.contains(QFile::encodeName(canonical(folder.path()))));
 }
 
+void pdfLocalLinksLeadFromTheOutputFolder()
+{
+    using namespace Qt::StringLiterals;
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVERIFY(QDir().mkpath(root.filePath(u"out"_s)));
+    writeFile(root.filePath(u"extra.html"_s), "Extra");
+    writeFile(root.filePath(u"chapters/near.html"_s), "Near");
+    writeFile(root.filePath(u"docs/notes.md"_s), "# Notes\n");
+    writeFile(root.filePath(u"chapters/part.md"_s), "# Part\n\n[Inherited][shared]\n\n"
+              "<a href='near.html#part'>Nearby</a> and [Notes](../docs/notes.md#notes).\n");
+    const QString source = root.filePath(u"book.md"_s);
+    writeFile(source, "# Book\n\n[Extra](extra.html?view=plain&mode=1#part%201) [Web](https://example.org/guide) "
+              "[Chapter](chapters/part.md#part) [Inside](#part)\n\nchapters/part.md\n\n[shared]: extra.html#inherited\n");
+    const auto loaded = load(source);
+    QVERIFY(!loaded.document.incomplete);
+    const QString output = root.filePath(u"out/paper.pdf"_s);
+    const auto result = Exporters::find(u"pdf"_s)->write(loaded.document, recipeFor(loaded, u"pdf"_s, output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const QByteArray bytes = readFile(output);
+    const QString pdf = QString::fromLatin1(bytes);
+    const QRegularExpression uri(u"/URI\\s*\\(([^\\r\\n)]*)\\)"_s);
+    QSet<QString> named;
+    for (const auto &match : uri.globalMatch(pdf)) named.insert(match.captured(1));
+    const QSet<QString> expected{u"../extra.html?view=plain&mode=1#part%201"_s, u"https://example.org/guide"_s,
+                                 u"../extra.html#inherited"_s, u"../chapters/near.html#part"_s, u"../docs/notes.md#notes"_s};
+    QCOMPARE(named, expected);
+    for (const QString &written : named) {
+        const QUrl url(written);
+        if (url.isRelative())
+            QVERIFY2(QFileInfo::exists(QDir(QFileInfo(output).absolutePath()).filePath(url.path(QUrl::FullyDecoded))),
+                     qPrintable(written));
+    }
+    QVERIFY(bytes.contains("/Dests"));
+    QVERIFY(!bytes.contains("file:"));
+    QVERIFY(!bytes.contains(QFile::encodeName(canonical(root.path()))));
+    const QString qpdf = tool("qpdf");
+    if (!qpdf.isEmpty()) {
+        QProcess check;
+        check.start(qpdf, {u"--check"_s, output});
+        QVERIFY(check.waitForFinished());
+        QVERIFY2(check.exitCode() == 0, check.readAllStandardError().constData());
+    }
+}
+
+void epubReportsLinksToFilesOutsideTheBook()
+{
+    using namespace Qt::StringLiterals;
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    writeFile(root.filePath(u"doc/sub/two.md"_s), "# Two\n\n## Café\n\nSecond chapter.\n");
+    writeFile(root.filePath(u"doc/extra.html"_s), "Extra");
+    writeFile(root.filePath(u"doc/info.html"_s), "Info");
+    writeFile(root.filePath(u"outside.html"_s), "Outside");
+    writeFile(root.filePath(u"doc/pics/cover.svg"_s),
+              "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2'><rect width='2' height='2'/></svg>");
+    const QString source = root.filePath(u"doc/book.md"_s);
+    writeFile(source, "# One\n\n[*Leaflet*](extra.html) [Repeat](extra.html)\n\n"
+              "<a title='Info' href='info.html?view=plain'><strong>HTML label</strong></a> [Outside](../outside.html)\n\n"
+              "[Next](#two) [Included](sub/two.md#two) [Accented](#caf%C3%A9) [Web](https://example.org/guide)\n\n"
+              "![Cover](pics/cover.svg)\n\nsub/two.md\n");
+    const auto loaded = load(source);
+    QVERIFY(!loaded.document.incomplete);
+    const QString output = root.filePath(u"book.epub"_s);
+    const Exporter *epub = Exporters::find(u"epub"_s);
+    const auto recipe = recipeFor(loaded, u"epub"_s, output);
+    const auto preflight = epub->limitations(loaded.document, recipe, {});
+    const auto result = epub->write(loaded.document, recipe, bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(result.limitations, preflight);
+    const QString messages = preflight.join(u'\n');
+    for (const auto &name : {u"extra.html"_s, u"info.html?view=plain"_s, u"../outside.html"_s})
+        QCOMPARE(messages.count(name), 1);
+
+    const auto zip = entriesOf(output);
+    const QByteArray first = entry(zip, u"OEBPS/chapter-1.xhtml"_s);
+    const QByteArray second = entry(zip, u"OEBPS/chapter-2.xhtml"_s);
+    QVERIFY(first.contains("<em>Leaflet</em>"));
+    QVERIFY(first.contains("Repeat"));
+    QVERIFY(first.contains("<strong>HTML label</strong>"));
+    QVERIFY(first.contains("Outside"));
+    QVERIFY(!first.contains("extra.html") && !first.contains("info.html") && !first.contains("outside.html"));
+    QVERIFY(!first.contains("href=\"\""));
+    QCOMPARE(first.count("href=\"chapter-2.xhtml#two\""), 2);
+    QVERIFY(first.contains("href=\"chapter-2.xhtml#caf%C3%A9\""));
+    QVERIFY(first.contains("href=\"https://example.org/guide\""));
+    QVERIFY(second.contains("id=\"two\"") && second.contains("id=\"café\""));
+    QVERIFY(first.contains("src=\"images/cover.svg\""));
+    const QByteArray package = entry(zip, u"OEBPS/content.opf"_s);
+    QVERIFY(package.contains("href=\"chapter-2.xhtml\""));
+    QVERIFY(package.contains("href=\"images/cover.svg\""));
+    QVERIFY(!package.contains("extra.html"));
+    QCOMPARE(entry(zip, u"OEBPS/images/cover.svg"_s), readFile(root.filePath(u"doc/pics/cover.svg"_s)));
+    QCOMPARE(readFile(root.filePath(u"outside.html"_s)), QByteArray("Outside"));
+}
+
 void htmlPicturesKeepTheirViewsAndOddFolderNames()
 {
     QTemporaryDir folder;

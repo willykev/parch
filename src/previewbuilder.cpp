@@ -470,14 +470,10 @@ QString Builder::taskImageName(bool checked)
 
 QString Builder::taskLink(int offset) { return QStringLiteral("parch:task/%1").arg(offset); }
 
-QString Builder::localHref(const md::Destination &target, const QString &written) const
+QString Builder::localHref(const md::Node &node, const md::Destination &target, const QString &written) const
 {
+    if (m_options.localLinks) return m_options.localLinks(node, written);
     if (!target.absolute) return written;
-    if (m_options.portableLinks) {
-        if (target.query) return written;
-        const QString anchor = md::includedAnchor(m_document, target.path, target.fragment);
-        return anchor.isEmpty() ? written : u'#' + anchor;
-    }
     return QUrl::fromLocalFile(target.path).toString(QUrl::FullyEncoded) + md::destinationSuffix(target);
 }
 
@@ -1784,7 +1780,7 @@ void Builder::inl(const Node &node, const Char &given)
             inner.href = u'#' + target.fragment;
             break;
         case md::Destination::Kind::LocalFile:
-            inner.href = localHref(target, node.dest);
+            inner.href = localHref(node, target, node.dest);
             break;
         default:
             inner.href = node.dest;
@@ -1878,7 +1874,7 @@ void Builder::htmlInline(const Node &node, const Char &state)
         md::Destination target;
         if (md::detail::isSafeUrl(href, false)) target = md::classifyDestination(m_document, node);
         if (target.kind == md::Destination::Kind::Anchor) inner.href = u'#' + target.fragment;
-        else if (target.kind == md::Destination::Kind::LocalFile) inner.href = localHref(target, href);
+        else if (target.kind == md::Destination::Kind::LocalFile) inner.href = localHref(node, target, href);
         else if (target.kind != md::Destination::Kind::Empty) inner.href = href;
         if (!inner.href.isEmpty()) {
             inner.ink = PreviewStyle::Link;

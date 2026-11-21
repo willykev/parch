@@ -372,6 +372,13 @@ private slots:
     void cliExportAssemblesMarkdown() { CliTests::exportAssemblesMarkdown(); }
     void cliExportAssemblyKeepsMeaning() { CliTests::exportAssemblyKeepsMeaning(); }
     void cliAssembledHeadingLinksKeepTheirTarget() { CliTests::assembledHeadingLinksKeepTheirTarget(); }
+    void cliAssembledLinksReachChaptersWithoutTheirFiles() { CliTests::assembledLinksReachChaptersWithoutTheirFiles(); }
+    void cliAssembledDestinationsKeepEncodedFragments() { CliTests::assembledDestinationsKeepEncodedFragments(); }
+    void cliAssembledChaptersKeepIndependentBlocks_data() { CliTests::assembledChaptersKeepIndependentBlocks_data(); }
+    void cliAssembledChaptersKeepIndependentBlocks() { CliTests::assembledChaptersKeepIndependentBlocks(); }
+    void cliAssembledLinksKeepTheirDefinitionScope() { CliTests::assembledLinksKeepTheirDefinitionScope(); }
+    void cliAssembledRepeatedChaptersShareTheirInlineNote() { CliTests::assembledRepeatedChaptersShareTheirInlineNote(); }
+    void cliEpubReportsOmittedLocalLinksOnTheCli() { CliTests::epubReportsOmittedLocalLinksOnTheCli(); }
     void cliAssembledListsKeepTheirNumbering() { CliTests::assembledListsKeepTheirNumbering(); }
     void cliHtmlHeadingLinksResolveInTheirChapter() { CliTests::htmlHeadingLinksResolveInTheirChapter(); }
     void cliInheritedReferencesUseTheirDefinitionFolder() { CliTests::inheritedReferencesUseTheirDefinitionFolder(); }
@@ -409,6 +416,8 @@ private slots:
     void screenshotNamesWhatCannotBeDone() { ScreenshotTests::namesWhatCannotBeDone(); }
     // Exports and printing. The tests themselves are in exporttests.cpp.
     void exportPdfSetsPagesWithSearchableText() { ExportTests::pdfSetsPagesWithSearchableText(); }
+    void pdfLocalLinksLeadFromTheOutputFolder() { ExportTests::pdfLocalLinksLeadFromTheOutputFolder(); }
+    void epubReportsLinksToFilesOutsideTheBook() { ExportTests::epubReportsLinksToFilesOutsideTheBook(); }
     void exportPdfKeepsHeadingsWithTheirText() { ExportTests::pdfKeepsHeadingsWithTheirText(); }
     void exportPdfTallTableRowsRunOntoTheNextPage() { ExportTests::pdfTallTableRowsRunOntoTheNextPage(); }
     void exportPdfSetsALongDocumentWhole() { ExportTests::pdfSetsALongDocumentWhole(); }

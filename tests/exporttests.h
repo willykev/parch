@@ -10,6 +10,8 @@ namespace ExportTests {
 void exportLinksKeepQueryAndFragment();
 
 void pdfSetsPagesWithSearchableText();
+void pdfLocalLinksLeadFromTheOutputFolder();
+void epubReportsLinksToFilesOutsideTheBook();
 void pdfKeepsHeadingsWithTheirText();
 void pdfTallTableRowsRunOntoTheNextPage();
 void pdfSetsALongDocumentWhole();

@@ -75,7 +75,9 @@ struct HtmlOptions {
     // destination (href or src) as the document has it, it returns the one
     // to write. A script URL it returns is still emptied in Safe mode. When
     // unset, every destination is written as the document has it.
-    std::function<QString(const Node &node, const QString &destination)> destination;
+    // A missing result omits the destination while keeping its content.
+    using DestinationWriter = std::function<std::optional<QString>(const Node &, const QString &)>;
+    DestinationWriter destination;
     // When set, citations and the bibliography as a citation style made them.
     std::optional<CitationHtml> citations;
     // When set, what is written for a formula, a diagram or an image in

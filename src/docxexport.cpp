@@ -5,6 +5,7 @@
 #include "htmlexport.h"
 #include "mdparser_p.h"
 #include "paperdocument.h"
+#include "picturedata.h"
 #include "saferead.h"
 #include "svgpaper.h"
 #include "zippackage.h"
@@ -15,7 +16,6 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
-#include <QImageReader>
 #include <QImageWriter>
 #include <QSet>
 
@@ -166,6 +166,7 @@ public:
     QStringList limitations;
     int formulasAsPictures = 0;
     int diagramsAsPictures = 0;
+    int reducedPictures = 0;
     int remoteImages = 0;
     int notesReferredAgain = 0;
     QStringList unreadImages;
@@ -439,7 +440,8 @@ private:
             Look shown = look;
             shown.italic = true;
             text(alt.isEmpty() ? node.dest : alt, shown);
-            if (!why.isEmpty()) unreadImages.append(QStringLiteral("%1 (%2)").arg(node.dest, why));
+            if (!why.isEmpty()) unreadImages.append(QStringLiteral("%1 (%2)").arg(
+                target.scheme == u"data" ? QStringLiteral("embedded picture") : node.dest, why));
         };
         if (target.kind == md::Destination::Kind::Remote) {
             ++remoteImages;
@@ -453,36 +455,23 @@ private:
             if (!read.ok) why = read.missing ? QStringLiteral("there is no such file") : read.error;
             else bytes = read.bytes;
         } else if (target.kind == md::Destination::Kind::OtherScheme && target.scheme == u"data") {
-            const qsizetype comma = node.dest.indexOf(u',');
-            if (comma > 0 && node.dest.left(comma).endsWith(QLatin1String(";base64")))
-                bytes = QByteArray::fromBase64(node.dest.mid(comma + 1).toLatin1());
+            bytes = PictureData::urlBytes(node.dest, SafeRead::PictureBytes, &why);
         }
         if (bytes.isEmpty()) {
             missing(why.isEmpty() ? QStringLiteral("not a picture parch can read") : why);
             return;
         }
-        QImage picture;
-        QSizeF size;
-        if (ExportWeb::Assets::mediaType(bytes, target.path) == u"image/svg+xml") {
-            size = SvgPaper::size(bytes);
-            picture = SvgPaper::raster(bytes, (size * 2).toSize());
-        } else {
-            QBuffer buffer(&bytes);
-            QImageReader reader(&buffer);
-            reader.setAutoTransform(true);
-            const QSize natural = reader.size();
-            if (natural.width() > 8192 || natural.height() > 8192)
-                reader.setScaledSize(natural.scaled(8192, 8192, Qt::KeepAspectRatio));
-            picture = reader.read();
-            size = picture.size();
-        }
-        if (picture.isNull() || size.isEmpty()) {
-            missing(QStringLiteral("not a picture parch can read"));
+        const auto source = PictureData::read(bytes);
+        const auto decoded = PictureData::decode(source, {.svgScale = 2});
+        if (decoded.image.isNull()) {
+            missing(decoded.error);
             return;
         }
-        // PNG and JPEG go in as they are; anything else as PNG.
-        const bool asIs = bytes.startsWith("\x89PNG") && picture.size() == size.toSize();
-        this->picture(asIs ? bytes : png(picture), size, alt.isEmpty() ? node.title : alt);
+        const qreal scale = source.format == "svg" ? 2 : 1;
+        if (!PictureData::fitsRaster(decoded.naturalSize, scale)) ++reducedPictures;
+        // Keep an original PNG only if it has the size being embedded.
+        const bool original = source.format == "png" && decoded.image.size() == decoded.naturalSize;
+        picture(original ? bytes : png(decoded.image), decoded.naturalSize, alt.isEmpty() ? node.title : alt);
     }
 
     void formula(const Node &node, const Look &look)
@@ -496,13 +485,14 @@ private:
             return;
         }
         const qreal scale = 4;
-        const QImage image = SvgPaper::raster(drawn->svg, (drawn->size * scale).toSize());
+        const QImage image = SvgPaper::raster(drawn->svg, PictureData::rasterSize(drawn->size, scale));
         if (image.isNull()) {
             Look source = look;
             source.code = true;
             text(node.text, source);
             return;
         }
+        if (!PictureData::fitsRaster(drawn->size, scale)) ++reducedPictures;
         ++formulasAsPictures;
         picture(png(image), drawn->size, node.text.simplified(), display ? 0 : drawn->size.height() - drawn->baseline);
     }
@@ -1521,6 +1511,8 @@ ExportResult DocxExporter::write(const md::Document &document, const ExportRecip
         result.limitations.append(QStringLiteral("Images from the web are not fetched, so their descriptions stand in "
                                                  "their place (%1)")
                                       .arg(Exporters::count(writer.remoteImages, QStringLiteral("image"), QStringLiteral("images"))));
+    if (writer.reducedPictures)
+        result.limitations.append(QStringLiteral("Pictures drawn at a lower resolution to fit the pixel limit: %1").arg(writer.reducedPictures));
     if (!writer.unreadImages.isEmpty())
         result.limitations.append(QStringLiteral("Images that could not be read are left out: %1")
                                       .arg(writer.unreadImages.join(QStringLiteral(", "))));

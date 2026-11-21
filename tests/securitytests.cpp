@@ -14,6 +14,7 @@
 #include "exports.h"
 #include "filepicker.h"
 #include "previewresources.h"
+#include "picturedata.h"
 #include "privatefiles.h"
 #include "remotefetcher.h"
 #include "renderhelpers.h"
@@ -29,6 +30,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QScopeGuard>
+#include <QSignalSpy>
 #include <QHostAddress>
 #include <QImage>
 #include <QNetworkProxy>
@@ -442,6 +444,50 @@ void aLinkedAssetsFolderIsNotFollowed()
     QCOMPARE(Attachments::savePasted(document, today, QStringLiteral("png"), "other").relative,
              QStringLiteral("assets/pasted-2026-11-16-3.png"));
     QVERIFY(!QFileInfo::exists(elsewhere + QStringLiteral("/target.png")));
+}
+
+void aHugePastedDataImageIsRefused()
+{
+    // Encoded spellings are measured by the bytes they carry.
+    QString why;
+    QCOMPARE(PictureData::urlBytes(u"data:image/png;base64,aGk%3D", 2, &why), QByteArray("hi"));
+    QVERIFY(why.isEmpty());
+    QVERIFY(PictureData::urlBytes(u"data:image/png;base64,aGV5", 2, &why).isEmpty());
+    QVERIFY(!why.isEmpty());
+    why.clear();
+    QCOMPARE(PictureData::urlBytes(u"data:image/png,%68%69", 2, &why), QByteArray("hi"));
+    QVERIFY(why.isEmpty());
+    QVERIFY(PictureData::urlBytes(u"data:image/png,%68%69!", 2, &why).isEmpty());
+    QVERIFY(!why.isEmpty());
+    QTemporaryDir folder;
+    const QString path = folder.filePath(QStringLiteral("paste.md"));
+    writeFile(path, "Text.\n");
+    ShellFixture shell({.files = {path}});
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    auto *binding = shell.binding();
+    QVERIFY(binding && binding->attachments());
+    QSignalSpy problems(binding->attachments(), &Attachments::problem);
+    QImage strip(8193, 1, QImage::Format_RGB32);
+    strip.fill(Qt::green);
+    QByteArray png;
+    QBuffer buffer(&png);
+    QVERIFY(buffer.open(QIODevice::WriteOnly) && strip.save(&buffer, "PNG"));
+    auto *mime = new QMimeData;
+    mime->setHtml(QStringLiteral("<img alt=\"Strip\" src=\"data:image/png;base64,%1\">").arg(QString::fromLatin1(png.toBase64())));
+    QGuiApplication::clipboard()->setMimeData(mime);
+    binding->select(0, 0);
+    QVERIFY(QMetaObject::invokeMethod(binding, "paste"));
+    QTRY_VERIFY(shell.document()->buffer()->text() != QStringLiteral("Text.\n"));
+    QVERIFY2(!problems.isEmpty(), qPrintable(shell.document()->buffer()->text()));
+    QVERIFY(problems.first().at(1).toString().contains(QStringLiteral("pixel"), Qt::CaseInsensitive));
+    QCOMPARE(shell.document()->buffer()->text(), QStringLiteral("StripText.\n"));
+    QVERIFY(QDir(folder.filePath("assets")).entryList(QDir::Files).isEmpty());
+    auto *small = new QMimeData;
+    small->setHtml(QStringLiteral("<img src=\"data:application/octet-stream;base64,%1\">").arg(QString::fromLatin1(pngBytes().toBase64())));
+    QGuiApplication::clipboard()->setMimeData(small);
+    QVERIFY(QMetaObject::invokeMethod(binding, "paste"));
+    QTRY_COMPARE(QDir(folder.filePath("assets")).entryList({QStringLiteral("*.png")}, QDir::Files).size(), 1);
+    QCOMPARE(problems.size(), 1);
 }
 
 void bigPastesConvertOffTheWindowThread()

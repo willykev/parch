@@ -36,8 +36,7 @@ public:
         QByteArray svg;
         // A diagram as Merman drew it, at print scale.
         QByteArray png;
-        // A diagram's SVG as Merman wrote it, which a browser draws as it
-        // is: for a web page and a book.
+        // Merman's source drawing for a web page or book to turn into plain SVG.
         QByteArray markup;
         // In logical pixels, at the font size the pictures are drawn for.
         QSizeF size;

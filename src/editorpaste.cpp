@@ -5,6 +5,7 @@
 
 #include "attachments.h"
 #include "htmlmarkdown.h"
+#include "picturedata.h"
 #include "sourceboundaries.h"
 
 #include <QBuffer>
@@ -71,6 +72,27 @@ bool mergesIn(const Document *document)
     return TableGrids::dialectOf(document->markdownOptions()).mergedCells;
 }
 
+Attachments::Placed saveClipboardImage(const QString &folder, const QDate &date, const QByteArray &bytes, QImage image = {})
+{
+    if (!bytes.isEmpty()) {
+        const auto source = PictureData::read(bytes);
+        const auto decoded = PictureData::decode(source, {.refuseOversize = true});
+        if (decoded.image.isNull()) return {{}, decoded.error};
+        const QString extension = Attachments::extensionFor(source.mediaType());
+        if (!extension.isEmpty()) return Attachments::savePasted(folder, date, extension, source.bytes);
+        image = decoded.image;
+    }
+    if (image.isNull()) return {{}, EditorBinding::tr("The image on the clipboard could not be read")};
+    if (!PictureData::fitsRaster(image.size()))
+        return {{}, EditorBinding::tr("The picture exceeds 8192 pixels on a side or 64 million pixels in all")};
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG"))
+        return {{}, EditorBinding::tr("The image on the clipboard could not be saved")};
+    if (png.size() > SafeRead::PictureBytes) return {{}, SafeRead::tooLargeReason(SafeRead::PictureBytes)};
+    return Attachments::savePasted(folder, date, QStringLiteral("png"), png);
+}
+
 void convertPaste(Attachments *attachments, Insertion *insertion, const QString &html, const QString &plain,
                   const QString &folder, const QDate &date, bool images)
 {
@@ -81,23 +103,13 @@ void convertPaste(Attachments *attachments, Insertion *insertion, const QString 
             Converted converted;
             HtmlMarkdown::ImageSink save;
             if (images) {
-                save = [&](const QByteArray &bytes, const QString &type) -> QString {
-                    QString extension = Attachments::extensionFor(type);
-                    QByteArray data = bytes;
-                    if (extension.isEmpty()) {
-                        QImage image;
-                        if (!image.loadFromData(bytes)) return {};
-                        data.clear();
-                        QBuffer buffer(&data);
-                        if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) return {};
-                        extension = QStringLiteral("png");
-                    }
-                    const Attachments::Placed placed = Attachments::savePasted(folder, date, extension, data);
+                save = [&](const QByteArray &bytes, const QString &) -> QString {
+                    const auto placed = saveClipboardImage(folder, date, bytes);
                     if (!placed.error.isEmpty()) converted.errors << placed.error;
                     return placed.relative;
                 };
             }
-            converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly, mergedCells);
+            converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly, mergedCells, &converted.errors);
             if (!images && overgrown(converted.markdown, html)) converted.markdown.clear();
             return converted;
         },
@@ -266,23 +278,19 @@ void EditorBinding::pasteImage(const QMimeData *mime, const QString &alt, Source
     if (!m_attachments || !m_document) return;
     // Bytes in a format worth keeping as it is; or else bytes of another
     // format, or the image itself, made a PNG on the worker.
-    QString extension;
-    QByteArray bytes, other;
+    QByteArray bytes;
     for (const QString &type : keptImageTypes()) {
-        if (!mime->hasFormat(type)) continue;
-        bytes = mime->data(type);
-        if (bytes.isEmpty()) continue;
-        extension = Attachments::extensionFor(type);
-        break;
+        if (mime->hasFormat(type)) bytes = mime->data(type);
+        if (!bytes.isEmpty()) break;
     }
     QImage image;
     if (bytes.isEmpty()) {
-        const QStringList formats = mime->formats();
-        for (const QString &format : formats)
-            if (other.isEmpty() && format.startsWith(QStringLiteral("image/"))) other = mime->data(format);
-        if (other.isEmpty()) image = qvariant_cast<QImage>(mime->imageData());
-        if (other.isEmpty() && image.isNull()) return;
-        extension = QStringLiteral("png");
+        for (const QString &format : mime->formats()) {
+            if (format.startsWith(QStringLiteral("image/"))) bytes = mime->data(format);
+            if (!bytes.isEmpty()) break;
+        }
+        if (bytes.isEmpty()) image = qvariant_cast<QImage>(mime->imageData());
+        if (bytes.isEmpty() && image.isNull()) return;
     }
     auto *insertion = new Insertion(m_document, range);
     writeThrough(insertion);
@@ -292,17 +300,7 @@ void EditorBinding::pasteImage(const QMimeData *mime, const QString &alt, Source
     const QPointer<EditorBinding> view(this);
     attachments->run<Attachments::Placed>(
         insertion,
-        [folder, date, extension, bytes, other, image] {
-            QByteArray data = bytes;
-            if (data.isEmpty()) {
-                QImage decoded = image;
-                if (!other.isEmpty()) decoded.loadFromData(other);
-                QBuffer buffer(&data);
-                if (decoded.isNull() || !buffer.open(QIODevice::WriteOnly) || !decoded.save(&buffer, "PNG"))
-                    return Attachments::Placed{{}, tr("The image on the clipboard could not be read")};
-            }
-            return Attachments::savePasted(folder, date, extension, data);
-        },
+        [folder, date, bytes, image] { return saveClipboardImage(folder, date, bytes, image); },
         [insertion, attachments, alt, view](Attachments::Placed placed) {
             if (!placed.error.isEmpty()) {
                 insertion->cancel();

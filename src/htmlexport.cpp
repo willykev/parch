@@ -1,6 +1,7 @@
 #include "htmlexport.h"
 
 #include "mdhtml.h"
+#include "picturedata.h"
 #include "saferead.h"
 #include "svgpaper.h"
 
@@ -62,6 +63,7 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
     if (destination) options.destination = destination;
     else options.destination = Exporters::destinationsFrom(document, folder);
     if (recipe.citations) options.citations = DocumentCitations::html(*recipe.citations);
+    QHash<const ExportPictures::Picture *, QString> formulas;
     const qreal fontSize = pictures ? pictures->options().fontSize : 16;
     options.picture = [&](const md::Node &node) -> QString {
         switch (node.type) {
@@ -69,16 +71,16 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
         case md::NodeType::MathBlock: {
             const bool display = node.type == md::NodeType::MathBlock || node.display;
             const ExportPictures::Picture *drawn = pictures ? pictures->formula(node.text, display) : nullptr;
-            return drawn ? formula(*drawn, node.text, display, fontSize) : QString();
+            if (!drawn) return {};
+            if (const auto it = formulas.constFind(drawn); it != formulas.cend()) return *it;
+            const QString markup = formula(*drawn, node.text, display, fontSize, book ? &assets : nullptr);
+            formulas.insert(drawn, markup);
+            return markup;
         }
         case md::NodeType::MermaidBlock: {
             const ExportPictures::Picture *drawn = pictures ? pictures->diagram(node.text) : nullptr;
             if (!drawn || !drawn->drawn) return {};
-            // A browser draws Merman's own SVG; a reader may not, so a book
-            // gets it plain, shapes and outlines alone.
-            const QByteArray svg = !book ? diagramSvg(*drawn)
-                                   : drawn->vector() ? drawn->svg
-                                                     : SvgPaper::plain(drawn->markup);
+            const QByteArray svg = diagramSvg(*drawn);
             const QString url = !svg.isEmpty() ? assets.bytes(svg, QStringLiteral("image/svg+xml"), QStringLiteral("diagram.svg"))
                                                : assets.bytes(drawn->png, QStringLiteral("image/png"), QStringLiteral("diagram.png"));
             return QStringLiteral("<figure class=\"diagram\"><img src=\"%1\" alt=\"%2\" width=\"%3\" height=\"%4\" /></figure>")
@@ -98,19 +100,25 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
                 ++result.remoteImages;
                 return description();
             }
-            if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return {};
-            QString error;
-            const QString url = assets.file(target.path, document.resourceFolders, &error);
+            const bool embedded = target.kind == md::Destination::Kind::OtherScheme && target.scheme == u"data";
+            if (!embedded && (target.kind != md::Destination::Kind::LocalFile || !target.absolute)) return {};
+            QString error, url;
+            if (embedded) {
+                const auto bytes = PictureData::urlBytes(src, SafeRead::PictureBytes, &error);
+                if (error.isEmpty()) url = assets.picture(bytes, QStringLiteral("picture"), &error);
+            } else {
+                url = assets.file(target.path, document.resourceFolders, &error);
+            }
             if (url.isEmpty()) {
-                const QString detail = QStringLiteral("%1 (%2)").arg(QFileInfo(target.path).fileName(), error);
-                if (!book && SafeRead::pictureRefusal(target.path, document.resourceFolders).isEmpty()) {
+                const QString detail = QStringLiteral("%1 (%2)").arg(embedded ? QStringLiteral("embedded picture") : QFileInfo(target.path).fileName(), error);
+                if (!book && !embedded && SafeRead::pictureRefusal(target.path, document.resourceFolders).isEmpty()) {
                     result.fallbackLinks.append(detail);
                     return {};
                 }
                 result.unreadImages.append(detail);
                 return description();
             }
-            if (assets.mode() == Assets::Mode::Link) {
+            if (!embedded && assets.mode() == Assets::Mode::Link) {
                 ++result.imagesLinked;
                 return {};
             }

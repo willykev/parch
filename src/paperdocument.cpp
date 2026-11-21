@@ -1,13 +1,13 @@
 #include "paperdocument.h"
 
 #include "exporter.h"
+#include "picturedata.h"
 #include "saferead.h"
 #include "svgpaper.h"
 
 #include <QAbstractTextDocumentLayout>
-#include <QBuffer>
+#include <QCryptographicHash>
 #include <QFileInfo>
-#include <QImageReader>
 #include <QPagedPaintDevice>
 #include <QPainter>
 #include <QScopeGuard>
@@ -34,7 +34,12 @@ class Objects : public QObject, public QTextObjectInterface {
 
 public:
     // Vectors by picture name, and the height of a page's text.
-    QHash<QString, QByteArray> vectors;
+    struct Vector {
+        QByteArray plain;
+        QSizeF size;
+        std::shared_ptr<QSvgRenderer> renderer;
+    };
+    QHash<QString, Vector> vectors;
     qreal bodyHeight = 0;
     // A formula in the text: its height and its baseline from its top, by
     // picture name.
@@ -98,10 +103,11 @@ public:
             }
             drawn.insert(position, target);
         }
-        if (const auto vector = vectors.constFind(base); vector != vectors.cend()) {
-            QSvgRenderer &renderer = rendererFor(base, *vector);
-            if (renderer.isValid()) {
-                renderer.render(painter, target);
+        if (auto vector = vectors.find(base); vector != vectors.end()) {
+            // Only the drawing written by cairo reaches this renderer.
+            if (!vector->renderer) vector->renderer = std::make_shared<QSvgRenderer>(vector->plain);
+            if (vector->renderer->isValid()) {
+                vector->renderer->render(painter, target);
                 return;
             }
         }
@@ -117,22 +123,10 @@ public:
 private:
     QSizeF naturalSize(QTextDocument *document, const QString &name)
     {
-        if (const auto vector = vectors.constFind(name); vector != vectors.cend()) {
-            const QSizeF size = SvgPaper::size(*vector);
-            if (size.isValid() && !size.isEmpty()) return size;
-        }
+        if (const auto vector = vectors.constFind(name); vector != vectors.cend()) return vector->size;
         const QImage picture = document->resource(QTextDocument::ImageResource, QUrl(name)).value<QImage>();
         return picture.isNull() ? QSizeF(1, 1) : QSizeF(picture.size());
     }
-
-    QSvgRenderer &rendererFor(const QString &name, const QByteArray &svg)
-    {
-        auto &renderer = m_renderers[name];
-        if (!renderer) renderer = std::make_shared<QSvgRenderer>(svg);
-        return *renderer;
-    }
-
-    QHash<QString, std::shared_ptr<QSvgRenderer>> m_renderers;
 };
 
 } // namespace paper_detail
@@ -140,8 +134,6 @@ private:
 using paper_detail::Objects;
 
 namespace {
-
-constexpr int kMaxSide = 8192;
 
 QImage transparentDot()
 {
@@ -156,7 +148,8 @@ QImage transparentDot()
 // and images read from disk whole.
 class PaperDocument::Resources : public preview::Resources {
 public:
-    Resources(const ExportPictures *pictures, Objects *objects) : m_pictures(pictures), m_objects(objects) {}
+    Resources(const ExportPictures *pictures, Objects *objects, qint64 pixels)
+        : m_pictures(pictures), m_objects(objects), m_pixelsLeft(pixels) {}
 
     preview::Picture math(const QString &tex, bool display, qreal fontSize) override
     {
@@ -172,11 +165,18 @@ public:
         const qreal scale = fontSize / std::max<qreal>(1, m_pictures->options().fontSize);
         picture.state = preview::Picture::Ready;
         picture.key = QStringLiteral("formula/%1/%2").arg(indexOf(QStringLiteral("f") + (display ? u'd' : u'i') + tex)).arg(fontSize);
-        picture.image = transparentDot();
+        if (const auto it = m_images.constFind(picture.key); it != m_images.cend()) return *it;
+        const QByteArray plain = SvgPaper::plain(drawn->svg, &picture.diagnostic);
+        if (!plain.isEmpty()) readVector(plain, drawn->size, picture);
+        if (picture.image.isNull()) {
+            picture.state = preview::Picture::Failed;
+            m_unread << QStringLiteral("formula (%1)").arg(picture.diagnostic);
+        }
         picture.size = drawn->size * scale;
         picture.baseline = drawn->baseline * scale;
         picture.description = drawn->description;
-        m_objects->vectors.insert(picture.key, drawn->svg);
+        m_images.insert(picture.key, picture);
+        if (picture.state != preview::Picture::Ready) return picture;
         m_objects->formulas.insert(picture.key, {picture.size.height(), picture.baseline});
         if (!display) m_formulas.insert(picture.key, {tex, picture.baseline});
         return picture;
@@ -195,15 +195,18 @@ public:
             return picture;
         }
         picture.key = QStringLiteral("diagram/%1").arg(indexOf(QStringLiteral("d") + source));
-        picture.image = QImage::fromData(drawn->png, "PNG");
-        if (picture.image.isNull()) {
-            picture.diagnostic = QStringLiteral("The diagram's picture cannot be read.");
-            return picture;
+        const auto known = m_images.constFind(picture.key);
+        if (known != m_images.cend()) return *known;
+        if (drawn->vector()) {
+            readVector(drawn->svg, drawn->size, picture);
+        } else {
+            readRaster(PictureData::read(drawn->png), picture);
         }
-        picture.state = preview::Picture::Ready;
+        if (picture.image.isNull()) m_unread << QStringLiteral("diagram (%1)").arg(picture.diagnostic);
+        else picture.state = preview::Picture::Ready;
         picture.size = drawn->size;
         picture.description = drawn->description;
-        if (drawn->vector()) m_objects->vectors.insert(picture.key, drawn->svg);
+        m_images.insert(picture.key, picture);
         return picture;
     }
 
@@ -211,29 +214,49 @@ public:
     {
         preview::Picture picture;
         picture.state = preview::Picture::Failed;
-        picture.key = QStringLiteral("image/%1").arg(indexOf(QStringLiteral("i") + written + u'\n' + destination.path));
-        switch (destination.kind) {
-        case md::Destination::Kind::LocalFile:
-            if (!destination.absolute) {
-                picture.diagnostic = QStringLiteral("the document has no folder to find it in");
-                break;
-            }
-            readFile(destination.path, folders, picture);
-            break;
-        case md::Destination::Kind::OtherScheme:
-            if (destination.scheme == u"data") readData(written, picture);
-            else picture.diagnostic = QStringLiteral("not a picture parch can read");
-            break;
-        case md::Destination::Kind::Remote:
+        QByteArray bytes;
+        QString identity;
+        if (destination.kind == md::Destination::Kind::Remote) {
             picture.diagnostic = QStringLiteral("pictures from the web are not fetched for an export");
             ++m_remote;
-            break;
-        default:
-            picture.diagnostic = QStringLiteral("not a picture parch can read");
-            break;
+            return picture;
         }
-        if (picture.state == preview::Picture::Failed && destination.kind != md::Destination::Kind::Remote)
-            m_unread.append(QStringLiteral("%1 (%2)").arg(written, picture.diagnostic));
+        if (destination.kind == md::Destination::Kind::LocalFile && destination.absolute) {
+            const QString canonical = QFileInfo(destination.path).canonicalFilePath();
+            // Every cached file was opened within this paper document's resource folders.
+            if (const auto it = m_images.constFind(canonical); it != m_images.cend()) return *it;
+            const auto read = SafeRead::readPicture(destination.path, folders);
+            if (read.ok) {
+                identity = read.canonicalPath;
+                bytes = read.bytes;
+            } else {
+                picture.diagnostic = read.missing ? QStringLiteral("there is no such file") : read.error;
+            }
+        } else if (destination.scheme == u"data") {
+            bytes = PictureData::urlBytes(written, SafeRead::PictureBytes, &picture.diagnostic);
+            if (!bytes.isEmpty())
+                identity = QStringLiteral("data:") + QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+        } else {
+            picture.diagnostic = destination.kind == md::Destination::Kind::LocalFile
+                ? QStringLiteral("the document has no folder to find it in") : QStringLiteral("not a picture parch can read");
+        }
+
+        if (!identity.isEmpty()) {
+            if (const auto it = m_images.constFind(identity); it != m_images.cend()) return *it;
+            picture.key = QStringLiteral("image/%1").arg(m_images.size() + 1);
+            const auto source = PictureData::read(bytes);
+            if (source.format == "svg") {
+                const QByteArray plain = SvgPaper::plain(source.bytes, &picture.diagnostic);
+                if (!plain.isEmpty()) readVector(plain, SvgPaper::size(plain), picture);
+            } else {
+                readRaster(source, picture);
+            }
+            if (!picture.image.isNull()) picture.state = preview::Picture::Ready;
+            m_images.insert(identity, picture);
+        }
+        if (picture.state == preview::Picture::Failed)
+            m_unread << QStringLiteral("%1 (%2)").arg(destination.scheme == u"data" ? QStringLiteral("embedded picture") : written,
+                                                       picture.diagnostic);
         return picture;
     }
 
@@ -256,62 +279,36 @@ private:
         return index;
     }
 
-    void readFile(const QString &path, const QStringList &folders, preview::Picture &picture)
+    void readVector(const QByteArray &plain, QSizeF size, preview::Picture &picture)
     {
-        const SafeRead::Result read = SafeRead::readPicture(path, folders);
-        if (!read.ok) {
-            picture.diagnostic = read.missing ? QStringLiteral("there is no such file") : read.error;
+        const qint64 pixels = SvgPaper::embeddedPixels(plain);
+        if (pixels < 0) {
+            readRaster({"svg", plain, {}}, picture);
             return;
         }
-        // An SVG picture is printed as vectors.
-        if (QFileInfo(path).suffix().compare(QLatin1String("svg"), Qt::CaseInsensitive) == 0) {
-            QString error;
-            const QByteArray plain = SvgPaper::plain(read.bytes, &error);
-            if (plain.isEmpty()) {
-                picture.diagnostic = error;
-                return;
-            }
-            picture.state = preview::Picture::Ready;
-            picture.image = transparentDot();
-            picture.size = SvgPaper::size(plain);
-            m_objects->vectors.insert(picture.key, plain);
+        if (pixels > m_pixelsLeft) {
+            picture.diagnostic = QStringLiteral("there is no room for this picture within the total pixel limit");
             return;
         }
-        QBuffer buffer;
-        buffer.setData(read.bytes);
-        buffer.open(QIODevice::ReadOnly);
-        QImageReader reader(&buffer);
-        reader.setAutoTransform(true);
-        const QSize size = reader.size();
-        if (size.width() > kMaxSide || size.height() > kMaxSide)
-            reader.setScaledSize(size.scaled(kMaxSide, kMaxSide, Qt::KeepAspectRatio));
-        picture.image = reader.read();
-        if (picture.image.isNull()) {
-            picture.diagnostic = reader.errorString();
-            return;
-        }
-        picture.state = preview::Picture::Ready;
-        picture.size = picture.image.size();
+        m_pixelsLeft -= pixels;
+        picture.image = transparentDot();
+        picture.size = size;
+        m_objects->vectors.insert(picture.key, {plain, size, {}});
     }
 
-    void readData(const QString &url, preview::Picture &picture)
+    void readRaster(const PictureData::Source &source, preview::Picture &picture)
     {
-        const qsizetype comma = url.indexOf(u',');
-        if (comma < 0 || !url.left(comma).endsWith(QLatin1String(";base64"))) {
-            picture.diagnostic = QStringLiteral("not a picture parch can read");
-            return;
-        }
-        picture.image = QImage::fromData(QByteArray::fromBase64(url.mid(comma + 1).toLatin1()));
-        if (picture.image.isNull()) {
-            picture.diagnostic = QStringLiteral("not a picture parch can read");
-            return;
-        }
-        picture.state = preview::Picture::Ready;
-        picture.size = picture.image.size();
+        const auto decoded = PictureData::decode(source, {.pixelsLeft = m_pixelsLeft});
+        picture.image = decoded.image;
+        picture.size = decoded.naturalSize;
+        picture.diagnostic = decoded.error;
+        m_pixelsLeft -= qint64(picture.image.width()) * picture.image.height();
     }
 
     const ExportPictures *m_pictures;
     Objects *m_objects;
+    qint64 m_pixelsLeft;
+    QHash<QString, preview::Picture> m_images;
     QHash<QString, int> m_names;
     QHash<QString, Formula> m_formulas;
     QStringList m_unread;
@@ -397,7 +394,7 @@ PaperDocument::PaperDocument(const md::Document &document, const DocumentCitatio
     // What the builder draws itself, such as a task's box, at print sharpness.
     m_style.scale = 4;
     auto objects = std::make_unique<Objects>();
-    m_resources = std::make_unique<Resources>(pictures, objects.get());
+    m_resources = std::make_unique<Resources>(pictures, objects.get(), options.picturePixelBudget);
     m_objects = std::move(objects);
 }
 

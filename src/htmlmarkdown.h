@@ -27,7 +27,7 @@ using ImageSink = std::function<QString(const QByteArray &bytes, const QString &
 // HTML shows nothing. Line breaks are LF. `inlineOnly`, when given, says
 // whether the Markdown is one paragraph, which can go inside a line.
 QString convert(const QString &html, const ImageSink &images = {}, bool *inlineOnly = nullptr,
-                bool mergedCells = false);
+                bool mergedCells = false, QStringList *imageErrors = nullptr);
 
 struct TableCells {
     QList<QStringList> rows;

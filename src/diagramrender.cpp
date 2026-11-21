@@ -581,6 +581,8 @@ RenderResult read(const HelperOutcome &svg, const HelperOutcome &png, const Rend
     QBuffer buffer;
     buffer.setData(png.output);
     QImageReader reader(&buffer, "png");
+    reader.setAutoDetectImageFormat(false);
+    reader.setDecideFormatFromContent(false);
     const QSize pixels = reader.size();
     if (!pixels.isValid() || pixels.isEmpty() || !size.isValid() || size.isEmpty()) {
         result.status = RenderResult::Failed;

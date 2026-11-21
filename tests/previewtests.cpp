@@ -2867,6 +2867,48 @@ void pathologicalBlocksStayCheapToLayOut()
     QCOMPARE(copied.value(0).trimmed(), QStringLiteral("Start ") + QString(3000, u'z') + QStringLiteral(" end."));
 }
 
+void aWebSvgIsDrawnWithoutItsOutsidePictures()
+{
+    SvgSwatch swatch;
+    TestFetcher fetcher;
+    PreviewResources resources;
+    resources.setFetcher(&fetcher);
+    resources.setRemoteAllowed(true);
+    const QString url = QStringLiteral("https://example.test/swatch.png");
+    const auto image = [&] { return resources.image(md::classifyDestination(url, {}), url, {}); };
+    QCOMPARE(image().state, Picture::Pending);
+    QCOMPARE(fetcher.asked(), QList<QUrl>{QUrl(url)});
+    fetcher.answer(QUrl(url), swatch.svg());
+    QTRY_COMPARE(resources.pending(), 0);
+    const Picture shown = image();
+    QCOMPARE(shown.state, Picture::Ready);
+    QVERIFY(pixelsNear(shown.image, QColor("#008000"), 5) > 0);
+    QCOMPARE(pixelsNear(shown.image, Qt::magenta, 5), 0);
+}
+
+void helperSvgWithAnOutsideReferenceIsNotPaintedByQt()
+{
+    SvgSwatch swatch;
+    QTemporaryDir folder;
+    const QString path = folder.filePath(QStringLiteral("render-svg"));
+    writeFile(path, "#!/bin/sh\ncat >/dev/null\necho 'OK     1 x' >&2\ncat <<'SVG'\n" + swatch.svg() + "\nSVG\n");
+    QVERIFY(QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    PreviewResources resources;
+    resources.setRenderService(&service);
+    const auto math = [&] { return resources.math(QStringLiteral("x"), false, 16); };
+    QCOMPARE(math().state, Picture::Pending);
+    QTRY_COMPARE_WITH_TIMEOUT(resources.pending(), 0, 10000);
+    const Picture shown = math();
+    if (shown.state == Picture::Failed) {
+        QVERIFY(!shown.diagnostic.isEmpty());
+    } else {
+        QCOMPARE(shown.state, Picture::Ready);
+        QVERIFY(pixelsNear(shown.image, QColor("#008000"), 5) > 0);
+        QCOMPARE(pixelsNear(shown.image, Qt::magenta, 5), 0);
+    }
+}
+
 void webPicturesWaitUntilAsked()
 {
     QAccessible::setActive(true);

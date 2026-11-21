@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Pictures open by their contents, whatever their extension, and a PDF is no
+  longer read as a picture. An SVG draws only the pictures embedded in it,
+  never other files on your computer. HTML and EPUB carry its drawing and
+  named views without scripts, and Markdown copies keep the original file.
+- Large pictures and formulas keep their size on the Word page at a lower
+  resolution. PDF exports reuse repeated pictures and report any left out
+  at the total pixel limit.
+- Pasting an oversized picture from a web page keeps its alt text and
+  explains why the picture could not be saved.
+
 - Tables show as grids in the text, between the paragraphs, and you write in
   their cells as anywhere else. `Tab`, `Enter` and the arrows go from cell to
   cell, and `Tab` or `Enter` on the last row adds one. Handles beside each row

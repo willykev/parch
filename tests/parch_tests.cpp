@@ -409,6 +409,16 @@ private slots:
     void screenshotWritesNothingOfThePersons() { ScreenshotTests::writesNothingOfThePersons(); }
     void screenshotNamesWhatCannotBeDone() { ScreenshotTests::namesWhatCannotBeDone(); }
     // Exports and printing. The tests themselves are in exporttests.cpp.
+    void svgPicturesUseTheirDrawingInEveryFormat() { ExportTests::svgPicturesUseTheirDrawingInEveryFormat(); }
+    void aPdfIsNotAPicture() { ExportTests::aPdfIsNotAPicture(); }
+    void picturesAreReadByTheirOwnFormat_data() { ExportTests::picturesAreReadByTheirOwnFormat_data(); }
+    void picturesAreReadByTheirOwnFormat() { ExportTests::picturesAreReadByTheirOwnFormat(); }
+    void exportedSvgPicturesHoldNoScript_data() { ExportTests::exportedSvgPicturesHoldNoScript_data(); }
+    void exportedSvgPicturesHoldNoScript() { ExportTests::exportedSvgPicturesHoldNoScript(); }
+    void inlineFormulaSvgKeepsOnlyDrawingElements() { ExportTests::inlineFormulaSvgKeepsOnlyDrawingElements(); }
+    void hugeSvgSizesAreDrawnWithinBounds() { ExportTests::hugeSvgSizesAreDrawnWithinBounds(); }
+    void onePictureNamedManyWaysIsDecodedOnce() { ExportTests::onePictureNamedManyWaysIsDecodedOnce(); }
+    void picturesPastTheBudgetAreLeftOutWithANote() { ExportTests::picturesPastTheBudgetAreLeftOutWithANote(); }
     void exportPdfSetsPagesWithSearchableText() { ExportTests::pdfSetsPagesWithSearchableText(); }
     void pdfLocalLinksLeadFromTheOutputFolder() { ExportTests::pdfLocalLinksLeadFromTheOutputFolder(); }
     void epubReportsLinksToFilesOutsideTheBook() { ExportTests::epubReportsLinksToFilesOutsideTheBook(); }
@@ -813,6 +823,8 @@ private slots:
     void restoringReadsHistoryOffTheUiThread() { LibraryTests::restoringReadsHistoryOffTheUiThread(); }
     void repeatedLibrarySearchesReadLittleAgain() { LibraryTests::repeatedLibrarySearchesReadLittleAgain(); }
     // The preview and the three views, written in previewtests.cpp.
+    void aWebSvgIsDrawnWithoutItsOutsidePictures() { PreviewTests::aWebSvgIsDrawnWithoutItsOutsidePictures(); }
+    void helperSvgWithAnOutsideReferenceIsNotPaintedByQt() { PreviewTests::helperSvgWithAnOutsideReferenceIsNotPaintedByQt(); }
     void viewModesAreKeptByEachView() { PreviewTests::viewModesAreKeptByEachView(); }
     void previewBuildsTextAndInlineFormatting() { PreviewTests::previewBuildsTextAndInlineFormatting(); }
     void previewBuildsListsQuotesAndRules() { PreviewTests::previewBuildsListsQuotesAndRules(); }
@@ -1003,6 +1015,7 @@ private slots:
     void aShortSwipeAlongAGlideAddsToIt() { TouchpadTests::aShortSwipeAlongAGlideAddsToIt(); }
     void theEditorAndThePreviewGlide() { TouchpadTests::theEditorAndThePreviewGlide(); }
     // What parch refuses to reach or write, written in securitytests.cpp.
+    void aHugePastedDataImageIsRefused() { SecurityTests::aHugePastedDataImageIsRefused(); }
     void webPictureRequestsKeepTheirHost() { SecurityTests::webPictureRequestsKeepTheirHost(); }
     void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }
     void webPicturesNeverComeFromThisComputersNetworks() { SecurityTests::webPicturesNeverComeFromThisComputersNetworks(); }

@@ -2,19 +2,23 @@
 
 #include "documentreading.h"
 #include "mdhtml.h"
+#include "picturedata.h"
 #include "saferead.h"
+#include "svgpaper.h"
 
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QMimeDatabase>
-#include <QScopeGuard>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSet>
 #include <QUrl>
+#include <QXmlStreamReader>
+#include <QXmlStreamWriter>
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -28,12 +32,9 @@ namespace {
 
 QString suffixFor(const QString &mediaType)
 {
-    if (mediaType == u"image/png") return QStringLiteral("png");
     if (mediaType == u"image/jpeg") return QStringLiteral("jpg");
-    if (mediaType == u"image/gif") return QStringLiteral("gif");
-    if (mediaType == u"image/webp") return QStringLiteral("webp");
     if (mediaType == u"image/svg+xml") return QStringLiteral("svg");
-    return QStringLiteral("bin");
+    return mediaType.sliced(6);
 }
 
 // A file name a folder, a URL and a ZIP all take as it is: letters, digits,
@@ -102,15 +103,9 @@ Assets::Assets(Mode mode, const QString &folder, const QString &outputFolder)
 {
 }
 
-QString Assets::mediaType(const QByteArray &data, const QString &name)
+QString Assets::mediaType(const QByteArray &data, const QString &)
 {
-    if (data.startsWith("\x89PNG\r\n\x1a\n")) return QStringLiteral("image/png");
-    if (data.startsWith("\xff\xd8\xff")) return QStringLiteral("image/jpeg");
-    if (data.startsWith("GIF87a") || data.startsWith("GIF89a")) return QStringLiteral("image/gif");
-    if (data.startsWith("RIFF") && data.mid(8, 4) == "WEBP") return QStringLiteral("image/webp");
-    const QString type = QMimeDatabase().mimeTypeForFileNameAndData(name, data).name();
-    if (type == u"image/svg+xml") return type;
-    return {};
+    return PictureData::read(data).mediaType();
 }
 
 QString Assets::file(const QString &absolutePath, const QStringList &folders, QString *error)
@@ -126,15 +121,86 @@ QString Assets::file(const QString &absolutePath, const QStringList &folders, QS
         *error = read.error;
         return {};
     }
-    const QByteArray &data = read.bytes;
-    const QString type = mediaType(data, absolutePath);
-    if (type.isEmpty()) {
-        *error = QStringLiteral("not a picture a page can show");
+    const QString url = picture(read.bytes, QFileInfo(absolutePath).fileName(), error);
+    if (!url.isEmpty()) m_byPath.insert(absolutePath, url);
+    return url;
+}
+
+namespace {
+
+// Keep named views and the coordinates used by svgView fragments. Only the
+// geometry of the views travels from the source into the new drawing.
+void keepViews(const QByteArray &svg, QByteArray &drawing)
+{
+    static const QRegularExpression separator(QStringLiteral("[,\\s]+"));
+    const auto box = [&](QStringView value) -> QRectF {
+        const auto fields = value.trimmed().toString().split(separator);
+        if (fields.size() != 4) return {};
+        double coordinates[4];
+        for (int i = 0; i < 4; ++i) {
+            bool ok = false;
+            coordinates[i] = fields[i].toDouble(&ok);
+            if (!ok || !std::isfinite(coordinates[i])) return {};
+        }
+        return QRectF(coordinates[0], coordinates[1], coordinates[2], coordinates[3]);
+    };
+    QXmlStreamReader xml(svg);
+    if (!xml.readNextStartElement()) return;
+    const auto canvas = box(xml.attributes().value(u"viewBox"));
+    const auto svgNamespace = xml.namespaceUri().toString();
+    QByteArray views;
+    QXmlStreamWriter writer(&views);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement() || xml.name() != u"view" || xml.namespaceUri() != svgNamespace) continue;
+        const auto attrs = xml.attributes();
+        const QString id = attrs.value(u"id").toString();
+        const QRectF view = box(attrs.value(u"viewBox"));
+        if (id.isEmpty() || view.isEmpty()) continue;
+        writer.writeStartElement(QStringLiteral("view"));
+        writer.writeAttribute(QStringLiteral("id"), id);
+        QStringList fields;
+        for (double v : {view.x(), view.y(), view.width(), view.height()}) fields << QString::number(v, 'g', 16);
+        writer.writeAttribute(QStringLiteral("viewBox"), fields.join(u' '));
+        if (attrs.hasAttribute(u"preserveAspectRatio"))
+            writer.writeAttribute(QStringLiteral("preserveAspectRatio"), attrs.value(u"preserveAspectRatio").toString());
+        writer.writeEndElement();
+    }
+    if (canvas.isValid() && !canvas.topLeft().isNull()) {
+        // Cairo's viewport starts at zero. Position it within the source's
+        // view box so a fragment can still select the original coordinates.
+        const QString frame = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%1\" height=\"%2\" "
+                                             "viewBox=\"%3 %4 %1 %2\"><g transform=\"translate(%3 %4)\">")
+                                  .arg(canvas.width(), 0, 'g', 16).arg(canvas.height(), 0, 'g', 16)
+                                  .arg(canvas.x(), 0, 'g', 16).arg(canvas.y(), 0, 'g', 16);
+        drawing.insert(drawing.indexOf("<svg"), frame.toUtf8());
+        drawing.append("</g>").append(views).append("</svg>");
+    } else if (!views.isEmpty()) {
+        drawing.insert(drawing.lastIndexOf("</svg>"), views);
+    }
+}
+
+} // namespace
+
+QString Assets::picture(const QByteArray &data, const QString &suggested, QString *error)
+{
+    const auto source = PictureData::read(data);
+    if (source.format.isEmpty()) {
+        *error = source.error.isEmpty() ? QStringLiteral("not a picture a page can show") : source.error;
         return {};
     }
-    const QString url = place(data, type, QFileInfo(absolutePath).fileName());
-    m_byPath.insert(absolutePath, url);
-    return url;
+    const QString type = source.mediaType();
+    if (m_mode == Mode::Markdown) return place(data, type, suggested);
+    if (source.format == "svg") {
+        QByteArray plain = SvgPaper::plain(source.bytes, error);
+        if (plain.isEmpty()) return {};
+        keepViews(source.bytes, plain);
+        return place(plain, type, suggested);
+    }
+    if (source.format == "png" || source.format == "jpeg" || source.format == "gif" || source.format == "webp")
+        return place(data, type, suggested);
+    *error = QStringLiteral("not a picture a page can show");
+    return {};
 }
 
 QString Assets::bytes(const QByteArray &data, const QString &mediaType, const QString &suggested)
@@ -157,10 +223,11 @@ QString Assets::place(const QByteArray &data, const QString &mediaType, const QS
     QString stem = info.completeBaseName();
     if (stem.isEmpty()) stem = QStringLiteral("picture");
     // A file that is no picture keeps its own suffix: refs.json, style.csl.
-    const QString own = info.suffix().toLower();
-    const QString suffix = !mediaType.isEmpty() ? suffixFor(mediaType) : own.isEmpty() ? QStringLiteral("bin") : own;
+    QString suffix = mediaType.isEmpty() ? info.suffix().toLower() : suffixFor(mediaType);
+    if (suffix.isEmpty()) suffix = QStringLiteral("bin");
+    if (mediaType == u"image/svg+xml" && data.startsWith("\x1f\x8b")) suffix = QStringLiteral("svgz");
     QString name = stem + u'.' + suffix;
-    const int folder = m_mode == Mode::Copy ? openFolder(QDir(m_outputFolder).filePath(m_folder)) : -1;
+    const int folder = (m_mode == Mode::Copy || m_mode == Mode::Markdown) ? openFolder(QDir(m_outputFolder).filePath(m_folder)) : -1;
     const auto close = qScopeGuard([folder] { if (folder >= 0) ::close(folder); });
     const bool managed = folder >= 0 && compareEntry(folder, kFolderMark, folderSignature) == Entry::Same;
     DiskVersion matched;
@@ -177,41 +244,70 @@ QString Assets::place(const QByteArray &data, const QString &mediaType, const QS
     return url;
 }
 
-QString formula(const ExportPictures::Picture &picture, const QString &tex, bool display, qreal fontSize)
+QString formula(const ExportPictures::Picture &picture, const QString &tex, bool display, qreal fontSize, Assets *book)
 {
     if (!picture.drawn || picture.svg.isEmpty() || fontSize <= 0) return {};
-    const QString svg = QString::fromUtf8(picture.svg);
-    const qsizetype open = svg.indexOf(QLatin1String("<svg"));
-    const qsizetype end = open < 0 ? -1 : svg.indexOf(u'>', open);
-    if (end < 0) return {};
-    QString tag = svg.mid(open, end - open);
-    const bool selfClosed = tag.endsWith(u'/');
-    if (selfClosed) tag.chop(1);
-    static const QRegularExpression sized(QStringLiteral("\\s(width|height|style|role|aria-label|class)\\s*=\\s*\"[^\"]*\""));
-    tag.remove(sized);
-    const qreal width = picture.size.width() / fontSize, height = picture.size.height() / fontSize;
-    const qreal depth = (picture.size.height() - picture.baseline) / fontSize;
-    const QString label = md::escapeHtml(tex.simplified());
-    tag += QStringLiteral(" width=\"%1em\" height=\"%2em\" role=\"img\" aria-label=\"%3\" class=\"math-svg\"")
-               .arg(number(width), number(height), label);
-    if (!display) tag += QStringLiteral(" style=\"vertical-align: -%1em\"").arg(number(depth));
-    QString markup = tag + u'>' + QStringLiteral("<title>%1</title>").arg(label);
-    markup += selfClosed ? QStringLiteral("</svg>") : svg.mid(end + 1).trimmed();
-    if (display) return QStringLiteral("<div class=\"math display\">%1</div>").arg(markup);
-    return QStringLiteral("<span class=\"math\">%1</span>").arg(markup);
+    const QByteArray plain = SvgPaper::plain(picture.svg);
+    if (plain.isEmpty()) return {};
+    const QString width = number(picture.size.width() / fontSize) + QStringLiteral("em");
+    const QString height = number(picture.size.height() / fontSize) + QStringLiteral("em");
+    const QString align = display ? QString() : QStringLiteral("vertical-align: -%1em").arg(number((picture.size.height() - picture.baseline) / fontSize));
+    const QString label = tex.simplified();
+
+    // Simple cairo shapes can stand inline. Drawings that need their own
+    // IDs, glyph definitions, gradients or embedded pictures stay one image.
+    QXmlStreamReader xml(plain);
+    if (!xml.readNextStartElement()) return {};
+    QString markup;
+    QXmlStreamWriter writer(&markup);
+    writer.writeStartElement(QStringLiteral("svg"));
+    writer.writeDefaultNamespace(QStringLiteral("http://www.w3.org/2000/svg"));
+    writer.writeAttribute(QStringLiteral("viewBox"), xml.attributes().value(u"viewBox").toString());
+    writer.writeAttribute(QStringLiteral("width"), width);
+    writer.writeAttribute(QStringLiteral("height"), height);
+    writer.writeAttribute(QStringLiteral("role"), QStringLiteral("img"));
+    writer.writeAttribute(QStringLiteral("aria-label"), label);
+    writer.writeAttribute(QStringLiteral("class"), QStringLiteral("math-svg"));
+    if (!align.isEmpty()) writer.writeAttribute(QStringLiteral("style"), align);
+    writer.writeTextElement(QStringLiteral("title"), label);
+    static const QSet<QString> shapes{"g", "path", "rect"};
+    static const QSet<QString> attributes{"d", "x", "y", "width", "height", "rx", "ry", "transform", "fill",
+        "fill-rule", "fill-opacity", "opacity", "stroke", "stroke-opacity", "stroke-width", "stroke-linecap",
+        "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "stroke-dashoffset"};
+    bool inlineDrawing = true;
+    while (!xml.atEnd() && inlineDrawing) {
+        xml.readNext();
+        if (xml.isStartElement()) {
+            if (!shapes.contains(xml.name().toString()) || xml.namespaceUri() != u"http://www.w3.org/2000/svg") {
+                inlineDrawing = false;
+                break;
+            }
+            writer.writeStartElement(xml.name().toString());
+            for (const auto &attr : xml.attributes()) {
+                if (!attr.namespaceUri().isEmpty() || !attributes.contains(attr.name().toString()) || attr.value().contains(u"url(")) {
+                    inlineDrawing = false;
+                    break;
+                }
+                writer.writeAttribute(attr.name().toString(), attr.value().toString());
+            }
+        } else if (xml.isEndElement()) {
+            writer.writeEndElement();
+        }
+    }
+    if (!inlineDrawing || xml.hasError()) {
+        const QString url = book ? book->bytes(plain, QStringLiteral("image/svg+xml"), QStringLiteral("formula.svg"))
+                                 : QStringLiteral("data:image/svg+xml;base64,") + QString::fromLatin1(plain.toBase64());
+        const QString style = QStringLiteral("width: %1; height: %2; ").arg(width, height) + align;
+        markup = QStringLiteral("<img src=\"%1\" alt=\"%2\" class=\"math-svg\" style=\"%3\" />")
+                     .arg(md::escapeHtml(url), md::escapeHtml(label), style);
+    }
+    return display ? QStringLiteral("<div class=\"math display\">%1</div>").arg(markup)
+                   : QStringLiteral("<span class=\"math\">%1</span>").arg(markup);
 }
 
 QByteArray diagramSvg(const ExportPictures::Picture &picture)
 {
-    const auto runs = [](const QByteArray &svg) {
-        const QByteArray lower = svg.toLower();
-        static const QRegularExpression handler(QStringLiteral("\\son[a-z]+\\s*="));
-        return lower.contains("<script") || lower.contains("<foreignobject") || lower.contains("javascript:") ||
-               handler.match(QString::fromUtf8(lower)).hasMatch();
-    };
-    if (!picture.markup.isEmpty() && !runs(picture.markup)) return picture.markup;
-    if (!picture.svg.isEmpty() && !runs(picture.svg)) return picture.svg;
-    return {};
+    return SvgPaper::plain(picture.markup.isEmpty() ? picture.svg : picture.markup);
 }
 
 namespace {

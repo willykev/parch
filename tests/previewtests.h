@@ -5,6 +5,9 @@
 // follows edits and the theme, and how it and the editor find each other.
 // ParchTests runs each of them as a test function of its own.
 namespace PreviewTests {
+void aWebSvgIsDrawnWithoutItsOutsidePictures();
+void helperSvgWithAnOutsideReferenceIsNotPaintedByQt();
+
 
 void viewModesAreKeptByEachView();
 void previewBuildsTextAndInlineFormatting();

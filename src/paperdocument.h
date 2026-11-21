@@ -39,6 +39,8 @@ struct PaperOptions {
     // The distance between lines, as a multiple of the text's size.
     qreal lineHeight = 1.5;
     bool pageNumbers = true;
+    // Maximum number of decoded picture pixels kept by one paper document.
+    qint64 picturePixelBudget = 512'000'000;
 
     // The page sizes the options offer, by the names they take.
     static QStringList pageSizes();

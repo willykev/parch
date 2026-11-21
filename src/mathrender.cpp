@@ -1,8 +1,8 @@
 #include "mathrender.h"
+#include "svgpaper.h"
 
 #include <QHash>
 #include <QRegularExpression>
-#include <QSvgRenderer>
 
 #include <algorithm>
 
@@ -161,9 +161,9 @@ RenderResult read(const HelperOutcome &outcome, const RenderRequest &request)
         return result;
     }
     const QByteArray svg = sizedInPixels(pictures.first(), size);
-    if (!QSvgRenderer(svg).isValid()) {
+    if (!SvgPaper::valid(svg)) {
         result.status = RenderResult::Failed;
-        result.diagnostic = QStringLiteral("render-svg drew a picture Qt cannot read");
+        result.diagnostic = QStringLiteral("render-svg drew a picture parch cannot read");
         return result;
     }
     result.status = RenderResult::Rendered;

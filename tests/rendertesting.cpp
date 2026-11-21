@@ -258,6 +258,24 @@ QJsonArray renderFixtures(const QString &name)
     return QJsonDocument::fromJson(file.readAll()).array();
 }
 
+SvgSwatch::SvgSwatch() : m_previous(QDir::searchPaths(QStringLiteral("parchswatch")))
+{
+    QImage tile(8, 8, QImage::Format_RGB32);
+    tile.fill(Qt::magenta);
+    if (!tile.save(m_folder.filePath(QStringLiteral("tile.png")))) qFatal("could not make the colour tile");
+    QDir::setSearchPaths(QStringLiteral("parchswatch"), {m_folder.path()});
+}
+
+SvgSwatch::~SvgSwatch()
+{
+    QDir::setSearchPaths(QStringLiteral("parchswatch"), m_previous);
+}
+
+QByteArray SvgSwatch::svg() const
+{
+    return R"(<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 8"><rect width="8" height="8" fill="#008000"/><image x="8" width="8" height="8" xlink:href="parchswatch:tile.png"/></svg>)";
+}
+
 int pixelsNear(const QImage &image, const QColor &color, int tolerance)
 {
     const QImage pixels = image.convertToFormat(QImage::Format_ARGB32);

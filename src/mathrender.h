@@ -8,7 +8,7 @@
 #include <QString>
 
 // TeX math through RaTeX's render-svg, which draws one formula per input
-// line as SVG that Qt's SVG renderer draws: glyph outlines for everything in
+// line as SVG with glyph outlines for everything in
 // the KaTeX fonts, text elements for scripts those fonts lack, and pictures
 // for emoji.
 //

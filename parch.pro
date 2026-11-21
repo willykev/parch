@@ -62,6 +62,7 @@ HEADERS += \
     src/docxexport.h \
     src/epubexport.h \
     src/paperdocument.h \
+    src/picturedata.h \
     src/pdfexport.h \
     src/pdfoutline.h \
     src/svgpaper.h \
@@ -179,6 +180,7 @@ SOURCES += \
     src/docxexport.cpp \
     src/epubexport.cpp \
     src/paperdocument.cpp \
+    src/picturedata.cpp \
     src/pdfexport.cpp \
     src/pdfoutline.cpp \
     src/svgpaper.cpp \

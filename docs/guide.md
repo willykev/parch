@@ -414,8 +414,10 @@ plain text; turning it on again styles it at once.
   An image pasted without alt text puts the caret between `![` and `]`, so
   that you can describe it for readers who cannot see it; one undo still
   takes the paste back.
-  Images in the web page itself stay links to where they are online; nothing
-  is downloaded.
+  A picture embedded in copied HTML can be up to 64 MiB, 8,192 pixels on
+  its longer side and 64 million pixels in all. If it exceeds a limit,
+  parch shows a notice and pastes its alt text. Online images keep their
+  web addresses.
 - Dropping files on the text, or pasting files copied in a file manager,
   links them where they land. A file already in the document's folder or in
   the library is linked where it is; anything else is copied into `assets`,
@@ -490,8 +492,15 @@ What it shows:
 - Code blocks coloured by their language, and tables with their alignment and
   merged cells. A table, a code block or a formula wider than the column
   scrolls sideways by itself; the text around it never does.
-- Images, scaled to the column. A path is read from the document's folder;
-  a web address is fetched, unless you turn that off in **Preferences**.
+- Images, scaled to the column and up to 4,096 pixels on their longer side.
+  parch recognises the format from the file's contents. Local picture files
+  can be up to 64 MiB. They can be PNG, JPEG, GIF, BMP or SVG. A compressed
+  SVG must also fit the limit when unpacked. Install `qt6-imageformats` for
+  WebP and TIFF, or `kimageformats` for AVIF, HEIF and JPEG XL. Link a PDF
+  as a document. To include another picture in an SVG, embed it in the
+  drawing. An SVG without dimensions or a view box uses a 300 by 150 pixel
+  viewport. For web pictures, choose **Show them** above the preview or
+  enable **Fetch pictures from the web** in **Preferences…**.
 - Math (`$…$`, `$$…$$`) and Mermaid diagrams, drawn in the theme's colours.
   The source stands in until the picture is drawn, and if it cannot be, the
   reason is shown in its place.
@@ -787,6 +796,7 @@ What each format holds:
   folder and copies other readable pictures into `NAME_files` beside it.
   Choose **copy** to carry all its pictures, **link** to point back to the
   originals, or **Write the text as it is** to keep the source text.
+  Copied pictures keep their original file contents, including editable SVG.
   Assembled Markdown carries the effective bibliography and style when the
   text uses citations. It omits citation files the source's front matter
   names outside its allowed folders and reports them as omitted.
@@ -808,14 +818,21 @@ What each format holds:
   at the foot of a page without its text. Formulas and diagrams are vectors;
   a diagram that cannot be drawn as one is printed as a picture at four times
   its size, and the notice says so. The citation style determines the
-  order of the bibliography and collected notes.
+  order of the bibliography and collected notes. A PDF can hold up to
+  512 million decoded picture pixels. Repeated references to the same file
+  count once, including through a symbolic link. Embedded pictures with
+  identical bytes also count once. A picture that would exceed the budget
+  gives way to its description, and the export notice names it.
 - **DOCX**: a Word document with styles for headings, quotes and code,
   bulleted, numbered and task lists, tables with merged cells, links, and
   pictures with their descriptions. Block code and inline code use a
   fixed-width font. Word places notes as footnotes or endnotes, according
   to the export setting. The title, author, subject, keywords and language
   from the front matter are document properties.
-  Formulas and diagrams are pictures, not Word equations.
+  Formulas and diagrams appear as pictures. A picture can be up to 8,192
+  pixels on its longer side and 64 million pixels in all. When a drawing
+  needs fewer pixels to fit, the export keeps its size on the page and
+  reports the reduced resolution.
 - **EPUB**: an EPUB 3 book with a file for each chapter (each heading of
   level 1, or of level 2 when the document has a single title), a table of
   contents from the headings, its images, formulas and diagrams as SVG, and
@@ -824,6 +841,12 @@ What each format holds:
   the web are left out with their descriptions in their place. Links to the
   book's chapters and to the web work in the book. Other local links appear
   as text, and the export notice names the destinations it leaves out.
+
+When HTML copies or embeds an SVG and when EPUB packs one, parch writes a
+self-contained drawing. It keeps the visible shapes, embedded pictures and
+named views such as `icons.svg#home`. It leaves out scripts, event handlers
+and links to other files. In HTML, **link** points to the original picture.
+Formulas and diagrams also travel as self-contained drawings.
 
 Formulas and diagrams are drawn by the same helpers as the preview, dark on
 white whatever the desktop's theme. Without them they are written as their

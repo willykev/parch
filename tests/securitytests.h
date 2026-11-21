@@ -6,6 +6,8 @@
 // an assets folder that is a link. ParchTests runs each of them as a test
 // function of its own.
 namespace SecurityTests {
+void aHugePastedDataImageIsRefused();
+
 
 void webPictureRequestsKeepTheirHost();
 void webPicturesComeOnlyFromPublicAddresses();

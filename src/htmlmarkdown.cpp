@@ -1,4 +1,5 @@
 #include "htmlmarkdown.h"
+#include "picturedata.h"
 
 #include "mdtable.h"
 #include "mdtree.h"
@@ -1141,8 +1142,8 @@ TableLayout layoutTable(const Node *table)
 
 class Converter {
 public:
-    Converter(const HtmlMarkdown::ImageSink &images, bool mergedCells)
-        : m_images(images), m_mergedCells(mergedCells) {}
+    Converter(const HtmlMarkdown::ImageSink &images, bool mergedCells, QStringList *imageErrors = nullptr)
+        : m_images(images), m_mergedCells(mergedCells), m_imageErrors(imageErrors) {}
 
     Blocks flow(const Node *container, Styles styles)
     {
@@ -1346,13 +1347,15 @@ private:
         if (!m_images) return {};
         const qsizetype comma = source.indexOf(u',');
         if (comma < 0) return {};
-        const QStringList header = source.mid(5, comma - 5).split(u';');
-        const QString mimeType = header.value(0).trimmed().toLower();
-        if (!mimeType.startsWith(QStringLiteral("image/"))) return {};
-        const QByteArray payload = source.mid(comma + 1).toLatin1();
-        const bool base64 = header.contains(QStringLiteral("base64"), Qt::CaseInsensitive);
-        const QByteArray bytes = base64 ? QByteArray::fromBase64(payload) : QByteArray::fromPercentEncoding(payload);
-        if (bytes.isEmpty()) return {};
+        const auto header = QStringView(source).sliced(5, comma - 5);
+        const auto separator = header.indexOf(u';');
+        const QString mimeType = header.left(separator < 0 ? header.size() : separator).trimmed().toString().toLower();
+        QString error;
+        const QByteArray bytes = PictureData::urlBytes(source, SafeRead::PictureBytes, &error);
+        if (!error.isEmpty()) {
+            if (m_imageErrors) m_imageErrors->append(error);
+            return {};
+        }
         return m_images(bytes, mimeType);
     }
 
@@ -1586,6 +1589,7 @@ private:
 
     const HtmlMarkdown::ImageSink &m_images;
     const bool m_mergedCells;
+    QStringList *m_imageErrors;
 };
 
 // Text before the first tag, as the clipboard of some Windows programs
@@ -1599,11 +1603,11 @@ QStringView withoutHeader(QStringView html)
 
 } // namespace
 
-QString HtmlMarkdown::convert(const QString &html, const ImageSink &images, bool *inlineOnly, bool mergedCells)
+QString HtmlMarkdown::convert(const QString &html, const ImageSink &images, bool *inlineOnly, bool mergedCells, QStringList *imageErrors)
 {
     Parser parser(withoutHeader(html));
     const Node *root = parser.parse();
-    Converter converter(images, mergedCells);
+    Converter converter(images, mergedCells, imageErrors);
     const Blocks blocks = converter.flow(root, 0);
     if (inlineOnly) *inlineOnly = blocks.size() == 1 && blocks.first().kind == Block::Paragraph;
     return joined(blocks);
@@ -1642,7 +1646,7 @@ std::optional<HtmlMarkdown::TableCells> HtmlMarkdown::firstTableCells(const QStr
 
 bool HtmlMarkdown::mayEmbedImages(const QString &html)
 {
-    return html.contains(QLatin1String("data:image/"), Qt::CaseInsensitive);
+    return html.contains(QLatin1String("<img"), Qt::CaseInsensitive) && html.contains(QLatin1String("data:"), Qt::CaseInsensitive);
 }
 
 bool HtmlMarkdown::isLoneImage(const QString &html, QString *alt)

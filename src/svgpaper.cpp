@@ -5,10 +5,11 @@
 #include <librsvg/rsvg.h>
 
 #include "svgpaper.h"
+#include "picturedata.h"
 
 #include <QPainter>
-#include <QRegularExpression>
 #include <QSvgRenderer>
+#include <QXmlStreamReader>
 
 #include <cmath>
 
@@ -54,39 +55,43 @@ cairo_status_t append(void *closure, const unsigned char *data, unsigned int len
     return CAIRO_STATUS_SUCCESS;
 }
 
-QSizeF sizeOf(const QByteArray &svg, RsvgHandle *handle)
+QSizeF sizeOf(RsvgHandle *handle)
 {
-    const QSizeF given = SvgPaper::size(svg);
-    if (given.isValid() && !given.isEmpty()) return given;
     if (!handle) return {};
+    gboolean hasViewBox = false;
+    RsvgRectangle box{};
+    RsvgLength w{}, h{};
+    rsvg_handle_get_intrinsic_dimensions(handle, nullptr, &w, nullptr, &h, &hasViewBox, &box);
+    if (hasViewBox) return QSizeF(box.width, box.height);
+    if (w.length <= 0 || h.length <= 0) return {};
     gdouble width = 0, height = 0;
-    if (rsvg_handle_get_intrinsic_size_in_pixels(handle, &width, &height) && width > 0 && height > 0)
+    if (rsvg_handle_get_intrinsic_size_in_pixels(handle, &width, &height))
         return QSizeF(width, height);
-    return {};
+    // An embedded SVG with no intrinsic size uses a 300 by 150 viewport.
+    // With one definite length, let librsvg resolve its units and font.
+    if (w.unit == RSVG_UNIT_PERCENT && h.unit == RSVG_UNIT_PERCENT) return QSizeF(300, 150);
+    const QByteArray css = w.unit == RSVG_UNIT_PERCENT ? QByteArrayLiteral(":root{width:300px!important}")
+                                                      : QByteArrayLiteral(":root{height:150px!important}");
+    if (!rsvg_handle_set_stylesheet(handle, reinterpret_cast<const guint8 *>(css.constData()), css.size(), nullptr))
+        return {};
+    const bool measured = rsvg_handle_get_intrinsic_size_in_pixels(handle, &width, &height);
+    rsvg_handle_set_stylesheet(handle, reinterpret_cast<const guint8 *>(""), 0, nullptr);
+    return measured ? QSizeF(width, height) : QSizeF{};
 }
 
 } // namespace
 
 namespace SvgPaper {
 
+bool valid(const QByteArray &svg)
+{
+    return Handle(svg).handle != nullptr;
+}
+
 QSizeF size(const QByteArray &svg)
 {
-    // The root element's attributes, wherever its tag ends.
-    const qsizetype open = svg.indexOf("<svg");
-    if (open < 0) return {};
-    const qsizetype close = svg.indexOf('>', open);
-    const QString tag = QString::fromUtf8(svg.mid(open, close < 0 ? -1 : close - open));
-    static const QRegularExpression viewBox(QStringLiteral("viewBox\\s*=\\s*[\"']\\s*([-0-9.eE]+)[\\s,]+([-0-9.eE]+)"
-                                                           "[\\s,]+([-0-9.eE]+)[\\s,]+([-0-9.eE]+)"));
-    if (const QRegularExpressionMatch match = viewBox.match(tag); match.hasMatch()) {
-        const QSizeF size(match.captured(3).toDouble(), match.captured(4).toDouble());
-        if (size.width() > 0 && size.height() > 0) return size;
-    }
-    static const QRegularExpression width(QStringLiteral("\\swidth\\s*=\\s*[\"']\\s*([0-9.]+)(px)?\\s*[\"']"));
-    static const QRegularExpression height(QStringLiteral("\\sheight\\s*=\\s*[\"']\\s*([0-9.]+)(px)?\\s*[\"']"));
-    const QRegularExpressionMatch w = width.match(tag), h = height.match(tag);
-    if (w.hasMatch() && h.hasMatch()) return QSizeF(w.captured(1).toDouble(), h.captured(1).toDouble());
-    return {};
+    Handle handle(svg);
+    return sizeOf(handle.handle);
 }
 
 QByteArray plain(const QByteArray &svg, QString *error)
@@ -96,7 +101,7 @@ QByteArray plain(const QByteArray &svg, QString *error)
         if (error) *error = handle.error;
         return {};
     }
-    const QSizeF size = sizeOf(svg, handle.handle);
+    const QSizeF size = sizeOf(handle.handle);
     if (!size.isValid() || size.isEmpty()) {
         if (error) *error = QStringLiteral("the SVG gives itself no size");
         return {};
@@ -119,13 +124,14 @@ QByteArray plain(const QByteArray &svg, QString *error)
     return out;
 }
 
-QImage raster(const QByteArray &svg, const QSize &pixels, QString *error)
+QImage raster(const QByteArray &svg, QSizeF requested, QString *error)
 {
     Handle handle(svg);
     if (!handle.handle) {
         if (error) *error = handle.error;
         return {};
     }
+    const QSize pixels = PictureData::rasterSize(requested);
     if (pixels.isEmpty()) {
         if (error) *error = QStringLiteral("no size to draw the SVG at");
         return {};
@@ -141,19 +147,36 @@ QImage raster(const QByteArray &svg, const QSize &pixels, QString *error)
                                                                    image.height(), int(image.bytesPerLine()));
     cairo_t *cr = cairo_create(surface);
     const bool drawn = handle.render(cr, image.width(), image.height());
+    const cairo_status_t status = cairo_status(cr);
     cairo_destroy(cr);
     cairo_surface_flush(surface);
     cairo_surface_destroy(surface);
-    if (!drawn) {
-        if (error) *error = handle.error;
+    if (!drawn || status != CAIRO_STATUS_SUCCESS) {
+        if (error) *error = drawn ? QString::fromUtf8(cairo_status_to_string(status)) : handle.error;
         return {};
     }
     return image;
 }
 
+qint64 embeddedPixels(const QByteArray &plain)
+{
+    if (!plain.contains("<image")) return 0;
+    QXmlStreamReader xml(plain);
+    qint64 total = 0;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement() || xml.name() != u"image") continue;
+        const auto attrs = xml.attributes();
+        const QSize size(attrs.value(u"width").toInt(), attrs.value(u"height").toInt());
+        if (!PictureData::fitsRaster(size)) return -1;
+        total += qint64(size.width()) * size.height();
+    }
+    return xml.hasError() ? -1 : total;
+}
+
 double difference(const QByteArray &svg, const QImage &reference)
 {
-    if (reference.isNull()) return 1;
+    if (reference.isNull() || embeddedPixels(svg) < 0) return 1;
     // Small enough to be quick, large enough for labels to count.
     const QSize size = reference.size().scaled(QSize(480, 480), Qt::KeepAspectRatio).expandedTo(QSize(1, 1));
     const QImage expected = reference.convertToFormat(QImage::Format_ARGB32)

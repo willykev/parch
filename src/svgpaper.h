@@ -20,17 +20,24 @@
 // thread.
 namespace SvgPaper {
 
+// Whether librsvg can open the drawing in memory.
+bool valid(const QByteArray &svg);
+
 // The SVG as plain SVG, the same size, in pixels; empty, with why, when
 // librsvg cannot read it.
 QByteArray plain(const QByteArray &svg, QString *error = nullptr);
 
-// The SVG drawn in `pixels`, on a transparent ground; a null image, with
-// why, when librsvg cannot read it.
-QImage raster(const QByteArray &svg, const QSize &pixels, QString *error = nullptr);
+// The SVG drawn at the requested size within the raster limits, on a
+// transparent ground. A null image comes with a reason.
+QImage raster(const QByteArray &svg, QSizeF requested, QString *error = nullptr);
 
-// The size the SVG gives itself, in CSS pixels: its view box, else its
-// width and height; empty when it gives none.
+// The SVG's view box or intrinsic size in CSS pixels, using the default
+// image viewport for a drawing whose dimensions depend on its container.
 QSizeF size(const QByteArray &svg);
+
+// Number of raster pixels in a plain drawing written by cairo. A negative
+// count means an embedded bitmap needs to be drawn at a bounded size first.
+qint64 embeddedPixels(const QByteArray &plain);
 
 // How unlike `reference` Qt's own SVG renderer draws `svg`, from 0 (alike)
 // to 1: the share of small cells whose colour differs clearly, both drawn

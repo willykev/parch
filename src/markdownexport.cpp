@@ -755,7 +755,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     result.renderers.insert(QStringLiteral("markdown"), QStringLiteral("parch " PARCH_VERSION));
     const QString outputFolder = QFileInfo(recipe.output).absolutePath();
     const QString folder = HtmlExporter::assetFolder(recipe.output);
-    ExportWeb::Assets assets(ExportWeb::Assets::Mode::Copy, QFileInfo(folder).fileName() + u'/', outputFolder);
+    ExportWeb::Assets assets(ExportWeb::Assets::Mode::Markdown, QFileInfo(folder).fileName() + u'/', outputFolder);
     if (recipe.options.contains(QStringLiteral("as-is"))) {
         result.limitations = limitations(document, recipe, {});
         const QString text = document.files.empty() ? QString() : document.files.front().text;

@@ -10,6 +10,7 @@
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QTemporaryDir>
 
 // What the render tests share: stand-in helpers, the real helpers when a
 // development build has them, waiting for results, and reading PDFs.
@@ -76,6 +77,18 @@ HelperMeasure measureHelper(const HelperRun &run, const QString &folder);
 
 // A fixture corpus from tests/fixtures/<name>/corpus.json.
 QJsonArray renderFixtures(const QString &name);
+
+// A green SVG with a reference to a magenta tile. Only the test process
+// knows the search path for the tile.
+class SvgSwatch {
+public:
+    SvgSwatch();
+    ~SvgSwatch();
+    QByteArray svg() const;
+private:
+    QTemporaryDir m_folder;
+    QStringList m_previous;
+};
 
 // Pixels of the image within `tolerance` (summed over the channels) of the colour.
 int pixelsNear(const QImage &image, const QColor &color, int tolerance);

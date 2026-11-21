@@ -7,6 +7,17 @@
 // stand-in for the desktop's print portal. ParchTests runs each of them as a
 // test function of its own.
 namespace ExportTests {
+void svgPicturesUseTheirDrawingInEveryFormat();
+void aPdfIsNotAPicture();
+void picturesAreReadByTheirOwnFormat_data();
+void picturesAreReadByTheirOwnFormat();
+void exportedSvgPicturesHoldNoScript_data();
+void exportedSvgPicturesHoldNoScript();
+void inlineFormulaSvgKeepsOnlyDrawingElements();
+void hugeSvgSizesAreDrawnWithinBounds();
+void onePictureNamedManyWaysIsDecodedOnce();
+void picturesPastTheBudgetAreLeftOutWithANote();
+
 void exportLinksKeepQueryAndFragment();
 
 void pdfSetsPagesWithSearchableText();

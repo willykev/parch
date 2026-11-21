@@ -1,17 +1,14 @@
 #include "previewresources.h"
 
+#include "picturedata.h"
 #include "remotefetcher.h"
+#include "svgpaper.h"
 #include "renderservice.h"
 #include "saferead.h"
 #include "workerfailure.h"
 
-#include <QBuffer>
 #include <QCoreApplication>
 #include <QCryptographicHash>
-#include <QFileInfo>
-#include <QImageReader>
-#include <QPainter>
-#include <QSvgRenderer>
 #include <QUrl>
 #include <QtConcurrent>
 #include <cmath>
@@ -30,33 +27,21 @@ struct Loaded {
     QString error;
 };
 
-Loaded readPicture(QImageReader &reader, bool byContent = true)
+QByteArray webFormat(const QByteArray &format)
 {
-    reader.setAutoTransform(true);
-    reader.setDecideFormatFromContent(byContent);
-    if (!reader.canRead()) return {{}, tr("it is not a picture parch can read")};
-    const QSize size = reader.size();
-    if (size.isValid() && std::max(size.width(), size.height()) > PreviewResources::MaxSide)
-        reader.setScaledSize(size.scaled(PreviewResources::MaxSide, PreviewResources::MaxSide, Qt::KeepAspectRatio));
-    QImage image = reader.read();
-    if (image.isNull()) return {{}, reader.errorString()};
-    if (std::max(image.width(), image.height()) > PreviewResources::MaxSide)
-        image = image.scaled(PreviewResources::MaxSide, PreviewResources::MaxSide, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    image.setDevicePixelRatio(1);
-    return {image, {}};
+    if (format == "png" || format == "jpeg" || format == "gif" || format == "webp" || format == "svg") return format;
+    return {};
 }
 
-Loaded readBytes(const QByteArray &bytes)
+Loaded readBytes(const QByteArray &bytes, bool web = false)
 {
-    // A picture made to harm that runs the reader out of memory is one that
-    // cannot be shown, not the end of parch.
     try {
         WorkerFailure::check(WorkerFailure::Job::Picture);
-        QBuffer buffer;
-        buffer.setData(bytes);
-        buffer.open(QIODevice::ReadOnly);
-        QImageReader reader(&buffer);
-        return readPicture(reader);
+        const auto source = PictureData::read(bytes, web ? NetworkFetcher::MaxBytes : SafeRead::PictureBytes);
+        if (web && webFormat(source.format).isEmpty())
+            return {{}, source.error.isEmpty() ? tr("it is not a PNG, JPEG, GIF, WebP or SVG picture") : source.error};
+        const auto decoded = PictureData::decode(source, {.maxSide = PreviewResources::MaxSide});
+        return {decoded.image, decoded.error};
     } catch (...) {
         return {{}, WorkerFailure::reason(std::current_exception())};
     }
@@ -79,63 +64,18 @@ Loaded readFile(const QString &path, const QStringList &folders)
 QImage pictureOf(const RenderResult &result, qreal scale)
 {
     if (!result.ok()) return {};
-    if (result.format != QLatin1String("svg")) return readBytes(result.data).image;
-    QSvgRenderer renderer(result.data);
-    if (!renderer.isValid()) return {};
-    QSizeF pixels = result.size * scale;
-    if (!pixels.isValid() || pixels.isEmpty()) return {};
-    if (std::max(pixels.width(), pixels.height()) > PreviewResources::MaxSide)
-        pixels = pixels.scaled(PreviewResources::MaxSide, PreviewResources::MaxSide, Qt::KeepAspectRatio);
-    QImage image(pixels.toSize().expandedTo(QSize(1, 1)), QImage::Format_ARGB32_Premultiplied);
-    if (image.isNull()) return {};
-    image.fill(Qt::transparent);
-    QPainter painter(&image);
-    renderer.render(&painter);
-    return image;
-}
-
-// A picture from the web, read by the one reader of the format its bytes
-// show, and never by any other installed reader.
-Loaded readWebPicture(const QByteArray &bytes)
-{
-    const QByteArray format = PreviewResources::webPictureFormat(bytes);
-    if (format.isEmpty()) return {{}, tr("it is not a PNG, JPEG, GIF, WebP or SVG picture")};
-    QBuffer buffer;
-    buffer.setData(bytes);
-    buffer.open(QIODevice::ReadOnly);
-    QImageReader reader(&buffer, format);
-    reader.setAutoDetectImageFormat(false);
-    return readPicture(reader, false);
-}
-
-// The bytes a data: URL carries.
-QByteArray inlineBytes(const QString &url)
-{
-    const qsizetype comma = url.indexOf(u',');
-    if (comma < 0) return {};
-    const QStringView header = QStringView(url).first(comma);
-    const QByteArray body = QStringView(url).sliced(comma + 1).toLatin1();
-    return header.endsWith(QLatin1String(";base64"), Qt::CaseInsensitive) ? QByteArray::fromBase64(body)
-                                                                           : QByteArray::fromPercentEncoding(body);
+    if (result.format == QLatin1String("svg"))
+        return SvgPaper::raster(result.data, PictureData::rasterSize(result.size, scale, PreviewResources::MaxSide));
+    const auto source = PictureData::read(result.data);
+    if (source.format != "png") return {};
+    return PictureData::decode(source, {.maxSide = PreviewResources::MaxSide}).image;
 }
 
 } // namespace
 
 QByteArray PreviewResources::webPictureFormat(const QByteArray &bytes)
 {
-    if (bytes.startsWith("\x89PNG\r\n\x1a\n")) return "png";
-    if (bytes.startsWith("\xff\xd8\xff")) return "jpeg";
-    if (bytes.startsWith("GIF87a") || bytes.startsWith("GIF89a")) return "gif";
-    if (bytes.size() >= 12 && bytes.startsWith("RIFF") && bytes.sliced(8, 4) == "WEBP") return "webp";
-    // SVG is text, whose root element may follow a byte order mark, an XML
-    // declaration, comments and a document type.
-    const QByteArray head = bytes.left(4096);
-    QByteArray start = head.trimmed();
-    if (start.startsWith("\xef\xbb\xbf")) start = start.sliced(3).trimmed();
-    if ((start.startsWith("<?xml") || start.startsWith("<svg") || start.startsWith("<!--") || start.startsWith("<!DOCTYPE"))
-        && head.contains("<svg"))
-        return "svg";
-    return {};
+    return webFormat(PictureData::read(bytes, NetworkFetcher::MaxBytes).format);
 }
 
 PreviewResources::PreviewResources(QObject *parent) : QObject(parent)
@@ -311,7 +251,11 @@ preview::Picture PreviewResources::image(const md::Destination &destination, con
         if (written.size() > MaxInlineBytes * 2) return fail(tr("it is too large"));
         entry.waiting = true;
         entry.picture.state = preview::Picture::Pending;
-        QtConcurrent::run(&m_pool, [written] { return readBytes(inlineBytes(written)); }).then(this, take);
+        QtConcurrent::run(&m_pool, [written] {
+            QString error;
+            const auto bytes = PictureData::urlBytes(written, MaxInlineBytes, &error);
+            return error.isEmpty() ? readBytes(bytes) : Loaded{{}, error};
+        }).then(this, take);
     } else if (remote) {
         if (!m_fetcher) return fail(tr("pictures from the network are not available"));
         const QUrl url(written);
@@ -323,7 +267,7 @@ preview::Picture PreviewResources::image(const md::Destination &destination, con
                 loaded(key, generation, QImage(), error.isEmpty() ? tr("nothing came back") : error);
                 return;
             }
-            QtConcurrent::run(&m_pool, readWebPicture, data).then(this, take);
+            QtConcurrent::run(&m_pool, readBytes, data, true).then(this, take);
         });
     } else {
         return fail(tr("its address is not one parch shows pictures from"));

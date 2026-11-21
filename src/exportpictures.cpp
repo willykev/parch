@@ -1,7 +1,9 @@
 #include "exportpictures.h"
 
+#include "picturedata.h"
 #include "svgpaper.h"
 
+#include <QBuffer>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QImage>
@@ -115,16 +117,22 @@ bool ExportPictures::draw(const md::Document &document, const std::function<bool
             picture.baseline = result.baseline * scale;
             if (!picture.drawn) picture.diagnostic = QStringLiteral("the math helper drew nothing usable");
         } else {
-            picture.drawn = !result.data.isEmpty();
-            picture.png = result.data;
+            const auto source = PictureData::read(result.data);
+            const auto decoded = source.format == "png" ? PictureData::decode(source) : PictureData::Decoded{};
+            if (!decoded.image.isNull()) {
+                if (decoded.image.size() == decoded.naturalSize) picture.png = result.data;
+                else {
+                    QBuffer buffer(&picture.png);
+                    if (!buffer.open(QIODevice::WriteOnly) || !decoded.image.save(&buffer, "PNG")) picture.png.clear();
+                }
+            }
+            picture.drawn = !picture.png.isEmpty();
             picture.markup = result.svg;
             picture.size = result.size;
             // Vectors only when Qt draws the plain SVG as Merman drew the picture.
             if (!result.svg.isEmpty()) {
                 const QByteArray plain = SvgPaper::plain(result.svg);
-                QImage reference;
-                reference.loadFromData(result.data, "PNG");
-                if (!plain.isEmpty() && !reference.isNull() && SvgPaper::difference(plain, reference) <= SvgPaper::kUnlike)
+                if (!plain.isEmpty() && picture.drawn && SvgPaper::difference(plain, decoded.image) <= SvgPaper::kUnlike)
                     picture.svg = plain;
             }
             if (!picture.drawn) picture.diagnostic = QStringLiteral("the diagram helper drew nothing usable");

@@ -17,6 +17,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
+#include <QCryptographicHash>
 #include <QImageWriter>
 #include <QSet>
 
@@ -284,14 +285,19 @@ private:
 
     void lineBreak() { out() += QStringLiteral("<w:r><w:br/></w:r>"); }
 
+    QString addMedia(const QByteArray &png)
+    {
+        const QString name = QStringLiteral("image%1.png").arg(m_media.size() + 1);
+        m_media.append({name, png});
+        return name;
+    }
+
     // A picture in the text, `lower` pixels below the baseline.
-    void picture(const QByteArray &png, QSizeF size, const QString &description, qreal lower = 0)
+    void picture(const QString &name, QSizeF size, const QString &description, qreal lower = 0)
     {
         if (size.width() > m_textWidth) size = QSizeF(m_textWidth, size.height() * m_textWidth / size.width());
         const qreal tallest = m_textWidth * 1.3;
         if (size.height() > tallest) size = QSizeF(size.width() * tallest / size.height(), tallest);
-        const QString name = QStringLiteral("image%1.png").arg(m_media.size() + 1);
-        m_media.append({name, png});
         const QString id = m_part->relate(kImageType, QStringLiteral("media/") + name, false);
         const qint64 cx = std::max<qint64>(1, qint64(std::round(size.width() * kEmuPerPixel)));
         const qint64 cy = std::max<qint64>(1, qint64(std::round(size.height() * kEmuPerPixel)));
@@ -468,23 +474,33 @@ private:
             missing(why.isEmpty() ? QStringLiteral("not a picture parch can read") : why);
             return;
         }
-        const auto source = PictureData::read(bytes);
-        const auto decoded = PictureData::decode(source, {.svgScale = 2});
-        if (decoded.image.isNull()) {
-            missing(decoded.error);
+        const auto digest = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
+        auto found = m_images.constFind(digest);
+        if (found == m_images.cend()) {
+            const auto source = PictureData::read(bytes);
+            const auto decoded = PictureData::decode(source, {.svgScale = 2});
+            PreparedImage image;
+            image.size = decoded.naturalSize;
+            image.error = decoded.error;
+            if (!decoded.image.isNull()) {
+                image.reduced = !PictureData::fitsRaster(image.size, source.format == "svg" ? 2 : 1);
+                const bool original = source.format == "png" && decoded.image.size() == image.size;
+                image.media = addMedia(original ? bytes : png(decoded.image));
+            }
+            found = m_images.insert(digest, std::move(image));
+        }
+        if (found->media.isEmpty()) {
+            missing(found->error);
             return;
         }
-        const qreal scale = source.format == "svg" ? 2 : 1;
-        if (!PictureData::fitsRaster(decoded.naturalSize, scale)) ++reducedPictures;
-        // Keep an original PNG only if it has the size being embedded.
-        const bool original = source.format == "png" && decoded.image.size() == decoded.naturalSize;
-        picture(original ? bytes : png(decoded.image), decoded.naturalSize, alt.isEmpty() ? node.title : alt);
+        if (found->reduced) ++reducedPictures;
+        picture(found->media, found->size, alt.isEmpty() ? node.title : alt);
     }
 
     void formula(const Node &node, const Look &look)
     {
         const bool display = node.type == NodeType::MathBlock || node.display;
-        const ExportPictures::Picture *drawn = m_pictures ? m_pictures->formula(node.text, display) : nullptr;
+        const ExportPictures::Picture *drawn = node.resolved && m_pictures ? m_pictures->formula(node.text, display) : nullptr;
         if (!drawn || !drawn->drawn) {
             Look source = look;
             source.code = true;
@@ -501,7 +517,7 @@ private:
         }
         if (!PictureData::fitsRaster(drawn->size, scale)) ++reducedPictures;
         ++formulasAsPictures;
-        picture(png(image), drawn->size, node.text.simplified(), display ? 0 : drawn->size.height() - drawn->baseline);
+        picture(addMedia(png(image)), drawn->size, node.text.simplified(), display ? 0 : drawn->size.height() - drawn->baseline);
     }
 
     void citation(const Node &node, const Look &look)
@@ -737,7 +753,7 @@ private:
 
     void diagram(const Node &node, const Flow &flow)
     {
-        const ExportPictures::Picture *drawn = m_pictures ? m_pictures->diagram(node.text) : nullptr;
+        const ExportPictures::Picture *drawn = node.resolved && m_pictures ? m_pictures->diagram(node.text) : nullptr;
         if (!drawn || !drawn->drawn || drawn->png.isEmpty()) {
             code(node.text, flow);
             return;
@@ -745,7 +761,7 @@ private:
         ++diagramsAsPictures;
         Para p = para(flow, QStringLiteral("Figure"));
         open(p);
-        picture(drawn->png, drawn->size, drawn->description);
+        picture(addMedia(drawn->png), drawn->size, drawn->description);
         close();
     }
 
@@ -1143,6 +1159,13 @@ private:
     QHash<QString, int> m_nextBookmarkSuffix;
     int m_bookmarkId = 0;
     int m_drawings = 0;
+    struct PreparedImage {
+        QString media;
+        QSizeF size;
+        QString error;
+        bool reduced = false;
+    };
+    QHash<QByteArray, PreparedImage> m_images;
     QList<Media> m_media;
     QList<std::pair<int, int>> m_numbers; // per numbering instance: its kind and first number
     QString m_language;

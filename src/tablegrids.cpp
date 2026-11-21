@@ -2715,40 +2715,52 @@ QList<SourceEdit> TableGrids::tidyCellEdits(QStringView text, const QList<Source
     };
     QList<SourceEdit> out;
     QList<Pending> tables;
-    for (const SourceEdit &edit : edits) {
+    QList<SourceEdit> ordered = edits;
+    const auto earlier = [](const SourceEdit &a, const SourceEdit &b) { return a.range.start < b.range.start; };
+    if (!std::is_sorted(ordered.cbegin(), ordered.cend(), earlier))
+        std::stable_sort(ordered.begin(), ordered.end(), earlier);
+    int runEnd = -1, row = 0;
+    for (const SourceEdit &edit : std::as_const(ordered)) {
         const int from = edit.range.start, to = from + edit.range.length;
-        const auto table = MdTable::locate(text, from, dialect);
-        const int row = table && table->unfit == MdTable::Unfit::None ? MdTable::rowAt(*table, from) : -1;
-        const int cell = row >= 0 && row != 1 ? MdTable::cellAt(*table, row, from) : -1;
-        const MdTable::Cell *in = cell >= 0 && cell < table->rows[row].cells.size() ? &table->rows[row].cells[cell] : nullptr;
-        if (!in || in->missing || from < in->start || to > in->end) {
+        if (from > runEnd) {
+            row = 0;
+            if (auto table = MdTable::locate(text, from, dialect, &runEnd))
+                tables.append({std::move(*table), {}});
+        }
+        if (tables.isEmpty() || from < tables.last().table.start || from > tables.last().table.end) {
             out.append(edit);
             continue;
         }
-        auto known = std::find_if(tables.begin(), tables.end(),
-                                  [&](const Pending &pending) { return pending.table.start == table->start; });
-        if (known == tables.end()) {
-            tables.append({*table, {}});
-            known = tables.end() - 1;
-        }
-        known->edits.append({row, cell, edit});
+        Pending &pending = tables.last();
+        const auto &table = pending.table;
+        while (row + 1 < table.rows.size() && table.rows.at(row + 1).line.start <= from) ++row;
+        const int cell = table.unfit == MdTable::Unfit::None && row != 1 ? MdTable::cellAt(table, row, from) : -1;
+        const MdTable::Cell *in = cell >= 0 && cell < table.rows[row].cells.size() ? &table.rows[row].cells[cell] : nullptr;
+        if (!in || in->missing || from < in->start || to > in->end) out.append(edit);
+        else pending.edits.append({row, cell, edit});
     }
+    const qsizetype otherEdits = out.size();
+    qsizetype other = 0;
     for (Pending &pending : tables) {
+        if (pending.edits.isEmpty()) continue;
         const MdTable::Table &table = pending.table;
         // A table that other edits reach into is left to them as they are.
-        const bool touched = std::any_of(out.cbegin(), out.cend(), [&](const SourceEdit &edit) {
-            return edit.range.start <= table.end && edit.range.start + edit.range.length >= table.start;
-        });
-        MdTable::Model model = MdTable::model(text, table);
-        std::sort(pending.edits.begin(), pending.edits.end(),
-                  [](const InCell &a, const InCell &b) { return a.edit.range.start > b.edit.range.start; });
-        for (const InCell &in : std::as_const(pending.edits)) {
-            const MdTable::Cell &cell = table.rows[in.row].cells[in.cell];
-            QString &item = model.rows[MdTable::modelRowOf(in.row)][in.cell].text;
-            item.replace(in.edit.range.start - cell.start, in.edit.range.length, in.edit.replacement);
+        while (other < otherEdits && out.at(other).range.start + out.at(other).range.length < table.start) ++other;
+        if (other < otherEdits && out.at(other).range.start <= table.end) {
+            for (const InCell &in : std::as_const(pending.edits)) out.append(in.edit);
+            continue;
         }
-        for (const InCell &in : std::as_const(pending.edits)) {
-            QString &item = model.rows[MdTable::modelRowOf(in.row)][in.cell].text;
+        MdTable::Model model = MdTable::model(text, table);
+        // Edits arrived in source order. Apply each cell's changes from
+        // right to left, then encode that cell once.
+        for (auto it = pending.edits.crbegin(); it != pending.edits.crend();) {
+            const int row = it->row, column = it->cell;
+            const MdTable::Cell &cell = table.rows[row].cells[column];
+            QString &item = model.rows[MdTable::modelRowOf(row)][column].text;
+            do {
+                item.replace(it->edit.range.start - cell.start, it->edit.range.length, it->edit.replacement);
+                ++it;
+            } while (it != pending.edits.crend() && it->row == row && it->cell == column);
             item = MdTable::encodeCell(item, dialect);
         }
         const MdTable::Layout layout = MdTable::write(model);
@@ -2756,14 +2768,15 @@ QList<SourceEdit> TableGrids::tidyCellEdits(QStringView text, const QList<Source
         const int columns = MdTable::columnCount(model);
         for (int r = 0; readsBack && r < model.rows.size(); ++r)
             readsBack = MdTable::readsBack(layout, model, r, dialect, columns);
-        if (touched || !readsBack) {
+        if (!readsBack) {
             for (const InCell &in : std::as_const(pending.edits)) out.append(in.edit);
             continue;
         }
         const QStringView before = text.mid(table.start, table.end - table.start);
         if (before != layout.text) out.append(coveringEdit(table.start, before, layout.text));
     }
-    std::sort(out.begin(), out.end(), [](const SourceEdit &a, const SourceEdit &b) { return a.range.start < b.range.start; });
+    // The outside edits and the table edits were each collected in source order.
+    std::inplace_merge(out.begin(), out.begin() + otherEdits, out.end(), earlier);
     return out;
 }
 

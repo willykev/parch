@@ -247,6 +247,8 @@ private:
     qsizetype m_keyMark = 0;
     qsizetype m_insertMark = 0;
     QPointer<SourceBuffer> m_insertBuffer;
+    QMetaObject::Connection m_insertEdits;
+    qsizetype m_insertUnits = 0;
     InsertKind m_insertKind = InsertKind::Plain;
     int m_insertCount = 1;
     QList<Key> m_insertKeys;

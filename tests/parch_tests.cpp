@@ -292,6 +292,8 @@ private slots:
     void testsKeepToTestLocations();
     void desktopEntryOpensMarkdown();
     // The Markdown engine. The tests themselves are in markdown_tests.cpp.
+    void checkingOneLongLineIsQuick() { MarkdownTests::checkingOneLongLineIsQuick(); }
+    void blankLinesUnderDeepListsParseQuickly() { MarkdownTests::blankLinesUnderDeepListsParseQuickly(); }
     void markdownCommonMarkSpec() { MarkdownTests::commonMarkSpec(); }
     void markdownGfmExtensions() { MarkdownTests::gfmExtensions(); }
     void markdownProfilesAndOptions() { MarkdownTests::profilesAndOptions(); }
@@ -308,11 +310,25 @@ private slots:
     void manyAnchorsBeforeAValueDoNotRecurse() { MarkdownTests::manyAnchorsBeforeAValueDoNotRecurse(); }
     void anUnclosedFlowListInFrontMatterIsAnError() { MarkdownTests::anUnclosedFlowListInFrontMatterIsAnError(); }
     void aLongUnclosedFrontMatterScalarParsesQuickly() { MarkdownTests::aLongUnclosedFrontMatterScalarParsesQuickly(); }
+    void sharedYamlReferencesAreReadOnce() { CitationTests::sharedYamlReferencesAreReadOnce(); }
+    void yamlFieldsCanArriveInAnyOrder() { CitationTests::yamlFieldsCanArriveInAnyOrder(); }
+    void longAuthorListsDisambiguatePromptly() { CitationTests::longAuthorListsDisambiguatePromptly(); }
+    void citationMarkupKeepsUnclosedTagsAsText() { CitationTests::citationMarkupKeepsUnclosedTagsAsText(); }
+    void citationLocatorsWithWhitespaceFormatPromptly() { CitationTests::citationLocatorsWithWhitespaceFormatPromptly(); }
+    void aRepeatedBibliographyIsSearchedOnce() { CitationTests::aRepeatedBibliographyIsSearchedOnce(); }
     void deeplyNestedCitationQuotesAreText() { CitationTests::deeplyNestedCitationQuotesAreText(); }
     void aTitleOfManyTagsFormatsQuickly() { CitationTests::aTitleOfManyTagsFormatsQuickly(); }
     void aStyleThatExpandsTooFarIsRefused() { CitationTests::aStyleThatExpandsTooFarIsRefused(); }
     void crossrefInheritanceCountsAgainstTheBudget() { CitationTests::crossrefInheritanceCountsAgainstTheBudget(); }
     void manyFieldsAndChildrenParseQuickly() { CitationTests::manyFieldsAndChildrenParseQuickly(); }
+    void consecutiveHeadingsKeepTheirPagePositions() { ExportTests::consecutiveHeadingsKeepTheirPagePositions(); }
+    void paperSetsManyShortParagraphsPromptly() { ExportTests::paperSetsManyShortParagraphsPromptly(); }
+    void paperWrapsLongTextRunsPromptly_data() { ExportTests::paperWrapsLongTextRunsPromptly_data(); }
+    void paperWrapsLongTextRunsPromptly() { ExportTests::paperWrapsLongTextRunsPromptly(); }
+    void docxReusesTheBytesOfOnePicture() { ExportTests::docxReusesTheBytesOfOnePicture(); }
+    void aDocumentWithManyFormulasStopsAtTheHelperBudget() { ExportTests::aDocumentWithManyFormulasStopsAtTheHelperBudget(); }
+    void paperIndexesUnresolvedReferencesOnce() { ExportTests::paperIndexesUnresolvedReferencesOnce(); }
+    void paperPaginatesWrappedHeadingsTogether() { ExportTests::paperPaginatesWrappedHeadingsTogether(); }
     void aHugeHtmlTableIsShownAsText() { ExportTests::aHugeHtmlTableIsShownAsText(); }
     void aDeeplyQuotedHtmlPasteFallsBackToText() { ExportTests::aDeeplyQuotedHtmlPasteFallsBackToText(); }
     void aTagWithManyAttributesPastesQuickly() { ExportTests::aTagWithManyAttributesPastesQuickly(); }
@@ -343,6 +359,7 @@ private slots:
     void markdownPerformance() { MarkdownTests::performance(); }
     void markdownPathologicalInput() { MarkdownTests::pathologicalInput(); }
     // The commands run from the terminal. The tests themselves are in clitests.cpp.
+    void aDeepTreeWritesLinearJson() { CliTests::aDeepTreeWritesLinearJson(); }
     void cliLaunchFindsCommands() { CliTests::launchFindsCommands(); }
     void cliHelpExplainsEveryCommand() { CliTests::helpExplainsEveryCommand(); }
     void cliUsageErrorsExitOne() { CliTests::usageErrorsExitOne(); }
@@ -438,6 +455,8 @@ private slots:
     void docxBookmarksAndRelationshipsStayUnique() { ExportTests::docxBookmarksAndRelationshipsStayUnique(); }
     void diagnosticsKeepPercentNumbers() { CitationTests::diagnosticsKeepPercentNumbers(); }
     void citationYearsSortAndLabelAtTheirLimits() { CitationTests::citationYearsSortAndLabelAtTheirLimits(); }
+    void movingAcrossUnicodeWordsIsQuick() { VimTests::movingAcrossUnicodeWordsIsQuick(); }
+    void aCountedInsertOfAPasteIsBounded() { VimTests::aCountedInsertOfAPasteIsBounded(); }
     void percentageMotionsCanCountEveryLine() { VimTests::percentageMotionsCanCountEveryLine(); }
     void svgPicturesUseTheirDrawingInEveryFormat() { ExportTests::svgPicturesUseTheirDrawingInEveryFormat(); }
     void aPdfIsNotAPicture() { ExportTests::aPdfIsNotAPicture(); }
@@ -521,6 +540,10 @@ private slots:
     void editsMadeWhileUndoAppliesWaitForTheStep();
     void undoHistoryEdges();
     // Files and text made to harm parch; the tests are in hostiletests.cpp.
+    void aFileThatGrowsPastTheLimitIsNotReadWhole() { HostileTests::aFileThatGrowsPastTheLimitIsNotReadWhole(); }
+    void aThemeFileThatIsNotRegularIsIgnored() { HostileTests::aThemeFileThatIsNotRegularIsIgnored(); }
+    void themeValuesAreClamped() { HostileTests::themeValuesAreClamped(); }
+    void folderSearchResultsShowBoundedContext() { HostileTests::folderSearchResultsShowBoundedContext(); }
     void hostileReadsStopAtTheirLimit() { HostileTests::readsStopAtTheirLimit(); }
     void hostileBibliographiesAndStylesAreReadSafely() { HostileTests::bibliographiesAndStylesAreReadSafely(); }
     void hostileDocumentsAndIncludesAreReadSafely() { HostileTests::documentsAndIncludesAreReadSafely(); }
@@ -907,6 +930,8 @@ private slots:
     void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
     void newWidthsMoveEachViewOnce() { FrameTests::newWidthsMoveEachViewOnce(); }
     // Scrolling with a touchpad, written in touchpadtests.cpp.
+    void editingManyCellsScansTheirTableOnce() { TableTests::editingManyCellsScansTheirTableOnce(); }
+    void aListSelectionOutdentsInOnePass() { TableTests::aListSelectionOutdentsInOnePass(); }
     void formatKeepsMergedCellsWhole() { TableTests::formatKeepsMergedCellsWhole(); }
     void scannerAgreesWithTheParser() { TableTests::scannerAgreesWithTheParser(); }
     void formatIsIdempotentAndKeepsPayloadBytes() { TableTests::formatIsIdempotentAndKeepsPayloadBytes(); }

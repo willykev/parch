@@ -95,12 +95,9 @@ public:
     // The locale; the bundled en-US unless set.
     void setLocale(std::shared_ptr<const CslLocale> locale) { m_locale = std::move(locale); }
     // The root document's databases, searched in order.
-    void setDatabases(QList<Database> databases) { m_databases = std::move(databases); }
+    void setDatabases(QList<Database> databases);
     // The databases of one included file; a file without its own uses the root's.
-    void setDatabasesFor(const QString &sourceFile, QList<Database> databases)
-    {
-        m_fileDatabases.insert(sourceFile, std::move(databases));
-    }
+    void setDatabasesFor(const QString &sourceFile, QList<Database> databases);
 
     CitationOutput format(const QList<CitationClusterSpec> &clusters,
                           const QList<WriterDefinition> &definitions = {}) const;

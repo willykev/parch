@@ -5,6 +5,8 @@
 // and the agent skill). ParchTests runs each of them as a test function of
 // its own, prefixed `cli`.
 namespace CliTests {
+void aDeepTreeWritesLinearJson();
+
 
 void launchFindsCommands();
 void helpExplainsEveryCommand();

@@ -1479,33 +1479,51 @@ TextChange hardBreak(QStringView, int anchor, int cursor, const Options &options
 std::optional<TextChange> indent(QStringView text, int anchor, int cursor, bool outdent, const Options &)
 {
     const auto lines = linesOf(text, qMin(anchor, cursor), qMax(anchor, cursor));
-    if (lines.size() == 1 && !partsOf(textOf(text, lines.first())).item()) return std::nullopt;
-    // The list item above at an indentation, the nearest one: the item a
-    // deeper item belongs to and what it lines up with.
-    const auto itemAbove = [&](const Line &line, const std::function<bool(const Parts &)> &wanted) -> std::optional<Parts> {
-        for (auto above = lineBefore(text, line); above; above = lineBefore(text, *above)) {
-            const QStringView own = textOf(text, *above);
-            if (isBlank(own)) continue;
-            const Parts parts = partsOf(own);
-            if (parts.item() && wanted(parts)) return parts;
-            if (!parts.item() && parts.indent() == 0) break;
+    const bool single = lines.size() == 1;
+    const Parts first = partsOf(textOf(text, lines.first()));
+    if (single && (!first.item() || (outdent && first.indent() == 0))) return std::nullopt;
+    // The nearest preceding sibling gives the width of its marker. The
+    // nearest shallower item gives the indentation to return to.
+    QHash<int, int> widths;
+    std::vector<int> parents;
+    for (auto above = lineBefore(text, lines.first()); above; above = lineBefore(text, *above)) {
+        const auto own = textOf(text, *above);
+        if (isBlank(own)) continue;
+        const Parts parts = partsOf(own);
+        if (!parts.item()) {
+            if (parts.indent() == 0) break;
+            continue;
         }
-        return std::nullopt;
-    };
+        const int indent = parts.indent();
+        if (!widths.contains(indent)) widths.insert(indent, parts.spaceEnd - parts.indentEnd);
+        if (parents.empty() || indent < parents.back()) parents.push_back(indent);
+        if (single && (outdent ? indent < first.indent() : indent == first.indent())) break;
+    }
+    std::reverse(parents.begin(), parents.end());
     QList<SourceEdit> edits;
     for (const Line &line : lines) {
         const QStringView own = textOf(text, line);
         if (isBlank(own)) continue;
         const Parts parts = partsOf(own);
+        const int width = parts.spaceEnd - parts.indentEnd;
+        const int siblingWidth = widths.value(parts.indent(), width);
+        int parentIndent = 0;
+        if (parts.item()) {
+            while (!parents.empty() && parents.back() >= parts.indent()) parents.pop_back();
+            if (!parents.empty()) parentIndent = parents.back();
+            parents.push_back(parts.indent());
+            widths.insert(parts.indent(), width);
+        } else if (parts.indent() == 0) {
+            parents.clear();
+            widths.clear();
+        }
         const int at = line.start + parts.quoteEnd;
         const bool tabbed = parts.indent() > 0 && own[parts.quoteEnd] == u'\t';
         if (!outdent) {
             QString unit = QStringLiteral("\t");
             if (parts.item() && !tabbed) {
                 // As deep as the text of the item above at this depth, so that this one belongs to it.
-                const auto sibling = itemAbove(line, [&](const Parts &p) { return p.indent() == parts.indent(); });
-                const Parts &like = sibling ? *sibling : parts;
-                unit = QString(like.spaceEnd - like.indentEnd, u' ');
+                unit = QString(siblingWidth, u' ');
             }
             edits.append(SourceEdit{{at, 0}, unit});
             continue;
@@ -1515,8 +1533,7 @@ std::optional<TextChange> indent(QStringView text, int anchor, int cursor, bool 
         if (tabbed) {
             removed = 1;
         } else if (parts.item()) {
-            const auto parent = itemAbove(line, [&](const Parts &p) { return p.indent() < parts.indent(); });
-            removed = parts.indent() - (parent ? parent->indent() : 0);
+            removed = parts.indent() - parentIndent;
         } else {
             removed = qMin(4, leadingSpaces(own.mid(parts.quoteEnd)));
         }

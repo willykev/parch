@@ -6,6 +6,7 @@
 #include "exporter.h"
 #include "exports.h"
 #include "mdinclude.h"
+#include "mdtree.h"
 #include "pdfexport.h"
 #include "sourcebuffer.h"
 #include "workerfailure.h"
@@ -45,6 +46,7 @@ PrintPreview::PrintPreview(QObject *parent)
     : QObject(parent), m_generation(std::make_shared<std::atomic<quint64>>(0))
 {
     // One thread, kept: what it lays out it also draws and lets go of.
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(1);
     m_pool.setExpiryTimeout(-1);
     m_delay.setSingleShot(true);

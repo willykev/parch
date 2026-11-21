@@ -374,7 +374,36 @@ CslDate CslJson::date(const QJsonValue &value)
     return date;
 }
 
-CslReference CslJson::reference(const QJsonObject &item, QString *error)
+namespace {
+// Only anchored values and the paths leading to them need identities.
+// Reusing a name list or a date in YAML shares its converted CSL value too.
+struct YamlSharing {
+    struct Shape {
+        QHash<QString, int> fields;
+        QHash<qsizetype, int> elements;
+    };
+    std::vector<Shape> shapes;
+    int root = -1;
+    QHash<int, QList<CslName>> names;
+    QHash<int, CslDate> dates;
+    QHash<int, QString> text;
+
+    int field(int shape, const QString &key) const
+    {
+        return shape < 0 ? -1 : shapes[size_t(shape)].fields.value(key, -1);
+    }
+};
+
+template <typename T>
+T converted(QHash<int, T> &cache, int id, const QJsonValue &value, T (*convert)(const QJsonValue &))
+{
+    if (id < 0) return convert(value);
+    const auto found = cache.constFind(id);
+    if (found != cache.cend()) return found.value();
+    return cache.insert(id, convert(value)).value();
+}
+
+CslReference readReference(const QJsonObject &item, QString *error, YamlSharing &shared, int shape)
 {
     CslReference reference;
     reference.id = scalarText(item.value(QStringLiteral("id"))).trimmed();
@@ -383,14 +412,15 @@ CslReference CslJson::reference(const QJsonObject &item, QString *error)
     for (auto it = item.constBegin(); it != item.constEnd(); ++it) {
         const QString key = it.key();
         if (key == u"id" || key == u"type") continue;
+        const int id = shared.field(shape, key);
         if (CslReference::isNameVariable(key)) {
-            const QList<CslName> list = CslJson::names(it.value());
+            const auto list = converted(shared.names, id, it.value(), CslJson::names);
             if (!list.isEmpty()) reference.names.insert(key, list);
         } else if (CslReference::isDateVariable(key)) {
-            const CslDate date = CslJson::date(it.value());
+            const auto date = converted(shared.dates, id, it.value(), CslJson::date);
             if (!date.isEmpty()) reference.dates.insert(key, date);
         } else {
-            const QString text = scalarText(it.value());
+            const auto text = converted(shared.text, id, it.value(), scalarText);
             if (!text.isEmpty()) reference.fields.insert(key, text);
         }
     }
@@ -406,6 +436,14 @@ CslReference CslJson::reference(const QJsonObject &item, QString *error)
     return reference;
 }
 
+} // namespace
+
+CslReference CslJson::reference(const QJsonObject &item, QString *error)
+{
+    YamlSharing sharing;
+    return readReference(item, error, sharing, -1);
+}
+
 namespace {
 
 // Builds JSON from libyaml's events.
@@ -416,7 +454,7 @@ constexpr int MaxNesting = 256;
 
 class YamlReader {
 public:
-    explicit YamlReader(const QByteArray &data)
+    explicit YamlReader(const QByteArray &data, YamlSharing *sharing = nullptr) : m_sharing(sharing)
     {
         yaml_parser_initialize(&m_parser);
         yaml_parser_set_input_string(&m_parser, reinterpret_cast<const unsigned char *>(data.constData()),
@@ -443,11 +481,13 @@ public:
             if (type == YAML_DOCUMENT_START_EVENT) {
                 yaml_event_delete(&event);
                 QJsonValue document;
-                if (!value(document, error, errorLine)) return {};
+                int shape = -1;
+                if (!value(document, error, errorLine, 0, shape)) return {};
                 // The first document with content is the bibliography, as
                 // in Markdown front matter.
                 if (!haveDocument && !document.isNull()) {
                     result = document;
+                    if (m_sharing) m_sharing->root = shape;
                     haveDocument = true;
                 }
                 continue;
@@ -476,7 +516,7 @@ private:
 
     // Reads the value starting at the next event, up to its end; a
     // document's end gives null.
-    bool value(QJsonValue &out, QString *error, int *errorLine, int depth = 0)
+    bool value(QJsonValue &out, QString *error, int *errorLine, int depth, int &shape)
     {
         yaml_event_t event;
         if (!next(event, error, errorLine)) return false;
@@ -496,45 +536,60 @@ private:
                                                    qsizetype(event.data.scalar.length));
             const bool plain = event.data.scalar.style == YAML_PLAIN_SCALAR_STYLE;
             out = plain && (text == u"~" || text == u"null" || text.isEmpty()) ? QJsonValue() : QJsonValue(text);
-            remember(event.data.scalar.anchor, out);
+            if (event.data.scalar.anchor) shape = save(anchorName(event.data.scalar.anchor), out, {});
             break;
         }
-        case YAML_ALIAS_EVENT:
-            out = m_anchors.value(QString::fromUtf8(reinterpret_cast<const char *>(event.data.alias.anchor)));
+        case YAML_ALIAS_EVENT: {
+            const auto anchor = m_anchors.value(anchorName(event.data.alias.anchor));
+            out = anchor.value;
+            shape = anchor.shape;
             break;
+        }
         case YAML_SEQUENCE_START_EVENT: {
             const QString anchor = anchorName(event.data.sequence_start.anchor);
             QJsonArray array;
+            YamlSharing::Shape members;
             for (;;) {
                 if (peekEnd(YAML_SEQUENCE_END_EVENT, ok, error, errorLine)) break;
                 if (!ok) break;
                 QJsonValue item;
-                if (!value(item, error, errorLine, depth + 1)) {
+                int child = -1;
+                if (!value(item, error, errorLine, depth + 1, child)) {
                     ok = false;
                     break;
                 }
+                if (child >= 0) members.elements.insert(array.size(), child);
                 array.append(item);
             }
             out = array;
-            if (!anchor.isEmpty()) m_anchors.insert(anchor, out);
+            shape = save(anchor, out, std::move(members));
             break;
         }
         case YAML_MAPPING_START_EVENT: {
             const QString anchor = anchorName(event.data.mapping_start.anchor);
-            QJsonObject object;
+            QMap<QString, QJsonValue> fields;
+            YamlSharing::Shape members;
             for (;;) {
                 if (peekEnd(YAML_MAPPING_END_EVENT, ok, error, errorLine)) break;
                 if (!ok) break;
                 QJsonValue key;
                 QJsonValue item;
-                if (!value(key, error, errorLine, depth + 1) || !value(item, error, errorLine, depth + 1)) {
+                int ignored = -1, child = -1;
+                if (!value(key, error, errorLine, depth + 1, ignored) || !value(item, error, errorLine, depth + 1, child)) {
                     ok = false;
                     break;
                 }
-                object.insert(key.toString(), item);
+                const auto name = key.toString();
+                if (child >= 0) members.fields.insert(name, child);
+                else members.fields.remove(name);
+                fields.insert(name, item);
             }
+            // QJsonObject stores its keys in order. Appending them in that
+            // order avoids moving every earlier field in a reverse-sorted map.
+            QJsonObject object;
+            for (auto it = fields.cbegin(); it != fields.cend(); ++it) object.insert(it.key(), it.value());
             out = object;
-            if (!anchor.isEmpty()) m_anchors.insert(anchor, out);
+            shape = save(anchor, out, std::move(members));
             break;
         }
         default:
@@ -569,17 +624,24 @@ private:
         return anchor ? QString::fromUtf8(reinterpret_cast<const char *>(anchor)) : QString();
     }
 
-    void remember(const yaml_char_t *anchor, const QJsonValue &value)
-    {
-        if (anchor) m_anchors.insert(anchorName(anchor), value);
-    }
-
     yaml_parser_t m_parser;
     // An event read ahead to see whether a collection ends, which the next
     // read takes.
     yaml_event_t m_peeked;
     bool m_pending = false;
-    QHash<QString, QJsonValue> m_anchors;
+    struct Anchor { QJsonValue value; int shape = -1; };
+    QHash<QString, Anchor> m_anchors;
+    YamlSharing *m_sharing;
+    int save(const QString &anchor, const QJsonValue &value, YamlSharing::Shape members)
+    {
+        int shape = -1;
+        if (m_sharing && (!anchor.isEmpty() || !members.fields.isEmpty() || !members.elements.isEmpty())) {
+            shape = int(m_sharing->shapes.size());
+            m_sharing->shapes.push_back(std::move(members));
+        }
+        if (!anchor.isEmpty()) m_anchors.insert(anchor, {value, shape});
+        return shape;
+    }
 };
 
 } // namespace
@@ -692,6 +754,7 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
         return database;
     }
     QJsonValue root;
+    YamlSharing sharing;
     if (format == Format::CslJson) {
         QJsonParseError parseError;
         const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
@@ -710,23 +773,29 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
     } else {
         QString message;
         int line = 0;
-        root = CslYaml::toJson(data, &message, &line);
+        root = YamlReader(data, &sharing).read(&message, &line);
         if (!message.isEmpty()) {
             error(QStringLiteral("The CSL YAML is not valid: %1.").arg(message), line);
             return database;
         }
     }
     QJsonArray items;
+    int sequence = sharing.root;
+    bool single = false;
     if (root.isArray()) {
         items = root.toArray();
     } else if (root.isObject()) {
         const QJsonObject object = root.toObject();
-        if (object.value(QStringLiteral("references")).isArray())
+        if (object.value(QStringLiteral("references")).isArray()) {
             items = object.value(QStringLiteral("references")).toArray();
-        else if (object.value(QStringLiteral("items")).isArray())
+            sequence = sharing.field(sharing.root, QStringLiteral("references"));
+        } else if (object.value(QStringLiteral("items")).isArray()) {
             items = object.value(QStringLiteral("items")).toArray();
-        else if (object.contains(QStringLiteral("id")))
+            sequence = sharing.field(sharing.root, QStringLiteral("items"));
+        } else if (object.contains(QStringLiteral("id"))) {
             items.append(object);
+            single = true;
+        }
     } else if (!root.isNull()) {
         error(QStringLiteral("The bibliography holds no list of references."), 0);
         return database;
@@ -738,7 +807,14 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
                                            QStringLiteral("Item %1 is not an object and is ignored.").arg(i + 1), {}, 0});
             continue;
         }
-        database.add(CslJson::reference(items[i].toObject()), 0);
+        const auto item = items.at(i).toObject();
+        CslReference key;
+        key.id = scalarText(item.value(QStringLiteral("id"))).trimmed();
+        if (key.id.isEmpty() || database.find(key.id)) database.add(std::move(key), 0);
+        else {
+            const int shape = sequence < 0 || single ? sequence : sharing.shapes[size_t(sequence)].elements.value(i, -1);
+            database.add(readReference(item, nullptr, sharing, shape), 0);
+        }
     }
     checkEntries();
     return database;

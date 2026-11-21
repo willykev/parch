@@ -30,6 +30,19 @@
 - Rich paste falls back to the clipboard’s plain text when the HTML exceeds
   16 MiB or its formatting would produce too much Markdown.
 
+- PDFs with many headings, long lines or unresolved links export faster. Word
+  reuses repeated pictures and keeps each picture’s description.
+- Checking long lines, reading large YAML bibliographies, and editing long
+  lists, tables and Unicode text take less time. Listing a bibliography twice
+  searches it once.
+- A document draws up to 10,000 distinct formulas and diagrams in total.
+  Further drawings appear as source, and **Check document** points to the
+  first one. Check also warns when a citation style reaches 50 names while
+  telling similar citations apart.
+- Saving reports a conflict if the open file has grown past 64 MiB on disk.
+  A Vim insert that is too large to repeat keeps the first insertion.
+  Library search shows an excerpt of long matches.
+
 - Tables show as grids in the text, between the paragraphs, and you write in
   their cells as anywhere else. `Tab`, `Enter` and the arrows go from cell to
   cell, and `Tab` or `Enter` on the last row adds one. Handles beside each row

@@ -60,6 +60,7 @@ bool isKeyword(char32_t c) { return classOf(c) >= 2; }
 // by whole graphemes.
 struct Text {
     QStringView s;
+    SourceGraphemes graphemes{s};
 
     int size() const { return int(s.size()); }
     // On a line end.
@@ -140,12 +141,12 @@ struct Text {
     }
     int next(int p) const
     {
-        const int n = nextSourceGrapheme(s, p);
+        const int n = graphemes.step(p, true);
         return n < 0 ? size() : n;
     }
     int previous(int p) const
     {
-        const int n = previousSourceGrapheme(s, p);
+        const int n = graphemes.step(p, false);
         return n < 0 ? 0 : n;
     }
     // Only blanks before p on its line.
@@ -904,6 +905,7 @@ void VimMode::setActive(bool active)
 {
     if (active == m_active) return;
     if (!active && m_mode == Insert && m_insertBuffer) m_insertBuffer->joinSince(m_insertMark);
+    disconnect(m_insertEdits);
     m_insertBuffer = nullptr;
     m_active = active;
     cancel();
@@ -1062,6 +1064,7 @@ void VimMode::leaveVisual()
 void VimMode::reset()
 {
     if (m_mode == Insert && m_insertBuffer) m_insertBuffer->joinSince(m_insertMark);
+    disconnect(m_insertEdits);
     m_insertBuffer = nullptr;
     m_recordingInsert = false;
     cancel();
@@ -2072,6 +2075,13 @@ bool VimMode::enterInsert(int position, InsertKind kind, int count)
     }
     m_insertMark = m_keyMark;
     m_insertBuffer = buffer();
+    m_insertUnits = 0;
+    if (m_insertBuffer) {
+        m_insertEdits = connect(m_insertBuffer, &SourceBuffer::sourceChanged, this,
+                                [this](Revision, SourceRange, const QString &replacement) {
+            m_insertUnits = std::min(maxPutUnits + 1, m_insertUnits + replacement.size());
+        });
+    }
     m_insertKind = kind;
     m_insertCount = std::clamp(count, 1, maxCount);
     m_insertKeys.clear();
@@ -2109,6 +2119,17 @@ void VimMode::replayInsertKey(const Key &key)
 
 void VimMode::leaveInsert()
 {
+    disconnect(m_insertEdits);
+    // Include the text a key actually inserted, such as a clipboard paste,
+    // and the text a recorded input-method commit would replay.
+    qsizetype recorded = 0;
+    for (const Key &key : std::as_const(m_insertKeys))
+        recorded += std::max<qsizetype>(1, key.text.size());
+    const auto units = std::max(recorded, m_insertUnits) + (m_insertKind == InsertKind::Plain ? 0 : newline().size());
+    if (m_insertCount > 1 && units > maxPutUnits / m_insertCount) {
+        setMessage(tr("That is too much text to repeat"));
+        m_insertOverflow = true;
+    }
     // A count types the same again: 3ix types three x.
     if (m_insertCount > 1 && !m_insertOverflow && m_host->editable()) {
         ++m_replaying;

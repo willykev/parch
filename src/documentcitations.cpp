@@ -105,7 +105,10 @@ QList<Database> databasesOf(const QStringList &files, Setup &setup, QSet<QString
                             const std::optional<Reach> &reach = std::nullopt)
 {
     QList<Database> list;
+    QSet<QString> seen;
     for (const QString &file : files) {
+        if (seen.contains(file)) continue;
+        seen.insert(file);
         if (reach && !reach->allows(file)) {
             if (!reported.contains(file))
                 setup.problems.append(outsideProblem(*reach, file, QStringLiteral("bibliography"),

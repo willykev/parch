@@ -2,6 +2,7 @@
 
 #include "document.h"
 #include "mdinclude.h"
+#include "mdtree.h"
 #include "pathtext.h"
 #include "sourcebuffer.h"
 #include "workerfailure.h"
@@ -25,6 +26,7 @@ QThreadPool *parsePool()
     if (!pool) {
         pool = new QThreadPool(QCoreApplication::instance());
         pool->setObjectName(QStringLiteral("parse"));
+        pool->setStackSize(md::WorkerStackBytes);
         pool->setMaxThreadCount(qBound(1, QThread::idealThreadCount() / 2, 2));
     }
     return pool;

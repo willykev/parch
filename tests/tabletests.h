@@ -5,6 +5,9 @@
 // through its cells, rows and columns. ParchTests runs each of them as a
 // test function of its own.
 namespace TableTests {
+void editingManyCellsScansTheirTableOnce();
+void aListSelectionOutdentsInOnePass();
+
 
 void formatKeepsMergedCellsWhole();
 void scannerAgreesWithTheParser();

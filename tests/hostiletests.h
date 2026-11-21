@@ -7,6 +7,11 @@
 // Every hostile file is small and made in a temporary folder. The test
 // class's slots call these.
 namespace HostileTests {
+void aFileThatGrowsPastTheLimitIsNotReadWhole();
+void aThemeFileThatIsNotRegularIsIgnored();
+void themeValuesAreClamped();
+void folderSearchResultsShowBoundedContext();
+
 
 void readsStopAtTheirLimit();
 void bibliographiesAndStylesAreReadSafely();

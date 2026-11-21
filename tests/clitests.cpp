@@ -1,4 +1,5 @@
 #include "clitests.h"
+#include <QElapsedTimer>
 
 #include "apppaths.h"
 #include "cli.h"
@@ -2795,6 +2796,27 @@ void checkingRelativeLinksIgnoresTheQueryForFileLookup()
     QCOMPARE(codes.count(u"broken-link-anchor"_s), 1);
     QCOMPARE(codes.count(u"broken-link"_s), 1);
     QVERIFY(problemCoded(document, u"broken-link"_s).value(u"message"_s).toString().contains(u"sub/absent.md)"));
+}
+
+void aDeepTreeWritesLinearJson()
+{
+    Sandbox box;
+    const auto tree = [&](int depth) {
+        box.write("outline.md", QStringLiteral("> ").repeated(depth) + "leaf");
+        return box.run({"render", "outline.md", "--to", "json-tree"});
+    };
+    const auto ordinary = tree(2);
+    QCOMPARE(ordinary.code, 0);
+    QCOMPARE(ordinary.out.toUtf8(), QJsonDocument(ordinary.json()).toJson(QJsonDocument::Indented));
+    const auto shortTree = tree(32);
+    QElapsedTimer timer;
+    timer.start();
+    const auto tallTree = tree(96);
+    QCOMPARE(tallTree.code, 0);
+    QVERIFY(!tallTree.json().isEmpty());
+    QVERIFY(tallTree.out.contains(QStringLiteral("leaf")));
+    QVERIFY(tallTree.out.size() < shortTree.out.size() * 4);
+    QVERIFY(timer.elapsed() < timeLimit(200));
 }
 
 } // namespace CliTests

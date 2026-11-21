@@ -70,7 +70,7 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
         case md::NodeType::MathInline:
         case md::NodeType::MathBlock: {
             const bool display = node.type == md::NodeType::MathBlock || node.display;
-            const ExportPictures::Picture *drawn = pictures ? pictures->formula(node.text, display) : nullptr;
+            const ExportPictures::Picture *drawn = node.resolved && pictures ? pictures->formula(node.text, display) : nullptr;
             if (!drawn) return {};
             if (const auto it = formulas.constFind(drawn); it != formulas.cend()) return *it;
             const QString markup = formula(*drawn, node.text, display, fontSize, book ? &assets : nullptr);
@@ -78,7 +78,7 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
             return markup;
         }
         case md::NodeType::MermaidBlock: {
-            const ExportPictures::Picture *drawn = pictures ? pictures->diagram(node.text) : nullptr;
+            const ExportPictures::Picture *drawn = node.resolved && pictures ? pictures->diagram(node.text) : nullptr;
             if (!drawn || !drawn->drawn) return {};
             const QByteArray svg = diagramSvg(*drawn);
             const QString url = !svg.isEmpty() ? assets.bytes(svg, QStringLiteral("image/svg+xml"), QStringLiteral("diagram.svg"))
@@ -147,6 +147,7 @@ void pictureLimitations(const md::Document &document, const ExportPictures *pict
     Counts counts;
     count(document, document.root, counts);
     if (!counts.formulas && !counts.diagrams) return;
+    ExportPictures::noteDrawingLimit(document, *limitations);
     ExportPictures::Counts drawn;
     if (pictures) {
         drawn = pictures->counts(document);

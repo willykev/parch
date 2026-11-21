@@ -68,6 +68,7 @@ QList<Heading> Outline::headings(const md::Document &document, const QString &te
 
 OutlineModel::OutlineModel(QObject *parent) : QAbstractListModel(parent)
 {
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(1);
     m_timer.setSingleShot(true);
     connect(&m_timer, &QTimer::timeout, this, &OutlineModel::scan);

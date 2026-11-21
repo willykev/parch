@@ -46,9 +46,9 @@ const QString version = QStringLiteral(PARCH_VERSION);
 
 // JSON with the control characters QJsonDocument leaves as they are (delete
 // and the C1 controls, inside strings only) escaped too.
-QByteArray printableJson(const QJsonDocument &document)
+QByteArray printableJson(const QJsonDocument &document, bool tree = false)
 {
-    const QString text = QString::fromUtf8(document.toJson(QJsonDocument::Indented));
+    const QString text = QString::fromUtf8(tree ? TreeJson::encode(document.object()) : document.toJson(QJsonDocument::Indented));
     QString safe;
     safe.reserve(text.size());
     for (const QChar c : text) {
@@ -730,7 +730,8 @@ int render(const QStringList &arguments, const Context &context)
         const QJsonObject parts = TreeJson::document(document);
         for (auto it = parts.begin(); it != parts.end(); ++it) tree.insert(it.key(), it.value());
         tree.insert(QStringLiteral("diagnostics"), diagnosticsJson(document));
-        text = QString::fromUtf8(printableJson(QJsonDocument(tree)));
+        if (!command.wantsJson() || command.parser.isSet(QStringLiteral("output")))
+            text = QString::fromUtf8(printableJson(QJsonDocument(tree), true));
         result = tree;
     }
 
@@ -748,7 +749,7 @@ int render(const QStringList &arguments, const Context &context)
         report.insert(QStringLiteral("diagnostics"), int(document.diagnostics.size()));
         if (output.isEmpty()) report.insert(QStringLiteral("result"), result);
         else report.insert(QStringLiteral("output"), output);
-        json(context.out, report);
+        writeAll(context.out, printableJson(QJsonDocument(report), to == u"json-tree"));
     } else if (document.incomplete) {
         line(context.err, QStringLiteral("parch render: %1 includes a file that could not be read; parch check %2 "
                                          "says which")

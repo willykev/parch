@@ -400,6 +400,7 @@ const char *codeName(DiagnosticCode code)
     case DiagnosticCode::UnresolvedVariable: return "unresolved-variable";
     case DiagnosticCode::MalformedTableRow: return "malformed-table-row";
     case DiagnosticCode::TableLimit: return "table-limit";
+    case DiagnosticCode::HelperLimit: return "helper-limit";
     case DiagnosticCode::ContentsLimit: return "contents-limit";
     case DiagnosticCode::UnclosedMath: return "unclosed-math";
     case DiagnosticCode::FrontMatter: return "front-matter";

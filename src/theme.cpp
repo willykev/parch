@@ -4,6 +4,7 @@
 // AppTheme, and the roles and state tokens follow the Omarchy shell's Color
 // and Style (all MIT, David Heinemeier Hansson).
 #include "theme.h"
+#include "saferead.h"
 
 #include "hyprland.h"
 
@@ -70,17 +71,17 @@ double Theme::luminance(const QColor &color) {
 
 QHash<QString, QString> Theme::readToml(const QString &path) {
     QHash<QString, QString> values;
-    QFile file(path);
-    if (path.isEmpty() || !file.open(QIODevice::ReadOnly))
-        return values;
+    if (path.isEmpty()) return values;
+    const auto file = SafeRead::read(path, 1 << 20);
+    if (!file.ok) return values;
     static const QRegularExpression section("^\\s*\\[([A-Za-z0-9_.-]+)\\]");
     // A quoted value may hold a #; a bare one is a color or ends at a space
     // or a comment.
     static const QRegularExpression entry(
         R"re(^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(#[0-9A-Fa-f]{3,8}|[^#\s]+)))re");
     QString prefix;
-    while (!file.atEnd()) {
-        const QString line = QString::fromUtf8(file.readLine());
+    const auto lines = QString::fromUtf8(file.bytes).split(u'\n');
+    for (const QString &line : lines) {
         const auto header = section.match(line);
         if (header.hasMatch()) {
             prefix = header.captured(1) + ".";
@@ -99,9 +100,9 @@ QHash<QString, QString> Theme::readToml(const QString &path) {
 
 QList<std::pair<QString, QString>> Theme::readShell(const QString &path) {
     QList<std::pair<QString, QString>> values;
-    QFile file(path);
-    if (path.isEmpty() || !file.open(QIODevice::ReadOnly))
-        return values;
+    if (path.isEmpty()) return values;
+    const auto file = SafeRead::read(path, 1 << 20);
+    if (!file.ok) return values;
     static const QRegularExpression header(R"(^\[([A-Za-z0-9_-]+)\]\s*(#.*)?$)");
     // A quoted string that is not empty, one to four numbers (a border's
     // widths), or a word; and perhaps a comment after it.
@@ -111,7 +112,7 @@ QList<std::pair<QString, QString>> Theme::readShell(const QString &path) {
                                           R"re(([A-Za-z][A-Za-z0-9_-]*))re"
                                           R"re()\s*(#.*)?$)re");
     QString section;
-    const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    const QStringList lines = QString::fromUtf8(file.bytes).split('\n');
     for (const QString &untrimmed : lines) {
         const QString line = untrimmed.trimmed();
         const auto named = header.match(line);
@@ -331,10 +332,10 @@ void Theme::reload() {
 
     // The shell's type scale (Style.font): every size derives from base-size,
     // at the shell's own ratios, unless the theme or the person pins one.
-    const int base = qMax(1, whole("font.base-size").value_or(12));
+    const int base = std::clamp(whole("font.base-size").value_or(12), 1, 96);
     auto scaled = [&](const QString &key, double ratio) {
         const int pinned = whole("font." + key).value_or(0);
-        return pinned > 0 ? pinned : qMax(1, int(std::lround(base * ratio)));
+        return std::clamp(pinned > 0 ? pinned : int(std::lround(base * ratio)), 1, 96);
     };
     const QHash<QString, int> sizes{
         {"caption", scaled("caption", .833)}, {"small", scaled("body-small", .917)},
@@ -342,7 +343,7 @@ void Theme::reload() {
         {"title", scaled("title", 1.167)},    {"heading", scaled("heading", 1.333)},
         {"display", scaled("display", 2)},
     };
-    const int borderWidth = qMax(0, int(std::lround(number("controls.normal-border-width", 1))));
+    const int borderWidth = int(std::lround(std::clamp(number("controls.normal-border-width", 1), 0.0, 16.0)));
 
     const bool same = m_loaded && palette == m_palette && dim == m_dim && faint == m_faint && red == m_danger &&
                       good == m_good && yellow == m_warning && controlFill == m_controlFill &&

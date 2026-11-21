@@ -24,6 +24,8 @@ struct Wanted {
 void collect(const md::Node &node, QList<Wanted> &wanted, QSet<QString> &seen,
              const std::function<QString(int, const QString &, bool)> &key)
 {
+    if (!node.resolved && (node.type == md::NodeType::MathInline || node.type == md::NodeType::MathBlock ||
+                           node.type == md::NodeType::MermaidBlock)) return;
     switch (node.type) {
     case md::NodeType::MathInline:
     case md::NodeType::MathBlock: {
@@ -200,6 +202,16 @@ QJsonObject ExportPictures::helperReport() const
     return report;
 }
 
+void ExportPictures::noteDrawingLimit(const md::Document &document, QStringList &limitations)
+{
+    for (const md::Diagnostic &issue : document.diagnostics) {
+        if (issue.code == md::DiagnosticCode::HelperLimit) {
+            limitations.append(issue.message);
+            return;
+        }
+    }
+}
+
 ExportPictures::Counts ExportPictures::counts(const md::Document &document) const
 {
     Counts counts;
@@ -207,12 +219,12 @@ ExportPictures::Counts ExportPictures::counts(const md::Document &document) cons
         if (node.type == md::NodeType::MermaidBlock) {
             ++counts.diagrams;
             const Picture *picture = diagram(node.text);
-            if (!picture || !picture->drawn) ++counts.diagramsNotDrawn;
+            if (!node.resolved || !picture || !picture->drawn) ++counts.diagramsNotDrawn;
             else if (!picture->vector()) ++counts.diagramsAsPictures;
         } else {
             ++counts.formulas;
             const Picture *picture = formula(node.text, node.type == md::NodeType::MathBlock || node.display);
-            if (!picture || !picture->drawn) ++counts.formulasNotDrawn;
+            if (!node.resolved || !picture || !picture->drawn) ++counts.formulasNotDrawn;
         }
     });
     return counts;

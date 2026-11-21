@@ -1435,3 +1435,103 @@ void CitationTests::cslTestSuite()
     if (!fixed.isEmpty()) qInfo("Now passing, no longer known failures: %s", qPrintable(fixed.join(u' ')));
     QVERIFY2(unexpected.isEmpty(), qPrintable(unexpected.join(u'\n')));
 }
+
+namespace CitationTests {
+
+void sharedYamlReferencesAreReadOnce()
+{
+    QByteArray yaml("- &guide\n  id: guide\n  title: Field guide\n  author:\n");
+    for (int i = 0; i < 180; ++i) yaml += "    - family: Green\n      given: Robin\n";
+    yaml += QByteArray("- *guide\n").repeated(350);
+    QElapsedTimer timer;
+    timer.start();
+    const auto db = database(yaml, BibliographyDatabase::Format::CslYaml);
+    QVERIFY(db->find("guide"));
+    QCOMPARE(db->find("guide")->names.value("author").size(), 180);
+    QCOMPARE(db->diagnostics().size(), 350);
+    const auto paired = database("- id: spring\n  author: &team [{family: Green, given: Robin}]\n"
+                                 "- id: summer\n  editor: *team\n", BibliographyDatabase::Format::CslYaml);
+    const auto *spring = paired->find("spring"), *summer = paired->find("summer");
+    QVERIFY(spring && summer);
+    QVERIFY(spring->names.value("author").isSharedWith(summer->names.value("editor")));
+    const auto literals = database("- id: plots\n  author: &lab Field Station\n- id: seeds\n  author: *lab\n",
+                                   BibliographyDatabase::Format::CslYaml);
+    const auto *plots = literals->find("plots"), *seeds = literals->find("seeds");
+    QVERIFY(plots && seeds);
+    QVERIFY(plots->names.value("author").isSharedWith(seeds->names.value("author")));
+    QVERIFY2(timer.elapsed() < timeLimit(90), qPrintable(QString::number(timer.elapsed())));
+}
+
+void yamlFieldsCanArriveInAnyOrder()
+{
+    QByteArray source("- id: survey\n  title: Observations\n");
+    for (int i = 20000; i > 0; --i)
+        source += "  observation-" + QByteArray::number(i).rightJustified(5, '0') + ": present\n";
+    QElapsedTimer timer;
+    timer.start();
+    const auto db = database(source, BibliographyDatabase::Format::CslYaml);
+    QVERIFY(db->find("survey"));
+    QCOMPARE(db->find("survey")->field("observation-00001"), QStringLiteral("present"));
+    QVERIFY2(timer.elapsed() < timeLimit(190), qPrintable(QString::number(timer.elapsed())));
+}
+
+void longAuthorListsDisambiguatePromptly()
+{
+    QByteArray authors;
+    for (int i = 0; i < 220; ++i) {
+        if (i) authors += ',';
+        authors += R"({"family":"Green","given":"Alex"})";
+    }
+    const auto pair = database("[{\"id\":\"a\",\"title\":\"One\",\"author\":[" + authors
+        + "]},{\"id\":\"b\",\"title\":\"Two\",\"author\":[" + authors + "]}]");
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = format(CslCatalog::bundledStyle("apa"), {pair}, {cluster({cite("a")}), cluster({cite("b")})});
+    QCOMPARE(result.citations.size(), 2);
+    QVERIFY(result.citations[0] != result.citations[1]);
+    QVERIFY(std::any_of(result.output.diagnostics.begin(), result.output.diagnostics.end(),
+                        [](const CitationDiagnostic &issue) {
+        return issue.code == CitationDiagnostic::Code::FormattingLimit && issue.message.contains("50");
+    }));
+    QVERIFY2(timer.elapsed() < timeLimit(250), qPrintable(QString::number(timer.elapsed())));
+}
+
+void citationMarkupKeepsUnclosedTagsAsText()
+{
+    const QString source = QStringLiteral("A comparison <i") + QString(4000, u' ') + QStringLiteral("in a draft");
+    QElapsedTimer timer;
+    timer.start();
+    const auto plain = CslText::fromHtml(source).toPlainText();
+    QCOMPARE(plain, source);
+    QVERIFY2(timer.elapsed() < timeLimit(70), qPrintable(QString::number(timer.elapsed())));
+}
+
+void citationLocatorsWithWhitespaceFormatPromptly()
+{
+    const auto refs = database(works());
+    QList<CitationClusterSpec> cites;
+    const QString locator = QStringLiteral("12,") + QString(3000, u' ') + "appendix";
+    for (int i = 0; i < 28; ++i) cites.append(cluster({cite("doe2006a", locator)}));
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = format(CslCatalog::bundledStyle("apa"), {refs}, cites);
+    QCOMPARE(result.citations.size(), cites.size());
+    QVERIFY2(timer.elapsed() < timeLimit(200), qPrintable(QString::number(timer.elapsed())));
+}
+
+void aRepeatedBibliographyIsSearchedOnce()
+{
+    const auto db = database(R"([{"id":"guide","title":"Field guide"}])");
+    QList<Database> databases(200, db);
+    QList<CitationClusterSpec> cites;
+    for (int i = 0; i < 250; ++i) cites.append(cluster({cite("guide")}));
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = format(CslCatalog::bundledStyle("ieee"), databases, cites);
+    QCOMPARE(result.citations.size(), cites.size());
+    for (const auto &problem : result.output.diagnostics)
+        QVERIFY(problem.code != CitationDiagnostic::Code::AmbiguousKey);
+    QVERIFY2(timer.elapsed() < timeLimit(200), qPrintable(QString::number(timer.elapsed())));
+}
+
+} // namespace CitationTests

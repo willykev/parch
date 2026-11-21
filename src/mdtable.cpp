@@ -358,12 +358,13 @@ std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dia
     return scanRows(text, lineAt(text, from), to, dialect, false);
 }
 
-std::optional<Table> locate(QStringView text, int position, const Dialect &dialect)
+std::optional<Table> locate(QStringView text, int position, const Dialect &dialect, int *runEnd)
 {
     const Line here = lineAt(text, position);
     const auto rowLike = [&](const Line &line) {
         return !isBlank(text, line) && !isComment(text, line, dialect) && hasPipe(text, line, dialect);
     };
+    if (runEnd) *runEnd = here.end;
     if (!rowLike(here)) return std::nullopt;
     Line first = here;
     while (const auto above = lineBefore(text, first)) {
@@ -371,12 +372,22 @@ std::optional<Table> locate(QStringView text, int position, const Dialect &diale
         first = *above;
     }
     // The header is the line just above the first delimiter row.
-    for (Line header = first; header.start <= here.start;) {
+    for (Line header = first; runEnd || header.start <= here.start;) {
         const auto next = lineAfter(text, header);
         if (!next || !rowLike(*next)) break;
-        if (delimiterRow(text, next->content, trimmedEnd(text, *next)))
-            return scanRows(text, header, int(text.size()), dialect, true);
+        if (delimiterRow(text, next->content, trimmedEnd(text, *next))) {
+            auto table = scanRows(text, header, int(text.size()), dialect, true);
+            if (runEnd) {
+                // A malformed or oversized grid can end before the pipe lines do.
+                Line last = table ? lineAt(text, table->end) : *next;
+                for (auto row = lineAfter(text, last); row && rowLike(*row); row = lineAfter(text, last))
+                    last = *row;
+                *runEnd = last.end;
+            }
+            return table;
+        }
         header = *next;
+        if (runEnd) *runEnd = header.end;
     }
     return std::nullopt;
 }

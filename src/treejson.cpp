@@ -2,6 +2,7 @@
 
 #include "documentcheck.h"
 
+#include <QJsonDocument>
 #include <memory>
 
 namespace TreeJson {
@@ -35,7 +36,7 @@ public:
         return index->at(offset).line;
     }
 
-    QJsonObject node(const md::Node &node, const md::Node *contentsAt = nullptr)
+    QJsonObject fields(const md::Node &node, const md::Node *contentsAt)
     {
         const md::Node &place = contentsAt ? *contentsAt : node;
         QJsonObject out{{QStringLiteral("type"), QString::fromLatin1(md::typeName(node.type))},
@@ -78,13 +79,32 @@ public:
             for (const md::Range &marker : node.markers) markers.append(range(marker));
             out.insert(QStringLiteral("markers"), markers);
         }
-        if (!node.contentsChildren().empty()) {
-            QJsonArray children;
-            for (const md::Node &child : node.contentsChildren())
-                children.append(this->node(child, node.contentsOwner ? &node : contentsAt));
-            out.insert(QStringLiteral("children"), children);
-        }
         return out;
+    }
+
+    QJsonObject node(const md::Node &root)
+    {
+        struct Frame {
+            const md::Node *node;
+            const md::Node *place;
+            QJsonArray children;
+            size_t next = 0;
+        };
+        std::vector<Frame> stack{{&root, nullptr, {}}};
+        for (;;) {
+            Frame &frame = stack.back();
+            const auto &children = frame.node->contentsChildren();
+            if (frame.next < children.size()) {
+                const auto *place = frame.node->contentsOwner ? frame.node : frame.place;
+                stack.push_back({&children[frame.next++], place, {}});
+                continue;
+            }
+            QJsonObject value = fields(*frame.node, frame.place);
+            if (!frame.children.isEmpty()) value.insert(QStringLiteral("children"), std::move(frame.children));
+            stack.pop_back();
+            if (stack.empty()) return value;
+            stack.back().children.append(std::move(value));
+        }
     }
 
     const md::Document &doc;
@@ -136,6 +156,62 @@ QJsonObject document(const md::Document &document)
         {QStringLiteral("root"), writer.node(document.root)},
         {QStringLiteral("incomplete"), document.incomplete},
     };
+}
+
+// Use Qt's JSON quoting for leaves. The explicit stack and bounded indentation
+// keep both the working stack and the bytes per field independent of depth.
+QByteArray encode(const QJsonObject &root)
+{
+    struct Frame {
+        QJsonObject object;
+        QJsonArray array;
+        QStringList keys;
+        qsizetype next = 0;
+        bool list = false;
+    };
+    QByteArray bytes;
+    std::vector<Frame> stack;
+    const auto leaf = [&](const QJsonValue &value) {
+        const QByteArray wrapped = QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact);
+        bytes.append(wrapped.constData() + 1, wrapped.size() - 2);
+    };
+    const auto open = [&](const QJsonValue &value) {
+        if (value.isObject()) {
+            const auto object = value.toObject();
+            bytes += '{';
+            stack.push_back({object, {}, object.keys(), 0, false});
+        } else if (value.isArray()) {
+            bytes += '[';
+            stack.push_back({{}, value.toArray(), {}, 0, true});
+        } else leaf(value);
+    };
+    const auto newline = [&](size_t depth) {
+        bytes += '\n';
+        bytes.append(qsizetype(std::min<size_t>(depth, 16) * 4), ' ');
+    };
+    open(root);
+    while (!stack.empty()) {
+        Frame &frame = stack.back();
+        const auto count = frame.list ? frame.array.size() : frame.keys.size();
+        if (frame.next == count) {
+            newline(stack.size() - 1);
+            bytes += frame.list ? ']' : '}';
+            stack.pop_back();
+            continue;
+        }
+        if (frame.next) bytes += ',';
+        newline(stack.size());
+        const auto i = frame.next++;
+        if (frame.list) open(frame.array.at(i));
+        else {
+            const QString &key = frame.keys.at(i);
+            leaf(key);
+            bytes += ": ";
+            open(frame.object.value(key));
+        }
+    }
+    bytes += '\n';
+    return bytes;
 }
 
 QJsonArray outline(const md::Document &document)

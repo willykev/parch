@@ -1,4 +1,5 @@
 #include "hostiletests.h"
+#include "theme.h"
 
 #include "apppaths.h"
 #include "backend.h"
@@ -1134,6 +1135,81 @@ void restoredTabsAreReadWhenShown()
     typeInto(shown);
     QTRY_VERIFY(preview->current());
     QVERIFY(preview->failure().isEmpty());
+}
+
+void aFileThatGrowsPastTheLimitIsNotReadWhole()
+{
+    QTemporaryDir dir;
+    const auto path = dir.filePath("field-notes.md");
+    writeFile(path, "One bed\n");
+    const auto opened = DiskFile::load(path);
+    QVERIFY(opened.ok);
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadWrite));
+    QVERIFY(file.resize(DiskFile::MaxLoadBytes + 1));
+    file.close();
+    const auto reads = DiskFile::contentReads();
+    QByteArray bytes;
+    QVERIFY(!DiskFile::readVersion(path, opened.version, bytes));
+    QVERIFY(bytes.isEmpty());
+    QVERIFY(DiskFile::fingerprint(path, opened.version) != opened.version);
+    const auto result = DiskFile::save(path, "Mine\n", opened.version);
+    QCOMPARE(result.status, SaveStatus::Conflict);
+    QVERIFY(result.error.contains("large", Qt::CaseInsensitive));
+    QCOMPARE(DiskFile::contentReads(), reads);
+    QCOMPARE(QFileInfo(path).size(), DiskFile::MaxLoadBytes + 1);
+}
+
+void aThemeFileThatIsNotRegularIsIgnored()
+{
+    QTemporaryDir dir;
+    QVERIFY(QDir().mkpath(dir.filePath("theme/shell.toml")));
+    writeFile(dir.filePath("theme/colors.toml"), "background = '#123456'\n");
+    Theme theme(dir.path());
+    QCOMPARE(theme.background(), QColor("#123456"));
+    QCOMPARE(theme.fontSize(), 12);
+    QVERIFY(QDir().rmdir(dir.filePath("theme/shell.toml")));
+    writeFile(dir.filePath("theme/shell.toml"), "[font]\nbase-size = 24\n#" + QByteArray(1024 * 1024, 'x'));
+    Theme oversized(dir.path());
+    QCOMPARE(oversized.background(), QColor("#123456"));
+    QCOMPARE(oversized.fontSize(), 12);
+}
+
+void themeValuesAreClamped()
+{
+    QTemporaryDir dir;
+    QVERIFY(QDir().mkpath(dir.filePath("theme")));
+    writeFile(dir.filePath("theme/shell.toml"), "[font]\nbase-size = 1000\nheading = 1200\n[controls]\nnormal-border-width = 200\n");
+    Theme theme(dir.path());
+    QCOMPARE(theme.fontSize(), 96);
+    QCOMPARE(theme.size("heading"), 96);
+    QCOMPARE(theme.controlBorderWidth(), 16);
+}
+
+void folderSearchResultsShowBoundedContext()
+{
+    QTemporaryDir folder;
+    const auto notes = folder.filePath("notes");
+    QVERIFY(QDir().mkpath(notes));
+    const QByteArray phrase = QByteArray("garden ").repeated(400);
+    writeFile(notes + "/journal.md", "morning " + phrase + "evening");
+    const auto paths = AppPaths::under(folder.filePath("app"));
+    DocumentStore store(paths);
+    Settings settings(paths.settingsFile());
+    settings.setLibraryFolders({notes});
+    FolderSearch search(paths, &store, &settings);
+    search.setRegex(true);
+    search.setPattern("garden.*evening");
+    search.start();
+    QTRY_VERIFY(search.finished());
+    QCOMPARE(search.matchCount(), 1);
+    QCOMPARE(search.rowCount(), 1);
+    {
+        const auto row = search.index(0);
+        QCOMPARE(search.data(row, FolderSearch::LengthRole).toInt(), phrase.size() + 7);
+        const QString match = search.data(row, FolderSearch::MatchRole).toString();
+        QVERIFY(match.startsWith("garden") && match.size() <= 180);
+    }
 }
 
 } // namespace HostileTests

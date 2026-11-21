@@ -2,6 +2,7 @@
 #include <gio/gio.h>
 
 #include "exporttests.h"
+#include "previewbuilder.h"
 
 #include "backend.h"
 #include "cli.h"
@@ -26,6 +27,7 @@
 #include "previewstyle.h"
 #include "printportal.h"
 #include "printpreview.h"
+#include "rendercheck.h"
 #include "rendertesting.h"
 #include "svgpaper.h"
 #include "testfiles.h"
@@ -3112,4 +3114,180 @@ void docxBookmarksAndRelationshipsStayUnique()
     QVERIFY2(elapsed < timeLimit(headings ? 500 : 750), qPrintable(QStringLiteral("%1 ms").arg(elapsed)));
 }
 
+void consecutiveHeadingsKeepTheirPagePositions()
+{
+    QString source;
+    for (int i = 0; i < 3500; ++i) source += QStringLiteral("## Plot %1\n\n").arg(i);
+    const auto doc = md::parse(source);
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QCOMPARE(paper.headings().size(), 3500);
+    for (const int i : {0, 3499}) {
+        auto at = paper.document()->find(QStringLiteral("Plot %1").arg(i));
+        QVERIFY(!at.isNull());
+        at.setPosition(at.selectionStart() + 1);
+        QVERIFY(at.charFormat().anchorNames().contains(QStringLiteral("plot-%1").arg(i)));
+    }
+    QVERIFY(paper.headings().last().page > 0);
+    QVERIFY2(timer.elapsed() < timeLimit(450), qPrintable(QString::number(timer.elapsed())));
+}
+
+void paperSetsManyShortParagraphsPromptly()
+{
+    const auto doc = md::parse(QStringLiteral("A field observation.\n\n").repeated(4000));
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QVERIFY(paper.pageCount() > 1);
+    QCOMPARE(paper.document()->toPlainText().count(QStringLiteral("A field observation.")), 4000);
+    QVERIFY2(timer.elapsed() < timeLimit(500), qPrintable(QString::number(timer.elapsed())));
+}
+
+void paperWrapsLongTextRunsPromptly_data()
+{
+    QTest::addColumn<QString>("run");
+    QTest::newRow("spaces") << QString(15000, u' ');
+    QTest::newRow("long-word") << QStringLiteral("Specimen").repeated(8000);
+}
+
+void paperWrapsLongTextRunsPromptly()
+{
+    QFETCH(QString, run);
+    const QString text = QStringLiteral("Start") + run + QStringLiteral("End");
+    const auto doc = md::parse(text);
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QString shown = paper.document()->toPlainText();
+    shown.remove(QChar(0x200b));
+    shown.remove(u'\n');
+    QCOMPARE(shown, text);
+    QVERIFY2(timer.elapsed() < timeLimit(300), qPrintable(QString::number(timer.elapsed())));
+}
+
+void docxReusesTheBytesOfOnePicture()
+{
+    QTemporaryDir folder;
+    QImage image(320, 320, QImage::Format_ARGB32);
+    image.fill(Qt::darkGreen);
+    QVERIFY(image.save(folder.filePath("plot.png")));
+    const auto bytes = readFile(folder.filePath("plot.png"));
+    QString source;
+    for (int i = 0; i < 15; ++i) {
+        const auto name = QStringLiteral("plot-%1.png").arg(i);
+        writeFile(folder.filePath(name), bytes);
+        source += QStringLiteral("![Plot %1](%2)\n\n").arg(i).arg(name);
+    }
+    const auto path = folder.filePath("plots.md");
+    writeFile(path, source.toUtf8());
+    const auto loaded = load(path);
+    const auto out = folder.filePath("plots.docx");
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", out), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto entries = entriesOf(out);
+    const auto documentXml = entry(entries, "word/document.xml");
+    QCOMPARE(documentXml.count("<w:drawing>"), 15);
+    for (int i = 0; i < 15; ++i) QVERIFY(documentXml.contains("descr=\"Plot " + QByteArray::number(i) + "\""));
+    QCOMPARE(entry(entries, "word/_rels/document.xml.rels").count("relationships/image"), 1);
+    QCOMPARE(entry(entries, "word/media/image1.png"), bytes);
+    QVERIFY(timer.elapsed() < timeLimit(250));
+}
+
+void aDocumentWithManyFormulasStopsAtTheHelperBudget()
+{
+    // Check the production boundary without starting a helper for each formula.
+    QString notes;
+    for (int i = 0; i < 10000; ++i) notes += QStringLiteral("$x_{%1}$\n\n").arg(i);
+    const int firstExtra = int(notes.size());
+    notes += QStringLiteral("$y$\n\n$x_{0}$");
+    const auto lecture = md::parse(notes);
+    const auto checks = RenderCheck::items(lecture);
+    QCOMPARE(checks.size(), size_t(10001));
+    QCOMPARE(checks[9999].source, QStringLiteral("x_{9999}"));
+    QCOMPARE(checks.back().source, QStringLiteral("x_{0}"));
+    QCOMPARE(lecture.diagnostics.size(), size_t(1));
+    QCOMPARE(lecture.diagnostics.front().code, md::DiagnosticCode::HelperLimit);
+    QCOMPARE(lecture.diagnostics.front().range.start, firstExtra);
+
+    // Draw a mixed document at a small limit with the same helpers as an export.
+    const QString source = QStringLiteral("$x$ and $x$\n\n"
+                                          "```mermaid\ngraph LR\nA --> B\n```\n\n"
+                                          "$$\nx\n$$\n\n"
+                                          "$later$ and $x$\n\n"
+                                          "```mermaid\ngraph LR\nB --> C\n```\n");
+    md::Source limits;
+    limits.maxDrawings = 3;
+    DocumentCheck::Loaded loaded;
+    loaded.document = md::parse(source, md::Options::writer(), limits);
+    const auto &doc = loaded.document;
+    const auto problems = DocumentCheck::problems(loaded);
+    QCOMPARE(problems.size(), size_t(1));
+    QCOMPARE(problems.front().code, QStringLiteral("helper-limit"));
+    QCOMPARE(problems.front().severity, md::Severity::Warning);
+    QCOMPARE(problems.front().range.start, source.indexOf(QStringLiteral("$later$")));
+    QVERIFY(problems.front().message.contains(QStringLiteral("3")));
+
+    QTemporaryDir folder;
+    ExportPictures::Options options;
+    options.service = fakeHelpers(folder.path());
+    ExportPictures pictures(options);
+    QElapsedTimer timer;
+    timer.start();
+    QVERIFY(pictures.draw(doc));
+    const auto counts = pictures.counts(doc);
+    QCOMPARE(counts.formulas, 5);
+    QCOMPARE(counts.formulasNotDrawn, 1);
+    QCOMPARE(counts.diagrams, 2);
+    QCOMPARE(counts.diagramsNotDrawn, 1);
+    QVERIFY(!pictures.formula(QStringLiteral("later"), false));
+    QVERIFY(timer.elapsed() < timeLimit(2000));
+
+    PaperDocument paper(doc, nullptr, &pictures, {});
+    QVERIFY(paper.layOut(nullptr));
+    const auto later = paper.document()->find(QStringLiteral("later"));
+    QVERIFY(!later.isNull());
+    QCOMPARE(later.charFormat().toolTip(), problems.front().message);
+    QVERIFY(paper.document()->toPlainText().contains(QStringLiteral("B --> C")));
+}
+
+void paperIndexesUnresolvedReferencesOnce()
+{
+    QString source;
+    for (int i = 0; i < 4000; ++i) source += QStringLiteral("[Plot][plot %1]\n\n").arg(i);
+    source += QStringLiteral("[Again][plot 0]");
+    const auto doc = md::parse(source);
+    QElapsedTimer timer;
+    timer.start();
+    const preview::Unresolved index(doc);
+    QCOMPARE(index.messages().size(), 4000);
+    QVERIFY(index.messages().first().contains(QStringLiteral("plot 0")));
+    QVERIFY(index.messages().last().contains(QStringLiteral("plot 3999")));
+    QVERIFY2(timer.elapsed() < timeLimit(45), qPrintable(QString::number(timer.elapsed())));
+}
+
+void paperPaginatesWrappedHeadingsTogether()
+{
+    QString source;
+    for (int i = 0; i < 1200; ++i)
+        source += QStringLiteral("## Chapter %1. ").arg(i) + QStringLiteral("Field observations and measurements ").repeated(4) + u'\n';
+    const auto doc = md::parse(source);
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QCOMPARE(paper.headings().size(), 1200);
+    const auto first = paper.document()->find(QStringLiteral("Chapter 0."));
+    const auto last = paper.document()->find(QStringLiteral("Chapter 1199."));
+    QVERIFY(!first.isNull() && !last.isNull());
+    QCOMPARE(paper.headings().first().page, paper.pageAt(first.selectionStart()));
+    QCOMPARE(paper.headings().last().page, paper.pageAt(last.selectionStart()));
+    QVERIFY(paper.headings().last().page > 0);
+    QVERIFY2(timer.elapsed() < timeLimit(600), qPrintable(QString::number(timer.elapsed())));
+}
 } // namespace ExportTests

@@ -5,6 +5,9 @@
 // each is run by a slot of the same name, prefixed `markdown`, in
 // parch_tests.cpp.
 namespace MarkdownTests {
+void checkingOneLongLineIsQuick();
+void blankLinesUnderDeepListsParseQuickly();
+
 void aWideTableWithShortRowsStaysSmall();
 void aTablePastItsCellLimitBecomesText();
 void manyTableOfContentsShareOneList();

@@ -520,7 +520,7 @@ FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &it
     *read = true;
     // Line numbers are counted as the matches come, from where the last one was.
     int line = 0;
-    qsizetype lineStart = 0, scanned = 0;
+    qsizetype lineStart = 0, lineEnd = -1, scanned = 0;
     TextSearch::forEachMatch(text, run.expression, [&](const QRegularExpressionMatch &match) {
         const qsizetype start = match.capturedStart(), length = match.capturedLength();
         if (length == 0) return true;
@@ -531,23 +531,33 @@ FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &it
         }
         ++result.count;
         if (result.hits.size() < MaxRowsPerFile) {
-            qsizetype lineEnd = start;
-            while (lineEnd < text.size() && text.at(lineEnd) != u'\n' && text.at(lineEnd) != u'\r') ++lineEnd;
+            if (lineEnd < start) {
+                lineEnd = start;
+                while (lineEnd < text.size() && text.at(lineEnd) != u'\n' && text.at(lineEnd) != u'\r') ++lineEnd;
+            }
             const qsizetype matchEnd = std::min(start + length, lineEnd);
             Hit hit;
             hit.line = line + 1;
             hit.column = int(start - lineStart) + 1;
             hit.start = int(start);
             hit.length = int(length);
-            const qsizetype from = std::max(lineStart, start - beforeUnits);
+            qsizetype from = std::max(lineStart, start - beforeUnits);
+            if (from > lineStart && text.at(from).isLowSurrogate()) ++from;
             hit.before = text.mid(from, start - from);
             // From the start of the line its indent goes; from within it, a mark says so.
             if (from == lineStart) hit.before = leftTrimmed(hit.before);
             else hit.before.prepend(u'…');
-            hit.match = text.mid(start, matchEnd - start);
-            const qsizetype until = std::min(lineEnd, matchEnd + afterUnits);
+            const qsizetype shownEnd = std::min(matchEnd, start + afterUnits);
+            hit.match = text.mid(start, shownEnd - start);
+            if (shownEnd < matchEnd) {
+                if (hit.match.back().isHighSurrogate()) hit.match.chop(1);
+                hit.match += u'…';
+            }
+            qsizetype until = std::min(lineEnd, matchEnd + afterUnits);
+            if (until < lineEnd && text.at(until - 1).isHighSurrogate()) --until;
             hit.after = text.mid(matchEnd, until - matchEnd) + (until < lineEnd ? QStringLiteral("…") : QString());
-            hit.lineText = text.mid(lineStart, std::min(lineEnd - lineStart, qsizetype(lineUnits))).trimmed();
+            hit.lineText = lineEnd - lineStart <= lineUnits ? text.mid(lineStart, lineEnd - lineStart).trimmed()
+                                                          : hit.before + hit.match + hit.after;
             result.hits.append(hit);
         }
         return result.count < countedPerFile;

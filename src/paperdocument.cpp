@@ -441,6 +441,7 @@ bool PaperDocument::layOut(QPagedPaintDevice *device, const std::function<bool(q
     m_text.documentLayout()->registerHandler(QTextFormat::ImageObject, objects);
     if (device) m_text.documentLayout()->setPaintDevice(device);
     // Set before building, so that pictures fit the column as they are made.
+    m_text.setLayoutEnabled(false);
     m_text.setPageSize(m_body.size());
     QTextOption wrapping = m_text.defaultTextOption();
     // Code and long addresses break where they must rather than run off the page.
@@ -489,6 +490,7 @@ bool PaperDocument::layOut(QPagedPaintDevice *device, const std::function<bool(q
         arrow.insertText(QString(QChar(0x2191)), format);
     }
     edits.endEditBlock();
+    m_text.setLayoutEnabled(true);
 
     // What the screen draws over the text, paper draws itself.
     const auto at = [this](int position) {
@@ -509,7 +511,9 @@ bool PaperDocument::layOut(QPagedPaintDevice *device, const std::function<bool(q
             case preview::Mark::NotesRule:
                 m_rules.append({Rule::ShortLine, at(start + mark.first), at(start + mark.first), mark.x});
                 break;
-            case preview::Mark::Heading: m_headingBlocks.append({at(start + mark.first), mark.level, mark.text}); break;
+            case preview::Mark::Heading:
+                m_headingBlocks.append({m_text.findBlock(start + mark.first), mark.level, mark.text});
+                break;
             default: break;
             }
         }
@@ -571,68 +575,57 @@ void PaperDocument::relayOut()
 void PaperDocument::splitAcrossPages()
 {
     QAbstractTextDocumentLayout *layout = m_text.documentLayout();
-    QTextBlock block = m_text.begin();
-    bool relaid = false;
+    // Measure against one layout. Editing one paragraph at a time would
+    // repeatedly invalidate every following paragraph and table.
+    struct Breaks {
+        QTextBlock block;
+        QList<int> offsets;
+    };
+    QList<Breaks> paragraphs;
     const qreal characters = std::max(1, m_text.characterCount());
-    for (int guard = 0; block.isValid() && guard < 1000000; ++guard) {
-        if (guard % 32 == 31 && stopping(0.6 + 0.2 * block.position() / characters)) return;
-        // Laid out as far as this block; where it stands on the page, in a
-        // table's cell too, whose lines go on from page to page as well.
+    int visited = 0;
+    for (QTextBlock block = m_text.begin(); block.isValid(); block = block.next()) {
+        if (++visited % 32 == 0 && stopping(0.6 + 0.2 * block.position() / characters)) return;
+        const QTextLayout *lines = block.layout();
+        if (!lines || lines->lineCount() < 2) continue;
         const qreal top = layout->blockBoundingRect(block).top();
-        QTextLayout *lines = block.layout();
-        // A block with no lines has not been placed: place everything again, once.
-        if (lines && lines->lineCount() == 0 && !relaid) {
-            relayOut();
-            relaid = true;
-            continue;
-        }
-        relaid = false;
-        if (!lines || lines->lineCount() < 2) {
-            block = block.next();
-            continue;
-        }
-        // Every place the block goes onto another page, found in one pass,
-        // so that a paragraph many pages long is split in time that grows
-        // with its length rather than with its square.
-        QList<int> splits;
         int page = pageOf(top + lines->lineAt(0).y());
+        QList<int> offsets;
         for (int i = 1; i < lines->lineCount(); ++i) {
-            const int at = pageOf(top + lines->lineAt(i).y());
-            if (at == page) continue;
-            page = at;
-            if (lines->lineAt(i).textStart() > 0) splits.append(lines->lineAt(i).textStart());
+            const QTextLine line = lines->lineAt(i);
+            const int next = pageOf(top + line.y());
+            if (next != page && line.textStart() > 0) offsets.append(line.textStart());
+            page = next;
         }
-        if (splits.isEmpty()) {
-            block = block.next();
-            continue;
-        }
-        const QTextBlockFormat format = block.blockFormat();
-        QTextBlockFormat before = format, after = format;
+        if (!offsets.isEmpty()) paragraphs.append({block, std::move(offsets)});
+    }
+    if (paragraphs.isEmpty()) return;
+
+    // Work backwards so earlier offsets and the original character formats
+    // still apply. A split replaces a line separator in code and keeps the
+    // paragraph's outer margins only on its first and last pieces.
+    QTextCursor cursor(&m_text);
+    cursor.beginEditBlock();
+    for (auto it = paragraphs.crbegin(); it != paragraphs.crend(); ++it) {
+        const int start = it->block.position();
+        QTextBlockFormat before = it->block.blockFormat(), after = before;
         before.setBottomMargin(0);
         after.setTopMargin(0);
         after.setTextIndent(0);
         after.setPageBreakPolicy(QTextFormat::PageBreak_Auto);
         QTextBlockFormat between = after;
         between.setBottomMargin(0);
-        const int start = block.position();
-        const QString text = block.text();
-        QTextCursor cursor(block);
-        // One edit, laid out once at its end rather than after every split.
-        cursor.beginEditBlock();
+        cursor.setPosition(start);
         cursor.setBlockFormat(before);
-        // From the last place back, so that the places before it stay where they are.
-        for (qsizetype k = splits.size() - 1; k >= 0; --k) {
-            const int split = splits.at(k);
-            cursor.setPosition(start + split);
-            // A line of code ends in a line separator, which the new block takes the place of.
-            if (text.at(split - 1) == QChar::LineSeparator) cursor.setPosition(start + split - 1, QTextCursor::KeepAnchor);
-            const QTextCharFormat chars = cursor.charFormat();
-            cursor.insertBlock(k == splits.size() - 1 ? after : between, chars);
+        for (qsizetype k = it->offsets.size() - 1; k >= 0; --k) {
+            const int cut = start + it->offsets.at(k);
+            cursor.setPosition(cut);
+            if (m_text.characterAt(cut - 1) == QChar::LineSeparator)
+                cursor.setPosition(cut - 1, QTextCursor::KeepAnchor);
+            cursor.insertBlock(k == it->offsets.size() - 1 ? after : between, cursor.charFormat());
         }
-        cursor.endEditBlock();
-        // Each part is looked at once more, on the page it now starts.
-        block = m_text.findBlock(start).next();
     }
+    cursor.endEditBlock();
 }
 
 void PaperDocument::markNames(const std::vector<preview::Section> &sections)
@@ -663,6 +656,9 @@ void PaperDocument::markNames(const std::vector<preview::Section> &sections)
         QTextCharFormat named;
         named.setAnchor(true);
         named.setAnchorNames(names);
+        // Qt interns character formats. Give different destination lists
+        // distinct integer properties as well, so their format lookups scale.
+        named.setProperty(QTextFormat::UserProperty + 0x512, position);
         cursor.mergeCharFormat(named);
     }
 }
@@ -684,7 +680,7 @@ void PaperDocument::breakPages(const std::vector<preview::Section> &sections)
             format.setBottomMargin(0);
             format.setLineHeight(1, QTextBlockFormat::FixedHeight);
             QTextCursor(block).setBlockFormat(format);
-            m_breaks.append(QTextCursor(block));
+            m_breaks.append(block);
         }
         start += section.length;
     }
@@ -708,12 +704,22 @@ void PaperDocument::keepHeadingsWithText()
     // A heading at the foot of a page, with what it heads on the next, goes
     // to the next page too. A heading above another may follow it there, so
     // this goes round until nothing moves.
+    if (m_headingBlocks.isEmpty() && m_breaks.isEmpty()) return;
     QAbstractTextDocumentLayout *layout = m_text.documentLayout();
+    // A run of headings at the end has no following text to keep with it.
+    // Lay it out normally, even when the index alone takes several pages.
+    int withText = int(m_headingBlocks.size());
+    QTextBlock following = m_text.lastBlock();
+    for (; withText > 0; --withText) {
+        while (following.isValid() && following.length() <= 1) following = following.previous();
+        if (following != m_headingBlocks[withText - 1].block) break;
+        following = following.previous();
+    }
     for (int round = 0; round < 12; ++round) {
-        relayOut();
-        bool moved = false;
-        for (const HeadingBlock &heading : std::as_const(m_headingBlocks)) {
-            const QTextBlock block = heading.at.block();
+        QList<std::pair<QTextBlock, QTextBlockFormat>> changes;
+        for (int i = 0; i < withText; ++i) {
+            const auto &heading = m_headingBlocks.at(i);
+            const QTextBlock block = heading.block;
             if (!block.isValid()) continue;
             if (block.blockFormat().pageBreakPolicy() & QTextFormat::PageBreak_AlwaysBefore) continue;
             QTextBlock next = block.next();
@@ -731,22 +737,24 @@ void PaperDocument::keepHeadingsWithText()
             if (pageOf(nextLine) <= page || firstLine - page * m_body.height() < 1) continue;
             QTextBlockFormat format = block.blockFormat();
             format.setPageBreakPolicy(format.pageBreakPolicy() | QTextFormat::PageBreak_AlwaysBefore);
-            QTextCursor(block).setBlockFormat(format);
-            moved = true;
+            changes.append({block, format});
         }
         // A page break that falls at the top of a page has a new page
         // already: breaking again would leave this one empty.
-        for (const QTextCursor &at : std::as_const(m_breaks)) {
-            const QTextBlock block = at.block();
+        for (const QTextBlock &block : std::as_const(m_breaks)) {
             if (!(block.blockFormat().pageBreakPolicy() & QTextFormat::PageBreak_AlwaysAfter)) continue;
             const qreal top = layout->blockBoundingRect(block).top();
             if (top - pageOf(top + 0.5) * m_body.height() >= 1 || top < 1) continue;
             QTextBlockFormat format = block.blockFormat();
             format.setPageBreakPolicy(QTextFormat::PageBreak_Auto);
-            QTextCursor(block).setBlockFormat(format);
-            moved = true;
+            changes.append({block, format});
         }
-        if (!moved) break;
+        if (changes.isEmpty()) break;
+        QTextCursor edit(&m_text);
+        edit.beginEditBlock();
+        for (const auto &[block, format] : std::as_const(changes)) QTextCursor(block).setBlockFormat(format);
+        edit.endEditBlock();
+        relayOut();
     }
 }
 
@@ -754,7 +762,7 @@ void PaperDocument::findHeadings()
 {
     m_headings.clear();
     for (const HeadingBlock &heading : std::as_const(m_headingBlocks)) {
-        const QTextBlock block = heading.at.block();
+        const QTextBlock block = heading.block;
         if (!block.isValid()) continue;
         const QTextLayout *text = block.layout();
         const qreal y = text && text->lineCount() ? text->position().y() + text->lineAt(0).y()

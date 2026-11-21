@@ -6,6 +6,7 @@
 #include "clicommands.h"
 #include "documentsettings.h"
 #include "documentstore.h"
+#include "mdtree.h"
 #include "portalfilepicker.h"
 #include "printportal.h"
 #include "qmltypes.h"
@@ -37,6 +38,7 @@
 #include <QStyleHints>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 #include <algorithm>
@@ -148,6 +150,7 @@ int main(int argc, char *argv[])
             } else {
                 application = std::make_unique<QCoreApplication>(argc, argv);
             }
+            QThreadPool::globalInstance()->setStackSize(md::WorkerStackBytes);
             application->setApplicationName(QStringLiteral("parch"));
             const Cli::Context context{QDir::currentPath(), QDir::homePath(), AppPaths::standard(), &out, &err};
             status = Cli::run(launch.commandArguments, context);
@@ -282,6 +285,7 @@ int main(int argc, char *argv[])
     }
 
     QGuiApplication app(argc, argv);
+    QThreadPool::globalInstance()->setStackSize(md::WorkerStackBytes);
     app.setDesktopFileName(QStringLiteral("parch"));
     app.setApplicationName(QStringLiteral("parch"));
     if (picturing) {

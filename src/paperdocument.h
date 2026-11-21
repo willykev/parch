@@ -11,6 +11,7 @@
 #include <QPageSize>
 #include <QString>
 #include <QStringList>
+#include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
 
@@ -157,13 +158,13 @@ private:
     QList<Rule> m_rules;
     // Heading blocks: where they are, their levels and texts.
     struct HeadingBlock {
-        QTextCursor at;
+        QTextBlock block;
         int level = 1;
         QString text;
     };
     QList<HeadingBlock> m_headingBlocks;
     // The blocks that break the page after them.
-    QList<QTextCursor> m_breaks;
+    QList<QTextBlock> m_breaks;
     QList<Heading> m_headings;
     QSizeF m_page;
     QRectF m_body;

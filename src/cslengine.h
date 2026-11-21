@@ -71,6 +71,7 @@ public:
         CslBibliographyLayout layout;
         bool nestingLimited = false;
         bool renderLimited = false;
+        bool namesLimited = false;
     };
 
     // The locale is the base for the style's language; the style's own

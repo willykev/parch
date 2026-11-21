@@ -121,7 +121,10 @@ std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dia
 // The table holding a position, found from the text alone: the header just
 // above the first delimiter row among the lines around it that have pipes,
 // and the rows after it down to a blank line or a line without a pipe.
-std::optional<Table> locate(QStringView text, int position, const Dialect &dialect = {});
+// With runEnd, look through the whole run of pipe lines containing the
+// position. Its table may start later. The following lookup can skip to
+// after runEnd even when these lines contain no table.
+std::optional<Table> locate(QStringView text, int position, const Dialect &dialect = {}, int *runEnd = nullptr);
 
 // The index of the row holding a position, or -1.
 int rowAt(const Table &table, int position);

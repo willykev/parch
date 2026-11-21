@@ -7,6 +7,17 @@
 // stand-in for the desktop's print portal. ParchTests runs each of them as a
 // test function of its own.
 namespace ExportTests {
+void paperPaginatesWrappedHeadingsTogether();
+
+void paperIndexesUnresolvedReferencesOnce();
+
+void consecutiveHeadingsKeepTheirPagePositions();
+void paperSetsManyShortParagraphsPromptly();
+void paperWrapsLongTextRunsPromptly_data();
+void paperWrapsLongTextRunsPromptly();
+void docxReusesTheBytesOfOnePicture();
+void aDocumentWithManyFormulasStopsAtTheHelperBudget();
+
 void aHugeHtmlTableIsShownAsText();
 void aDeeplyQuotedHtmlPasteFallsBackToText();
 void aTagWithManyAttributesPastesQuickly();

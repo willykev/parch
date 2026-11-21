@@ -2,6 +2,7 @@
 
 #include "documentreading.h"
 #include "mdinclude.h"
+#include "mdtree.h"
 #include "rendercheck.h"
 #include "renderservice.h"
 #include "sourcebuffer.h"
@@ -45,6 +46,7 @@ struct DocumentChecker::Found {
 
 DocumentChecker::DocumentChecker(QObject *parent) : QObject(parent)
 {
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(1);
 }
 

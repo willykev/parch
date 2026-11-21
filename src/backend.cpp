@@ -11,6 +11,7 @@
 #include "foldersearch.h"
 #include "history.h"
 #include "librarymodel.h"
+#include "mdtree.h"
 #include "pathtext.h"
 #include "privatefiles.h"
 #include "readingpositions.h"
@@ -124,6 +125,7 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     m_organizer->setDialects([this] { return m_documentSettings->dialectsOfFiles(); });
     // Two workers: enough to list a folder while another is slow, and few
     // enough that a folder that never answers costs little.
+    m_libraryPool->setStackSize(md::WorkerStackBytes);
     m_libraryPool->setMaxThreadCount(2);
     // The guide the package installs beside the program, as <prefix>/share/doc/parch.
     m_installedGuide = QDir::cleanPath(QCoreApplication::applicationDirPath()

@@ -80,6 +80,8 @@ private:
     const Source &source;
     InlineParser inlines;
     int tableCellsLeft;
+    QSet<std::pair<NodeType, QString>> drawings;
+    bool reportedDrawings = false;
 
     struct Loaded {
         int file = -1;
@@ -497,6 +499,25 @@ bool sizeHtmlTable(Node &table, int &remaining)
 void Assembler::structure(Node &node)
 {
     switch (node.type) {
+    case NodeType::MathBlock:
+    case NodeType::MathInline:
+    case NodeType::MermaidBlock: {
+        const auto kind = node.type == NodeType::MathInline && node.display ? NodeType::MathBlock : node.type;
+        const auto key = std::pair{kind, node.text};
+        if (drawings.contains(key)) break;
+        const int limit = std::clamp(source.maxDrawings, 0, MaxDrawings);
+        if (drawings.size() < limit) drawings.insert(key);
+        else {
+            node.resolved = false;
+            if (!reportedDrawings) {
+                st.diagnose(node.file, node.range, Severity::Warning, DiagnosticCode::HelperLimit,
+                            QStringLiteral("The document has more than %1 different formulas and diagrams. "
+                                           "Further drawings are shown as source.").arg(limit));
+                reportedDrawings = true;
+            }
+        }
+        break;
+    }
     case NodeType::Include:
         if (node.includedFile >= 0) {
             auto &headings = doc.files[size_t(node.includedFile)].headings;

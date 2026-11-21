@@ -156,7 +156,7 @@ constexpr int systemFileFailure = -2;
 // there but cannot be read. A file that still stands as `known` did is that
 // version, unless its bytes are asked for, and is not read.
 bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString &error, struct stat *found = nullptr,
-           int *failure = nullptr, const DiskVersion *known = nullptr, qint64 limit = -1)
+           int *failure = nullptr, const DiskVersion *known = nullptr)
 {
     int code = 0;
     const auto fail = [&](int number, const QString &message) {
@@ -196,9 +196,9 @@ bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString
     struct stat state {};
     FileStamp stamp;
     if (!stamped(file.handle(), state, stamp) || !S_ISREG(state.st_mode)) return notRegular();
-    if (limit >= 0 && state.st_size > limit)
+    if (state.st_size > DiskFile::MaxLoadBytes)
         return fail(EFBIG, QCoreApplication::translate("DiskFile", "it is larger than the %1 MiB parch opens")
-                               .arg(limit >> 20));
+                               .arg(DiskFile::MaxLoadBytes >> 20));
     char name[PATH_MAX];
     const ssize_t nameLength = ::readlink(QFile::encodeName(QStringLiteral("/proc/self/fd/%1").arg(file.handle())).constData(),
                                           name, sizeof name - 1);
@@ -220,10 +220,10 @@ bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString
     QByteArray content;
     QString why;
     bool tooLarge = false;
-    if (!SafeRead::readDescriptor(file.handle(), limit >= 0 ? limit : std::numeric_limits<qint64>::max() - 1, content,
+    if (!SafeRead::readDescriptor(file.handle(), DiskFile::MaxLoadBytes, content,
                                   why, &tooLarge, qint64(state.st_size)))
         return tooLarge ? fail(EFBIG, QCoreApplication::translate("DiskFile", "it is larger than the %1 MiB parch opens")
-                                          .arg(limit >> 20))
+                                          .arg(DiskFile::MaxLoadBytes >> 20))
                         : fail(EIO, why);
     ++readsMade;
     version = DiskVersion{canonical, quint64(state.st_dev), quint64(state.st_ino),
@@ -273,6 +273,18 @@ bool attributeNames(int descriptor, QByteArray &names)
         if (errno != ERANGE) return false;
     }
     errno = ERANGE;
+    return false;
+}
+
+bool probeForSave(const QString &path, DiskVersion &version, SaveResult &result, const DiskVersion &known,
+                  struct stat *state = nullptr)
+{
+    int failure = 0;
+    if (probe(path, version, nullptr, result.error, state, &failure, &known)) return true;
+    if (failure == EFBIG) {
+        result.status = SaveStatus::Conflict;
+        result.error = QCoreApplication::translate("DiskFile", "The file on disk is now too large to open");
+    }
     return false;
 }
 
@@ -448,9 +460,13 @@ SaveResult writeInPlace(const QString &path, const DiskVersion &expected, const 
         return result;
     }
     if (!sameFile(reader.handle())) return changedOnDisk();
-    const QByteArray current = reader.readAll();
-    if (reader.error() != QFileDevice::NoError) {
-        result.error = reader.errorString();
+    QByteArray current;
+    bool tooLarge = false;
+    if (!SafeRead::readDescriptor(reader.handle(), DiskFile::MaxLoadBytes, current, result.error, &tooLarge)) {
+        if (tooLarge) {
+            result.status = SaveStatus::Conflict;
+            result.error = QCoreApplication::translate("DiskFile", "The file on disk is now too large to open");
+        }
         return result;
     }
     ++readsMade;
@@ -466,7 +482,7 @@ SaveResult writeInPlace(const QString &path, const DiskVersion &expected, const 
     }
 
     DiskVersion latest;
-    if (!probe(path, latest, nullptr, result.error, nullptr, nullptr, &expected)) return result;
+    if (!probeForSave(path, latest, result, expected)) return result;
     if (latest != expected) return changedOnDisk();
     const int descriptor = ::open(name.constData(), O_WRONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
     if (descriptor < 0) {
@@ -530,7 +546,7 @@ LoadedFile load(const QString &path)
     LoadedFile loaded;
     QByteArray bytes;
     int failure = 0;
-    if (!probe(path, loaded.version, &bytes, loaded.error, nullptr, &failure, nullptr, MaxLoadBytes)) {
+    if (!probe(path, loaded.version, &bytes, loaded.error, nullptr, &failure)) {
         loaded.missing = failure == ENOENT || failure == ENOTDIR;
         if (!loaded.missing) {
             loaded.unreadable = loaded.error;
@@ -913,7 +929,7 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
     SaveResult result;
     DiskVersion initial;
     struct stat original {};
-    if (!probe(path, initial, nullptr, result.error, &original, nullptr, &expected)) return result;
+    if (!probeForSave(path, initial, result, expected, &original)) return result;
     if (initial != expected) return changedOnDisk();
     // A file with other names would lose them to a new file, and a file of
     // another account its owner, so such a file is written in place.
@@ -985,7 +1001,7 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
     // The first look's stamp is the newer, and may stand for the file where
     // the expected version's could not.
     DiskVersion latest;
-    if (!probe(path, latest, nullptr, result.error, nullptr, nullptr, &initial)) return result;
+    if (!probeForSave(path, latest, result, initial)) return result;
     if (latest != expected) return changedOnDisk();
     if (!output.commit()) {
         result.error = systemError(errno);

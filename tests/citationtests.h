@@ -4,6 +4,13 @@
 // databases, the CSL style reader and processor, the bundled styles and the
 // citation formatter. The test class's slots call these.
 namespace CitationTests {
+void sharedYamlReferencesAreReadOnce();
+void yamlFieldsCanArriveInAnyOrder();
+void longAuthorListsDisambiguatePromptly();
+void citationMarkupKeepsUnclosedTagsAsText();
+void citationLocatorsWithWhitespaceFormatPromptly();
+void aRepeatedBibliographyIsSearchedOnce();
+
 void deeplyNestedCitationQuotesAreText();
 void aTitleOfManyTagsFormatsQuickly();
 void aStyleThatExpandsTooFarIsRefused();

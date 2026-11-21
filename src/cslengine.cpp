@@ -723,8 +723,8 @@ bool isNumeric(const QString &value)
 bool isPluralValue(const QString &value)
 {
     static const QRegularExpression joined(QStringLiteral(
-        "^\\s*(?:[A-Za-z]{0,3}\\d+|[ivxlcdm]+\\b)[A-Za-z]{0,3}(?:\\s*(?:[-–—,&]|\\band\\b|\\bet\\b)\\s*)+"
-        "(?:[A-Za-z]{0,3}\\d|[ivxlcdm]+\\b)"),
+        "^\\s*+(?:[A-Za-z]{0,3}\\d++|[ivxlcdm]++\\b)[A-Za-z]{0,3}(?:\\s*+(?:[-–—,&]|\\band\\b|\\bet\\b)\\s*+)++"
+        "(?:[A-Za-z]{0,3}\\d|[ivxlcdm]++\\b)"),
                                              QRegularExpression::CaseInsensitiveOption);
     return joined.match(value).hasMatch();
 }
@@ -2285,6 +2285,7 @@ private:
     const CslStyle &m_style;
     const CslLocale &m_locale;
     Processor m_processor;
+    bool m_namesLimited = false;
     const qsizetype m_perCite;
     qsizetype m_outputLeft = MaxDocumentChars;
     std::vector<const CslReference *> m_references;
@@ -2393,6 +2394,7 @@ QString yearSuffixLetters(int index)
 void Run::disambiguate()
 {
     const QHash<QString, QString> &options = m_style.citation().options;
+    constexpr int maxNamesToDisambiguate = 50;
     const bool addNames = options.value(QStringLiteral("disambiguate-add-names")) == u"true";
     const bool addGiven = options.value(QStringLiteral("disambiguate-add-givenname")) == u"true";
     const bool addYear = options.value(QStringLiteral("disambiguate-add-year-suffix")) == u"true";
@@ -2459,7 +2461,8 @@ void Run::disambiguate()
             for (const int i : group) m_states[size_t(i)].expandLevel = addGiven ? maxLevel : 0;
             int best = distinct(group);
             int bestCount = -1;
-            const int most = mostNames(group);
+            const int available = mostNames(group);
+            const int most = std::min(available, maxNamesToDisambiguate);
             for (int n = 1; n <= most && best < int(group.size()); ++n) {
                 for (const int i : group) m_states[size_t(i)].namesShown = n;
                 const int count = distinct(group);
@@ -2468,6 +2471,7 @@ void Run::disambiguate()
                     bestCount = n;
                 }
             }
+            if (available > most && best < int(group.size())) m_namesLimited = true;
             for (size_t k = 0; k < group.size(); ++k) {
                 m_states[size_t(group[k])].expandLevel = 0;
                 m_states[size_t(group[k])].namesShown = bestCount < 0 ? original[k] : bestCount;
@@ -2483,7 +2487,8 @@ void Run::disambiguate()
     if (addGiven && rule == u"by-cite" && !groups.empty()) {
         for (const std::vector<int> &group : groups) {
             int current = distinct(group);
-            const int most = mostNames(group);
+            const int available = mostNames(group);
+            const int most = std::min(available, maxNamesToDisambiguate);
             for (int index = 0; index < most && current < int(group.size()); ++index) {
                 for (int level = 1; level <= 2 && current < int(group.size()); ++level) {
                     std::vector<QList<int>> saved;
@@ -2501,6 +2506,7 @@ void Run::disambiguate()
                     }
                 }
             }
+            if (available > most && current < int(group.size())) m_namesLimited = true;
         }
         groups = ambiguousGroups();
     }
@@ -3010,6 +3016,7 @@ CslEngine::Result Run::process(const QList<CslCitation> &input, const QList<cons
             if (!text.isEmpty()) result.bibliography.append({m_references[size_t(i)]->id, text, m_references[size_t(i)]});
         }
     }
+    result.namesLimited = m_namesLimited;
     result.nestingLimited = m_processor.nestingLimited;
     result.renderLimited = m_processor.renderLimited;
     return result;

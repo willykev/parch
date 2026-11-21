@@ -195,8 +195,12 @@ QString oneBlock(const QString &text, bool collapse)
 Unresolved::Unresolved(const md::Document &document) : m_references(document.files.size())
 {
     using C = md::DiagnosticCode;
+    QSet<QString> seen;
     for (const md::Diagnostic &diagnostic : document.diagnostics) {
         switch (diagnostic.code) {
+        case C::HelperLimit:
+            m_drawingLimitMessage = diagnostic.message;
+            continue;
         case C::UnresolvedReference:
             if (diagnostic.file >= 0 && size_t(diagnostic.file) < m_references.size())
                 m_references[size_t(diagnostic.file)].push_back({diagnostic.range, diagnostic.message});
@@ -220,7 +224,10 @@ Unresolved::Unresolved(const md::Document &document) : m_references(document.fil
         default:
             continue;
         }
-        if (!m_messages.contains(diagnostic.message)) m_messages.append(diagnostic.message);
+        if (!seen.contains(diagnostic.message)) {
+            seen.insert(diagnostic.message);
+            m_messages.append(diagnostic.message);
+        }
     }
     for (auto &references : m_references)
         std::stable_sort(references.begin(), references.end(),
@@ -245,6 +252,10 @@ std::vector<std::pair<md::Range, QString>> Unresolved::references(const Node &no
 QString Unresolved::of(const Node &node) const
 {
     switch (node.type) {
+    case NodeType::MathInline:
+    case NodeType::MathBlock:
+    case NodeType::MermaidBlock:
+        return node.resolved ? QString() : m_drawingLimitMessage;
     case NodeType::Text:
     case NodeType::Escape:
     case NodeType::Entity: {
@@ -600,24 +611,27 @@ void Builder::text(const QString &text, const Char &state)
         m_out->cursor.insertText(shown, format);
         return;
     }
-    // A word too long to break gets a zero-width space after every LongWord
-    // characters, never inside a surrogate pair or before a combining mark.
+    // Bound the runs the line breaker must shape, including long stretches
+    // of spaces. Keep the break outside surrogate pairs and combining marks.
     QTextCharFormat mark = format;
     mark.setProperty(BreakProperty, true);
-    qsizetype from = 0, run = 0;
+    qsizetype from = 0, run = 0, white = 0;
     for (qsizetype i = 0; i < shown.size(); ++i) {
         const QChar c = shown.at(i);
-        if (c.isSpace() || c == QChar(0x200B) || c == u'-') {
+        if (c.isSpace()) {
             run = 0;
-            continue;
+            ++white;
+        } else {
+            white = 0;
+            run = c == QChar(0x200B) || c == u'-' ? 0 : run + 1;
         }
-        if (++run < LongWord || i + 1 >= shown.size()) continue;
+        if (std::max(run, white) < LongWord || i + 1 >= shown.size()) continue;
         const QChar next = shown.at(i + 1);
         if (c.isHighSurrogate() || next.isLowSurrogate() || next.isMark()) continue;
         m_out->cursor.insertText(shown.mid(from, i + 1 - from), format);
         m_out->cursor.insertText(QString(QChar(0x200B)), mark);
         from = i + 1;
-        run = 0;
+        white = run = 0;
     }
     if (from < shown.size()) m_out->cursor.insertText(shown.mid(from), format);
 }
@@ -1218,7 +1232,10 @@ void Builder::mathBlock(const Node &node, const Flow &flow)
 {
     const qreal gap = m_style.gap();
     Picture formula;
-    if (m_resources) formula = m_resources->math(node.text, true, flow.size);
+    if (!node.resolved) {
+        formula.state = Picture::Failed;
+        formula.diagnostic = m_unresolved.of(node);
+    } else if (m_resources) formula = m_resources->math(node.text, true, flow.size);
     uses(formula);
     if (formula.state == Picture::Failed) {
         codeBlock(node, flow, node.text, QString(),
@@ -1258,7 +1275,10 @@ void Builder::mathBlock(const Node &node, const Flow &flow)
 void Builder::diagram(const Node &node, const Flow &flow)
 {
     Picture drawing;
-    if (m_resources) drawing = m_resources->diagram(node.text);
+    if (!node.resolved) {
+        drawing.state = Picture::Failed;
+        drawing.diagnostic = m_unresolved.of(node);
+    } else if (m_resources) drawing = m_resources->diagram(node.text);
     uses(drawing);
     if (drawing.state == Picture::Failed) {
         codeBlock(node, flow, node.text, QString(),
@@ -1943,7 +1963,10 @@ void Builder::image(const Node &node, const QString &destination, const QString 
 void Builder::mathInline(const Node &node, const Char &state)
 {
     Picture formula;
-    if (m_resources) formula = m_resources->math(node.text, node.display, state.size);
+    if (!node.resolved) {
+        formula.state = Picture::Failed;
+        formula.diagnostic = m_unresolved.of(node);
+    } else if (m_resources) formula = m_resources->math(node.text, node.display, state.size);
     uses(formula);
     anchor(node, 0);
     if (formula.state == Picture::Ready && !formula.image.isNull()) {

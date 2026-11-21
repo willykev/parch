@@ -35,6 +35,7 @@ QString kindOf(md::DiagnosticCode code)
     case C::UnresolvedVariable: return QStringLiteral("variable");
     case C::MalformedTableRow:
     case C::TableLimit: return QStringLiteral("table");
+    case C::HelperLimit: return QStringLiteral("renderer");
     case C::UnclosedMath: return QStringLiteral("math");
     case C::FrontMatter: return QStringLiteral("front-matter");
     case C::UnsupportedHtml: return QStringLiteral("html");
@@ -242,8 +243,12 @@ bool load(const QString &path, const Dialect::Layers &layers, Loaded *loaded, QS
 LineIndex::LineIndex(QStringView text) : m_text(text)
 {
     m_starts.push_back(0);
+    int low = 0;
+    m_lowSurrogates.push_back(0);
     for (qsizetype i = 0; i < text.size(); ++i) {
         const QChar c = text[i];
+        low += c.isLowSurrogate();
+        if ((i + 1) % 128 == 0) m_lowSurrogates.push_back(low);
         // "\r\n", "\n" and "\r" each end a line, as in CommonMark.
         if (c == u'\n' || (c == u'\r' && (i + 1 >= text.size() || text[i + 1] != u'\n')))
             m_starts.push_back(int(i + 1));
@@ -256,10 +261,12 @@ Position LineIndex::at(int offset) const
     const auto next = std::upper_bound(m_starts.cbegin(), m_starts.cend(), offset);
     const int line = int(next - m_starts.cbegin());
     // Characters, not UTF-16 units: a surrogate pair is one.
-    int column = 1;
-    for (int i = *(next - 1); i < offset; ++i)
-        if (!m_text[i].isLowSurrogate()) ++column;
-    return {line, column};
+    const auto charactersBefore = [&](int pos) {
+        int low = m_lowSurrogates[size_t(pos / 128)];
+        for (int i = pos - pos % 128; i < pos; ++i) low += m_text[i].isLowSurrogate();
+        return pos - low;
+    };
+    return {line, 1 + charactersBefore(offset) - charactersBefore(*(next - 1))};
 }
 
 Position positionOf(QStringView text, int offset)

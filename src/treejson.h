@@ -21,6 +21,7 @@ namespace TreeJson {
 // {"files": [{"path", "directory", "includedFrom", "frontMatter"}],
 //  "root": node, "incomplete": bool}
 QJsonObject document(const md::Document &document);
+QByteArray encode(const QJsonObject &tree);
 
 // [{"level", "text", "slug", "label", "file", "line"}], in document order.
 QJsonArray outline(const md::Document &document);

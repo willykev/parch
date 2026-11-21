@@ -6,6 +6,7 @@
 #include "foldersearch.h"
 #include "history.h"
 #include "librarywalk.h"
+#include "mdtree.h"
 #include "pathtext.h"
 #include "saferead.h"
 #include "settings.h"
@@ -89,6 +90,7 @@ struct FileOrganizer::OpenRanges {
 FileOrganizer::FileOrganizer(DocumentStore *store, Settings *settings, QObject *parent)
     : QObject(parent), m_store(store), m_settings(settings)
 {
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(2);
 }
 

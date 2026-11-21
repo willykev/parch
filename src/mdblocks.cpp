@@ -242,6 +242,7 @@ private:
     int indent = 0;
     bool blank = false;
     bool indented = false;
+    bool repeatBlank = false;
     bool prevBlank = true; // the line before this one was blank, or there is none
 };
 
@@ -420,6 +421,15 @@ Block *BlockParser::newComment(int start, int length, int line, int depth)
 
 void BlockParser::processLine()
 {
+    if (repeatBlank) {
+        int first = lineStart;
+        while (first < lineEnd && isSpaceOrTab(s[first].unicode())) ++first;
+        if (first == lineEnd) {
+            ++lineNumber;
+            return;
+        }
+        repeatBlank = false;
+    }
     if (opt.lineComments && commentLine()) return;
 
     ++lineNumber;
@@ -505,6 +515,11 @@ void BlockParser::processLine()
         }
     }
     prevBlank = blank;
+    // Another physically blank line follows the same open list or definition
+    // path once this one continued every container and added no literal text.
+    repeatBlank = blank && container == oldTip && isContainer(container->type)
+        && container == tip && nns == lineEnd
+        && std::all_of(s + lineStart, s + lineEnd, [](QChar c) { return isSpaceOrTab(c.unicode()); });
 }
 
 // 0: the line continues the block; 1: it does not; 2: it closed the block

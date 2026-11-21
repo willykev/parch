@@ -5,6 +5,10 @@
 // and how the window shows and leaves them. ParchTests runs each of them as
 // a test function of its own.
 namespace VimTests {
+void aCountedInsertOfAPasteIsBounded();
+
+void movingAcrossUnicodeWordsIsQuick();
+
 
 void undoStepsJoinIntoOneChange();
 void vimKeysAreOffUntilChosenAndKept();

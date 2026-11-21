@@ -201,6 +201,7 @@ public:
 
 private:
     QHash<quint64, QString> m_nodes;
+    QString m_drawingLimitMessage; // the same reason applies to every drawing past the limit
     // By file, in source order: the ranges of unresolved references.
     std::vector<std::vector<std::pair<md::Range, QString>>> m_references;
     QStringList m_messages;

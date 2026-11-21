@@ -6,6 +6,7 @@
 #include "mdinclude.h"
 #include "mdparser_p.h"
 #include "documentparse.h"
+#include "mdtree.h"
 #include "outline.h"
 #include "previewresources.h"
 #include "previewwatch.h"
@@ -265,6 +266,7 @@ Preview::Preview(QObject *parent)
       m_marks(new PreviewMarks(this))
 {
     connect(m_watch, &PreviewWatch::fileChanged, this, &Preview::dependencyChanged);
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(1);
     m_timer.setSingleShot(true);
     connect(&m_timer, &QTimer::timeout, this, &Preview::parse);

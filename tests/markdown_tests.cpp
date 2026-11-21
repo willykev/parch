@@ -1,4 +1,5 @@
 #include "markdown_tests.h"
+#include "documentcheck.h"
 #include "testfiles.h"
 
 #include "frontmatter.h"
@@ -3416,6 +3417,32 @@ void pathologicalInput()
     const md::Document emphasis = md::parse(nestedEmphasis);
     QVERIFY(treeDepth(emphasis.root) < 100);
     QCOMPARE(md::plainText(*first(emphasis, NodeType::Paragraph)).count(u'a'), 400);
+}
+
+void checkingOneLongLineIsQuick()
+{
+    const QString word = QString::fromUtf8("map🌱 ");
+    const QString line = word.repeated(4500);
+    QElapsedTimer timer;
+    timer.start();
+    const QString source = QStringLiteral("Map\r\n") + line;
+    const DocumentCheck::LineIndex index(source);
+    for (int i = 4500; i >= 0; --i) {
+        const auto place = index.at(5 + i * word.size());
+        QCOMPARE(place.line, 2);
+        QCOMPARE(place.column, 1 + i * 5);
+    }
+    QVERIFY2(timer.elapsed() < timeLimit(35), qPrintable(QString::number(timer.elapsed())));
+}
+
+void blankLinesUnderDeepListsParseQuickly()
+{
+    const QString source = QStringLiteral("- ").repeated(100) + "Seed\n" + QString(15000, u'\n') + "End";
+    QElapsedTimer timer;
+    timer.start();
+    const auto doc = md::parse(source);
+    QVERIFY(md::toHtml(doc).endsWith(QStringLiteral("<p>End</p>\n")));
+    QVERIFY2(timer.elapsed() < timeLimit(50), qPrintable(QString::number(timer.elapsed())));
 }
 
 } // namespace MarkdownTests

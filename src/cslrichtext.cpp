@@ -347,7 +347,7 @@ QString attributeValue(const QString &attributes, const QString &name)
 QList<CslMarkup::Token> CslMarkup::tokenize(const QString &markup)
 {
     static const QRegularExpression tag(
-        QStringLiteral("<(/?)(i|em|b|strong|u|sup|sub|sc|span|a|div|br)((?:\\s+[^<>]*?)?)\\s*(/?)>"),
+        QStringLiteral("<(/?)(i|em|b|strong|u|sup|sub|sc|span|a|div|br)(\\s[^<>]*+|/?)>"),
         QRegularExpression::CaseInsensitiveOption);
     QList<Token> tokens;
     qsizetype last = 0;
@@ -375,7 +375,7 @@ QList<CslMarkup::Token> CslMarkup::tokenize(const QString &markup)
                 token.style = attributeValue(attributes, QStringLiteral("style"));
                 token.href = attributeValue(attributes, QStringLiteral("href"));
             }
-            token.selfClosing = !match.captured(4).isEmpty() || token.text == u"br";
+            token.selfClosing = attributes.endsWith(u'/') || token.text == u"br";
         }
         tokens.append(token);
     }

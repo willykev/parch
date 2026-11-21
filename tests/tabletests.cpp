@@ -1,4 +1,5 @@
 #include "tabletests.h"
+#include "testfiles.h"
 
 #include "markdownediting.h"
 #include "mdtable.h"
@@ -693,6 +694,35 @@ void shiftTabIntoARowOfAPipeAloneStopsThere()
     const int pipe = int(text.indexOf(u"\n|\n")) + 2;
     QCOMPARE(moved->anchor, pipe);
     QCOMPARE(moved->cursor, pipe);
+}
+
+void editingManyCellsScansTheirTableOnce()
+{
+    QString source = QStringLiteral("| Plot | Plant |\n|---|---|\n");
+    QList<SourceEdit> edits;
+    for (int i = 0; i < 500; ++i) {
+        edits.append({{int(source.size()) + 2, 4}, QStringLiteral("West")});
+        source += QStringLiteral("| East | Thyme |\n");
+    }
+    QElapsedTimer timer;
+    timer.start();
+    const auto tidy = TableGrids::tidyCellEdits(source, edits, {});
+    for (auto it = tidy.crbegin(); it != tidy.crend(); ++it)
+        source.replace(it->range.start, it->range.length, it->replacement);
+    QCOMPARE(source.count(QStringLiteral("West")), edits.size());
+    QVERIFY2(timer.elapsed() < timeLimit(120), qPrintable(QString::number(timer.elapsed())));
+}
+
+void aListSelectionOutdentsInOnePass()
+{
+    const QString source = QStringLiteral("- Plants\n") + QStringLiteral("  - Thyme\n").repeated(1800);
+    QElapsedTimer timer;
+    timer.start();
+    const auto change = MarkdownEditing::indent(source, 0, int(source.size()), true);
+    QVERIFY(change);
+    QCOMPARE(change->edits.size(), 1800);
+    QCOMPARE(change->edits.last().range.length, 2);
+    QVERIFY2(timer.elapsed() < timeLimit(90), qPrintable(QString::number(timer.elapsed())));
 }
 
 } // namespace TableTests

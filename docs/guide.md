@@ -155,7 +155,8 @@ parch ~/weather-station/weather-station.md
   UTF-8**, which keeps the file's original bytes in its history first.
 - parch opens files of up to 64 MiB, at paths of up to 4,095 bytes with every
   link followed. A larger file, or a longer path, is not opened, and parch
-  says why.
+  says why. If an open file grows past 64 MiB on disk, parch reports a
+  conflict when you save. **Save as…** lets you keep your edits in another file.
 
 parch keeps each file's line endings and byte-order mark. Text you paste gets
 the document's line endings.
@@ -557,7 +558,13 @@ parch draws formulas and diagrams itself, with two programs that come with
 it: RaTeX for TeX math and Merman for Mermaid diagrams. Both run on your
 computer, cut off from the network, and only while they draw. What they
 cannot draw keeps its source in place, with the reason (**Check document**
-and `parch check` list them too).
+and `parch check` list them too). The preview runs up to two helpers at a
+time in the background.
+
+A document, including its chapters, can draw up to 10,000 distinct formulas
+and diagrams in all. Repeating a drawing uses the same slot. Inline and
+display versions of a formula count separately.
+Further drawings appear as source, and Check points to the first one.
 
 ### Math
 
@@ -708,7 +715,10 @@ It also reports when a style expands beyond 100,000 elements, when formatting
 exceeds a citation’s rendering limit, or when the fields inherited through
 BibTeX `crossref` or `xdata` exceed the bibliography’s expansion limit. A
 citation field with more than 32 nested quotes or formatting marks reads as
-plain text.
+plain text. To distinguish citations that read alike, a style can compare up
+to 50 names per work. Check warns if the style reaches that limit. Listing the
+same bibliography twice in a document searches it once.
+
 A newly created bibliography can be empty. The warning in **Check document**
 and `parch check` reads “The bibliography holds no entries yet.”
 
@@ -832,7 +842,8 @@ What each format holds:
   can search and copy, working links, and an outline of the headings.
   Relative links lead from the folder the PDF is saved in.
   `+++` starts a new page, and a heading never stays
-  at the foot of a page without its text. Formulas and diagrams are vectors;
+  at the foot of a page without its text. If the document ends with a run of
+  headings, they flow onto successive pages. Formulas and diagrams are vectors;
   a diagram that cannot be drawn as one is printed as a picture at four times
   its size, and the notice says so. The citation style determines the
   order of the bibliography and collected notes. A PDF can hold up to
@@ -849,7 +860,8 @@ What each format holds:
   Formulas and diagrams appear as pictures. A picture can be up to 8,192
   pixels on its longer side and 64 million pixels in all. When a drawing
   needs fewer pixels to fit, the export keeps its size on the page and
-  reports the reduced resolution.
+  reports the reduced resolution. Repeated pictures share one copy in the
+  Word file and keep the description at each place they appear.
 - **EPUB**: an EPUB 3 book with a file for each chapter (each heading of
   level 1, or of level 2 when the document has a single title), a table of
   contents from the headings, its images, formulas and diagrams as SVG, and
@@ -910,8 +922,8 @@ several documents at once (see [Command line](#command-line)).
 - `Escape` closes the bar and gives the keys back to the text.
 - **Search the library…** (`Ctrl+Shift+F`) searches the text of every
   document in the library's folders and the drafts. Matches arrive as they
-  are found, grouped by document, with the line around each; choosing one
-  opens the document there.
+  are found, grouped by document. A long match shows an excerpt with an
+  ellipsis. Choosing it takes you to the full match in the document.
 - **Go to heading…** (`Ctrl+R`) lists the document's headings to jump to.
   Searching shows the parent headings of each match. The focused editor uses
   this key for redo in Vim Normal or Visual mode.
@@ -1024,8 +1036,10 @@ pending.
 
 ### Normal mode
 
-A count before a command repeats it or goes that far, up to 9999: `3w`,
-`2dd`, `d3w`, `2d3w`, `5G`. These keys are covered:
+A count before a command repeats it or goes that far, up to 9999. Examples
+include `3w`, `2dd` and `5G`. Counted inserts and puts have a limit of
+10 million UTF-16 units in all. If repeating an insert would exceed it,
+parch keeps what you typed or pasted once and shows a notice.
 
 - **Moving:** `h` `j` `k` `l` and the arrow keys; `Backspace` and `Space`,
   which go on to the line before or after; `Enter`, to the first non-blank
@@ -1402,8 +1416,9 @@ Put `--` before filenames that start with a dash.
   citations, bibliography files and citation styles (a problem in a
   bibliography file is reported at its line there). Notes of severity
   `info` (HTML shown as text, a footnote nothing refers to) are listed but do
-  not count as problems. Every formula and Mermaid diagram is drawn as the
-  preview draws it, and one that RaTeX or Merman refuses is reported
+  not count as problems. Check draws the same formulas and diagrams as the
+  preview and reports `helper-limit` at the first distinct drawing beyond
+  10,000. A formula or diagram that RaTeX or Merman refuses is reported
   (`invalid-math`, `invalid-diagram`) with what the helper said; when a
   helper cannot be found, check says what it could not check and does not
   count it as a problem. With `--json` it reports the RaTeX and Merman
@@ -1411,8 +1426,9 @@ Put `--` before filenames that start with a dash.
 - **render** writes the HTML fragment the preview and exports are made from
   (`html`, the default), the text a reader sees (`text`), the headings
   indented by level (`outline`), or the whole semantic tree with source ranges
-  (`json-tree`). Reader text keeps code indentation and includes formatted
-  citations and the bibliography. In a note style, collected citation notes
+  (`json-tree`). The JSON tree indents its first 16 levels and keeps deeper
+  levels at the same margin. Reader text keeps code indentation and includes
+  formatted citations and the bibliography. In a note style, collected citation notes
   come before the bibliography. Relative links and images lead from the
   folder the HTML is written to, or from the document's.
 - **export** writes the document in any of the formats the window's
@@ -1532,7 +1548,10 @@ web are shown in every document.
 
 parch draws everything from your Omarchy theme and follows it as you switch
 themes, light or dark, along with the theme's font. `Ctrl+=` and `Ctrl+-`
-change the text size, and `Ctrl+0` returns to the theme's size.
+change the text size, and `Ctrl+0` returns to the theme's size. Theme
+settings come from regular files of up to 1 MiB each. If a file cannot be
+read, parch uses its defaults for those settings. Theme font sizes range
+from 1 to 96 and control borders from 0 to 16 pixels.
 
 Screen readers and other assistive technology reach every control by name.
 They can also edit the text, place the caret and select: each edit they

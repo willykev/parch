@@ -209,6 +209,7 @@ class TableGrids : public QObject {
     Q_PROPERTY(QList<QObject *> grids READ gridObjects NOTIFY gridsChanged)
     // The view's cursor is in a grid, whose caret the grid draws.
     Q_PROPERTY(bool caretInGrid READ caretInGrid NOTIFY caretChanged)
+    Q_PROPERTY(bool canShowGrid READ canShowGrid NOTIFY canShowGridChanged)
     Q_PROPERTY(QString problem READ problem NOTIFY problemChanged)
     // The most cells, the header's counted, and columns a table shown as a grid holds.
     Q_PROPERTY(int maxCells READ maxCells CONSTANT)
@@ -223,6 +224,7 @@ public:
     QList<QObject *> gridObjects() const;
     const QList<TableGrid *> &grids() const { return m_grids; }
     bool caretInGrid() const { return m_caretGrid != nullptr; }
+    bool canShowGrid() const;
     // The tables of the text as it is now have been looked for: those that
     // are to be grids are.
     bool settled() const;
@@ -388,7 +390,7 @@ public:
     void compositionChanged();
     // The binding's projection: shown anew, a change followed, laid out anew.
     void loaded();
-    void sourceChanged(SourceRange range, int inserted);
+    void sourceChanged(SourceRange range, int inserted, bool localRawEdit);
     void relayout();
     // The binding lets go of its document and editor.
     void clear();
@@ -401,6 +403,7 @@ signals:
     void enabledChanged();
     void gridsChanged();
     void caretChanged();
+    void canShowGridChanged();
     void problemChanged();
     // An edit was refused, and why, for the view to say.
     void refused(const QString &reason);
@@ -411,6 +414,7 @@ private:
     void parsed();
     // Grids for these tables, read from the text; others are shown as Markdown again.
     void adopt(const QList<MdTable::Table> &tables);
+    bool adoptOne(const MdTable::Table &table);
     void project(TableGrid *grid);
     void unproject(int start, int end);
     void placeGrids();
@@ -449,8 +453,13 @@ private:
     // A change that leaves a block selected, from one cell to another.
     Adapted changeBlock(const TableGrid *grid, const std::function<QString(MdTable::Model &)> &operation,
                         const Span &selected) const;
-    // The table, shown as Markdown in this view, that holds a position.
-    std::optional<MdTable::Table> markdownTableAt(int position) const;
+    struct RawTable {
+        int start, end;
+        bool waiting; // Adopt when the caret leaves a table being written here.
+        bool contains(int position) const { return position >= start && position <= end; }
+    };
+    const RawTable *rawTableAt(int position) const;
+    void updateShowGrid();
     bool enterFromProse(int position, bool down);
 
     EditorBinding *m_binding;
@@ -459,9 +468,11 @@ private:
     QList<TableGrid *> m_grids;
     TableGrid *m_caretGrid = nullptr;
     TickEscapes m_tickEscapes;
-    // Tables the parse found that hold the caret: shown as Markdown until
-    // the caret leaves them, so that one being typed is not drawn under it.
-    QList<std::pair<int, int>> m_waiting;
+    // Projectable tables left as Markdown, as of the last parse or toggle.
+    QList<RawTable> m_rawTables;
+    bool m_canShowGrid = false;
+    // Where the last edit to raw text in this view left new source.
+    std::optional<SourceRange> m_localRawEdit;
     // Tables this view shows as Markdown, by where they start.
     QList<int> m_markdown;
     QString m_problem;

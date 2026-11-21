@@ -48,6 +48,13 @@
 - The command line reports standard-output write failures and invalid
   numeric export options with the documented exit codes. Filenames after
   `--` are kept, and valid quiet exports with switches run silently.
+- **Keep both** opens the conflict copy at the saved caret and scroll
+  position, even if you keep writing while the copy is saved. **Show as
+  Markdown** keeps the caret in the table. The guide describes the conflict
+  choices and where to find the table commands.
+- When a file is reloaded, its eligible tables show as grids as soon as the
+  text is parsed. **Show table as grid** can also show a completed
+  hand-written table while the caret is still in it.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

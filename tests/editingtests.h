@@ -5,6 +5,11 @@
 // each of them as a test function of its own.
 namespace EditingTests {
 
+void guideDescribesTheConflictChoicesShown_data();
+void guideDescribesTheConflictChoicesShown();
+void keepBothRestoresTheCaretOfTheKeptText_data();
+void keepBothRestoresTheCaretOfTheKeptText();
+
 void sourceEditsGroupIntoOneUndoStep();
 void inlineFormattingWrapsAndToggles();
 void scriptsWriteWhatTheDialectReads();

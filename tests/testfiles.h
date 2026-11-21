@@ -2,6 +2,22 @@
 
 #include <QByteArray>
 #include <QString>
+#include <memory>
+
+class QSemaphore;
+class QThreadPool;
+
+// Occupies every worker until released, without holding the test's thread.
+class PoolBlock {
+public:
+    explicit PoolBlock(QThreadPool *pool = nullptr);
+    ~PoolBlock();
+    void release();
+
+private:
+    std::shared_ptr<QSemaphore> m_gate;
+    int m_count = 0;
+};
 
 // Files and theme folders the tests write, always beneath a temporary folder.
 

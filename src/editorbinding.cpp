@@ -12,6 +12,7 @@
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QQuickTextDocument>
+#include <QScopedValueRollback>
 #include <QTextBlock>
 #include <QTextBlockFormat>
 #include <QTextCursor>
@@ -391,6 +392,7 @@ void EditorBinding::detach()
     m_loaded = false;
     m_foreign = {};
     m_topAnchor = {};
+    m_tableLayout.reset();
     m_cursorSource = m_anchorSource = 0;
     refreshEditable();
     m_vim->reset();
@@ -428,6 +430,7 @@ void EditorBinding::load()
     // The projection is the source again, whatever was written into it.
     m_foreign = {};
     m_topAnchor = {};
+    m_tableLayout.reset();
     selectEditor(0, 0);
     m_projecting = false;
     refreshCursor();
@@ -564,7 +567,7 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
         edit.insertText(written);
     }
     // The grids follow the change, before the selection does.
-    m_tables->sourceChanged(range, inserted);
+    m_tables->sourceChanged(range, inserted, revision == m_rawEditRevision);
     // Positions before the edit stay, positions after it move by its length,
     // and positions inside what it replaced go to its end; the selection keeps
     // its direction.
@@ -1028,6 +1031,7 @@ void EditorBinding::refreshCursor()
     const int cursor = m_pairs.toSource(editorCursor());
     const int anchor = m_pairs.toSource(editorAnchor());
     if (cursor == m_cursorSource && anchor == m_anchorSource) return;
+    m_tableLayout.reset();
     m_cursorSource = cursor;
     m_anchorSource = anchor;
     emit cursorChanged();
@@ -1146,6 +1150,7 @@ bool EditorBinding::replace(SourceRange range, const QString &text, EditKind kin
                               && std::none_of(text.cbegin(), text.cend(), [](QChar c) {
                                      return c == u'\r' || c == u'\n' || c == QChar::ParagraphSeparator;
                                  });
+    const QScopedValueRollback writing(m_rawEditRevision, m_buffer->revision() + 1);
     const auto outcome = continuesRun ? m_buffer->replace({{range, text}}, kind, m_tableRun)
                                       : m_buffer->replace(range, text, kind);
     if (outcome == SourceBuffer::EditOutcome::Rejected) return false;
@@ -1600,7 +1605,12 @@ void EditorBinding::revealCursor()
 {
     QQuickItem *view = viewport();
     if (!view || !m_loaded) return;
-    const QRectF caret = rectangleAt(editorCursor()).translated(m_editor->position());
+    revealCursor(view, rectangleAt(editorCursor()));
+}
+
+void EditorBinding::revealCursor(QQuickItem *view, const QRectF &rectangle)
+{
+    const QRectF caret = rectangle.translated(m_editor->position());
     const qreal top = view->property("contentY").toReal();
     const qreal height = view->height();
     qreal target = top;
@@ -1608,6 +1618,31 @@ void EditorBinding::revealCursor()
     else if (caret.bottom() > top + height) target = std::ceil(caret.bottom() - height);
     if (target == top) return;
     scrollView(view, target);
+}
+
+void EditorBinding::queueTableLayout(bool reveal)
+{
+    QQuickItem *view = viewport();
+    if (!m_loaded || !view) return;
+    m_tableLayout = TableLayout{m_buffer->revision(), view->property("contentY").toReal(), reveal};
+    if (m_tableLayoutQueued) return;
+    m_tableLayoutQueued = true;
+    QMetaObject::invokeMethod(this, &EditorBinding::finishTableLayout, Qt::QueuedConnection);
+}
+
+void EditorBinding::finishTableLayout()
+{
+    m_tableLayoutQueued = false;
+    const auto layout = std::exchange(m_tableLayout, std::nullopt);
+    if (!layout || !m_loaded || m_foreign.pending || layout->revision != m_buffer->revision()) return;
+    QQuickItem *view = viewport();
+    if (!view) return;
+    const QRectF caret = rectangleAt(editorCursor(), true);
+    if (view->property("contentY").toReal() == layout->scroll) {
+        if (layout->reveal) revealCursor(view, caret);
+        else if (m_topAnchor.valid && m_topAnchor.contentY == layout->scroll) restoreTop(view, m_topAnchor.position, true);
+    }
+    if (!m_tables->caretInGrid() && !m_composing) emit caretLaidOut(caret);
 }
 
 void EditorBinding::keepCursorInView(qreal formerHeight)
@@ -1632,11 +1667,11 @@ QRectF EditorBinding::sourceRectangle(int source) const
     return rectangleAt(m_pairs.toEditor(qBound(0, source, m_buffer->length())));
 }
 
-QRectF EditorBinding::rectangleAt(int editorPosition) const
+QRectF EditorBinding::rectangleAt(int editorPosition, bool fresh) const
 {
     if (m_loaded)
         if (const auto inGrid = m_tables->rectangleFor(m_pairs.toSource(editorPosition))) return *inGrid;
-    if (editorPosition == editorCursor()) return m_cursorRectangle.read(m_editor).toRectF();
+    if (!fresh && editorPosition == editorCursor()) return m_cursorRectangle.read(m_editor).toRectF();
     QRectF rect;
     m_positionToRectangle.invoke(m_editor, Q_RETURN_ARG(QRectF, rect), Q_ARG(int, editorPosition));
     return rect;
@@ -1681,18 +1716,21 @@ int EditorBinding::topSourcePosition() const
 void EditorBinding::restore(int cursor, int anchor, int top)
 {
     if (!m_loaded) return;
+    m_tableLayout.reset();
     const QString source = m_buffer->text();
     // Saved positions may be from older text: they are kept inside it and at grapheme starts.
     const auto fit = [&](int position) { return graphemeAtOrBefore(source, qBound(0, position, int(source.size()))); };
     // A composition keeps its own collapsed selection until it ends.
     if (!m_composing) selectEditor(m_pairs.toEditor(fit(anchor)), m_pairs.toEditor(fit(cursor)));
-    QQuickItem *view = viewport();
-    if (!view) return;
-    const int position = fit(top);
-    const QRectF line = rectangleAt(m_pairs.toEditor(position));
+    if (QQuickItem *view = viewport()) restoreTop(view, fit(top));
+}
+
+void EditorBinding::restoreTop(QQuickItem *view, int source, bool fresh)
+{
+    const QRectF line = rectangleAt(m_pairs.toEditor(source), fresh);
     // The first line keeps the margin above it in view.
     scrollView(view, line.y() <= 0 ? 0 : m_editor->y() + line.y());
-    m_topAnchor = {true, position, view->property("contentY").toReal()};
+    m_topAnchor = {true, source, view->property("contentY").toReal()};
 }
 
 void EditorBinding::select(int anchor, int cursor)

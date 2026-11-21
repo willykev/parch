@@ -148,31 +148,6 @@
 
 namespace {
 
-// Occupies every thread of the global pool until released, so that work the
-// store queues there starts only when the test lets it.
-class PoolBlock {
-public:
-    explicit PoolBlock(QThreadPool *pool = QThreadPool::globalInstance())
-        : m_pool(pool), m_gate(std::make_shared<QSemaphore>())
-    {
-        m_count = m_pool->maxThreadCount();
-        // Each blocker owns the gate, so that it outlives this object: a
-        // thread woken by release() is still inside the semaphore afterwards.
-        for (int i = 0; i < m_count; ++i)
-            m_pool->start([gate = m_gate] { gate->acquire(); });
-    }
-    ~PoolBlock() { release(); }
-    void release()
-    {
-        if (const int count = std::exchange(m_count, 0); count > 0) m_gate->release(count);
-    }
-
-private:
-    QThreadPool *m_pool;
-    std::shared_ptr<QSemaphore> m_gate;
-    int m_count = 0;
-};
-
 // A test that needs the local time to be another zone's runs again in a
 // process of its own, with TZ set from that process's start: setting it in
 // this one would race whatever other threads read the local time. In that
@@ -803,6 +778,10 @@ private slots:
     void noteMenuFindsItsReferenceAgain() { EditingTests::noteMenuFindsItsReferenceAgain(); }
     void assistiveTechnologyEditsTheSource() { EditingTests::assistiveTechnologyEditsTheSource(); }
     void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
+    void guideDescribesTheConflictChoicesShown_data() { EditingTests::guideDescribesTheConflictChoicesShown_data(); }
+    void guideDescribesTheConflictChoicesShown() { EditingTests::guideDescribesTheConflictChoicesShown(); }
+    void keepBothRestoresTheCaretOfTheKeptText_data() { EditingTests::keepBothRestoresTheCaretOfTheKeptText_data(); }
+    void keepBothRestoresTheCaretOfTheKeptText() { EditingTests::keepBothRestoresTheCaretOfTheKeptText(); }
     // How much history keeps, other encodings, the library's width, files
     // renamed elsewhere, recent files and drafts, library search and the
     // user guide, written in librarytests.cpp.
@@ -931,6 +910,13 @@ private slots:
     void handlesMoveRowsAndColumnsByDragging() { TableGridTests::handlesMoveRowsAndColumnsByDragging(); }
     void theSizePickerInsertsATidyEmptyTable() { TableGridTests::theSizePickerInsertsATidyEmptyTable(); }
     void tablesCanBeShownAsMarkdownPerView() { TableGridTests::tablesCanBeShownAsMarkdownPerView(); }
+    void guideDescribesTheActionsInEachTableMenu() { TableGridTests::guideDescribesTheActionsInEachTableMenu(); }
+    void showMarkdownFromTheCellMenuKeepsTheCaret_data() { TableGridTests::showMarkdownFromTheCellMenuKeepsTheCaret_data(); }
+    void showMarkdownFromTheCellMenuKeepsTheCaret() { TableGridTests::showMarkdownFromTheCellMenuKeepsTheCaret(); }
+    void externallyReloadedTablesProjectInANewView_data() { TableGridTests::externallyReloadedTablesProjectInANewView_data(); }
+    void externallyReloadedTablesProjectInANewView() { TableGridTests::externallyReloadedTablesProjectInANewView(); }
+    void showGridCanRestoreACompletedTableUnderTheCaret_data() { TableGridTests::showGridCanRestoreACompletedTableUnderTheCaret_data(); }
+    void showGridCanRestoreACompletedTableUnderTheCaret() { TableGridTests::showGridCanRestoreACompletedTableUnderTheCaret(); }
     void readOnlyTablesTakeNoEdits() { TableGridTests::readOnlyTablesTakeNoEdits(); }
     void copyingCellsGivesTabsAndAnHtmlTable() { TableGridTests::copyingCellsGivesTabsAndAnHtmlTable(); }
     void pastingCellsFillsOverwritesAndGrows() { TableGridTests::pastingCellsFillsOverwritesAndGrows(); }

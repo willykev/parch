@@ -930,14 +930,16 @@ void TableGrids::setProblem(const QString &problem)
 void TableGrids::clear()
 {
     disconnect(m_parseConnection);
-    m_waiting.clear();
+    m_rawTables.clear();
+    m_localRawEdit.reset();
     m_markdown.clear();
     m_tickEscapes = {};
     // The view lets go of the grids before they go.
     const QList<TableGrid *> gone = std::exchange(m_grids, {});
-    m_caretGrid = nullptr;
+    if (std::exchange(m_caretGrid, nullptr)) emit caretChanged();
     if (!gone.isEmpty()) emit gridsChanged();
     for (TableGrid *grid : gone) grid->deleteLater();
+    updateShowGrid();
 }
 
 void TableGrids::loaded()
@@ -954,7 +956,9 @@ void TableGrids::parsed()
     if (!m_enabled || !m_binding->m_loaded || !m_binding->m_document) return;
     const ParsedTextPtr parse = m_binding->m_document->parse()->current();
     if (!parse || parse->revision != m_binding->m_buffer->revision()) return;
+    m_rawTables.clear();
     if (!m_binding->m_document->markdownOptions().tables) {
+        m_localRawEdit.reset();
         adopt({});
         return;
     }
@@ -963,26 +967,31 @@ void TableGrids::parsed()
     const QString source = text();
     const MdTable::Dialect dialect = this->dialect();
     QList<MdTable::Table> tables;
-    m_waiting.clear();
-    const bool first = m_grids.isEmpty() && !m_binding->m_buffer->canUndo();
+    bool waiting = false;
     for (const md::Node *node : std::as_const(nodes)) {
         const auto table = MdTable::scan(source, node->range.start, node->range.end, dialect);
         if (!table || table->unfit != MdTable::Unfit::None) continue;
         int rows = 0;
         for (const md::Node &row : node->children) rows += row.type == md::NodeType::TableRow;
         if (rows != table->rows.size() - 1 || node->columns != table->columns) continue;
-        if (m_markdown.contains(table->start)) continue;
-        // A table the caret is in that was not a grid is being written: it
-        // waits until the caret leaves it.
-        const bool known = std::any_of(m_grids.cbegin(), m_grids.cend(),
-                                       [&](TableGrid *grid) { return grid->start() == table->start; });
-        const int caret = cursor();
-        if (!known && !first && caret >= table->start && caret <= table->end) {
-            m_waiting.append({table->start, table->end});
+        if (m_markdown.contains(table->start)) {
+            m_rawTables.append({table->start, table->end, false});
+            continue;
+        }
+        // Only a new table being written in this view waits for the caret.
+        // A file read from disk or text brought in by another view can show
+        // its grids as soon as it has been parsed.
+        const RawTable raw{table->start, table->end, true};
+        const bool writing = m_localRawEdit && raw.contains(cursor()) && m_localRawEdit->start <= raw.end
+                             && m_localRawEdit->start + m_localRawEdit->length >= raw.start;
+        if (writing && !gridAt(raw.start)) {
+            m_rawTables.append(raw);
+            waiting = true;
             continue;
         }
         tables.append(*table);
     }
+    if (!waiting) m_localRawEdit.reset();
     adopt(tables);
 }
 
@@ -1042,6 +1051,7 @@ void TableGrids::adopt(const QList<MdTable::Table> &tables)
     placeGrids();
     if (changed) emit gridsChanged();
     cursorMoved();
+    if (changed) m_binding->queueTableLayout(false);
 }
 
 void TableGrids::project(TableGrid *grid)
@@ -1113,20 +1123,17 @@ void TableGrids::placeGrids()
     }
 }
 
-void TableGrids::sourceChanged(SourceRange range, int inserted)
+void TableGrids::sourceChanged(SourceRange range, int inserted, bool localRawEdit)
 {
     const int delta = inserted - range.length;
     const int oldEnd = range.start + range.length;
     if (m_tickEscapes.grid && range.start <= m_tickEscapes.grid->end() && oldEnd >= m_tickEscapes.grid->start())
         m_tickEscapes = {};
-    for (auto &[start, end] : m_waiting) {
-        if (oldEnd < start) {
-            start += delta;
-            end += delta;
-        } else if (range.start <= end) {
-            end += delta;
-        }
-    }
+    m_localRawEdit.reset();
+    if (m_enabled && localRawEdit) m_localRawEdit.emplace(SourceRange{range.start, inserted});
+    // A raw table has to be read again before the command can restore it.
+    m_rawTables.clear();
+    updateShowGrid();
     for (int &start : m_markdown)
         if (oldEnd <= start) start += delta;
     if (m_grids.isEmpty()) return;
@@ -1239,19 +1246,14 @@ void TableGrids::cursorMoved()
     const int cursor = this->cursor(), anchor = this->anchor();
     if (m_picked.anchor != anchor || m_picked.cursor != cursor) m_picked = {};
     // A table being written becomes a grid once the caret leaves it.
-    if (!m_waiting.isEmpty() && !m_settling) {
-        QList<std::pair<int, int>> waiting;
-        bool left = false;
-        for (const auto &[start, end] : std::as_const(m_waiting)) {
-            if (cursor >= start && cursor <= end) waiting.append({start, end});
-            else left = true;
-        }
-        if (left) {
-            m_waiting = waiting;
-            if (m_binding->m_document) m_binding->m_document->parse()->request();
-            QMetaObject::invokeMethod(this, &TableGrids::parsed, Qt::QueuedConnection);
-        }
+    if (!m_settling && m_rawTables.removeIf([cursor](const RawTable &table) {
+            return table.waiting && !table.contains(cursor);
+        }) > 0) {
+        m_localRawEdit.reset();
+        if (m_binding->m_document) m_binding->m_document->parse()->request();
+        QMetaObject::invokeMethod(this, &TableGrids::parsed, Qt::QueuedConnection);
     }
+    updateShowGrid();
     TableGrid *grid = gridAt(cursor);
     if (grid && !m_settling && anchor == cursor) {
         const int direction = cursor >= m_lastCursor ? 1 : -1;
@@ -2749,20 +2751,32 @@ TableGrids::Adapted TableGrids::changeBlock(const TableGrid *grid, const std::fu
     return out;
 }
 
-std::optional<MdTable::Table> TableGrids::markdownTableAt(int position) const
+const TableGrids::RawTable *TableGrids::rawTableAt(int position) const
 {
-    const QString source = text();
-    for (int start : m_markdown) {
-        const auto table = MdTable::locate(source, start, dialect());
-        if (table && table->start == start && position >= table->start && position <= table->end) return table;
-    }
-    return std::nullopt;
+    for (const RawTable &table : m_rawTables)
+        if (table.contains(position)) return &table;
+    return nullptr;
+}
+
+bool TableGrids::canShowGrid() const
+{
+    if (!m_enabled || !m_binding->m_loaded) return false;
+    const RawTable *table = rawTableAt(cursor());
+    return table && (!table->waiting || settled());
+}
+
+void TableGrids::updateShowGrid()
+{
+    const bool can = canShowGrid();
+    if (can == m_canShowGrid) return;
+    m_canShowGrid = can;
+    emit canShowGridChanged();
 }
 
 bool TableGrids::can(const QString &command) const
 {
     if (!m_binding->m_loaded) return false;
-    if (command == u"showTableGrid") return m_enabled && markdownTableAt(cursor()).has_value();
+    if (command == u"showTableGrid") return canShowGrid();
     TableGrid *grid = gridAt(cursor());
     if (!grid) return false;
     const bool editable = m_binding->editable();
@@ -2797,16 +2811,16 @@ bool TableGrids::runCommand(const QString &command)
     if (!can(command)) return false;
     const QString source = text();
     if (command == u"showTableGrid") {
-        const auto table = markdownTableAt(cursor());
-        if (!table) return false;
-        m_markdown.removeAll(table->start);
-        adoptAt(table->start);
-        return true;
+        const RawTable *raw = rawTableAt(cursor());
+        if (!raw) return false;
+        const auto table = MdTable::scan(source, raw->start, raw->end, dialect());
+        return table && adoptOne(*table);
     }
     TableGrid *grid = gridAt(cursor());
     if (command == u"showTableMarkdown") {
         // This view shows the table's Markdown, until it is shown as a grid again.
         m_markdown.append(grid->start());
+        m_rawTables.append({grid->start(), grid->end(), false});
         const int caret = cursor();
         unproject(grid->start(), grid->end());
         m_grids.removeAll(grid);
@@ -2814,8 +2828,13 @@ bool TableGrids::runCommand(const QString &command)
         grid->deleteLater();
         emit gridsChanged();
         placeGrids();
-        select(caret, caret);
+        const int shown = m_binding->sourceToEditor(caret);
+        m_binding->selectEditor(shown, shown);
+        m_binding->refreshCursor();
         emit caretChanged();
+        updateShowGrid();
+        // The layout of the raw rows determines how far to scroll.
+        m_binding->queueTableLayout(true);
         return true;
     }
     if (command == u"deleteTable") {
@@ -3015,17 +3034,23 @@ void TableGrids::adoptAt(int position)
 {
     if (!m_enabled || !m_binding->m_loaded) return;
     const auto table = MdTable::locate(text(), position, dialect());
-    if (!table || table->unfit != MdTable::Unfit::None) return;
-    if (std::any_of(m_grids.cbegin(), m_grids.cend(), [&](TableGrid *g) { return g->start() == table->start; })) return;
-    m_waiting.removeIf([&](const std::pair<int, int> &waiting) { return waiting.first == table->start; });
+    if (table) adoptOne(*table);
+}
+
+bool TableGrids::adoptOne(const MdTable::Table &table)
+{
+    if (table.unfit != MdTable::Unfit::None || gridAt(table.start)) return false;
+    m_rawTables.removeIf([&table](const RawTable &raw) { return raw.start == table.start; });
+    m_markdown.removeAll(table.start);
     auto *grid = new TableGrid(this);
-    grid->read(*table, text());
+    grid->read(table, text());
     m_grids.append(grid);
     std::sort(m_grids.begin(), m_grids.end(), [](TableGrid *a, TableGrid *b) { return a->start() < b->start(); });
     project(grid);
     placeGrids();
     emit gridsChanged();
     cursorMoved();
+    return true;
 }
 
 // ---- The clipboard -------------------------------------------------------------

@@ -308,10 +308,12 @@ or delete them together.
   punctuation such as the underscore in `1_0`. Numbers sort before text and
   empty cells come last. Rows that compare the same stay in their original
   order.
-- A right click in a cell, or the `Menu` key there, offers all of these with
-  **Merge cells**, **Split cell**, **Show as Markdown** and **Delete table**.
-  On a misspelled word it offers its spellings first, and the table's
-  commands under **Table**.
+- A right click in a cell, or the `Menu` key there, offers row insertion,
+  duplication and deletion, column insertion and deletion, and **Merge
+  cells**, **Split cell**, **Show as Markdown** and **Delete table**, where
+  they can act. Use the row handle's menu to move a row and the column
+  handle's menu to move, align or sort a column. On a misspelled word, the
+  spellings come first and the table commands are under **Table**.
 - `Alt+Shift+Up` and `Alt+Shift+Down` move the caret's row, or the rows
   selected; `Alt+Shift+Left` and `Alt+Shift+Right` move its column.
 
@@ -345,10 +347,15 @@ wide, with its colons for alignment. Opening, reading or selecting a table
 changes nothing in the file. One written untidily elsewhere is tidied by its
 first change, and `Ctrl+Z` brings back exactly what was there.
 
-**Show as Markdown**, in a cell's menu, shows that table's Markdown in this
-window, as text you edit directly, until **Show table as grid**. **Show
-tables as Markdown** in the menu, or **Tables** in **Preferences**, shows
-every table as Markdown; **Format table** lines up one shown that way.
+**Show as Markdown** in a cell's menu keeps the caret in the table and
+shows its Markdown in this window for direct editing. With the caret in
+the table, use **Show table as grid** in **Format → Table** or the command
+palette to bring back the grid. A table written by hand becomes a grid
+when the caret leaves it. Once parch has read a completed table it can show
+as a grid, the same command shows it there and then.
+
+**Show tables as Markdown** in the menu, or **Tables** in **Preferences**,
+shows every table as Markdown. **Format table** lines up one shown that way.
 
 A table stays as Markdown, as it is written, when it could not be written as
 a grid without losing something: a row with more cells than the header, a
@@ -1143,22 +1150,31 @@ parch watches the files you have open.
 - If you have unsaved changes too, the document goes into **conflict** and
   nothing is saved over the file until you choose. You can keep writing
   meanwhile. **Review** (or `Ctrl+S`) shows your text beside the file's,
-  with the differing lines marked, and offers:
-  - **Reload**: take the file's text. Yours stays in history and undo.
-  - **Keep both**: save your text as a copy beside the file, and take the
+  with the differing lines marked. An ordinary change to a named file
+  offers four choices.
+  - **Reload** takes the file's text. Yours stays in history and undo.
+  - **Keep both** saves your text as a copy beside the file and takes the
     file's text.
-  - **Overwrite**: save your text over the file. The file's text goes to
+  - **Overwrite** saves your text over the file. The file's text goes to
     history.
-  - **Save as…**: put your text somewhere else.
+  - **Cancel** closes the review and leaves the conflict pending.
+
+  A draft's conflict offers **Reload**, **Overwrite** and **Cancel**.
 - If another program renames the file, or moves it into a folder parch
   watches (that of another open file, or a library folder you have open),
   the tab follows it, with any unsaved text, its history and its place among
   the recent files, and a notice says so. Moved anywhere else, the file is
   missing, as if it had been deleted.
-- If the file was deleted, **Save again** puts your text back where it was.
-- If the file was replaced by a link to another file, nothing is read from
-  or written to that file unless you choose **Follow the link**. **Put this
-  text at “name”** replaces the link with a file holding your text.
+- If the file was deleted and the document has text to keep, **Save again**
+  puts it back where it was. **Save as…** writes it somewhere else.
+- If the file cannot be read, **Retry** tries to read it again. If the
+  document has its own text, **Save as…** writes it somewhere else.
+- If the file was replaced by a link to another file, **Follow the link**
+  reads the linked file and makes it the tab's file for future saves. If
+  the document has its own text, **Keep both** saves a copy of it and leaves
+  the conflict pending. **Put this text at “name”** replaces the link with
+  that text, and **Save as…** writes it somewhere else. A tab with no text
+  of its own can also open **Version history…**.
 
 ## Choose how a document is read
 
@@ -1566,12 +1582,13 @@ A TeX command parch cannot draw is listed under [Math](#math), and a Mermaid
 syntax error is said as Merman reports it. If none is drawn at all, the
 helpers are missing from `/usr/lib/parch`: install the package again.
 
-**A table shows as Markdown, not as a grid.** It may be shown so on purpose:
-**Show table as grid** in the command palette, with the caret in it, shows
-it as a grid again, and **Show tables as grids** in the menu turns grids on
-for every table. Otherwise parch could not write it as a grid without losing
-something; [Write in tables](#write-in-tables) says what that is. A table you
-are typing by hand becomes a grid once the caret leaves it.
+**A table shows as Markdown, not as a grid.** To restore a grid you hid,
+put the caret in the table and choose **Show table as grid** in the command
+palette. **Show tables as grids** in the menu turns grids on for every table
+that can use them. A table you are typing by hand becomes a grid once the
+caret leaves it. For a completed table that parch can show as a grid,
+**Show table as grid** does it while the caret is still there. The cases
+that need Markdown are listed in [Write in tables](#write-in-tables).
 
 **Words are not underlined, or parch says spelling is not checked.** The
 English dictionary is missing: `sudo pacman -S hunspell-en_us`. Spelling may

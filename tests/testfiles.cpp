@@ -3,8 +3,27 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSemaphore>
+#include <QThreadPool>
 #include <QtTest>
 #include <cstdio>
+#include <utility>
+
+PoolBlock::PoolBlock(QThreadPool *pool) : m_gate(std::make_shared<QSemaphore>())
+{
+    if (!pool) pool = QThreadPool::globalInstance();
+    m_count = pool->maxThreadCount();
+    // Each blocker owns the gate, including while it wakes up.
+    for (int i = 0; i < m_count; ++i)
+        pool->start([gate = m_gate] { gate->acquire(); });
+}
+
+PoolBlock::~PoolBlock() { release(); }
+
+void PoolBlock::release()
+{
+    if (const int count = std::exchange(m_count, 0); count > 0) m_gate->release(count);
+}
 
 void writeFile(const QString &path, const QByteArray &contents)
 {

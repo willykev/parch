@@ -691,6 +691,8 @@ ApplicationWindow {
     // while the caret is on one, and superscript and subscript where the
     // dialect reads what they write: after a letter or a digit.
     function fitsCaret(command) {
+        if (command === "showTableGrid")
+            return editorPane.binding.tables.canShowGrid
         // A table's commands where the caret is in one shown as a grid, and
         // no new table inside a cell.
         if (tableCommands.indexOf(command) >= 0)

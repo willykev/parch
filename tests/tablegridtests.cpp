@@ -1,6 +1,8 @@
 #include "tablegridtests.h"
 
 #include "apppaths.h"
+#include "commandfilter.h"
+#include "documentparse.h"
 #include "mdtree.h"
 #include "documentsettings.h"
 #include "attachments.h"
@@ -8,11 +10,14 @@
 #include "documentstore.h"
 #include "editorbinding.h"
 #include "mdtable.h"
+#include "settings.h"
 #include "sourcebuffer.h"
+#include "tabmodel.h"
 #include "tablegrids.h"
 #include "testfiles.h"
 #include "theme.h"
 #include "vimmode.h"
+#include "windowcontext.h"
 #include "windowtesting.h"
 
 #include <QAbstractTextDocumentLayout>
@@ -27,10 +32,12 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextDocument>
 #include <QStyleHints>
+#include <QThreadPool>
 #include <QWheelEvent>
 #include <QtTest>
 #include <memory>
@@ -1183,6 +1190,351 @@ void tablesCanBeShownAsMarkdownPerView()
     QCOMPARE(view.binding->tables()->grids().size(), 1);
 }
 
+void guideDescribesTheActionsInEachTableMenu()
+{
+    GridEditor view(u"| A | B | C |\n|---|---|---|\n| one | centre | three |\n| four | five | six |\n"_s);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    activate(&view.window);
+    const int position = int(view.text().indexOf(u"centre")) + 2;
+    view.select(position, position);
+    QObject *menu = view.pane->findChild<QObject *>(u"tableMenu"_s);
+    QVERIFY(menu);
+    const QStringList rowActions{u"insertRowAboveEntry"_s, u"insertRowBelowEntry"_s, u"duplicateRowEntry"_s, u"deleteRowEntry"_s};
+    const QStringList columnActions{u"insertColumnLeftEntry"_s, u"insertColumnRightEntry"_s, u"deleteColumnEntry"_s};
+    const QStringList rowHandleOnly{u"moveRowUpEntry"_s, u"moveRowDownEntry"_s};
+    const QStringList columnHandleOnly{u"moveColumnLeftEntry"_s, u"moveColumnRightEntry"_s, u"alignDefaultEntry"_s, u"alignLeftEntry"_s,
+                                      u"alignCenterEntry"_s, u"alignRightEntry"_s, u"sortAscendingEntry"_s, u"sortDescendingEntry"_s};
+    const QStringList cellOnly{u"mergeCellsEntry"_s, u"splitCellEntry"_s, u"showMarkdownEntry"_s, u"deleteTableEntry"_s};
+    const auto commands = [&](const QStringList &visible) {
+        for (const auto &id : rowActions + columnActions + rowHandleOnly + columnHandleOnly + cellOnly) {
+            auto *entry = menu->findChild<QQuickItem *>(id);
+            QVERIFY2(entry, qPrintable(id));
+            QVERIFY2(entry->isVisible() == visible.contains(id), qPrintable(id));
+        }
+    };
+    const QPoint cell = view.editor->mapToScene(view.binding->sourceRectangle(position).center()).toPoint();
+    QTest::mouseClick(&view.window, Qt::RightButton, Qt::NoModifier, cell);
+    QTRY_VERIFY(menu->property("opened").toBool());
+    QCOMPARE(menu->property("kind").toString(), u"cell"_s);
+    commands(rowActions + columnActions + cellOnly);
+    QStringList cellLabels;
+    for (const auto &id : cellOnly) cellLabels.append(menu->findChild<QQuickItem *>(id)->property("text").toString());
+    QMetaObject::invokeMethod(menu, "close");
+    QTRY_VERIFY(!menu->property("visible").toBool());
+    for (const auto &kind : {u"row"_s, u"column"_s}) {
+        view.select(position, position);
+        QQuickItem *handle = findItem(view.window.contentItem(), kind + u"Handle");
+        QTRY_VERIFY(handle && handle->isVisible());
+        QTest::mouseClick(&view.window, Qt::LeftButton, Qt::NoModifier, centreOf(handle));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QCOMPARE(menu->property("kind").toString(), kind);
+        commands(kind == u"row" ? rowActions + rowHandleOnly : columnActions + columnHandleOnly);
+        QMetaObject::invokeMethod(menu, "close");
+        QTRY_VERIFY(!menu->property("visible").toBool());
+    }
+
+    const QString guide = QString::fromUtf8(readFile(QStringLiteral(PARCH_SOURCE_DIR "/docs/guide.md")));
+    const QString section = guide.section(u"## Write in tables\n"_s, 1, 1).section(u"\n## "_s, 0, 0);
+    const QString paragraph = section.section(u"A right click in a cell"_s, 1, 1).section(u"\n- "_s, 0, 0).simplified();
+    QVERIFY2(!paragraph.contains(u"offers all of these"), qPrintable(paragraph));
+    QVERIFY2(paragraph.contains(u"row insertion, duplication and deletion"), qPrintable(paragraph));
+    QVERIFY2(paragraph.contains(u"column insertion and deletion"), qPrintable(paragraph));
+    for (const auto &label : cellLabels) QVERIFY2(paragraph.contains(u"**%1**"_s.arg(label)), qPrintable(label));
+    QVERIFY2(paragraph.contains(u"row handle's menu to move a row"), qPrintable(paragraph));
+    QVERIFY2(paragraph.contains(u"column handle's menu to move, align or sort a column"), qPrintable(paragraph));
+    QVERIFY(paragraph.contains(u"**Table**"));
+}
+
+void showMarkdownFromTheCellMenuKeepsTheCaret_data()
+{
+    QTest::addColumn<QString>("route");
+    QTest::addColumn<bool>("split");
+    QTest::addColumn<bool>("deep");
+    QTest::newRow("right-click") << u"right-click"_s << false << false;
+    QTest::newRow("Menu") << u"Menu"_s << false << false;
+    QTest::newRow("palette") << u"palette"_s << false << false;
+    QTest::newRow("right-click-split-crlf") << u"right-click"_s << true << false;
+    QTest::newRow("right-click-deep-in-table") << u"right-click"_s << false << true;
+}
+
+void showMarkdownFromTheCellMenuKeepsTheCaret()
+{
+    QFETCH(QString, route);
+    QFETCH(bool, split);
+    QFETCH(bool, deep);
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    shell.settings()->setTableGrids(true);
+    const int flash = QGuiApplication::styleHints()->cursorFlashTime();
+    QGuiApplication::styleHints()->setCursorFlashTime(0);
+    const auto blink = qScopeGuard([flash] { QGuiApplication::styleHints()->setCursorFlashTime(flash); });
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    resizeWindow(window, split ? 900 : 500);
+    const QString path = shell.root.filePath(u"grid.md"_s);
+    const QString prose = u"Preceding text, outside the table.\n\n"_s.repeated(12);
+    const QString words = u"many words for a cell to wrap in the narrower table. "_s.repeated(5);
+    QString source = prose + u"| First | Second |\n|---|---|\n"_s;
+    if (deep) source += u"| %1 | right |\n| left | %1 |\n"_s.arg(words.trimmed()).repeated(10);
+    source += u"| %1target | right |\n\nAfter the table.\n"_s.arg(words);
+    if (split) source.replace(u"\n"_s, u"\r\n"_s);
+    writeFile(path, source.toUtf8());
+    shell.backend->openFiles({path});
+    Document *document = shell.document();
+    EditorBinding *binding = shell.binding();
+    if (split) {
+        shell.context()->setLibraryOpen(false);
+        shell.context()->tabs()->setActiveMode(TabModel::Split);
+        QTRY_VERIFY(window->property("splitBoth").toBool());
+    }
+    QTRY_COMPARE(binding->tables()->grids().size(), 1);
+    QVERIFY(binding->tables()->grids().first()->lineCount({1, 0}) > 1);
+    // Another projection, without a second native window taking the popup's focus.
+    QQmlComponent component(&shell.engine, QUrl(u"qrc:/EditorPane.qml"_s));
+    const std::unique_ptr<QObject> second(component.createWithInitialProperties(
+        {{u"width"_s, 640}, {u"height"_s, 480}, {u"tableGrids"_s, true}, {u"document"_s, QVariant::fromValue(document)}}));
+    QVERIFY2(second, qPrintable(component.errorString()));
+    auto *otherBinding = second->findChild<EditorBinding *>();
+    QVERIFY(otherBinding);
+    QTRY_COMPARE(otherBinding->tables()->grids().size(), 1);
+
+    activate(window);
+    QQuickItem *editor = shell.item(u"editor"_s);
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    const int position = int(source.indexOf(u"target")) + 2;
+    binding->select(position, position);
+    QCOMPARE(binding->cursorSource(), position);
+    const Revision revision = document->buffer()->revision();
+    if (route == u"palette") {
+        sendKey(window, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier);
+        QObject *palette = shell.object(u"commandPalette"_s);
+        QTRY_VERIFY(palette && palette->property("opened").toBool());
+        auto *field = qobject_cast<QQuickItem *>(shell.object(u"paletteField"_s));
+        QVERIFY(field);
+        field->setProperty("text", u"Show table as Markdown"_s);
+        auto *matches = qobject_cast<CommandFilter *>(shell.object(u"paletteMatches"_s));
+        QVERIFY(matches);
+        QTRY_COMPARE(matches->idAt(0), u"showTableMarkdown"_s);
+        QTRY_COMPARE(window->activeFocusItem(), field);
+        sendKey(window, Qt::Key_Return);
+        QTRY_VERIFY(!palette->property("visible").toBool());
+    } else {
+        if (route == u"Menu") sendKey(window, Qt::Key_Menu);
+        else {
+            const QRectF point = binding->sourceRectangle(position);
+            const QPointF click = editor->mapToScene({point.x() + 0.25, point.center().y()});
+            QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, click.toPoint());
+        }
+        QObject *menu = shell.object(u"tableMenu"_s);
+        QTRY_VERIFY(menu && menu->property("opened").toBool());
+        auto *entry = menu->findChild<QQuickItem *>(u"showMarkdownEntry"_s);
+        QVERIFY(entry && entry->isVisible() && entry->isEnabled());
+        QCOMPARE(binding->cursorSource(), position);
+        QSignalSpy triggered(entry, SIGNAL(triggered()));
+        QTest::mouseClick(entry->window(), Qt::LeftButton, Qt::NoModifier, centreOf(entry));
+        QCOMPARE(triggered.size(), 1);
+        QTRY_VERIFY(!menu->property("visible").toBool());
+    }
+    QTRY_COMPARE(binding->tables()->grids().size(), 0);
+    QCOMPARE(otherBinding->tables()->grids().size(), 1);
+    QCOMPARE(document->buffer()->revision(), revision);
+    QVERIFY(!document->buffer()->canUndo());
+    QCOMPARE(document->buffer()->text(), source);
+    QCOMPARE(binding->cursorSource(), position);
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    QTRY_VERIFY(caretDrawnAt(binding, editor, position));
+    auto *flickable = shell.item(u"flickable"_s);
+    QVERIFY(flickable);
+    QTRY_VERIFY(flickable->mapRectToItem(editor, flickable->boundingRect()).contains(binding->sourceRectangle(position).center()));
+    typeText(window, u"x"_s);
+    QString changed = source;
+    changed.insert(position, u'x');
+    QCOMPARE(document->buffer()->text(), changed);
+    shell.backend->store()->save(document);
+    QTRY_COMPARE(document->state(), Document::State::Clean);
+    QCOMPARE(readFile(path), changed.toUtf8());
+}
+
+void externallyReloadedTablesProjectInANewView_data()
+{
+    QTest::addColumn<bool>("inside");
+    QTest::addColumn<bool>("parsedBeforeActivation");
+    QTest::addColumn<bool>("earlierUndo");
+    QTest::addColumn<bool>("startsWithTable");
+    QTest::newRow("reload-parses-in-reopened-view") << true << false << true << false;
+    QTest::newRow("reopened-before-parse-caret-in-prose") << false << false << false << false;
+    QTest::newRow("already-parsed-with-undo") << true << true << true << false;
+    QTest::newRow("new-view-on-leading-table") << true << true << false << true;
+}
+
+void externallyReloadedTablesProjectInANewView()
+{
+    QFETCH(bool, inside);
+    QFETCH(bool, parsedBeforeActivation);
+    QFETCH(bool, earlierUndo);
+    QFETCH(bool, startsWithTable);
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    shell.settings()->setTableGrids(true);
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    const QString path = shell.root.filePath(u"grid.md"_s);
+    const QString secondFile = shell.root.filePath(u"second.md"_s);
+    // The caret follows the surviving suffix through an otherwise full rewrite.
+    const QString suffix = u"\n| Target | cello |\n\nAfter the rewrite.\n"_s;
+    const QString old = u"Older prose at the start of the file. "_s.repeated(12) + u"\n\n"_s + weather
+                        + u"\n\nAnother paragraph before the row."_s + suffix;
+    const QString fresh = (startsWithTable ? QString() : u"Different introduction.\n\n"_s)
+                          + u"| New | Columns |\n|---|---|"_s + suffix;
+    writeFile(path, old.toUtf8());
+    writeFile(secondFile, "Another open file.\n");
+    shell.backend->openFiles({path});
+    Document *document = shell.document();
+    EditorBinding *binding = shell.binding();
+    QVERIFY(document && binding);
+    QTRY_COMPARE(binding->tables()->grids().size(), 1);
+    if (earlierUndo) {
+        document->buffer()->replace({0, 0}, u"An earlier edit.\n\n"_s);
+        shell.backend->store()->save(document);
+        QTRY_COMPARE(document->state(), Document::State::Clean);
+        QVERIFY(document->buffer()->canUndo());
+    }
+    const int position = inside ? int(fresh.indexOf(u"Target")) + 3 : int(fresh.indexOf(u"After"));
+    const int oldPosition = position + document->buffer()->length() - int(fresh.size());
+    binding->select(oldPosition, oldPosition);
+    QCOMPARE(binding->cursorSource(), oldPosition);
+    const Revision before = document->buffer()->revision();
+    shell.backend->openFiles({secondFile});
+    QVERIFY(shell.document() != document);
+    TabModel *tabs = shell.context()->tabs();
+    const int tab = tabs->indexOf(document);
+    QCOMPARE(tabs->viewState(tab).cursor, oldPosition);
+    auto *parsePool = QCoreApplication::instance()->findChild<QThreadPool *>(u"parse"_s);
+    QVERIFY(parsePool);
+    PoolBlock parsing(parsePool);
+    if (parsedBeforeActivation) parsing.release();
+    writeFile(path, fresh.toUtf8());
+    QTRY_COMPARE(document->buffer()->text(), fresh);
+    QCOMPARE(document->state(), Document::State::Clean);
+    QVERIFY(document->buffer()->canUndo());
+    const Revision revision = document->buffer()->revision();
+    QVERIFY(revision > before);
+    const ViewState saved = tabs->viewState(tab);
+    QCOMPARE(saved.cursor, position);
+    document->parse()->request();
+    if (parsedBeforeActivation) QTRY_VERIFY(document->parse()->current());
+    else QVERIFY(!document->parse()->current());
+    shell.backend->openForwarded({path}, {});
+    QTRY_COMPARE(shell.document(), document);
+    QTRY_COMPARE(binding->document(), document);
+    QCOMPARE(binding->cursorSource(), position);
+    parsing.release();
+    QTRY_VERIFY(binding->tables()->settled());
+    QCOMPARE(document->parse()->current()->revision, revision);
+    const int reopened = binding->tables()->grids().size();
+
+    shell.backend->newWindow();
+    WindowContext *second = shell.backend->windows().at(1);
+    second->tabs()->openDocument(document, saved);
+    QQuickWindow *other = shell.windowFor(second);
+    QVERIFY(other);
+    auto *otherBinding = other->findChild<EditorBinding *>();
+    QVERIFY(otherBinding);
+    QTRY_COMPARE(otherBinding->document(), document);
+    QTRY_VERIFY(otherBinding->tables()->settled());
+    QCOMPARE(otherBinding->cursorSource(), position);
+    const int newView = otherBinding->tables()->grids().size();
+    QCOMPARE(document->buffer()->revision(), revision);
+    QCOMPARE(readFile(path), fresh.toUtf8());
+    QCOMPARE((std::pair{reopened, newView}), (std::pair{1, 1}));
+    QCOMPARE(binding->tables()->grids().first()->rowTexts(1), (QStringList{u"Target"_s, u"cello"_s}));
+}
+
+void showGridCanRestoreACompletedTableUnderTheCaret_data()
+{
+    QTest::addColumn<bool>("manual");
+    QTest::newRow("manual-override") << true;
+    QTest::newRow("completed-under-caret") << false;
+}
+
+void showGridCanRestoreACompletedTableUnderTheCaret()
+{
+    QFETCH(bool, manual);
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    shell.settings()->setTableGrids(true);
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    const QString path = shell.root.filePath(u"grid.md"_s);
+    const QString starting = manual ? weather : u"Readings.\n\n\n\nAfter."_s;
+    writeFile(path, starting.toUtf8());
+    shell.backend->openFiles({path});
+    Document *document = shell.document();
+    EditorBinding *binding = shell.binding();
+    TableGrids *tables = binding->tables();
+    QTRY_VERIFY(tables->settled());
+    auto *parsePool = QCoreApplication::instance()->findChild<QThreadPool *>(u"parse"_s);
+    QVERIFY(parsePool);
+    PoolBlock parsing(parsePool);
+    if (manual) {
+        parsing.release();
+        QTRY_COMPARE(tables->grids().size(), 1);
+        const int cell = int(starting.indexOf(u"North")) + 1;
+        binding->select(cell, cell);
+        QVERIFY(tables->runCommand(u"showTableMarkdown"_s));
+        const int after = int(starting.indexOf(u"After"));
+        binding->select(after, after);
+        QVERIFY(!tables->can(u"showTableGrid"_s));
+        QCOMPARE(tables->grids().size(), 0);
+        binding->select(cell, cell);
+    } else {
+        binding->select(11, 11);
+        typeText(window, u"| A | B |"_s);
+        sendKey(window, Qt::Key_Return);
+        typeText(window, u"|---|---|"_s);
+        sendKey(window, Qt::Key_Return);
+        typeText(window, u"| one | two"_s);
+        QVERIFY(document->buffer()->text().contains(u"| A | B |\n|---|---|\n| one | two"));
+        QVERIFY(!tables->settled());
+        QVERIFY(!tables->can(u"showTableGrid"_s));
+    }
+    QCOMPARE(tables->grids().size(), 0);
+    const int caret = binding->cursorSource();
+    const QString before = document->buffer()->text();
+    const Revision revision = document->buffer()->revision();
+    const qsizetype undo = document->buffer()->undoDepth();
+    sendKey(window, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier);
+    QObject *palette = shell.object(u"commandPalette"_s);
+    QTRY_VERIFY(palette && palette->property("opened").toBool());
+    auto *field = qobject_cast<QQuickItem *>(shell.object(u"paletteField"_s));
+    QVERIFY(field);
+    field->setProperty("text", u"Show table as grid"_s);
+    auto *matches = qobject_cast<CommandFilter *>(shell.object(u"paletteMatches"_s));
+    QVERIFY(matches);
+    QTRY_COMPARE(matches->idAt(0), u"showTableGrid"_s);
+    auto *list = qobject_cast<QQuickItem *>(shell.object(u"paletteList"_s));
+    QVERIFY(list);
+    const auto choice = [&] { return list->property("currentItem").value<QQuickItem *>(); };
+    QTRY_VERIFY(choice() && choice()->property("commandId").toString() == u"showTableGrid");
+    if (!manual) QVERIFY(!choice()->property("available").toBool());
+    parsing.release();
+    QTRY_VERIFY(tables->settled());
+    QCOMPARE(tables->grids().size(), 0);
+    QVERIFY(tables->can(u"showTableGrid"_s));
+    QTRY_VERIFY(choice() && choice()->property("available").toBool());
+    QTRY_COMPARE(window->activeFocusItem(), field);
+    sendKey(window, Qt::Key_Return);
+    QTRY_VERIFY(!palette->property("visible").toBool());
+    QTRY_COMPARE(tables->grids().size(), 1);
+    QTRY_COMPARE(window->activeFocusItem(), shell.item(u"editor"_s));
+    QCOMPARE(binding->cursorSource(), caret);
+    QVERIFY(tables->caretInGrid());
+    QCOMPARE(document->buffer()->text(), before);
+    QCOMPARE(document->buffer()->revision(), revision);
+    QCOMPARE(document->buffer()->undoDepth(), undo);
+}
+
 void readOnlyTablesTakeNoEdits()
 {
     GridEditor view{QString()};
@@ -1409,6 +1761,8 @@ void tablesTheGridCannotHoldStayMarkdown()
         QVERIFY(block.isVisible());
     // Typed in, it takes edits as text does.
     view.select(3, 3);
+    QVERIFY(!view.binding->tables()->can(u"showTableGrid"_s));
+    QVERIFY(!view.binding->tables()->runCommand(u"showTableGrid"_s));
     view.type(u"z"_s);
     QVERIFY(view.text().startsWith(u"| az | b |"_s));
 }

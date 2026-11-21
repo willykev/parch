@@ -135,24 +135,23 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
         if (write > m_refusedAfter) forgetUnsafe(documentId);
     });
     connect(m_store.get(), &DocumentStore::documentClosed, this, &Backend::forgetUnsafe);
-    // Keep both opens the local text as a copy beside the file, in the
-    // window in front, where the writer was in that text: the view of the
-    // original in front of the window in front, or else its first tab in the
-    // most recent window that shows it.
-    connect(m_store.get(), &DocumentStore::conflictCopyOpened, this, [this](Document *copy, Document *original) {
-        WindowContext *window = activeWindow();
-        if (!window) return;
-        std::optional<ViewState> view;
+    // Keep both takes the place in the original when it takes the text:
+    // the active tab, or the first tab that shows it, in the most recent
+    // window with a view of the document.
+    m_store->setConflictCopyView([this](Document *original) -> std::optional<ViewState> {
         for (WindowContext *holder : std::as_const(m_recent)) {
             TabModel *tabs = holder->tabs();
             const int index = tabs->activeDocument() == original ? tabs->activeIndex() : tabs->indexOf(original);
             if (index < 0) continue;
             holder->captureView();
-            view = tabs->viewState(index);
-            break;
+            return tabs->viewState(index);
         }
-        window->tabs()->openDocument(copy, view);
+        return std::nullopt;
     });
+    connect(m_store.get(), &DocumentStore::conflictCopyOpened, this,
+            [this](Document *copy, Document *, const std::optional<ViewState> &view) {
+                if (WindowContext *window = activeWindow()) window->tabs()->openDocument(copy, view);
+            });
     // A document whose tab closed while its save ran, and whose save then
     // failed or met a conflict, comes back as a tab of the window in front,
     // behind the one being written in, and a notice says so.

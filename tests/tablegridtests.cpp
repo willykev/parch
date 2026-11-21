@@ -775,10 +775,9 @@ void theLineAfterATableStaysBlank()
     const int blank = grid->end() + 1;
     view.select(blank, blank);
     view.type(u"Note"_s);
-    QVERIFY2(view.text().contains(u"| 12  |\n\nNote\nAfter"_s), qPrintable(view.text()));
+    QVERIFY2(view.text().contains(u"| 12  |\n\nNote\n\nAfter"_s), qPrintable(view.text()));
     QCOMPARE(view.binding->tables()->grids().size(), 1);
     // Nothing pulls the text below up against the table.
-    view.binding->undo();
     view.binding->undo();
     QCOMPARE(view.text(), weather);
     const int after = int(view.text().indexOf(u"After"));
@@ -2186,6 +2185,403 @@ void replaceAllMakesTheReplacementsTablesCanTake()
     QCOMPARE(replaced.first().first().toInt(), 1);
     QCOMPARE(refused.count(), 1);
     QCOMPARE(view.text(), u"| A | B |\n| --- | --- |\n| \\`aaa | bbb` |\n\nSome  prose."_s);
+}
+
+namespace {
+
+void compareSaved(GridEditor &view, const QString &expected)
+{
+    view.store->save(view.document);
+    QTRY_VERIFY(!view.document->differsFromFile());
+    QCOMPARE(readFile(view.document->path()), expected.toUtf8());
+}
+
+} // namespace
+
+void backwardCutAboveATableLeavesItWhole_data()
+{
+    QTest::addColumn<QString>("keys");
+    QTest::addColumn<bool>("reverse");
+    QTest::addColumn<bool>("insideCell");
+    QTest::addColumn<QString>("newline");
+    QTest::newRow("vim-cut") << u"vk"_s << true << false << u"\n"_s;
+    QTest::newRow("vim-delete") << u"vkd"_s << true << false << u"\n"_s;
+    QTest::newRow("reverse-selection") << QString() << true << false << u"\n"_s;
+    QTest::newRow("forward-selection") << QString() << false << false << u"\n"_s;
+    QTest::newRow("reverse-crlf") << QString() << true << false << u"\r\n"_s;
+    QTest::newRow("from-inside-a-cell") << QString() << true << true << u"\n"_s;
+}
+
+void backwardCutAboveATableLeavesItWhole()
+{
+    QFETCH(QString, keys);
+    QFETCH(bool, reverse);
+    QFETCH(bool, insideCell);
+    QFETCH(QString, newline);
+    QString text = u"Alpha line\n\nBeta line\n\n| A | B |\n| --- | --- |\n| Blue | Gold |\n\nTail."_s;
+    text.replace(u"\n"_s, newline);
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int beta = int(text.indexOf(u"Beta"));
+    const int tableStart = view.grid()->start();
+    const int high = insideCell ? view.grid()->end() : tableStart;
+    if (keys.isEmpty()) {
+        const int endpoint = insideCell ? int(text.indexOf(u"Blue")) : tableStart;
+        view.select(reverse ? endpoint : beta, reverse ? beta : endpoint);
+    } else {
+        view.pane->setProperty("vimKeys", true);
+        const int blank = tableStart - int(newline.size());
+        view.select(blank, blank);
+        view.type(keys);
+    }
+    if (!keys.endsWith(u'd')) {
+        view.key(Qt::Key_X, Qt::ControlModifier);
+        QCOMPARE(QGuiApplication::clipboard()->text(), text.mid(beta, high - beta));
+    }
+    const QString expected = text.left(beta) + text.mid(high);
+    QCOMPARE(view.text(), expected);
+    QVERIFY(view.grids(insideCell ? 0 : 1));
+    if (!insideCell) QCOMPARE(cells(view), u"A|B / Blue|Gold"_s);
+    compareSaved(view, expected);
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    QVERIFY(view.grids(1));
+    compareSaved(view, text);
+}
+
+void replaceAllKeepsItsQueryWhenItRetries_data()
+{
+    QTest::addColumn<bool>("append");
+    QTest::addColumn<QString>("newPattern");
+    QTest::addColumn<QString>("interruption");
+    QTest::newRow("edit-and-fields") << true << u"Gold"_s << QString();
+    QTest::newRow("regex-and-invalid-fields") << true << u"["_s << QString();
+    QTest::newRow("regex-then-literal") << true << u"gold"_s << QString();
+    QTest::newRow("edit-only") << true << QString() << QString();
+    QTest::newRow("fields-only") << false << u"Gold"_s << QString();
+    QTest::newRow("grid-appears") << false << QString() << u"project"_s;
+    QTest::newRow("switch-through-read-only-view") << false << QString() << u"switch"_s;
+    QTest::newRow("reopen-find-bar") << false << QString() << u"reopen"_s;
+}
+
+void replaceAllKeepsItsQueryWhenItRetries()
+{
+    QFETCH(bool, append);
+    QFETCH(QString, newPattern);
+    QFETCH(QString, interruption);
+    const QString text =
+        u"| Color name | Other |\n| ---------- | ----- |\n| Blue       | Gold  |\n\nTail."_s;
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    DocumentFind find;
+    find.setDocument(view.document);
+    find.setBinding(view.binding);
+    find.setActive(true);
+    const bool capture = newPattern == u"["_s || newPattern == u"gold"_s;
+    const bool project = interruption == u"project"_s;
+    if (project) {
+        view.pane->setProperty("tableGrids", false);
+        QVERIFY(view.grids(0));
+    }
+    find.setRegex(capture || project);
+    find.setPattern(capture ? u"(Bl)ue"_s : project ? u"Blue|-{5}"_s : u"Blue"_s);
+    QTRY_COMPARE(find.count(), project ? 4 : 1);
+    QSignalSpy replaced(&find, &DocumentFind::replacedAll);
+    const QString replacement = capture ? u"$1-ed"_s : u"Edited"_s;
+    if (interruption == u"switch"_s || interruption == u"reopen"_s) {
+        // Start a new command immediately after returning to this document.
+        // Only its completion may make an edit.
+        find.replaceAll(u"Stale"_s);
+        if (interruption == u"switch"_s) {
+            const QString path = view.root.filePath(u"readonly.md"_s);
+            writeFile(path, QByteArray("Blue \xff\n"));
+            Document *readOnly = view.store->open(path);
+            QVERIFY(readOnly);
+            const QString before = readOnly->buffer()->text();
+            view.pane->setProperty("document", QVariant::fromValue(readOnly));
+            find.setDocument(readOnly);
+            QVERIFY(!find.canReplace());
+            find.replaceAll(u"Refused"_s);
+            QCOMPARE(readOnly->buffer()->text(), before);
+            view.pane->setProperty("document", QVariant::fromValue(view.document));
+            find.setDocument(view.document);
+        } else {
+            find.setActive(false);
+            find.setActive(true);
+        }
+    }
+    find.replaceAll(replacement);
+    // All changes happen in this event-loop turn, ahead of worker delivery.
+    QString newer = text;
+    if (append) {
+        view.document->buffer()->replace({int(text.size()), 0}, u"!"_s);
+        newer += u'!';
+    }
+    if (!newPattern.isEmpty()) {
+        find.setPattern(newPattern);
+        if (newPattern == u"gold"_s) find.setRegex(false);
+        if (!capture) find.setCaseSensitive(true);
+    }
+    if (project) {
+        view.pane->setProperty("tableGrids", true);
+        QCOMPARE(view.binding->tables()->grids().size(), 1);
+    }
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(replaced.first().first().toInt(), 1);
+    QString expected = newer;
+    expected.replace(u"Blue       "_s, (capture ? u"Bl-ed"_s : replacement).leftJustified(11));
+    QCOMPARE(view.text(), expected);
+    QVERIFY(view.grids(1));
+    compareSaved(view, expected);
+    view.binding->undo();
+    QCOMPARE(view.text(), newer);
+    compareSaved(view, newer);
+}
+
+void replaceAllKeepsSafeEditsInTheSameTable_data()
+{
+    QTest::addColumn<QString>("pattern");
+    QTest::addColumn<QString>("replacement");
+    QTest::addColumn<QStringList>("before");
+    QTest::addColumn<QStringList>("after");
+    QTest::addColumn<bool>("mixed");
+    QTest::addColumn<int>("matches");
+    QTest::addColumn<int>("accepted");
+    const QString pattern = uR"(\\|SAFE)"_s;
+    const QString opening = uR"(\`aaa)"_s;
+    const QString closing = u"bbb`"_s;
+    QTest::newRow("other-row") << pattern << QString()
+        << QStringList{opening, closing, u"SAFE"_s, u"still"_s}
+        << QStringList{opening, closing, QString(), u"still"_s} << false << 2 << 1;
+    QTest::newRow("same-row-other-cell") << pattern << QString()
+        << QStringList{opening, closing + u"SAFE"_s} << QStringList{opening, closing} << false << 2 << 1;
+    QTest::newRow("same-cell") << pattern << QString()
+        << QStringList{opening + u"SAFE"_s, closing} << QStringList{opening, closing} << false << 2 << 1;
+    QTest::newRow("still-replaces-prose-and-a-second-table") << pattern << QString()
+        << QStringList{opening + u"SAFE"_s, closing} << QStringList{opening, closing} << true << 4 << 3;
+    QTest::newRow("all-refused") << pattern << QString()
+        << QStringList{opening, closing} << QStringList{opening, closing} << false << 1 << 0;
+    QTest::newRow("cooperating-edits") << uR"(\\|(?<=bbb)`)"_s << QString()
+        << QStringList{opening, closing} << QStringList{u"`aaa"_s, u"bbb"_s} << false << 2 << 2;
+    QTest::newRow("no-op") << u"aaa"_s << u"aaa"_s
+        << QStringList{opening, closing} << QStringList{opening, closing} << false << 1 << 1;
+}
+
+void replaceAllKeepsSafeEditsInTheSameTable()
+{
+    QFETCH(QString, pattern);
+    QFETCH(QString, replacement);
+    QFETCH(QStringList, before);
+    QFETCH(QStringList, after);
+    QFETCH(bool, mixed);
+    QFETCH(int, matches);
+    QFETCH(int, accepted);
+    const auto table = [](const QStringList &cells) {
+        QString source = u"| Opening cell | Closing cell |\n| ------------ | ------------ |\n"_s;
+        for (qsizetype i = 0; i < cells.size(); i += 2)
+            source += u"| %1 | %2 |\n"_s.arg(cells[i], -12).arg(cells[i + 1], -12);
+        return source;
+    };
+    const QString text = table(before) + (mixed ? u"\nSAFE in prose.\n\n"_s + table({u"SAFE"_s, u"elsewhere"_s}) : QString());
+    const QString expected = table(after) + (mixed ? u"\n in prose.\n\n"_s + table({QString(), u"elsewhere"_s}) : QString());
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(mixed ? 2 : 1));
+    DocumentFind find;
+    find.setDocument(view.document);
+    find.setBinding(view.binding);
+    find.setActive(true);
+    find.setRegex(true);
+    find.setPattern(pattern);
+    QTRY_COMPARE(find.count(), matches);
+    QSignalSpy replaced(&find, &DocumentFind::replacedAll);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    find.replaceAll(replacement);
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(replaced.first().first().toInt(), accepted);
+    QCOMPARE(refused.count(), int(accepted < matches));
+    if (!refused.isEmpty()) QVERIFY(!refused.first().first().toString().isEmpty());
+    QCOMPARE(view.text(), expected);
+    QVERIFY(view.grids(mixed ? 2 : 1));
+    QCOMPARE(view.grid()->rowCount(), int(before.size() / 2 + 1));
+    for (qsizetype i = 0; i < after.size(); ++i) {
+        const MdTable::Cell &cell = view.grid()->cellAt({int(i / 2 + 1), int(i % 2)});
+        QCOMPARE(view.text().mid(cell.start, cell.end - cell.start), after[i]);
+    }
+    compareSaved(view, expected);
+    QCOMPARE(view.document->buffer()->undoDepth(), expected == text ? 0 : 1);
+    view.binding->undo();
+    QCOMPARE(view.text(), text);
+    compareSaved(view, text);
+}
+
+void backtickRunsCloseInsideTheirOwnCell_data()
+{
+    QTest::addColumn<QString>("content");
+    QTest::addColumn<int>("opening");
+    QTest::addColumn<int>("closing");
+    QTest::addColumn<QString>("expected");
+    QTest::addColumn<QString>("code");
+    QTest::addColumn<bool>("standard");
+    QTest::addColumn<QString>("neighborTicks");
+    QTest::newRow("one") << u"aaa"_s << 1 << 1 << u"`aaa`"_s << u"aaa"_s << false << u"`"_s;
+    QTest::newRow("two") << u"aaa"_s << 2 << 2 << u"``aaa``"_s << u"aaa"_s << false << u"``"_s;
+    QTest::newRow("three") << u"aaa"_s << 3 << 3 << u"```aaa```"_s << u"aaa"_s << false << u"```"_s;
+    QTest::newRow("earlier-closing-tick-protected")
+        << u"aaa"_s << 2 << 2 << u"``aaa``"_s << u"aaa"_s << false << u"`ccc``"_s;
+    QTest::newRow("mismatched") << u"aaa"_s << 2 << 1 << uR"(\`\`aaa`)"_s << QString() << false << u"``"_s;
+    QTest::newRow("authored-escape-and-backslash")
+        << uR"(\\\`aaa)"_s << 0 << 1 << uR"(\\\`aaa\`)"_s << QString() << false << u"`"_s;
+    QTest::newRow("pipe-in-code")
+        << uR"(aaa\|b)"_s << 2 << 2 << uR"(``aaa\|b``)"_s << u"aaa|b"_s << false << u"``"_s;
+    QTest::newRow("standard") << u"aaa"_s << 3 << 3 << u"```aaa```"_s << u"aaa"_s << true << u"```"_s;
+}
+
+void backtickRunsCloseInsideTheirOwnCell()
+{
+    QFETCH(QString, content);
+    QFETCH(int, opening);
+    QFETCH(int, closing);
+    QFETCH(QString, expected);
+    QFETCH(QString, code);
+    QFETCH(bool, standard);
+    QFETCH(QString, neighborTicks);
+    const QString neighbor = u"bbb"_s + neighborTicks;
+    const QString text = u"| A | B |\n| --- | --- |\n| %1 | %2 |\n\nAfter."_s.arg(content, neighbor);
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    if (standard) {
+        Dialect::Layers layers;
+        layers.document.profile = md::Profile::Standard;
+        view.document->setSavedDialect(layers);
+    }
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    const auto checkNeighbor = [&] {
+        QCOMPARE(view.grid()->cellCount(1), 2);
+        const MdTable::Cell &cell = view.grid()->cellAt({1, 1});
+        QCOMPARE(view.text().mid(cell.start, cell.end - cell.start), neighbor);
+    };
+    const int start = int(text.indexOf(content));
+    view.select(start, start);
+    for (int i = 0; i < opening; ++i) {
+        sendKey(&view.window, u'`');
+        checkNeighbor();
+    }
+    const QString opened = view.text();
+    view.key(Qt::Key_End);
+    for (int i = 0; i < closing; ++i) {
+        sendKey(&view.window, u'`');
+        checkNeighbor();
+        if (i == 0 && neighborTicks == u"`ccc``"_s) QVERIFY(view.cell().endsWith(uR"(\`)"_s));
+    }
+    QCOMPARE(refused.count(), 0);
+    QCOMPARE(view.cell(), expected);
+    QCOMPARE(view.cursor(), int(view.text().indexOf(expected) + expected.size()));
+    const md::Document parsed = md::parse(view.text(), view.document->markdownOptions());
+    QCOMPARE(parsed.root.children.size(), 2u);
+    const md::Node &table = parsed.root.children.front();
+    QCOMPARE(table.type, md::NodeType::Table);
+    QCOMPARE(table.children.size(), 2u);
+    QCOMPARE(table.children.at(1).children.size(), 2u);
+    const md::Node &cell = table.children.at(1).children.front();
+    QStringList spans;
+    for (const md::Node &inlineNode : cell.children)
+        if (inlineNode.type == md::NodeType::Code) spans.append(inlineNode.text);
+    QCOMPARE(spans, code.isEmpty() ? QStringList() : QStringList{code});
+    compareSaved(view, view.text());
+    if (standard) {
+        // Standard requires the pipe to be escaped even within the span.
+        const QString closed = view.text();
+        const int at = int(closed.indexOf(u"aaa")) + 1;
+        view.select(at, at);
+        view.type(u"|"_s);
+        QCOMPARE(view.cell(), uR"(```a\|aa```)"_s);
+        QCOMPARE(view.cursor(), int(view.text().indexOf(uR"(a\|aa)"_s)) + 3);
+        checkNeighbor();
+        compareSaved(view, view.text());
+        view.binding->undo();
+        QCOMPARE(view.text(), closed);
+    }
+    view.binding->undo();
+    QCOMPARE(view.text(), opened);
+    checkNeighbor();
+    compareSaved(view, opened);
+}
+
+void writingBelowAGridKeepsTheNextParagraphSeparate_data()
+{
+    QTest::addColumn<QString>("separator");
+    QTest::addColumn<QString>("input");
+    QTest::addColumn<bool>("enter");
+    QTest::addColumn<bool>("crlf");
+    QTest::addColumn<bool>("tail");
+    QTest::newRow("enter-from-empty-row") << u"\n\n"_s << u"Below"_s << true << false << true;
+    QTest::newRow("directly-on-the-blank-line") << u"\n\n"_s << u"Below"_s << false << false << true;
+    QTest::newRow("extra-blank") << u"\n\n\n"_s << u"Below"_s << false << false << true;
+    QTest::newRow("whitespace-crlf") << u"\n \t\n"_s << u"Below"_s << false << true << true;
+    QTest::newRow("paste-with-a-final-break") << u"\n\n"_s << u"Below\n"_s << false << false << true;
+    QTest::newRow("eof") << QString() << u"Below"_s << false << false << false;
+}
+
+void writingBelowAGridKeepsTheNextParagraphSeparate()
+{
+    QFETCH(QString, separator);
+    QFETCH(QString, input);
+    QFETCH(bool, enter);
+    QFETCH(bool, crlf);
+    QFETCH(bool, tail);
+    const QString table = u"| A   | B   |\n| --- | --- |\n| one | two |"_s;
+    const QString emptyRow = u"\n|     |     |"_s;
+    QString text = table + (enter ? emptyRow : QString()) + separator + (tail ? u"After text."_s : QString());
+    if (crlf) text.replace(u"\n"_s, u"\r\n"_s);
+    GridEditor view(text);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const QString newline = view.document->newline();
+    const int blank = view.grid()->end() + (separator.isEmpty() ? 0 : int(newline.size()));
+    if (enter) {
+        const int start = view.grid()->cellAt({2, 0}).start;
+        view.select(start, start);
+        view.key(Qt::Key_Return);
+        QCOMPARE(view.grid()->rowCount(), 2);
+    } else if (tail) {
+        view.select(blank, blank);
+    } else {
+        const int start = int(text.indexOf(u"two"));
+        view.select(start, start);
+        view.key(Qt::Key_Down);
+    }
+    const QString before = view.text();
+    if (input.endsWith(u'\n')) pasteText(view, input);
+    else view.type(input);
+    QString expected = table + u"\n\n"_s + input;
+    if (tail) {
+        if (!input.endsWith(u'\n') && separator != u"\n\n\n"_s) expected += u'\n';
+        expected += separator.mid(1);
+        expected += u"After text."_s;
+    }
+    if (crlf) expected.replace(u"\n"_s, u"\r\n"_s);
+    QCOMPARE(view.text(), expected);
+    QCOMPARE(view.cursor(), int(expected.indexOf(u"Below") + input.size()));
+    const md::Document parsed = md::parse(view.text(), view.document->markdownOptions());
+    QCOMPARE(parsed.root.children.size(), tail ? 3 : 2);
+    QCOMPARE(parsed.root.children[0].type, md::NodeType::Table);
+    QCOMPARE(parsed.root.children[1].type, md::NodeType::Paragraph);
+    if (tail) QCOMPARE(parsed.root.children[2].type, md::NodeType::Paragraph);
+    compareSaved(view, expected);
+    view.binding->undo();
+    QCOMPARE(view.text(), before);
+    compareSaved(view, before);
+    if (enter) {
+        view.binding->undo();
+        QCOMPARE(view.text(), text);
+        QVERIFY(view.grids(1));
+        QCOMPARE(view.grid()->rowCount(), 3);
+        compareSaved(view, text);
+    }
 }
 
 void slowPastesLeaveTablesShownAsMarkdownAsWritten()

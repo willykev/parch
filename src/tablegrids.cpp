@@ -30,6 +30,7 @@
 #include <QTextDocument>
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 namespace {
 
@@ -911,6 +912,7 @@ void TableGrids::clear()
     disconnect(m_parseConnection);
     m_waiting.clear();
     m_markdown.clear();
+    m_tickEscapes = {};
     // The view lets go of the grids before they go.
     const QList<TableGrid *> gone = std::exchange(m_grids, {});
     m_caretGrid = nullptr;
@@ -1095,6 +1097,8 @@ void TableGrids::sourceChanged(SourceRange range, int inserted)
 {
     const int delta = inserted - range.length;
     const int oldEnd = range.start + range.length;
+    if (m_tickEscapes.grid && range.start <= m_tickEscapes.grid->end() && oldEnd >= m_tickEscapes.grid->start())
+        m_tickEscapes = {};
     for (auto &[start, end] : m_waiting) {
         if (oldEnd < start) {
             start += delta;
@@ -1243,12 +1247,15 @@ void TableGrids::cursorMoved()
         // into it or from a cell out of it, takes the whole table; one from
         // above that stops where the table starts, as whole lines selected
         // above it do, stays above it.
-        TableGrid *from = gridAt(anchor);
         const bool forward = anchor < cursor;
-        if (from != grid) {
-            int a = anchor, c = cursor;
-            if (from) a = forward ? from->start() : from->end();
-            if (grid && !(forward && cursor == grid->start())) c = forward ? grid->end() : grid->start();
+        const int low = qMin(anchor, cursor), high = qMax(anchor, cursor);
+        const TableGrid *first = forward ? gridAt(anchor) : grid;
+        const TableGrid *last = forward ? grid : gridAt(anchor);
+        if (last && high == last->start()) last = nullptr;
+        if (first != last) {
+            const int start = first ? first->start() : low;
+            const int end = last ? last->end() : high;
+            const int a = forward ? start : end, c = forward ? end : start;
             if (a != anchor || c != cursor) {
                 m_settling = true;
                 select(a, c);
@@ -1778,9 +1785,19 @@ std::optional<TableGrids::Adapted> TableGrids::adaptOne(const SourceEdit &edit) 
                         return QString();
                     }, at, 0);
                 }
+                // The old blank line's break can end the new paragraph.
+                // Keep a blank line after it as well when prose follows.
+                int next = end + breakAfter(source, end);
+                while (next < source.size() && (source[next] == u' ' || source[next] == u'\t')) ++next;
+                int typedEnd = int(edit.replacement.size());
+                while (typedEnd > 0 && (edit.replacement[typedEnd - 1] == u' ' || edit.replacement[typedEnd - 1] == u'\t'))
+                    --typedEnd;
+                QString inserted = newline + edit.replacement;
+                if (next < source.size() && !isBreak(source[next]) && breakBefore(edit.replacement, typedEnd) == 0)
+                    inserted += newline;
                 Adapted below;
                 below.kind = Adapted::Changed;
-                below.edits.append({{from, 0}, newline + edit.replacement});
+                below.edits.append({{from, 0}, inserted});
                 below.anchor = below.cursor = from + int(newline.size() + edit.replacement.size());
                 return below;
             }
@@ -1870,12 +1887,17 @@ bool asciiPunct(QChar c)
     return (u >= 0x21 && u <= 0x2f) || (u >= 0x3a && u <= 0x40) || (u >= 0x5b && u <= 0x60) || (u >= 0x7b && u <= 0x7e);
 }
 
-// The backtick runs of a cell's text that no run as long closes after them
-// in it, read as the table's reader finds code spans: where each starts,
-// and how long it is.
-QList<std::pair<int, int>> openTicks(QStringView text)
+struct TickRun {
+    int start;
+    int length;
+    int close;
+};
+
+// Read runs as code spans are read: an escape can hide an opener, and a
+// run of the same length closes it. A close of -1 marks an unmatched run.
+QList<TickRun> tickRuns(QStringView text)
 {
-    QList<std::pair<int, int>> open;
+    QList<TickRun> runs;
     const int size = int(text.size());
     for (int i = 0; i < size;) {
         if (text[i] == u'\\' && i + 1 < size && asciiPunct(text[i + 1])) {
@@ -1897,56 +1919,259 @@ QList<std::pair<int, int>> openTicks(QStringView text)
             int end = k;
             while (end < size && text[end] == u'`') ++end;
             if (end - k == run - i) {
-                close = end;
+                close = k;
                 break;
             }
             k = end;
         }
-        if (close < 0) {
-            open.append({i, run - i});
-            i = run;
-        } else {
-            i = close;
-        }
+        const int length = run - i;
+        runs.append({i, length, close});
+        i = close < 0 ? run : close + length;
     }
-    return open;
+    return runs;
 }
 
-// A cell's text with a backslash before each backtick that nothing closes in
-// it, so that none pairs with a backtick of another cell; `changes` gets
-// where each went in, as +1 at a position of the text as it was.
-QString escapeOpenTicks(const QString &text, QList<std::pair<int, int>> *changes)
+struct GridCellEdit {
+    TableGrid *grid;
+    TableGrid::Place place;
+    SourceEdit edit;
+};
+
+struct CellRewrite {
+    TableGrid::Place place;
+    QString original;
+    QString payload;
+    QString text;
+    struct BreakRun {
+        int rawStart;
+        int rawEnd;
+        int at;
+    };
+    struct Write {
+        SourceRange before;
+        SourceRange after;
+    };
+    QList<BreakRun> breaks;
+    QList<Write> writes;
+    int rawLength = 0;
+    int lead = 0;
+    QList<int> tracked; // Existing tick escapes, carried along with the cell's text
+    QList<int> freed;   // Removed from the payload
+    QList<int> pipes;   // Escaped after freeing ticks
+    QList<int> added;   // New tick escapes after encoding pipes
+
+    void encode(const MdTable::Dialect &dialect, bool closeTicks);
+    void protectOpenTicks();
+    bool restoresEscape() const;
+    int offsetOf(int raw) const;
+    QList<int> protectedSlashes() const;
+};
+
+int countBefore(const QList<int> &positions, int offset)
 {
-    QString out = text;
-    const QList<std::pair<int, int>> open = openTicks(text);
-    for (auto run = open.crbegin(); run != open.crend(); ++run)
-        for (int k = run->second; k-- > 0;) out.insert(run->first + k, u'\\');
-    for (const auto &[start, length] : open)
-        for (int k = 0; k < length; ++k) changes->append({start + k, 1});
-    return out;
+    return int(std::lower_bound(positions.cbegin(), positions.cend(), offset) - positions.cbegin());
 }
 
-// A cell's text with the backslash taken from an escaped backtick that a
-// backtick written after it, nothing closing that one, would close: the
-// two make code in the cell. `changes` gets where each went, as -1.
-QString freeClosedTicks(const QString &text, QList<std::pair<int, int>> *changes)
+QList<int> closedTickEscapes(QStringView text, const QList<int> &tracked, const QList<CellRewrite::Write> &writes)
 {
+    if (tracked.isEmpty()) return {};
+    // Look for matching delimiters with the editor's escapes out of the
+    // way. Keep the escapes on every run outside the pair being edited.
+    QString bare;
+    QList<int> bareOffsets;
+    int from = 0;
+    for (int slash : tracked) {
+        bare += text.mid(from, slash - from);
+        bareOffsets.append(int(bare.size()));
+        from = slash + 1;
+    }
+    bare += text.mid(from);
     QList<int> freed;
-    for (const auto &[start, length] : openTicks(text)) {
-        if (length != 1) continue;
-        // The backtick nearest before it: escaped, by an odd run of backslashes.
-        int tick = start - 1;
-        while (tick >= 0 && text[tick] != u'`') --tick;
-        if (tick < 1) continue;
-        int slashes = 0;
-        while (tick - 1 - slashes >= 0 && text[tick - 1 - slashes] == u'\\') ++slashes;
-        if (slashes % 2 == 1 && !freed.contains(tick - 1)) freed.append(tick - 1);
+    for (const auto &[start, length, close] : tickRuns(bare)) {
+        if (close < 0) continue;
+        const int first = countBefore(bareOffsets, start), last = countBefore(bareOffsets, start + length);
+        const int closing = countBefore(bareOffsets, close), end = countBefore(bareOffsets, close + length);
+        if (last == first && end == closing) continue;
+        const auto touched = [&](int begin, int limit) {
+            return std::any_of(writes.cbegin(), writes.cend(), [&](const CellRewrite::Write &edit) {
+                const int at = edit.after.start;
+                if (edit.after.length == 0) return edit.before.length > 0 && at >= begin && at <= limit;
+                return at < limit && at + edit.after.length > begin;
+            });
+        };
+        if (!touched(start + first, start + length + last) && !touched(close + closing, close + length + end))
+            continue;
+        for (int i = first; i < last; ++i) freed.append(tracked[i]);
+        for (int i = closing; i < end; ++i) freed.append(tracked[i]);
     }
-    std::sort(freed.begin(), freed.end());
-    QString out = text;
-    for (auto at = freed.crbegin(); at != freed.crend(); ++at) out.remove(*at, 1);
-    for (int at : std::as_const(freed)) changes->append({at, -1});
+    return freed;
+}
+
+void CellRewrite::encode(const MdTable::Dialect &dialect, bool closeTicks)
+{
+    freed = closeTicks && dialect.protectCode ? closedTickEscapes(payload, tracked, writes) : QList<int>();
+    pipes.clear();
+    added.clear();
+    text = payload;
+    for (auto slash = freed.crbegin(); slash != freed.crend(); ++slash) text.remove(*slash, 1);
+    QList<MdTable::Field> fields;
+    MdTable::splitRow(text, 0, int(text.size()), dialect.protectCode, fields, &pipes);
+    for (auto pipe = pipes.crbegin(); pipe != pipes.crend(); ++pipe) text.insert(*pipe, u'\\');
+    while (!text.isEmpty() && (text.back() == u' ' || text.back() == u'\t')) text.chop(1);
+}
+
+void CellRewrite::protectOpenTicks()
+{
+    for (const auto &[start, length, close] : tickRuns(text))
+        if (close < 0)
+            for (int i = 0; i < length; ++i) added.append(start + i);
+    for (auto at = added.crbegin(); at != added.crend(); ++at) text.insert(*at, u'\\');
+}
+
+bool CellRewrite::restoresEscape() const
+{
+    if (added.isEmpty()) return false;
+    for (const Write &write : writes) {
+        const QStringView removed = QStringView(original).mid(write.before.start, write.before.length);
+        if (!removed.contains(u'\\')) continue;
+        // At the end of a replacement, a slash inserted before the next
+        // tick can restore a deletion, even if other matches change the cell.
+        const int from = qMax(0, write.after.start);
+        const int to = qMax(0, write.after.start + write.after.length);
+        const int first = from + countBefore(pipes, from), last = to + countBefore(pipes, to);
+        const int earlier = countBefore(added, first), inside = countBefore(added, last);
+        const int throughEnd = int(std::upper_bound(added.cbegin(), added.cend(), last) - added.cbegin());
+        if (earlier == throughEnd) continue;
+        const int start = first + earlier;
+        if (QStringView(text).mid(start, last + throughEnd - start) == removed
+            || (inside > earlier && QStringView(text).mid(start, last + inside - start) == removed))
+            return true;
+    }
+    return false;
+}
+
+int CellRewrite::offsetOf(int raw) const
+{
+    int shift = 0;
+    for (const BreakRun &run : breaks) {
+        if (raw >= run.rawEnd) shift += run.rawEnd - run.rawStart - 1;
+        else if (raw > run.rawStart) {
+            raw = run.at + 1 + shift;
+            break;
+        } else break;
+    }
+    int offset = qMax(0, raw - shift - lead);
+    offset -= countBefore(freed, offset);
+    offset += countBefore(pipes, offset);
+    return offset + countBefore(added, offset);
+}
+
+QList<int> CellRewrite::protectedSlashes() const
+{
+    QList<int> slashes;
+    for (int at : tracked) {
+        if (std::binary_search(freed.cbegin(), freed.cend(), at)) continue;
+        at -= countBefore(freed, at);
+        at += countBefore(pipes, at);
+        slashes.append(at + countBefore(added, at));
+    }
+    for (qsizetype i = 0; i < added.size(); ++i) slashes.append(added[i] + int(i));
+    std::sort(slashes.begin(), slashes.end());
+    return slashes;
+}
+
+CellRewrite rewriteCell(QStringView source, std::span<const GridCellEdit> edits,
+                        const TableGrids::TickEscapes &escapes)
+{
+    const GridCellEdit &first = edits.front();
+    const MdTable::Cell &cell = first.grid->cellAt(first.place);
+    const int tail = tailOf(source, cell);
+    CellRewrite out;
+    out.place = first.place;
+    out.original = source.mid(cell.start, cell.end - cell.start).toString();
+    const QList<int> remembered = first.grid == escapes.grid && first.place == escapes.place ? escapes.slashes : QList<int>();
+    // Work from the original offsets even when only some matches are tried.
+    int maxEnd = cell.end;
+    for (const GridCellEdit &in : edits) maxEnd = qMax(maxEnd, in.edit.range.start + in.edit.range.length);
+    const QStringView base = source.mid(cell.start, qMin(maxEnd, cell.end + tail) - cell.start);
+    QString &payload = out.payload;
+    qsizetype rememberedAt = 0;
+    int raw = 0, from = 0;
+    const auto copy = [&](int to) {
+        while (rememberedAt < remembered.size() && remembered[rememberedAt] < to) {
+            const int slash = remembered[rememberedAt++];
+            if (slash >= from && slash + 1 < to && base[slash] == u'\\' && base[slash + 1] == u'`')
+                out.tracked.append(int(payload.size()) + slash - from);
+        }
+        payload += base.mid(from, to - from);
+        raw += to - from;
+        from = to;
+    };
+    // A run of line breaks put in a cell becomes one space.
+    static const QRegularExpression breaks(QStringLiteral("[ \\t]*[\\r\\n\\x{2028}\\x{2029}]+[ \\t]*"));
+    for (const GridCellEdit &in : edits) {
+        const SourceEdit &edit = in.edit;
+        const int start = qBound(cell.start, edit.range.start, cell.end + tail) - cell.start;
+        const int end = qBound(cell.start, edit.range.start + edit.range.length, cell.end + tail) - cell.start;
+        copy(qMax(start, from));
+        const int at = int(payload.size());
+        const QString replacement = QString(edit.replacement).replace(u'\t', u' ');
+        int done = 0;
+        for (auto found = breaks.globalMatch(replacement); found.hasNext();) {
+            const QRegularExpressionMatch run = found.next();
+            payload += QStringView(replacement).mid(done, run.capturedStart() - done);
+            raw += int(run.capturedStart()) - done;
+            out.breaks.append({raw, raw + int(run.capturedLength()), int(payload.size())});
+            payload += u' ';
+            raw += int(run.capturedLength());
+            done = int(run.capturedEnd());
+        }
+        payload += QStringView(replacement).mid(done);
+        raw += int(replacement.size()) - done;
+        out.writes.append(CellRewrite::Write{{start, end - start}, {at, int(payload.size()) - at}});
+        from = qMax(from, end);
+    }
+    copy(int(base.size()));
+    out.rawLength = raw;
+    while (out.lead < payload.size() && (payload[out.lead] == u' ' || payload[out.lead] == u'\t')) ++out.lead;
+    // A slash before a tick is still protective only if a newer edit
+    // has left it unescaped.
+    out.tracked.removeIf([&](int slash) {
+        int at = slash;
+        while (at > 0 && payload[at - 1] == u'\\') --at;
+        return (slash - at) % 2 != 0;
+    });
+    for (int &slash : out.tracked) slash -= out.lead;
+    for (CellRewrite::Write &write : out.writes) write.after.start -= out.lead;
+    payload.remove(0, out.lead);
     return out;
+}
+
+bool fitRow(QList<MdTable::Item> &row, std::span<CellRewrite> cells, int columns, const MdTable::Dialect &dialect)
+{
+    const QList<MdTable::Item> before = row;
+    const auto readsBack = [&] {
+        for (const CellRewrite &cell : cells) row[cell.place.cell].text = cell.text;
+        return MdTable::readsBack(row, columns, dialect);
+    };
+    bool freed = false;
+    for (CellRewrite &cell : cells) {
+        cell.encode(dialect, true);
+        freed |= !cell.freed.isEmpty();
+    }
+    if (readsBack()) return true;
+    if (freed) {
+        for (CellRewrite &cell : cells) cell.encode(dialect, false);
+        if (readsBack()) return true;
+    }
+    if (dialect.protectCode) {
+        for (CellRewrite &cell : cells) cell.protectOpenTicks();
+        if (std::none_of(cells.begin(), cells.end(), [](const CellRewrite &cell) { return cell.restoresEscape(); })
+            && readsBack())
+            return true;
+    }
+    row = before;
+    return false;
 }
 
 } // namespace
@@ -1977,22 +2202,16 @@ TableGrids::Adapted TableGrids::adapt(const QList<SourceEdit> &edits, int anchor
         dropped += count;
         return left != nullptr;
     };
-    // Each edit's grid and cell, or none.
-    struct InCell {
-        const TableGrid *grid;
-        TableGrid::Place place;
-        SourceEdit edit;
-    };
     QList<SourceEdit> passing;
-    QList<InCell> inCells;
+    QList<GridCellEdit> inCells;
     const QString source = text();
     for (const SourceEdit &edit : edits) {
         const int from = edit.range.start, to = edit.range.start + edit.range.length;
         // The grid the edit reaches into, without taking it whole; one that
         // reaches into two cuts through one of them.
-        const TableGrid *grid = nullptr;
+        TableGrid *grid = nullptr;
         bool two = false;
-        for (const TableGrid *g : m_grids) {
+        for (TableGrid *g : m_grids) {
             if (to < g->start() || from > g->end() || (from <= g->start() && to >= g->end())) continue;
             if (endsBefore(source, from, to, edit.replacement, g->start())) continue;
             if (grid) two = true;
@@ -2047,233 +2266,116 @@ TableGrids::Adapted TableGrids::adapt(const QList<SourceEdit> &edits, int anchor
     out.kind = Adapted::Changed;
     out.anchor = anchor;
     out.cursor = cursor;
-    // Where the selection was in the text the edits would have made, and
-    // where it is in the one they make, are worked out table by table: a
-    // position is moved by the edits before it, those of the table it is
-    // in left out, which the table's own writing replaces.
-    const auto naiveShift = [&](int position, const TableGrid *within) {
-        int shift = 0;
+    // Keep each table, row and cell together, with its original edit order.
+    std::stable_sort(inCells.begin(), inCells.end(), [](const GridCellEdit &a, const GridCellEdit &b) {
+        return std::tuple{a.grid->start(), a.place.row, a.place.cell, a.edit.range.start}
+               < std::tuple{b.grid->start(), b.place.row, b.place.cell, b.edit.range.start};
+    });
+    std::span<const GridCellEdit> remaining(inCells.constData(), size_t(inCells.size()));
+    QList<SourceEdit> written = std::move(passing);
+    const TickEscapes remembered = left ? TickEscapes{} : m_tickEscapes;
+    for (size_t first = 0; first < remaining.size();) {
+        TableGrid *grid = remaining[first].grid;
+        size_t next = first + 1;
+        while (next < remaining.size() && remaining[next].grid == grid) ++next;
+        const auto mine = remaining.subspan(first, next - first);
+        first = next;
+        MdTable::Model model = MdTable::model(source, grid->table());
+        const int columns = MdTable::columnCount(model);
+        QList<CellRewrite> mappings;
+        bool accepted = false;
+        for (size_t i = 0; i < mine.size();) {
+            const int row = mine[i].place.row;
+            QList<std::span<const GridCellEdit>> groups;
+            QList<CellRewrite> cells;
+            while (i < mine.size() && mine[i].place.row == row) {
+                size_t end = i + 1;
+                while (end < mine.size() && mine[end].place == mine[i].place) ++end;
+                auto group = mine.subspan(i, end - i);
+                groups.append(group);
+                cells.append(rewriteCell(source, group, remembered));
+                i = end;
+            }
+            auto &items = model.rows[row];
+            if (fitRow(items, {cells.data(), size_t(cells.size())}, columns, dialect)) {
+                accepted = true;
+                if (!left) mappings += std::move(cells);
+                continue;
+            }
+            if (!left) return refuse(joinsCells());
+            // Try the row together first, since the edits can make one
+            // another safe. If that fails, keep what fits in source order.
+            for (qsizetype g = 0; g < groups.size(); ++g) {
+                const auto group = groups[g];
+                if (groups.size() > 1 && fitRow(items, {&cells[g], 1}, columns, dialect)) {
+                    accepted = true;
+                    continue;
+                }
+                if (group.size() == 1) {
+                    drop(joinsCells(), 1);
+                    continue;
+                }
+                QList<GridCellEdit> kept;
+                for (const GridCellEdit &match : group) {
+                    kept.append(match);
+                    CellRewrite trial = rewriteCell(source, {kept.constData(), size_t(kept.size())}, remembered);
+                    if (fitRow(items, {&trial, 1}, columns, dialect)) {
+                        accepted = true;
+                    } else {
+                        kept.removeLast();
+                        drop(joinsCells(), 1);
+                    }
+                }
+            }
+        }
+        if (!accepted) continue;
+        const MdTable::Layout layout = MdTable::write(model);
+        const int tableLength = grid->end() - grid->start();
+        const QStringView before = QStringView(source).mid(grid->start(), tableLength);
+        if (before != layout.text) written.append(coveringEdit(grid->start(), before, layout.text));
+        if (left) continue; // Replace All leaves the view's selection to the source edits.
+
+        // Map the ordinary edit's selection from the text it would have made
+        // to the retidied table. Keep any offset added by an earlier table.
+        int naiveStart = grid->start();
         for (const SourceEdit &edit : edits) {
             const int end = edit.range.start + edit.range.length;
-            if (end > position) continue;
-            if (within && end >= within->start() && edit.range.start <= within->end()) continue;
-            shift += int(edit.replacement.size()) - edit.range.length;
+            if (end < grid->start() || endsBefore(source, edit.range.start, end, edit.replacement, grid->start()))
+                naiveStart += int(edit.replacement.size()) - edit.range.length;
         }
-        return shift;
-    };
-    QList<SourceEdit> written = passing;
-    QList<const TableGrid *> grids;
-    for (const InCell &in : std::as_const(inCells))
-        if (!grids.contains(in.grid)) grids.append(in.grid);
-    // Line breaks put in a cell are spaces, a run of them one space.
-    static const QRegularExpression breaks(QStringLiteral("[ \\t]*[\\r\\n\\x{2028}\\x{2029}]+[ \\t]*"));
-    // Positions in the selection are placed once, in the first table that holds them.
-    bool anchorPlaced = false, cursorPlaced = false;
-    int placedAnchor = anchor, placedCursor = cursor;
-    for (const TableGrid *grid : std::as_const(grids)) {
-        MdTable::Model model = MdTable::model(source, grid->table());
-        // A run of line breaks in the text the edits would make, written as one space.
-        struct Run {
-            int rawStart = 0;
-            int rawEnd = 0;
-            int at = 0;
-        };
-        struct Cell {
-            TableGrid::Place place;
-            int naiveStart = 0;
-            int naiveLength = 0; // in the text the edits would make
-            QList<Run> runs;
-            int lead = 0;
-            QList<int> escapes; // offsets in the written text where a backslash was added before a pipe
-            // Then where a backslash went in (+1) or out (-1) beside a backtick.
-            QList<std::pair<int, int>> ticks;
-            QString original;
-            QString text;
-            // Where a position in the text the edits would make is in the written text.
-            int offsetOf(int naive) const
-            {
-                int raw = naive - naiveStart, shift = 0;
-                for (const Run &run : runs) {
-                    if (raw >= run.rawEnd) shift += run.rawEnd - run.rawStart - 1;
-                    else if (raw > run.rawStart) return adjusted(run.at + 1 - lead);
-                    else break;
-                }
-                return adjusted(raw - shift - lead);
+        int length = tableLength;
+        for (const GridCellEdit &in : mine) length += int(in.edit.replacement.size()) - in.edit.range.length;
+        const auto mapPosition = [&](int naive, int &position) {
+            if (naive < naiveStart) return;
+            if (naive > naiveStart + length) {
+                position += int(layout.text.size()) - length;
+                return;
             }
-            int adjusted(int offset) const
-            {
-                offset = qMax(0, offset);
-                int escaped = 0;
-                for (int escape : escapes) escaped += escape < offset;
-                offset += escaped;
-                int moved = 0;
-                for (const auto &[at, delta] : ticks) moved += at < offset ? delta : 0;
-                return offset + moved;
+            int shift = naiveStart - grid->start();
+            size_t counted = 0;
+            for (const CellRewrite &cell : std::as_const(mappings)) {
+                const MdTable::Cell &original = grid->cellAt(cell.place);
+                while (counted < mine.size()
+                       && mine[counted].edit.range.start + mine[counted].edit.range.length < original.rawStart) {
+                    const SourceEdit &edit = mine[counted++].edit;
+                    shift += int(edit.replacement.size()) - edit.range.length;
+                }
+                const int raw = naive - original.start - shift;
+                if (raw < 0 || raw > cell.rawLength) continue;
+                const MdTable::Placed &at = layout.cells[cell.place.row][cell.place.cell];
+                position += naiveStart + at.start + qMin(cell.offsetOf(raw), at.length + at.tail) - naive;
+                return;
             }
         };
-        QList<Cell> cells;
-        // This table's edits in order, each cell's side by side, so that
-        // thousands of them, as Replace All makes, are gone through once.
-        QList<const InCell *> mine;
-        for (const InCell &in : std::as_const(inCells))
-            if (in.grid == grid) mine.append(&in);
-        std::stable_sort(mine.begin(), mine.end(), [](const InCell *a, const InCell *b) {
-            return a->edit.range.start < b->edit.range.start;
-        });
-        const int gridShift = naiveShift(grid->start(), grid);
-        // The table's own edits before a cell, in the text they would make.
-        int ownBefore = 0;
-        qsizetype counted = 0;
-        for (qsizetype i = 0; i < mine.size();) {
-            const TableGrid::Place cellPlace = mine[i]->place;
-            qsizetype next = i;
-            while (next < mine.size() && mine[next]->place == cellPlace) ++next;
-            const MdTable::Cell &cell = grid->cellAt(cellPlace);
-            const int tail = tailOf(source, cell);
-            while (counted < mine.size()
-                   && mine[counted]->edit.range.start + mine[counted]->edit.range.length < cell.rawStart) {
-                ownBefore += int(mine[counted]->edit.replacement.size()) - mine[counted]->edit.range.length;
-                ++counted;
-            }
-            // The cell's text with every edit of it, each clamped to the
-            // text and the spaces after it; its line breaks spaces, and its
-            // tabs, where each run of breaks was in the text the edits would make.
-            Cell c;
-            c.original = source.mid(cell.start, cell.end - cell.start);
-            QString base = c.original;
-            QList<SourceEdit> own;
-            int maxEnd = 0;
-            for (qsizetype k = i; k < next; ++k) {
-                const SourceEdit &other = mine[k]->edit;
-                const int a = qBound(cell.start, other.range.start, cell.end + tail) - cell.start;
-                const int b = qBound(cell.start, other.range.start + other.range.length, cell.end + tail) - cell.start;
-                own.append({{a, b - a}, other.replacement});
-                maxEnd = qMax(maxEnd, b);
-            }
-            i = next;
-            if (maxEnd > base.size()) base += QString(maxEnd - base.size(), u' ');
-            QString payload;
-            int raw = 0, from = 0;
-            for (const SourceEdit &e : std::as_const(own)) {
-                const int at = qMax(e.range.start, from);
-                payload += QStringView(base).mid(from, at - from);
-                raw += at - from;
-                const QString replacement = QString(e.replacement).replace(u'\t', u' ');
-                int done = 0;
-                for (auto found = breaks.globalMatch(replacement); found.hasNext();) {
-                    const QRegularExpressionMatch run = found.next();
-                    payload += QStringView(replacement).mid(done, run.capturedStart() - done);
-                    raw += int(run.capturedStart()) - done;
-                    c.runs.append({raw, raw + int(run.capturedLength()), int(payload.size())});
-                    payload += u' ';
-                    raw += int(run.capturedLength());
-                    done = int(run.capturedEnd());
-                }
-                payload += QStringView(replacement).mid(done);
-                raw += int(replacement.size()) - done;
-                from = qMax(from, e.range.start + e.range.length);
-            }
-            payload += QStringView(base).mid(from);
-            raw += int(base.size()) - from;
-            c.place = cellPlace;
-            c.naiveStart = cell.start + gridShift + ownBefore;
-            c.naiveLength = raw;
-            // Spaces before the text are no part of the cell, and a pipe
-            // that would end it is written escaped.
-            while (c.lead < payload.size() && (payload[c.lead] == u' ' || payload[c.lead] == u'\t')) ++c.lead;
-            QString encoded = payload.mid(c.lead);
-            QList<MdTable::Field> fields;
-            QList<int> pipes;
-            MdTable::splitRow(encoded, 0, int(encoded.size()), dialect.protectCode, fields, &pipes);
-            for (auto pipe = pipes.crbegin(); pipe != pipes.crend(); ++pipe) encoded.insert(*pipe, u'\\');
-            c.escapes = pipes;
-            c.text = encoded;
-            while (!c.text.isEmpty() && (c.text.back() == u' ' || c.text.back() == u'\t')) c.text.chop(1);
-            model.rows[cellPlace.row][cellPlace.cell].text = c.text;
-            cells.append(c);
+        mapPosition(anchor, out.anchor);
+        mapPosition(cursor, out.cursor);
+        if (edits.size() == 1 && mappings.size() == 1) {
+            const CellRewrite &cell = mappings.constFirst();
+            out.tickEscapes = {grid, cell.place, cell.protectedSlashes()};
         }
-        MdTable::Layout layout = MdTable::write(model);
-        // Each changed row reads back as the cells it was given. Where code
-        // started with a backtick would end in another cell, the backtick is
-        // written escaped, `\``; an escaped one that a backtick written after
-        // it closes is freed, the two then code in their cell.
-        const int columns = MdTable::columnCount(model);
-        bool fits = true;
-        for (qsizetype first = 0; fits && first < cells.size();) {
-            const int row = cells[first].place.row;
-            qsizetype end = first;
-            while (end < cells.size() && cells[end].place.row == row) ++end;
-            if (!MdTable::readsBack(layout, model, row, dialect, columns)) {
-                const auto attempt = [&](QString (*fix)(const QString &, QList<std::pair<int, int>> *)) {
-                    bool changed = false, same = true;
-                    for (qsizetype k = first; k < end; ++k) {
-                        Cell &c = cells[k];
-                        c.ticks.clear();
-                        const QString fixed = fix(c.text, &c.ticks);
-                        changed = changed || fixed != c.text;
-                        same = same && fixed == c.original;
-                        model.rows[row][c.place.cell].text = fixed;
-                    }
-                    // A fix that only takes the edit back is none.
-                    if (changed && !same) {
-                        layout = MdTable::write(model);
-                        if (MdTable::readsBack(layout, model, row, dialect, columns)) return true;
-                    }
-                    for (qsizetype k = first; k < end; ++k) {
-                        cells[k].ticks.clear();
-                        model.rows[row][cells[k].place.cell].text = cells[k].text;
-                    }
-                    return false;
-                };
-                if (attempt(&freeClosedTicks) || attempt(&escapeOpenTicks)) {
-                    for (qsizetype k = first; k < end; ++k) cells[k].text = model.rows[row][cells[k].place.cell].text;
-                } else {
-                    fits = false;
-                }
-            }
-            first = end;
-        }
-        if (!fits) {
-            if (!drop(joinsCells(), int(mine.size()))) return refuse(reason);
-            continue;
-        }
-        const int naiveTableStart = grid->start() + gridShift;
-        // A position in a changed cell goes to the same place in its text,
-        // which may run into the spaces after it, as a typed space does.
-        const auto place = [&](int naive, bool *placed) {
-            for (const Cell &c : std::as_const(cells)) {
-                if (naive < c.naiveStart || naive > c.naiveStart + c.naiveLength) continue;
-                const int offset = c.offsetOf(naive);
-                const MdTable::Placed &at = layout.cells[c.place.row][c.place.cell];
-                *placed = true;
-                return naiveTableStart + at.start + qMin(offset, at.length + at.tail);
-            }
-            return naive;
-        };
-        int ownShift = 0;
-        for (const InCell &in : std::as_const(inCells))
-            if (in.grid == grid) ownShift += int(in.edit.replacement.size()) - in.edit.range.length;
-        const int naiveTableEnd = naiveTableStart + (grid->end() - grid->start()) + ownShift;
-        const int growth = int(layout.text.size()) - (naiveTableEnd - naiveTableStart);
-        if (!anchorPlaced) {
-            const int at = place(anchor, &anchorPlaced);
-            if (anchorPlaced) placedAnchor = at;
-            else if (anchor > naiveTableEnd) placedAnchor += growth;
-        } else if (anchor > naiveTableEnd) {
-            placedAnchor += growth;
-        }
-        if (!cursorPlaced) {
-            const int at = place(cursor, &cursorPlaced);
-            if (cursorPlaced) placedCursor = at;
-            else if (cursor > naiveTableEnd) placedCursor += growth;
-        } else if (cursor > naiveTableEnd) {
-            placedCursor += growth;
-        }
-        const QStringView before = QStringView(source).mid(grid->start(), grid->end() - grid->start());
-        if (before != layout.text) written.append(coveringEdit(grid->start(), before, layout.text));
     }
-    std::sort(written.begin(), written.end(),
-              [](const SourceEdit &a, const SourceEdit &b) { return a.range.start < b.range.start; });
+    std::stable_sort(written.begin(), written.end(),
+                     [](const SourceEdit &a, const SourceEdit &b) { return a.range.start < b.range.start; });
     for (qsizetype i = 1; i < written.size(); ++i)
         if (written[i].range.start < written[i - 1].range.start + written[i - 1].range.length)
             return refuse(tr("Select the whole table, or stay inside one cell."));
@@ -2285,8 +2387,6 @@ TableGrids::Adapted TableGrids::adapt(const QList<SourceEdit> &edits, int anchor
         return out;
     }
     out.edits = written;
-    out.anchor = placedAnchor;
-    out.cursor = placedCursor;
     return out;
 }
 

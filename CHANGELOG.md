@@ -13,6 +13,13 @@
   again with its pipes lined up, as one step to undo. **Table** (`Ctrl+T`)
   asks for the new table's size. **Show as Markdown** shows one table's pipes,
   and **Tables** in Preferences turns grids off.
+- Cutting prose up to the start of a table keeps the table intact, including
+  with a backwards Vim selection.
+- **Replace All** keeps the search and replacement it started with as you
+  type. It applies the changes each table can accept and reports the count
+  and any refusal.
+- Matching backtick runs make code inside a cell. Text typed below a table
+  starts its own paragraph.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

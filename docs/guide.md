@@ -243,15 +243,16 @@ cells counting the header's, so that the new table is one. With the caret in
 a table, the same keys and button open that table's menu instead. A table you
 type by hand, pipes and all, becomes a grid as soon as the caret leaves it.
 
-**Write in the cells.** Click a cell to put the caret where you clicked, and
-type; double-click to select a word, triple-click to select the cell's text. A
-cell's Markdown stays in view, styled as in the rest of the text, so
-`**bold**`, `[links](…)` and `code` work in cells as anywhere. A `|` you type
-is written `\|`, as Markdown needs it in a table, and a `` ` `` that would
-start code ending in another cell is written `` \` ``, until you type the one
-that closes it in the same cell. Spaces at the start or end of a cell are
-dropped, since Markdown ignores them. Typing in a cell is one step for
-`Ctrl+Z`, as in a paragraph, and the preview and saving follow as you type.
+**Write in the cells.** Click a cell to place the caret and type.
+Double-click to select a word and triple-click to select the cell's text.
+A cell's Markdown stays in view, styled as in the rest of the text, so
+`**bold**`, `[links](…)` and `code` work in cells as anywhere. A pipe that
+would split a cell is written `\|`. Matching backtick runs make inline code
+in a cell. If an opening run could join two cells, parch escapes it until
+you type a closing run of the same length in that cell. Spaces at the
+start or end of a cell are dropped, since Markdown ignores them. Typing in
+a cell is one step for `Ctrl+Z`, as in a paragraph, and the preview and
+saving follow as you type.
 
 **Move from cell to cell.**
 
@@ -275,8 +276,8 @@ other commands for whole lines are not made in a table, and the status line
 says so. `Ctrl+A` selects the cell's text, then every cell of the table, then
 the whole document; `Esc` lets go of a block. A selection that starts in a
 paragraph and reaches into a table takes the whole table, as does one that
-starts in a cell and goes on out of the table. One that ends where a table
-starts, as lines selected above it do, leaves the table out.
+starts in a cell and goes on out of the table. Selecting prose up to the
+start of a table keeps the selection in the prose in either direction.
 
 **Copy and paste.** A block of cells copies as cells, which paste into a
 spreadsheet as cells; **Cut** copies them and empties them. Cells copied from
@@ -325,9 +326,9 @@ Inserting a column inside a merged cell widens it and deleting a column it
 covers narrows it. A move or a paste that would cut one in two says so in the
 status line and changes nothing.
 
-**Around a table.** The line after a table stays blank: text you write on it
-goes on the line below, so that it never becomes a row of the table, and
-nothing pulls the text below up against it. `Backspace` on that blank line
+**Around a table.** Text you write on the blank line below a table starts
+its own paragraph. A blank line separates it from the table above and from
+any paragraph below. `Backspace` on the blank line next to the table
 selects the table, and pressed again deletes it, as **Delete table** does.
 For a table at the very start or end of the document, `Up` from its first
 row or `Down` from its last makes a line beside it to write on. A table
@@ -816,10 +817,12 @@ several documents at once (see [Command line](#command-line)).
   next match, `Shift+Enter` and `Shift+F3` to the one before, and the bar
   counts them ("3 of 12"). The bar's buttons match case, whole words, or a
   regular expression.
-- **Find and replace…** (`Ctrl+H`) adds a replace field: **Replace** changes
-  the current match and **All** every match, as one step for
-  `Ctrl+Z`. With regular expressions, `$1` in the replacement is the first
-  group.
+- **Find and replace…** (`Ctrl+H`) adds a replace field. **Replace** changes
+  the current match. **All** uses the Find settings and replacement in
+  effect when pressed and makes one step for `Ctrl+Z`. The bar shows how
+  many matches were replaced, and the status line says when a table
+  refused a change. With regular expressions, `$1` in the replacement is
+  the first group.
 - `Escape` closes the bar and gives the keys back to the text.
 - **Search the library…** (`Ctrl+Shift+F`) searches the text of every
   document in the library's folders and the drafts. Matches arrive as they

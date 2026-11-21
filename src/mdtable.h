@@ -171,6 +171,8 @@ Layout write(const Model &model);
 // in one cell and closed in the next, for one, would join them.
 // `columns` is the model's column count, worked out when it is not given.
 bool readsBack(const Layout &layout, const Model &model, int row, const Dialect &dialect = {}, int columns = -1);
+// Checks a staged row before laying out the whole table.
+bool readsBack(const QList<Item> &items, int columns, const Dialect &dialect);
 
 // ---- Changes to a table ------------------------------------------------------
 

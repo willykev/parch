@@ -262,6 +262,13 @@ public:
     // cell to another, as rows and columns of the model; false for none.
     bool block(const TableGrid *grid, int *firstRow, int *lastRow, int *firstColumn, int *lastColumn) const;
 
+    // Backslashes added by the editor to protect ticks in one cell.
+    struct TickEscapes {
+        QPointer<TableGrid> grid;
+        TableGrid::Place place;
+        QList<int> slashes;
+    };
+
     // What an edit of the view becomes: the same, when it touches no grid;
     // an edit of a cell, the table written tidy around it, with where the
     // caret goes; or nothing, refused, with the reason the view shows.
@@ -271,13 +278,14 @@ public:
         int anchor = 0;
         int cursor = 0;
         QString reason;
+        TickEscapes tickEscapes;
     };
     Adapted adapt(SourceRange range, const QString &text) const;
     // The same for several edits made at once, as a command or Replace All
     // makes them, against the text as it is, sorted and apart; and where
     // their selection goes, in the text after them. With `left`, those that
-    // cannot be made are left out, as Replace All leaves them, and counted
-    // there, the reason being the first one's; Refused only when none can be.
+    // cannot be made are left out and counted there, with the first reason.
+    // Replace All supplies no selection to map and gets Refused if none fit.
     Adapted adapt(const QList<SourceEdit> &edits, int anchor, int cursor, int *left = nullptr) const;
     // A change of a grid's table through its model, as the row and column
     // commands make one: the table written tidy, as one edit, and the
@@ -404,6 +412,7 @@ signals:
 
 private:
     friend class TableGrid;
+    friend class EditorBinding;
     void parsed();
     // Grids for these tables, read from the text; others are shown as Markdown again.
     void adopt(const QList<MdTable::Table> &tables);
@@ -453,6 +462,7 @@ private:
     bool m_enabled = false;
     QList<TableGrid *> m_grids;
     TableGrid *m_caretGrid = nullptr;
+    TickEscapes m_tickEscapes;
     // Tables the parse found that hold the caret: shown as Markdown until
     // the caret leaves them, so that one being typed is not drawn under it.
     QList<std::pair<int, int>> m_waiting;

@@ -374,6 +374,7 @@ void EditorBinding::detach()
     // being destroyed: whatever has gone reads as null here and is left alone.
     cancelComposition();
     m_tables->clear();
+    m_tableRunCaret = -1;
     for (const QMetaObject::Connection &connection : std::as_const(m_connections)) disconnect(connection);
     m_connections.clear();
     if (m_editor) m_editor->removeEventFilter(this);
@@ -1119,9 +1120,15 @@ bool EditorBinding::replace(SourceRange range, const QString &text, EditKind kin
             if (!goesOn) m_tableRun = ++runs;
             run = m_tableRun;
         }
-        if (!adapted.edits.isEmpty()
-            && m_buffer->replace(adapted.edits, kind, run) == SourceBuffer::EditOutcome::Rejected)
-            return false;
+        if (!adapted.edits.isEmpty()) {
+            const QPointer<SourceBuffer> buffer = m_buffer;
+            const Revision revision = buffer->revision();
+            const auto outcome = buffer->replace(adapted.edits, kind, run);
+            if (outcome == SourceBuffer::EditOutcome::Rejected) return false;
+            if (outcome == SourceBuffer::EditOutcome::Applied && !adapted.tickEscapes.slashes.isEmpty()
+                && buffer && buffer == m_buffer && buffer->revision() == revision + 1)
+                m_tables->m_tickEscapes = adapted.tickEscapes;
+        }
         m_tableRunCaret = kind != EditKind::Other ? adapted.cursor : -1;
         m_tableRunKind = kind;
         if (m_keepCaret) return true;
@@ -1132,11 +1139,21 @@ bool EditorBinding::replace(SourceRange range, const QString &text, EditKind kin
         revealCursor();
         return true;
     }
-    const auto outcome = m_buffer->replace(range, text, kind);
+    // The first key below a grid also writes the paragraph's separators.
+    // The following prose keys continue that same typing run.
+    const bool continuesRun = kind == EditKind::Typing && kind == m_tableRunKind && range.length == 0
+                              && range.start == m_tableRunCaret
+                              && std::none_of(text.cbegin(), text.cend(), [](QChar c) {
+                                     return c == u'\r' || c == u'\n' || c == QChar::ParagraphSeparator;
+                                 });
+    const auto outcome = continuesRun ? m_buffer->replace({{range, text}}, kind, m_tableRun)
+                                      : m_buffer->replace(range, text, kind);
     if (outcome == SourceBuffer::EditOutcome::Rejected) return false;
+    const int after = range.start + int(text.size());
+    m_tableRunCaret = continuesRun ? after : -1;
     if (placeCaret) {
         // The caret ends after what was written, also when that equals what it replaced.
-        const int caret = m_pairs.toEditor(range.start + int(text.size()));
+        const int caret = m_pairs.toEditor(after);
         selectEditor(caret, caret);
         revealCursor();
     }

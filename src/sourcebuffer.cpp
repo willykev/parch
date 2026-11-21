@@ -102,6 +102,12 @@ SourceBuffer::EditOutcome SourceBuffer::replace(const QList<SourceEdit> &edits)
     return EditOutcome::Applied;
 }
 
+SourceBuffer::EditOutcome SourceBuffer::replaceAtRevision(Revision revision, const QList<SourceEdit> &edits)
+{
+    if (m_replaying || m_stepDepth > 0 || revision != m_revision) return EditOutcome::Rejected;
+    return replace(edits);
+}
+
 SourceBuffer::EditOutcome SourceBuffer::replace(const QList<SourceEdit> &edits, EditKind kind, quint64 run)
 {
     if (run == 0 || kind == EditKind::Other) return replace(edits);

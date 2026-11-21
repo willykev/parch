@@ -932,6 +932,16 @@ private slots:
     void upAndDownKeepToTheColumnClickedIn() { TableGridTests::upAndDownKeepToTheColumnClickedIn(); }
     void aLineBreakPastedInACellLeavesTheCaretAfterIt() { TableGridTests::aLineBreakPastedInACellLeavesTheCaretAfterIt(); }
     void replaceAllMakesTheReplacementsTablesCanTake() { TableGridTests::replaceAllMakesTheReplacementsTablesCanTake(); }
+    void backwardCutAboveATableLeavesItWhole_data() { TableGridTests::backwardCutAboveATableLeavesItWhole_data(); }
+    void backwardCutAboveATableLeavesItWhole() { TableGridTests::backwardCutAboveATableLeavesItWhole(); }
+    void replaceAllKeepsItsQueryWhenItRetries_data() { TableGridTests::replaceAllKeepsItsQueryWhenItRetries_data(); }
+    void replaceAllKeepsItsQueryWhenItRetries() { TableGridTests::replaceAllKeepsItsQueryWhenItRetries(); }
+    void replaceAllKeepsSafeEditsInTheSameTable_data() { TableGridTests::replaceAllKeepsSafeEditsInTheSameTable_data(); }
+    void replaceAllKeepsSafeEditsInTheSameTable() { TableGridTests::replaceAllKeepsSafeEditsInTheSameTable(); }
+    void backtickRunsCloseInsideTheirOwnCell_data() { TableGridTests::backtickRunsCloseInsideTheirOwnCell_data(); }
+    void backtickRunsCloseInsideTheirOwnCell() { TableGridTests::backtickRunsCloseInsideTheirOwnCell(); }
+    void writingBelowAGridKeepsTheNextParagraphSeparate_data() { TableGridTests::writingBelowAGridKeepsTheNextParagraphSeparate_data(); }
+    void writingBelowAGridKeepsTheNextParagraphSeparate() { TableGridTests::writingBelowAGridKeepsTheNextParagraphSeparate(); }
     void slowPastesLeaveTablesShownAsMarkdownAsWritten() { TableGridTests::slowPastesLeaveTablesShownAsMarkdownAsWritten(); }
     void aTableGrowsNoLargerThanAGridHolds() { TableGridTests::aTableGrowsNoLargerThanAGridHolds(); }
     void escapeWithTextSelectedInACellIsTheViews() { TableGridTests::escapeWithTextSelectedInACellIsTheViews(); }
@@ -18291,6 +18301,7 @@ void ParchTests::findBarFindsAndReplacesFromTheKeys()
     settle(bar);
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(all));
     QTRY_COMPARE(buffer->text(), QStringLiteral("1 two 1 three 1\nfour 1\n"));
+    QCOMPARE(count->property("text").toString(), QStringLiteral("3 replaced"));
     buffer->undo();
     QCOMPARE(buffer->text(), QStringLiteral("one two 1 three one\nfour one\n"));
     // A pattern that is no regular expression says why.

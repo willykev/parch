@@ -34,6 +34,8 @@ public:
     // they are sorted and do not overlap. Either all are applied or, should
     // one of them split a grapheme or the ranges be out of order, none.
     EditOutcome replace(const QList<SourceEdit> &edits);
+    // A worker's edits belong to a single revision and must apply now.
+    EditOutcome replaceAtRevision(Revision revision, const QList<SourceEdit> &edits);
     // The same, as one of a run of edits in one place: typed (or deleted)
     // there, each joins the step of the run's edit before it, within the
     // pause that ends typing, as typed text does, though each may rewrite

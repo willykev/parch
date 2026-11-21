@@ -470,6 +470,32 @@ Layout write(const Model &model)
     return layout;
 }
 
+static bool readsRow(QStringView text, const Line &line, const QList<Item> &items, int columns, const Dialect &dialect)
+{
+    bool extra = false, leading = false;
+    const Row read = rowOf(text, line, columns, dialect, &extra, &leading);
+    if (extra || leading || read.cells.size() != items.size()) return false;
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        const Cell &cell = read.cells[i];
+        if (cell.span != items[i].span || text.mid(cell.start, cell.end - cell.start) != items[i].text) return false;
+    }
+    return true;
+}
+
+bool readsBack(const QList<Item> &items, int columns, const Dialect &dialect)
+{
+    // Padding and alignment leave the boundaries the same as this row's.
+    QString text = QStringLiteral("|");
+    for (const Item &item : items) {
+        text += u' ';
+        text += item.text;
+        text += u' ';
+        text += QString(item.span, u'|');
+    }
+    const int end = int(text.size());
+    return readsRow(text, {0, 0, end, end}, items, columns, dialect);
+}
+
 bool readsBack(const Layout &layout, const Model &model, int row, const Dialect &dialect, int columns)
 {
     if (columns < 0) columns = columnCount(model);
@@ -482,15 +508,7 @@ bool readsBack(const Layout &layout, const Model &model, int row, const Dialect 
     const int end = physical + 1 < layout.lineStarts.size() ? layout.lineStarts[physical + 1] - int(brk.size())
                                                             : int(text.size());
     const Line line{start, start + int(model.prefixes.value(physical).size()), end, end};
-    bool extra = false, leading = false;
-    const Row read = rowOf(text, line, columns, dialect, &extra, &leading);
-    const QList<Item> &items = model.rows[row];
-    if (extra || leading || read.cells.size() != items.size()) return false;
-    for (qsizetype i = 0; i < items.size(); ++i) {
-        const Cell &cell = read.cells[i];
-        if (cell.span != items[i].span || text.mid(cell.start, cell.end - cell.start) != items[i].text) return false;
-    }
-    return true;
+    return readsRow(text, line, model.rows[row], columns, dialect);
 }
 
 } // namespace MdTable

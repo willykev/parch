@@ -660,9 +660,10 @@ BibliographyDatabase::Format BibliographyDatabase::formatForPath(const QString &
     return Format::BibLaTeX;
 }
 
-BibliographyDatabase BibliographyDatabase::fromFile(const QString &path, Format format)
+BibliographyDatabase BibliographyDatabase::fromFile(const QString &path, Format format, const QStringList *folders)
 {
-    const SafeRead::Result read = SafeRead::read(path, SafeRead::ReferenceBytes);
+    const auto read = folders ? SafeRead::readWithin(path, SafeRead::ReferenceBytes, *folders)
+                              : SafeRead::read(path, SafeRead::ReferenceBytes);
     if (!read.ok) {
         BibliographyDatabase database;
         database.m_identity = path;

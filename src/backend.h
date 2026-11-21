@@ -240,6 +240,7 @@ public:
     // Asks where to save the document in front and saves it there, keeping
     // its identity, text and undo.
     Q_INVOKABLE void saveAs();
+    Q_INVOKABLE void answerSaveLink(Document *document, const QString &name, const QString &target, const QString &choice);
     // Saves again a document whose save failed, to where it was going.
     Q_INVOKABLE void retrySave();
     // Reads again the file of the document in front, which waits because
@@ -296,7 +297,7 @@ public:
     // Opens a file the library lists, as openFiles() does, in the window
     // in front, except that a file no longer there is a tab that says it is
     // not found: the library never makes a file.
-    Q_INVOKABLE void openFromLibrary(const QString &path);
+    Q_INVOKABLE void openFromLibrary(const QString &path, bool outsideLink = false);
     // Opens an unnamed draft, in the window that has a tab for it, or else
     // in the window in front.
     Q_INVOKABLE void openDraft(const QString &documentId);

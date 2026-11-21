@@ -938,7 +938,9 @@ wider or narrower, or reach the edge with `Tab` and use `Left` and `Right`
 own width, and the session brings it back; a new window starts at the width
 you chose last.
 
-- **Drafts** lists your drafts. **Recent** lists the files you opened last.
+- **Drafts** lists open drafts that have never been saved first, newest first.
+  Saved drafts follow in order of their last change. **Recent** lists the
+  files you opened last.
 - `Delete` on a recent file, or **Remove from recent** in its menu, takes it
   out of **Recent**; the file stays where it is. **Clear recent files**, in
   the menu (`F10`), the command palette and the menu of **Recent**, empties
@@ -948,7 +950,10 @@ you chose last.
   brings the draft back, attachments and all, while the notice shows. A draft
   open in another window with text not yet saved is not deleted.
 - **Open folder** adds a folder. Its `.md`, `.markdown` and `.txt` files are
-  listed beneath it and follow changes on disk.
+  listed beneath it and follow changes on disk. Links into any folder you
+  added work throughout the library. A link leading outside has a link icon.
+  You can open a linked document directly. Library searches, moves, trash
+  and link updates work only inside the folders you added.
 - **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
   including folders you have not opened.
 - **Outline**, at the foot of the library, lists the headings of the document
@@ -962,7 +967,9 @@ you chose last.
   trash…** (`Delete`), from where the desktop's trash can bring it back.
   The same commands are in the menu (`F10`) and the command palette for the
   document in front, with **New document in folder…**, which makes one
-  beside it, when it is in one of the library's folders.
+  beside it, when it is in one of the library's folders. Between file
+  systems, parch copies files up to 64 MiB in the background. It removes the
+  original once the complete copy is in place.
 - When a document or folder moves or gets a new name, parch reviews affected links, images,
   includes and reference definitions in the library's Markdown and `.txt`
   documents. This includes supported HTML link and image attributes and
@@ -1161,7 +1168,13 @@ every five seconds while you keep going. `Ctrl+S` saves at once.
 - A file with several hard links, or one whose owner or group a new file
   could not keep, is written in place instead, after its current text is in
   history.
-- Saving through a symbolic link you opened keeps saving through it.
+- Opening an existing document through a symbolic link keeps its target as
+  the document you edit. Choosing a link in **Save as…** or for the first
+  save shows where it leads. **Replace the link** puts your document at the
+  link's name. **Write to the target** saves into the existing regular file.
+  **Cancel** returns to your document.
+- A link named on the command line whose target is missing opens read-only.
+  The notice shows the target's path.
 - When a save fails, the notice bar says why and offers **Retry** and
   **Save as…**. Your text stays in the window and in recovery.
 
@@ -1181,7 +1194,8 @@ parch keeps earlier versions of each document. Open them with
 - A version is kept every five minutes while you write, when a document is
   first saved after opening, and before anything replaces its text: a reload,
   an overwrite, a restore, or text brought back from recovery. Each version
-  says why it was kept.
+  says why it was kept. After an automatic reload, further saves share the
+  usual five-minute interval.
 - **Restore** replaces the text with the chosen version; `Ctrl+Z` takes it
   back.
 - A file you reopened in another encoding and saved as UTF-8 keeps its
@@ -1195,7 +1209,10 @@ parch keeps earlier versions of each document. Open them with
   applies at once. A lower one waits until you stop changing it; if it would
   remove older versions, Preferences say how many, and they go only when you
   choose **Remove them**. **Keep them**, or closing Preferences, leaves the
-  limits as they were. A version you named is never removed.
+  limits as they were. When space runs low, parch takes older versions
+  from documents using more than their share first, preserving the three
+  newest unnamed versions of each document when space allows. Named
+  versions stay until you remove them.
 - If named versions alone fill that space, history pauses and the notice bar
   says so. Saving carries on.
 
@@ -1578,7 +1595,10 @@ their line endings kept. Everything else parch keeps is in these folders:
 | `~/.cache/parch/render/` | Formulas and diagrams already drawn, at most 128 MiB |
 
 These follow `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and
-`XDG_CACHE_HOME` when they are set.
+`XDG_CACHE_HOME` when they are set. Without `XDG_RUNTIME_DIR`, parch keeps
+its socket in a private `runtime` folder under its state folder. If the
+socket path is too long, that launch uses its own private temporary folder
+and opens a separate instance.
 
 ### Back up and restore
 

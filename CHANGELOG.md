@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- The library marks links leading outside its folders. You can open a linked
+  document directly. Searches, moves, trash and link updates stay inside
+  the library. Open, unsaved drafts appear first.
+- Saving under a link's name shows where it leads and lets you replace the
+  link or write to its existing target. A launch through a link whose file
+  is missing opens read-only.
+- Moving files between file systems copies up to 64 MiB in the background.
+  History shares space across documents and uses its usual five-minute
+  interval after automatic reloads.
+- Sessions without a runtime folder use a private folder under parch's
+  state folder. A socket path that is too long opens a separate instance.
 - Pictures open by their contents, whatever their extension, and a PDF is no
   longer read as a picture. An SVG draws only the pictures embedded in it,
   never other files on your computer. HTML and EPUB carry its drawing and

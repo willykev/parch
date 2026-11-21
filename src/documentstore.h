@@ -88,6 +88,10 @@ public:
     // created: one that appeared since, even while the save runs, is left as
     // it is and the save fails.
     void saveAs(Document *document, const QString &path, const DiskVersion &expected);
+    enum class SaveLinkChoice { Cancel, Replace, Follow };
+    void answerSaveLink(Document *document, const QString &name, const QString &target, SaveLinkChoice choice);
+    // A named, read-only tab for a link whose file is missing.
+    Document *openMissingLink(const QString &name);
     // What a restore did with the entry's text: the file held it already;
     // the document shows it, unsaved or in conflict; or parch's own later
     // save left newer text in the file, which the document shows, and the
@@ -269,6 +273,7 @@ signals:
     // saveAs returns. Said once the document shows the outcome, and after
     // any save that waited for this one has started. A naming that a newer
     // one replaced before it started never ends.
+    void saveLinkRequested(Document *document, const QString &name, const QString &target, bool canFollow);
     void saveFinished(Document *document, const QString &name, SaveStatus status);
     void documentClosed(const QString &id);
     // Keep both has saved the local text to a file beside the original and
@@ -342,13 +347,16 @@ private:
         // it replaces, so that a restart knows the file it leaves as parch's.
         bool notesSave = false;
         QByteArray from;
-        // The first save of a file since it was opened or reloaded: what it
+        // The first save of a file since it was opened: what it
         // replaces is kept in history first, unless history's newest version
         // holds it, and what it writes is kept too.
         bool keepsReplaced = false;
+        // Later automatic reloads share the ordinary history interval.
+        bool reloaded = false;
         // The text is put at the target's very name, in place of a link
         // there, which is never followed.
         bool putsHere = false;
+        std::optional<DiskFile::NameLink> link;
         // The permission bits of the document's file as last seen, which a
         // file made again in its place is given; 0 when not known.
         quint32 mode = 0;
@@ -504,7 +512,8 @@ private:
     QString draftFolder(const QString &id) const;
     QString canonicalDrafts() const;
     QString draftIdAt(const QString &canonicalPath) const;
-    void nameAs(Document *document, const QString &path, const std::optional<DiskVersion> &expected);
+    void nameAs(Document *document, const QString &path, const std::optional<DiskVersion> &expected,
+                const std::optional<DiskFile::NameLink> &approved = {}, bool replace = false);
     // Puts the text at the document's own name, in place of the link that
     // leads elsewhere from there; the name is the one a naming asked for.
     void putHere(Document *document, const QString &name);
@@ -523,7 +532,7 @@ private:
     void applyCheck(Document *document, const DiskCheck &check);
     // Replaces the buffer's text with the file's by one edit of the changed
     // middle, and makes the file's version the document's.
-    void takeFile(Document *document, const LoadedFile &file);
+    void takeFile(Document *document, const LoadedFile &file, bool automaticReload = false);
     // The text becomes `after` by one edit of the middle that differs,
     // grown to whole graphemes.
     static void replaceChanged(SourceBuffer *buffer, const QString &after);

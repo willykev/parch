@@ -4,12 +4,13 @@
 
 // Where parch keeps its own files. Every location is injectable, so that
 // tests run beneath a temporary folder and never touch the real XDG folders.
-// Nothing here creates a folder: whoever writes a file makes its folder first.
+// The runtime fallback is created privately when the session provides none.
 struct AppPaths {
     QString data;
     QString state;
     QString config;
     QString runtime;
+    bool singleInstance = true;
 
     // Whether the id is a document id as parch makes them: a UUID in lower
     // case without braces, and never empty. Ids name folders and files
@@ -21,6 +22,9 @@ struct AppPaths {
     static AppPaths standard();
     // Every location beneath one folder.
     static AppPaths under(const QString &root);
+
+    QString socketPath() const;
+    bool socketPathFits() const;
 
     // Unnamed drafts, one folder per document id.
     QString drafts() const;

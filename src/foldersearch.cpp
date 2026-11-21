@@ -323,26 +323,28 @@ QVariantMap FolderSearch::row(int row) const
     return values;
 }
 
-bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search)
+bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search, const QStringList *folders)
 {
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    if (folders && LibraryWalk::rootOf(canonical, *folders).isEmpty()) return false;
     TextCache &cache = textCache();
     {
         QMutexLocker lock(&cache.mutex);
-        const TextCache::Entry *cached = cache.find(path, search);
+        const TextCache::Entry *cached = cache.find(canonical, search);
         if (cached && cached->size == size && cached->modified == modified) {
             *text = cached->text;
             return true;
         }
     }
     if (size > MaxFileBytes) return false;
-    const SafeRead::Result read = SafeRead::read(path, MaxFileBytes);
+    const auto read = folders ? SafeRead::readWithin(path, MaxFileBytes, *folders) : SafeRead::read(path, MaxFileBytes);
     if (!read.ok) return false;
     ++reads;
     const DecodedText decoded = DiskFile::decode(read.bytes);
     if (!decoded.valid) return false;
     *text = decoded.text;
     QMutexLocker lock(&cache.mutex);
-    cache.insert(path, size, modified, decoded.text, search);
+    cache.insert(read.canonicalPath, size, modified, decoded.text, search);
     return true;
 }
 
@@ -514,8 +516,9 @@ FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &it
     QString text;
     if (item.hasText) {
         text = item.text;
-    } else if (!readText(item.path, item.size, item.modified, &text, run.number)) {
-        return result;
+    } else {
+        const QStringList roots = item.documentId.isEmpty() ? run.folders : QStringList{run.paths.drafts()};
+        if (!readText(item.path, item.size, item.modified, &text, run.number, &roots)) return result;
     }
     *read = true;
     // Line numbers are counted as the matches come, from where the last one was.

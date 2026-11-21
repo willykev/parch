@@ -273,6 +273,15 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     }, Qt::QueuedConnection);
     // The file dialogs' answers, and the dialogs' actions, are actions too:
     // each clears a notice, and what goes wrong is one.
+    connect(m_store.get(), &DocumentStore::saveLinkRequested, this,
+            [this](Document *doc, const QString &name, const QString &target, bool canFollow) {
+        WindowContext *window = m_files->namingWindow(doc);
+        if (!window) {
+            for (auto *holder : std::as_const(m_windows))
+                if (holder->tabs()->viewsOf(doc)) { window = holder; break; }
+        }
+        if (window) emit window->saveLinkRequested(doc, name, target, canFollow);
+    });
     connect(m_files.get(), &FileRequests::answered, this, &Backend::clearNotice);
     connect(m_files.get(), &FileRequests::problem, this, &Backend::notify);
     connect(m_files.get(), &FileRequests::documentsChosen, this, [this](WindowContext *window, const QStringList &files) {
@@ -684,6 +693,13 @@ bool Backend::refuseReadOnlyScratch(Document *document)
     return true;
 }
 
+void Backend::answerSaveLink(Document *document, const QString &name, const QString &target, const QString &choice)
+{
+    using Choice = DocumentStore::SaveLinkChoice;
+    m_store->answerSaveLink(document, name, target, choice == u"replace" ? Choice::Replace
+                                                : choice == u"follow" ? Choice::Follow : Choice::Cancel);
+}
+
 void Backend::saveAs()
 {
     clearNotice();
@@ -877,10 +893,21 @@ void Backend::recordThenGiveUp(WindowContext *window, Document *document, bool k
     });
 }
 
-void Backend::openFromLibrary(const QString &path)
+void Backend::openFromLibrary(const QString &path, bool outsideLink)
 {
     clearNotice();
-    if (WindowContext *window = activeWindow()) openIn(window, {path}, Absent::NotFound)->raise();
+    WindowContext *window = activeWindow();
+    if (!window) return;
+    if (outsideLink) {
+        // Choosing the marked link opens the target as a document in its
+        // own folder, even if the link's name once belonged to another tab.
+        const QFileInfo link(path);
+        const QString target = link.canonicalFilePath();
+        if (!target.isEmpty() && link.isFile()) openIn(window, {target}, Absent::NotFound)->raise();
+        else notify(tr("Cannot open “%1”").arg(path), tr("The link does not lead to a regular file."));
+        return;
+    }
+    openIn(window, {path}, Absent::NotFound)->raise();
 }
 
 void Backend::openDraft(const QString &documentId)
@@ -1207,6 +1234,14 @@ WindowContext *Backend::openIn(WindowContext *window, const QStringList &files, 
             break;
         }
         if (waiting) continue;
+        if (const auto link = DiskFile::nameLink(path); link && !link->regular) {
+            shown = showDocument(window, m_store->openMissingLink(path));
+            documentShown = true;
+            failures.append(tr("“%1” is a link to “%2”. It opens read-only because its target cannot be opened.")
+                                .arg(path, link->target));
+            ++refused;
+            continue;
+        }
         // Its absence is what the first edit checks before creating the file.
         const DiskVersion none = DiskFile::fingerprint(path);
         if (absent == Absent::NewFile && !path.endsWith(u'/') && !none.exists
@@ -1294,10 +1329,13 @@ void Backend::name(Document *draft, const QString &path, const DiskVersion &abse
     // ends at once; the connection goes with the draft.
     auto finished = std::make_shared<QMetaObject::Connection>();
     *finished = connect(m_store.get(), &DocumentStore::saveFinished, draft,
-                        [this, finished, draft, path](Document *saved, const QString &name) {
+                        [this, finished, draft, path](Document *saved, const QString &name, SaveStatus status) {
         if (saved != draft || name != path) return;
         disconnect(*finished);
-        namingEnded(draft, path);
+        if (status == SaveStatus::Cancelled) {
+            for (auto *window : std::as_const(m_windows)) window->tabs()->forgetNewFile(draft);
+            m_store->save(draft);
+        } else namingEnded(draft, path);
     });
     m_store->saveAs(draft, path, absent);
 }

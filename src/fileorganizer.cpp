@@ -54,17 +54,54 @@ bool sameFileState(const struct stat &a, const struct stat &b)
            && a.st_ctim.tv_sec == b.st_ctim.tv_sec && a.st_ctim.tv_nsec == b.st_ctim.tv_nsec;
 }
 
-// Renames without replacing anything at the new name; 0, or the error.
-int renameWithoutReplacing(const QString &from, const QString &to)
+// Holds the checked folder across lookup and mutation of an entry in it.
+class LibraryDirectory {
+public:
+    LibraryDirectory(const QString &path, const QStringList &roots)
+        : fd(::open(QFile::encodeName(path), O_RDONLY | O_DIRECTORY | O_CLOEXEC))
+    {
+        if (fd < 0 && errno == EACCES) fd = ::open(QFile::encodeName(path), O_PATH | O_DIRECTORY | O_CLOEXEC);
+        if (fd >= 0 && LibraryWalk::rootOf(SafeRead::descriptorPath(fd), roots).isEmpty()) {
+            ::close(fd);
+            fd = -1;
+            errno = EACCES;
+        }
+    }
+    ~LibraryDirectory() { if (fd >= 0) ::close(fd); }
+    Q_DISABLE_COPY_MOVE(LibraryDirectory)
+    int fd;
+};
+
+SaveResult copyBetweenFolders(const QString &from, const QString &to, const QStringList &roots, const struct stat &expected)
 {
-    const QByteArray source = QFile::encodeName(from), target = QFile::encodeName(to);
-    if (::renameat2(AT_FDCWD, source.constData(), AT_FDCWD, target.constData(), RENAME_NOREPLACE) == 0) return 0;
-    const int error = errno;
-    if (error != EINVAL && error != ENOSYS) return error;
-    // A file system that cannot refuse to replace is asked first, so that
-    // only something made in between could be replaced.
-    if (entryAt(to)) return EEXIST;
-    return ::rename(source.constData(), target.constData()) == 0 ? 0 : errno;
+    const QString into = PathText::folderOf(to);
+    LibraryDirectory source(PathText::folderOf(from), roots), destination(into, roots);
+    const QByteArray oldName = QFile::encodeName(PathText::fileName(from)), newName = QFile::encodeName(PathText::fileName(to));
+    const auto failed = [](const QString &reason) { return SaveResult{SaveStatus::Failed, reason, {}}; };
+    if (source.fd < 0 || destination.fd < 0) return failed(FileOrganizer::tr("A folder is no longer in the library."));
+    const int fd = ::openat(source.fd, oldName, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return failed(systemError(errno));
+    const auto close = qScopeGuard([fd] { ::close(fd); });
+    struct stat opened {};
+    if (::fstat(fd, &opened) || !S_ISREG(opened.st_mode) || !sameFileState(expected, opened)
+        || LibraryWalk::rootOf(SafeRead::descriptorPath(fd), roots).isEmpty())
+        return failed(FileOrganizer::tr("The source changed before the copy."));
+    if (opened.st_size > SafeRead::DocumentBytes) return failed(SafeRead::tooLargeReason(SafeRead::DocumentBytes));
+    SaveResult made = DiskFile::copyAt(destination.fd, into, PathText::fileName(to), fd, opened.st_size, opened.st_mode & 0777);
+    if (made.status != SaveStatus::Saved) return made;
+    const auto unchangedCopy = [&] { return DiskFile::copyStillAt(destination.fd, newName, made.version); };
+    if (!unchangedCopy()) return failed(FileOrganizer::tr("The destination changed. The original was kept."));
+    struct stat current {};
+    if (::fstatat(source.fd, oldName, &current, AT_SYMLINK_NOFOLLOW) != 0
+        || opened.st_dev != current.st_dev || opened.st_ino != current.st_ino)
+        return failed(FileOrganizer::tr("The source was replaced. The destination was kept."));
+    if (LibraryWalk::rootOf(SafeRead::descriptorPath(source.fd), roots).isEmpty()
+        || LibraryWalk::rootOf(SafeRead::descriptorPath(destination.fd), roots).isEmpty())
+        return failed(FileOrganizer::tr("A folder moved outside the library. The original was kept."));
+    if (sameFileState(opened, current) && ::unlinkat(source.fd, oldName, 0) == 0) return made;
+    const QString reason = sameFileState(opened, current) ? systemError(errno) : FileOrganizer::tr("The source changed during the copy.");
+    if (unchangedCopy()) ::unlinkat(destination.fd, newName, 0);
+    return failed(reason);
 }
 
 bool canEditReferences(const Document *document)
@@ -132,19 +169,19 @@ QString FileOrganizer::nameProblem(const QString &name) const
 
 QString FileOrganizer::libraryOf(const QString &path) const
 {
-    QString outermost;
-    for (const QString &folder : m_settings->libraryFolders())
-        if ((path == folder || path.startsWith(folder + u'/')) && (outermost.isEmpty() || folder.size() < outermost.size()))
-            outermost = folder;
-    return outermost;
+    const QStringList roots = m_settings->libraryFolders();
+    const QString listed = LibraryWalk::rootOf(path, roots);
+    if (listed.isEmpty() || LibraryWalk::rootOf(QFileInfo(path).canonicalFilePath(), roots).isEmpty()) return {};
+    return listed;
 }
 
 bool FileOrganizer::organizes(const QString &path) const
 {
-    if (path.isEmpty()) return false;
-    for (const QString &folder : m_settings->libraryFolders())
-        if (path == folder) return false;
-    return !libraryOf(path).isEmpty();
+    const QString leaf = PathText::fileName(path);
+    if (leaf.isEmpty() || leaf == u"." || leaf == u"..") return false;
+    const QStringList roots = m_settings->libraryFolders();
+    return !roots.contains(DiskFile::literalPath(path)) && !libraryOf(path).isEmpty()
+           && !libraryOf(PathText::folderOf(path)).isEmpty();
 }
 
 QString FileOrganizer::shownName(const QString &path) const
@@ -190,7 +227,9 @@ void FileOrganizer::newFile(const QString &folder, const QString &name)
         taken();
         return;
     }
-    const SaveResult made = DiskFile::create(path, {});
+    LibraryDirectory parent(folder, m_settings->libraryFolders());
+    const SaveResult made = parent.fd >= 0 ? DiskFile::createAt(parent.fd, folder, file, {})
+                                           : SaveResult{SaveStatus::Failed, systemError(errno), {}};
     if (made.status == SaveStatus::Conflict) {
         taken();
         return;
@@ -215,8 +254,8 @@ void FileOrganizer::newFolder(const QString &folder, const QString &name)
         emit problem(tr("Not made: %1").arg(trimmed), tr("New folders are made in the library's folders."));
         return;
     }
-    const QString path = folder + u'/' + trimmed;
-    if (::mkdir(QFile::encodeName(path).constData(), 0777) == 0) return;
+    LibraryDirectory parent(folder, m_settings->libraryFolders());
+    if (parent.fd >= 0 && ::mkdirat(parent.fd, QFile::encodeName(trimmed), 0777) == 0) return;
     const int error = errno;
     if (error == EEXIST)
         emit problem(tr("Not made: “%1” already exists").arg(trimmed),
@@ -270,7 +309,7 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
                   "removed from the library instead."));
         return;
     }
-    if (libraryOf(to).isEmpty()) {
+    if (libraryOf(PathText::folderOf(to)).isEmpty()) {
         refuse(tr("It can only go to a folder of the library."));
         return;
     }
@@ -307,16 +346,17 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
         }
     }
     Plan plan;
+    plan.roots = m_settings->libraryFolders();
     plan.from = from;
     plan.to = to;
     plan.library = libraryOf(from);
-    plan.destinationLibrary = libraryOf(to);
+    plan.destinationLibrary = libraryOf(PathText::folderOf(to));
     plan.folder = S_ISDIR(state.st_mode);
     plan.documents = plan.folder ? 0 : 1;
     if (m_dialects) plan.dialects = m_dialects();
     // Only a document or a folder can be what a reference leads to here.
     if (!plan.folder && !LibraryWalk::isTextDocument(name)) {
-        if (perform(plan)) finishMove(plan, false, {});
+        perform(plan, [this, plan](auto) { finishMove(plan, false, {}); });
         return;
     }
     // Open documents are read as their text is now, by their file's identity.
@@ -332,7 +372,7 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
         // The question, or the move, comes before the organizer says it is
         // no longer busy, so that a window waiting for it hears of it.
         if (planned.files.isEmpty()) {
-            if (perform(planned)) finishMove(planned, false, {});
+            perform(planned, [this, planned](auto) { finishMove(planned, false, {}); });
         } else {
             m_review = planned;
             emit reviewChanged();
@@ -350,12 +390,12 @@ FileOrganizer::Plan FileOrganizer::planJob(Plan plan, QHash<std::pair<quint64, q
         QString text;
         const auto opened = open.constFind({found.device, found.inode});
         if (opened != open.cend()) text = *opened;
-        else if (!FolderSearch::readText(found.path, found.size, found.modified, &text)) return true;
+        else if (!FolderSearch::readText(found.path, found.size, found.modified, &text, 0, &plan.roots)) return true;
         const md::Options options = plan.dialects ? plan.dialects(found.path) : md::Options();
         auto changes = DocumentLinks::changes(text, found.path, plan.library, moves, options, plan.destinationLibrary);
         if (!changes.isEmpty()) plan.files.append({found.path, std::move(changes)});
         return true;
-    }, cancel.get());
+    }, cancel.get(), plan.roots);
     return plan;
 }
 
@@ -398,16 +438,15 @@ QVariantMap FileOrganizer::review() const
 void FileOrganizer::confirmMove(bool updateReferences)
 {
     if (!m_review) return;
-    const Plan plan = *std::exchange(m_review, std::nullopt);
+    Plan plan = *std::exchange(m_review, std::nullopt);
+    plan.roots = m_settings->libraryFolders();
     setBusy(1);
     const auto release = qScopeGuard([this] { setBusy(-1); });
     emit reviewChanged();
-    if (!perform(plan)) return;
-    if (!updateReferences) {
-        finishMove(plan, false, {});
-        return;
-    }
-    this->updateReferences(plan);
+    perform(plan, [this, plan, updateReferences](auto) {
+        if (updateReferences) this->updateReferences(plan);
+        else finishMove(plan, false, {});
+    });
 }
 
 void FileOrganizer::cancelMove()
@@ -417,15 +456,15 @@ void FileOrganizer::cancelMove()
     emit reviewChanged();
 }
 
-bool FileOrganizer::perform(const Plan &plan, std::optional<DiskVersion> *copiedVersion)
+void FileOrganizer::perform(const Plan &plan, std::function<void(std::optional<DiskVersion>)> moved)
 {
     const QString name = PathText::fileName(plan.from);
     const bool renaming = PathText::folderOf(plan.from) == PathText::folderOf(plan.to);
-    const auto refuse = [&](const QString &detail) {
+    const auto refuse = [this, renaming, name](const QString &detail) {
         emit problem(renaming ? tr("Not renamed: %1").arg(name) : tr("Not moved: %1").arg(name), detail);
-        return false;
     };
-    // Anything can have changed while the references were read or reviewed.
+    if (!organizes(plan.from) || libraryOf(PathText::folderOf(plan.to)).isEmpty())
+        return refuse(tr("The source and destination must still be in the library."));
     struct stat state {};
     if (!entryAt(plan.from, &state)) return refuse(tr("“%1” can no longer be found.").arg(name));
     if (entryAt(plan.to))
@@ -446,52 +485,49 @@ bool FileOrganizer::perform(const Plan &plan, std::optional<DiskVersion> *copied
             return refuse(tr("“%1” changed before it could be moved.").arg(name));
         state = saved;
     }
-    int error = renameWithoutReplacing(plan.from, plan.to);
-    std::optional<DiskVersion> copied;
-    if (error == EXDEV && S_ISREG(state.st_mode)) {
-        // Another file system: the file is copied there, and the original
-        // goes only once the copy is in place.
-        const int fd = ::open(QFile::encodeName(plan.from).constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) {
-            const int reason = errno;
-            return refuse(tr("“%1” could not be read: %2").arg(name, systemError(reason)));
+    const auto relocatedOnDisk = [this, plan, canonicalFrom, link, moved](std::optional<DiskVersion> copied) {
+        const auto going = documentsUnder(canonicalFrom);
+        const QString canonicalTo = link ? QString() : QFileInfo(plan.to).canonicalFilePath();
+        for (Document *document : going) {
+            const QString now = canonicalTo + document->path().mid(canonicalFrom.size());
+            m_store->relocate(document, now, plan.folder ? std::nullopt : copied);
         }
-        const auto close = qScopeGuard([fd] { ::close(fd); });
-        struct stat opened {};
-        if (::fstat(fd, &opened) || !sameFileState(state, opened))
-            return refuse(tr("“%1” changed before it could be copied.").arg(name));
-        QByteArray bytes;
-        QString why;
-        if (!SafeRead::readForCopy(fd, opened.st_size, bytes, why))
-            return refuse(tr("“%1” could not be read in full: %2. The original was kept.").arg(name, why));
-        const SaveResult made = DiskFile::create(plan.to, bytes, state.st_mode & 07777);
-        if (made.status == SaveStatus::Conflict) error = EEXIST;
-        else if (made.status != SaveStatus::Saved)
-            return refuse(tr("“%1” could not be copied to “%2”: %3").arg(name, shownName(PathText::folderOf(plan.to)), made.error));
+        m_store->relocateClosedPaths(canonicalFrom, canonicalTo, plan.folder);
+        for (Document *document : going) {
+            emit documentMoved(document);
+        }
+        emit relocated(plan.from, plan.to);
+        if (!canonicalFrom.isEmpty() && canonicalFrom != plan.from) emit relocated(canonicalFrom, canonicalTo);
+        moved(copied);
+    };
+    const QStringList roots = m_settings->libraryFolders();
+    LibraryDirectory source(PathText::folderOf(plan.from), roots), destination(PathText::folderOf(plan.to), roots);
+    if (source.fd < 0 || destination.fd < 0 || !organizes(plan.from))
+        return refuse(tr("The source and destination must still be in the library."));
+    const QByteArray oldName = QFile::encodeName(name), newName = QFile::encodeName(PathText::fileName(plan.to));
+    int error = m_crossDevice ? EXDEV : 0;
+    if (!error && ::renameat2(source.fd, oldName, destination.fd, newName, RENAME_NOREPLACE) != 0) error = errno;
+    if ((error == ENOSYS || error == EINVAL || error == EOPNOTSUPP) && !plan.folder) {
+        // A hard link also claims only a free name.
+        if (::linkat(source.fd, oldName, destination.fd, newName, 0) != 0) error = errno;
+        else if (::unlinkat(source.fd, oldName, 0) == 0) error = 0;
         else {
-            if (DiskFile::fingerprint(plan.to, made.version) != made.version)
-                return refuse(tr("The copy of “%1” changed. The original was kept.").arg(name));
-            struct stat current {};
-            const auto undoCopy = [&] {
-                struct stat target {}, checked {}, source {};
-                if (!entryAt(plan.to, &target) || !S_ISREG(target.st_mode) || quint64(target.st_dev) != made.version.device
-                    || quint64(target.st_ino) != made.version.inode || DiskFile::fingerprint(plan.to, made.version) != made.version)
-                    return false;
-                return entryAt(plan.from, &source) && source.st_dev == opened.st_dev && source.st_ino == opened.st_ino
-                       && entryAt(plan.to, &checked) && sameFileState(target, checked)
-                       && ::unlink(QFile::encodeName(plan.to).constData()) == 0;
-            };
-            if (!entryAt(plan.from, &current) || !sameFileState(opened, current))
-                return refuse(undoCopy() ? tr("“%1” changed during the copy. The move was cancelled.").arg(name)
-                                         : tr("“%1” changed during the copy. The destination was kept.").arg(name));
-            if (::unlink(QFile::encodeName(plan.from).constData()) != 0) {
-                const int reason = errno;
-                return refuse(undoCopy() ? tr("“%1” could not be moved: %2").arg(name, systemError(reason))
-                                         : tr("“%1” was copied, but its original could not be removed: %2").arg(name, systemError(reason)));
-            }
-            error = 0;
-            copied = made.version;
+            error = errno;
+            struct stat ours {}, there {};
+            if (::fstatat(source.fd, oldName, &ours, AT_SYMLINK_NOFOLLOW) == 0
+                && ::fstatat(destination.fd, newName, &there, AT_SYMLINK_NOFOLLOW) == 0 && sameFileState(ours, there))
+                ::unlinkat(destination.fd, newName, 0);
         }
+    }
+    if (error == EXDEV && S_ISREG(state.st_mode)) {
+        setBusy(1);
+        QtConcurrent::run(&m_pool, copyBetweenFolders, plan.from, plan.to, roots, state)
+            .then(this, [this, relocatedOnDisk, refuse](const SaveResult &result) {
+                if (result.status == SaveStatus::Saved) relocatedOnDisk(result.version);
+                else refuse(result.error);
+                setBusy(-1);
+            });
+        return;
     }
     switch (error) {
     case 0:
@@ -512,20 +548,7 @@ bool FileOrganizer::perform(const Plan &plan, std::optional<DiskVersion> *copied
     default:
         return refuse(tr("“%1” could not be moved: %2").arg(name, systemError(error)));
     }
-    // Open documents follow their files.
-    const QString canonicalTo = link ? QString() : QFileInfo(plan.to).canonicalFilePath();
-    for (Document *document : going) {
-        const QString now = canonicalTo + document->path().mid(canonicalFrom.size());
-        m_store->relocate(document, now, plan.folder ? std::nullopt : copied);
-    }
-    m_store->relocateClosedPaths(canonicalFrom, canonicalTo, plan.folder);
-    for (Document *document : going) {
-        emit documentMoved(document);
-    }
-    emit relocated(plan.from, plan.to);
-    if (!canonicalFrom.isEmpty() && canonicalFrom != plan.from) emit relocated(canonicalFrom, canonicalTo);
-    if (copiedVersion) *copiedVersion = copied;
-    return true;
+    relocatedOnDisk(std::nullopt);
 }
 
 std::optional<FileOrganizer::Patched> FileOrganizer::inverseFor(const QString &path, const QString &documentId,
@@ -647,9 +670,14 @@ void FileOrganizer::rewriteOpen(const StagedRewrite &staged, Document *open, Rew
     done.patched.append(std::move(*patch));
 }
 
-void FileOrganizer::rewriteClosed(const StagedRewrite &staged, History *history, Rewritten &done)
+void FileOrganizer::rewriteClosed(const StagedRewrite &staged, const QStringList &roots, History *history, Rewritten &done)
 {
     const LoadedFile &loaded = staged.loaded;
+    if (LibraryWalk::rootOf(loaded.version.canonicalPath, roots).isEmpty()
+        || QFileInfo(staged.path).canonicalFilePath() != loaded.version.canonicalPath) {
+        done.failed << staged.path;
+        return;
+    }
     QString written;
     auto patch = inverseFor(loaded.version.canonicalPath, staged.documentId, loaded.text, staged.edits,
                             staged.references, &written);
@@ -669,7 +697,14 @@ void FileOrganizer::rewriteClosed(const StagedRewrite &staged, History *history,
         *why = tr("The file changed after its version was kept.");
         return false;
     };
-    const SaveResult saved = DiskFile::save(staged.path, DiskFile::encode(written, loaded.convention), loaded.version, keep);
+    const QString &canonical = loaded.version.canonicalPath;
+    LibraryDirectory parent(PathText::folderOf(canonical), roots);
+    if (parent.fd < 0) {
+        done.failed << staged.path;
+        return;
+    }
+    const SaveResult saved = DiskFile::save(canonical, DiskFile::encode(written, loaded.convention),
+                                            loaded.version, keep, parent.fd);
     if (saved.status != SaveStatus::Saved) {
         done.failed << staged.path;
         return;
@@ -696,6 +731,10 @@ void FileOrganizer::updateReferences(const Plan &plan)
     for (const FilePlan &file : plan.files) {
         const QString now = DocumentLinks::moved(file.path, moves);
         const QString canonical = QFileInfo(now).canonicalFilePath();
+        if (LibraryWalk::rootOf(canonical, plan.roots).isEmpty()) {
+            done.failed << now;
+            continue;
+        }
         Document *open = m_store->documentOf(canonical);
         if (!open) {
             closed.append({now, file.path, m_store->documentIdFor(canonical.isEmpty() ? now : canonical)});
@@ -736,8 +775,8 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, Plan pl
     const QList<DocumentLinks::Move> moves{{plan.from, plan.to}};
     Rewritten done;
     for (const Rewrite &file : files) {
-        LoadedFile loaded = DiskFile::load(file.path);
-        if (!loaded.ok || loaded.readOnly) {
+        LoadedFile loaded = DiskFile::load(file.path, &plan.roots);
+        if (!loaded.ok || loaded.readOnly || LibraryWalk::rootOf(loaded.version.canonicalPath, plan.roots).isEmpty()) {
             done.failed << file.path;
             continue;
         }
@@ -746,7 +785,7 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, Plan pl
                                                     plan.destinationLibrary);
         const auto edits = referenceEdits(changes, file.path, done);
         if (edits.isEmpty()) continue;
-        rewriteClosed({file.path, file.documentId, int(edits.size()), edits, std::move(loaded), 0, {}}, history, done);
+        rewriteClosed({file.path, file.documentId, int(edits.size()), edits, std::move(loaded), 0, {}}, plan.roots, history, done);
     }
     return done;
 }
@@ -760,6 +799,7 @@ void FileOrganizer::undoMove(quint64 move)
     }
     const Done taken = *std::exchange(m_done, std::nullopt);
     Plan back = taken.plan;
+    back.roots = m_settings->libraryFolders();
     std::swap(back.from, back.to);
     std::swap(back.library, back.destinationLibrary);
     back.files.clear();
@@ -777,10 +817,10 @@ void FileOrganizer::undoMove(quint64 move)
         return;
     }
     using StagedFiles = std::pair<QList<StagedRewrite>, QStringList>;
-    QtConcurrent::run(&m_pool, [closed, failed = std::move(failed)]() mutable {
+    QtConcurrent::run(&m_pool, [closed, roots = back.roots, failed = std::move(failed)]() mutable {
         QList<StagedRewrite> staged;
         for (const Patched &patch : closed) {
-            LoadedFile loaded = DiskFile::load(patch.path);
+            LoadedFile loaded = DiskFile::load(patch.path, &roots);
             auto edits = loaded.ok && !loaded.readOnly && loaded.version.canonicalPath == patch.path
                              ? inverseEdits(patch, loaded.text) : std::nullopt;
             if (!edits) {
@@ -806,7 +846,7 @@ void FileOrganizer::finishUndo(Plan back, const QList<Patched> &open, QList<Stag
     QList<StagedRewrite> buffers;
     for (const Patched &patch : open) {
         Document *document = m_store->documentOf(patch.path);
-        if (!canEditReferences(document) || document->id() != patch.documentId) {
+        if (!organizes(patch.path) || !canEditReferences(document) || document->id() != patch.documentId) {
             failed << patch.path;
             continue;
         }
@@ -829,13 +869,18 @@ void FileOrganizer::finishUndo(Plan back, const QList<Patched> &open, QList<Stag
         return;
     }
 
-    std::optional<DiskVersion> copied;
-    if (!perform(back, &copied)) return;
+    perform(back, [this, back, buffers, closed](auto copied) { undoReferences(back, buffers, closed, copied); });
+}
+
+void FileOrganizer::undoReferences(Plan back, QList<StagedRewrite> buffers, QList<StagedRewrite> closed,
+                                   const std::optional<DiskVersion> &copied)
+{
     const QList<DocumentLinks::Move> moves{{back.from, back.to}};
     Rewritten done;
     for (StagedRewrite &file : buffers) {
         file.path = DocumentLinks::moved(file.path, moves);
-        rewriteOpen(file, m_store->documentOf(file.path), done);
+        if (organizes(file.path)) rewriteOpen(file, m_store->documentOf(file.path), done);
+        else done.failed << file.path;
     }
     // A move changes where the staged version is expected. A copy between
     // file systems also has a new inode, which perform() reports itself.
@@ -858,9 +903,9 @@ void FileOrganizer::finishUndo(Plan back, const QList<Patched> &open, QList<Stag
         finishMove(back, true, std::move(done));
         return;
     }
-    release.dismiss();
-    QtConcurrent::run(&m_pool, [prepared, history = m_store->history(), done = std::move(done)]() mutable {
-        for (const StagedRewrite &file : prepared) rewriteClosed(file, history, done);
+    setBusy(1);
+    QtConcurrent::run(&m_pool, [prepared, roots = back.roots, history = m_store->history(), done = std::move(done)]() mutable {
+        for (const StagedRewrite &file : prepared) rewriteClosed(file, roots, history, done);
         return done;
     }).then(this, [this, back = std::move(back)](Rewritten rewritten) {
         finishMove(back, true, std::move(rewritten));
@@ -933,12 +978,12 @@ void FileOrganizer::askToTrash(const QString &path)
     // question says what goes with it.
     setBusy(1);
     m_cancel = std::make_shared<std::atomic<bool>>(false);
-    QtConcurrent::run(&m_pool, [path, cancel = m_cancel] {
+    QtConcurrent::run(&m_pool, [path, roots = m_settings->libraryFolders(), cancel = m_cancel] {
         int documents = 0;
         LibraryWalk::walk({path}, [&documents](const LibraryWalk::Found &) {
             ++documents;
             return true;
-        }, cancel.get());
+        }, cancel.get(), roots);
         return documents;
     }).then(this, [this, path, name, open](int documents) {
         m_trashing = {{QStringLiteral("path"), path}, {QStringLiteral("name"), name}, {QStringLiteral("folder"), true},
@@ -957,7 +1002,11 @@ void FileOrganizer::confirmTrash()
     const QString name = trashing.value(QStringLiteral("name")).toString();
     // The home trash is made in the data folder, which Qt does not make.
     QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation));
-    QFile file(path);
+    if (!organizes(path)) {
+        emit problem(tr("Not moved to the trash: %1").arg(name), tr("This file or folder is now outside the library."));
+        return;
+    }
+    QFile file(DiskFile::literalPath(path));
     if (!file.moveToTrash()) {
         emit problem(tr("Not moved to the trash: %1").arg(name),
                      tr("“%1” could not be moved to the trash: %2").arg(name, file.errorString()));

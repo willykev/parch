@@ -16,38 +16,40 @@ namespace {
 struct Stamp {
     qint64 size = -1;
     QDateTime modified;
+    QString canonical;
+    std::optional<QStringList> folders;
     bool operator==(const Stamp &) const = default;
 };
 
-Stamp stampOf(const QString &path)
+Stamp stampOf(const QString &path, const QStringList *folders)
 {
     const QFileInfo info(path);
     if (!info.exists()) return {};
-    return {info.size(), info.lastModified()};
+    return {info.size(), info.lastModified(), info.canonicalFilePath(), folders ? std::optional(*folders) : std::nullopt};
 }
 
-std::shared_ptr<const BibliographyDatabase> database(const QString &path)
+std::shared_ptr<const BibliographyDatabase> database(const QString &path, const QStringList *folders)
 {
     static QMutex mutex;
     static QHash<QString, std::pair<Stamp, std::shared_ptr<const BibliographyDatabase>>> cache;
-    const Stamp stamp = stampOf(path);
+    const Stamp stamp = stampOf(path, folders);
     {
         QMutexLocker locker(&mutex);
         const auto known = cache.constFind(path);
         if (known != cache.constEnd() && stamp.size >= 0 && known->first == stamp) return known->second;
     }
-    auto read = std::make_shared<const BibliographyDatabase>(BibliographyDatabase::fromFile(path));
+    auto read = std::make_shared<const BibliographyDatabase>(BibliographyDatabase::fromFile(path, BibliographyDatabase::Format::Auto, folders));
     QMutexLocker locker(&mutex);
     if (stamp.size >= 0) cache.insert(path, {stamp, read});
     else cache.remove(path);
     return read;
 }
 
-std::shared_ptr<const CslStyle> styleFile(const QString &path, QString *error)
+std::shared_ptr<const CslStyle> styleFile(const QString &path, QString *error, const QStringList *folders)
 {
     static QMutex mutex;
     static QHash<QString, std::tuple<Stamp, std::shared_ptr<const CslStyle>, QString>> cache;
-    const Stamp stamp = stampOf(path);
+    const Stamp stamp = stampOf(path, folders);
     {
         QMutexLocker locker(&mutex);
         const auto known = cache.constFind(path);
@@ -57,7 +59,7 @@ std::shared_ptr<const CslStyle> styleFile(const QString &path, QString *error)
         }
     }
     QString why;
-    std::shared_ptr<const CslStyle> style = CslCatalog::styleFromFile(path, &why);
+    std::shared_ptr<const CslStyle> style = CslCatalog::styleFromFile(path, &why, folders);
     if (!style && why.isEmpty()) why = QStringLiteral("The citation style “%1” cannot be used.").arg(QFileInfo(path).fileName());
     QMutexLocker locker(&mutex);
     if (stamp.size >= 0) cache.insert(path, {stamp, style, why});
@@ -116,7 +118,7 @@ QList<Database> databasesOf(const QStringList &files, Setup &setup, QSet<QString
             reported.insert(file);
             continue;
         }
-        Database db = database(file);
+        Database db = database(file, reach ? &reach->folders : nullptr);
         report(db, reported, setup.problems);
         list.append(db);
     }
@@ -315,7 +317,7 @@ Setup prepare(const Dialect::Choice &dialect, bool linkCitations, const std::opt
     } else if (!dialect.citationStyle.isEmpty()) {
         QString error;
         if (Dialect::isStyleFile(dialect.citationStyle)) {
-            setup.style = styleFile(dialect.citationStyle, &error);
+            setup.style = styleFile(dialect.citationStyle, &error, reach && frontMatter ? &reach->folders : nullptr);
         } else {
             setup.style = CslCatalog::bundledStyle(dialect.citationStyle, &error);
             if (!setup.style && error.isEmpty())

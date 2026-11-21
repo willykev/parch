@@ -107,9 +107,10 @@ std::shared_ptr<const CslStyle> CslCatalog::bundledStyle(const QString &id, QStr
     return style;
 }
 
-std::shared_ptr<const CslStyle> CslCatalog::styleFromFile(const QString &path, QString *error)
+std::shared_ptr<const CslStyle> CslCatalog::styleFromFile(const QString &path, QString *error, const QStringList *folders)
 {
-    const SafeRead::Result read = SafeRead::read(path, SafeRead::ReferenceBytes);
+    const auto read = folders ? SafeRead::readWithin(path, SafeRead::ReferenceBytes, *folders)
+                              : SafeRead::read(path, SafeRead::ReferenceBytes);
     if (!read.ok) {
         if (error)
             *error = QStringLiteral("Cannot read the citation style “%1”: %2.").arg(QFileInfo(path).fileName(), read.error);

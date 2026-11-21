@@ -190,14 +190,18 @@ private:
     // opened or reloaded, and no save has replaced them yet: the first save
     // keeps them in history before it does.
     bool m_diskUnkept = false;
+    bool m_reloaded = false;
     // The name a naming of the document's own file was asked under, taken
     // by the save that naming starts, which says it again when it ends.
     QString m_askedName;
     // Requests made while a save ran; at most one more save follows it.
     bool m_saveAgain = false;
+    std::optional<DiskFile::NameLink> m_saveLink;
     QString m_pendingSaveAs;
     // The version the waiting name must still find, when the name asked for one.
     std::optional<DiskVersion> m_pendingExpected;
+    std::optional<DiskFile::NameLink> m_pendingLink;
+    bool m_pendingReplaceLink = false;
     // The file is being compared with what parch last read, off the UI thread.
     bool m_checking = false;
     // A choice made in a conflict runs off the UI thread: Keep both reads

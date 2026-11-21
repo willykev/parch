@@ -96,7 +96,7 @@ public:
 
     BibliographyDatabase() = default;
     // Reads a file; the format comes from its extension when Auto.
-    static BibliographyDatabase fromFile(const QString &path, Format format = Format::Auto);
+    static BibliographyDatabase fromFile(const QString &path, Format format = Format::Auto, const QStringList *folders = nullptr);
     static BibliographyDatabase fromData(const QByteArray &data, Format format, const QString &identity);
     static Format formatForPath(const QString &path);
 

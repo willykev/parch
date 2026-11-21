@@ -1,5 +1,7 @@
 #include "diskfile.h"
 
+#include "mdinclude.h"
+
 #include "saferead.h"
 
 #include <QCoreApplication>
@@ -156,7 +158,7 @@ constexpr int systemFileFailure = -2;
 // there but cannot be read. A file that still stands as `known` did is that
 // version, unless its bytes are asked for, and is not read.
 bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString &error, struct stat *found = nullptr,
-           int *failure = nullptr, const DiskVersion *known = nullptr)
+           int *failure = nullptr, const DiskVersion *known = nullptr, const QStringList *folders = nullptr)
 {
     int code = 0;
     const auto fail = [&](int number, const QString &message) {
@@ -209,6 +211,8 @@ bool probe(const QString &path, DiskVersion &version, QByteArray *bytes, QString
     const QString canonical = QFile::decodeName(QByteArray(name, nameLength));
     // A file of /proc says it is empty and is not, and none is a document.
     if (SafeRead::isSystemPath(canonical)) return fail(systemFileFailure, SafeRead::systemPathReason(canonical));
+    if (folders && std::none_of(folders->cbegin(), folders->cend(), [&](const QString &root) { return md::isWithin(canonical, root); }))
+        return fail(EACCES, QCoreApplication::translate("DiskFile", "The file is outside the library"));
     if (found) *found = state;
     if (!bytes && known && known->exists && known->stamp.trusted() && known->stamp == stamp
         && known->canonicalPath == canonical && known->device == quint64(state.st_dev)
@@ -294,7 +298,7 @@ SaveResult changedOnDisk()
 }
 
 // Every byte, or false with errno set.
-bool writeAll(int descriptor, const QByteArray &bytes)
+bool writeAll(int descriptor, QByteArrayView bytes)
 {
     qsizetype written = 0;
     while (written < bytes.size()) {
@@ -307,6 +311,34 @@ bool writeAll(int descriptor, const QByteArray &bytes)
         }
         written += step;
     }
+    return true;
+}
+
+// Hash exactly the expected bytes and optionally copy them as they arrive.
+bool copyAndHash(int source, int destination, qint64 size, QByteArray &digest)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    char buffer[64 * 1024];
+    qint64 copied = 0;
+    for (;;) {
+        const ssize_t count = ::read(source, buffer, sizeof buffer);
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) return false;
+        if (count == 0) break;
+        copied += count;
+        if (copied > size) {
+            errno = EFBIG;
+            return false;
+        }
+        const QByteArrayView chunk(buffer, count);
+        if (destination >= 0 && !writeAll(destination, chunk)) return false;
+        hash.addData(chunk);
+    }
+    if (copied != size) {
+        errno = EIO;
+        return false;
+    }
+    digest = hash.result();
     return true;
 }
 
@@ -441,16 +473,15 @@ Carried carryAttributes(int from, const struct stat &original, int to, QString &
 // not stand in for. What it holds goes to keep first, and nothing is written
 // unless keep has it, since a write cut short leaves the file torn.
 SaveResult writeInPlace(const QString &path, const DiskVersion &expected, const QByteArray &bytes,
-                        const DiskFile::KeepCurrent &keep)
+                        const DiskFile::KeepCurrent &keep, const QByteArray &name)
 {
     SaveResult result;
-    const QByteArray name = QFile::encodeName(expected.canonicalPath);
     // The file is opened once to read and once to write, and is the expected
     // file both times, never another put at its name meanwhile.
     const auto sameFile = [&expected](int descriptor) {
         struct stat state {};
         return ::fstat(descriptor, &state) == 0 && S_ISREG(state.st_mode) && quint64(state.st_dev) == expected.device
-               && quint64(state.st_ino) == expected.inode;
+               && quint64(state.st_ino) == expected.inode && SafeRead::descriptorPath(descriptor) == expected.canonicalPath;
     };
     QFile reader;
     const int readable = ::open(name.constData(), O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
@@ -541,12 +572,12 @@ DiskVersion fingerprint(const QString &path, const DiskVersion &known)
     return version;
 }
 
-LoadedFile load(const QString &path)
+LoadedFile load(const QString &path, const QStringList *folders)
 {
     LoadedFile loaded;
     QByteArray bytes;
     int failure = 0;
-    if (!probe(path, loaded.version, &bytes, loaded.error, nullptr, &failure)) {
+    if (!probe(path, loaded.version, &bytes, loaded.error, nullptr, &failure, nullptr, folders)) {
         loaded.missing = failure == ENOENT || failure == ENOTDIR;
         if (!loaded.missing) {
             loaded.unreadable = loaded.error;
@@ -586,6 +617,17 @@ QString canonicalPath(const QString &path)
         ::readlink(QFile::encodeName(QStringLiteral("/proc/self/fd/%1").arg(descriptor)).constData(), name, sizeof name - 1);
     ::close(descriptor);
     return length < 0 ? absolute : QFile::decodeName(QByteArray(name, length));
+}
+
+std::optional<NameLink> nameLink(const QString &path)
+{
+    const QByteArray name = QFile::encodeName(path);
+    struct stat link {}, target {};
+    if (::lstat(name, &link) || !S_ISLNK(link.st_mode)) return std::nullopt;
+    const bool regular = ::stat(name, &target) == 0 && S_ISREG(target.st_mode);
+    const QString resolved = canonicalPath(path);
+    return NameLink{path, resolved == path ? QFileInfo(path).symLinkTarget() : resolved,
+                    quint64(link.st_dev), quint64(link.st_ino), regular, quint64(target.st_dev), quint64(target.st_ino)};
 }
 
 QString literalPath(const QString &path)
@@ -638,7 +680,8 @@ SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
     return createAt(directory, folder, leaf, bytes, mode);
 }
 
-SaveResult createAt(int directory, const QString &folder, const QString &leaf, const QByteArray &bytes, quint32 mode)
+static SaveResult writeNewAt(int directory, const QString &folder, const QString &leaf, const QByteArray &bytes,
+                             quint32 mode, int source, qint64 size)
 {
     SaveResult result;
     const auto failed = [&result](int number) {
@@ -660,7 +703,7 @@ SaveResult createAt(int directory, const QString &folder, const QString &leaf, c
     for (int attempt = 0; attempt < 100 && descriptor < 0; ++attempt) {
         temporary = name + '.' + randomSuffix();
         // The umask applies, as to any file made.
-        descriptor = ::openat(directory, temporary.constData(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        descriptor = ::openat(directory, temporary.constData(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode ? mode & 0777 : 0666);
         if (descriptor < 0 && errno != EEXIST) break;
     }
     if (descriptor < 0) {
@@ -677,7 +720,13 @@ SaveResult createAt(int directory, const QString &folder, const QString &leaf, c
     });
     // The mode of the file it stands for, when one is known.
     if (mode != 0 && ::fchmod(descriptor, mode_t(mode & 0777)) != 0) return failed(errno);
-    if (!writeAll(descriptor, bytes)) return failed(errno);
+    QByteArray digest;
+    if (source >= 0) {
+        if (!copyAndHash(source, descriptor, size, digest)) return failed(errno);
+    } else {
+        if (!writeAll(descriptor, bytes)) return failed(errno);
+        digest = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
+    }
     if (::fdatasync(descriptor) != 0) {
         result.error = QCoreApplication::translate("DiskFile", "Cannot write the file to disk");
         return result;
@@ -691,13 +740,20 @@ SaveResult createAt(int directory, const QString &folder, const QString &leaf, c
     // is removed.
     int failure = 0;
     bool named = false;
-    if (renameWithoutReplacing) {
+    if (source >= 0) {
+        if (::linkat(directory, temporary.constData(), directory, name.constData(), 0) == 0) {
+            named = true;
+            if (::unlinkat(directory, temporary.constData(), 0) == 0) temporary.clear();
+        } else {
+            failure = errno;
+        }
+    } else if (renameWithoutReplacing) {
         named = ::renameat2(directory, temporary.constData(), directory, name.constData(), RENAME_NOREPLACE) == 0;
         if (named) temporary.clear();
         else failure = errno;
     }
     int written = descriptor;
-    if (!named && (!renameWithoutReplacing || failure == EINVAL || failure == ENOSYS || failure == EOPNOTSUPP)) {
+    if (source < 0 && !named && (!renameWithoutReplacing || failure == EINVAL || failure == ENOSYS || failure == EOPNOTSUPP)) {
         named = linking && ::linkat(directory, temporary.constData(), directory, name.constData(), 0) == 0;
         if (!named) failure = linking ? errno : EINVAL;
         if (!named && failure != EEXIST) {
@@ -736,13 +792,45 @@ SaveResult createAt(int directory, const QString &folder, const QString &leaf, c
     if (!stamped(written, made, stamp)) return failed(errno);
     result.status = SaveStatus::Saved;
     result.version = DiskVersion{literalPath(folder + u'/' + leaf), quint64(made.st_dev), quint64(made.st_ino),
-                                 QCryptographicHash::hash(bytes, QCryptographicHash::Sha256), true, stamp};
+                                 digest, true, stamp};
     result.version.mode = quint32(made.st_mode & 0777);
     if (afterNaming) afterNaming(folder + u'/' + leaf);
     return result;
 }
 
-SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode)
+SaveResult createAt(int directory, const QString &folder, const QString &leaf, const QByteArray &bytes, quint32 mode)
+{
+    return writeNewAt(directory, folder, leaf, bytes, mode, -1, 0);
+}
+
+SaveResult copyAt(int directory, const QString &folder, const QString &leaf, int source, qint64 size, quint32 mode)
+{
+    if (source < 0) return {SaveStatus::Failed, systemError(EBADF), {}};
+    if (size < 0 || size > MaxLoadBytes) return {SaveStatus::Failed, SafeRead::tooLargeReason(MaxLoadBytes), {}};
+    return writeNewAt(directory, folder, leaf, {}, mode, source, size);
+}
+
+bool copyStillAt(int directory, const QByteArray &leaf, const DiskVersion &expected)
+{
+    const int fd = ::openat(directory, leaf, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return false;
+    const auto close = qScopeGuard([fd] { ::close(fd); });
+    struct stat opened {}, named {};
+    FileStamp stamp;
+    if (!stamped(fd, opened, stamp) || !S_ISREG(opened.st_mode)
+        || quint64(opened.st_dev) != expected.device || quint64(opened.st_ino) != expected.inode
+        || stamp.size != expected.stamp.size || stamp.size > MaxLoadBytes
+        || SafeRead::descriptorPath(fd) != expected.canonicalPath) return false;
+    if (!expected.stamp.trusted() || stamp != expected.stamp) {
+        QByteArray digest;
+        if (!copyAndHash(fd, -1, stamp.size, digest) || digest != expected.sha256) return false;
+    }
+    return ::fstatat(directory, leaf, &named, AT_SYMLINK_NOFOLLOW) == 0
+           && opened.st_dev == named.st_dev && opened.st_ino == named.st_ino && opened.st_size == named.st_size
+           && opened.st_ctim.tv_sec == named.st_ctim.tv_sec && opened.st_ctim.tv_nsec == named.st_ctim.tv_nsec;
+}
+
+SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode, const NameLink *expectedLink)
 {
     SaveResult result;
     const auto failed = [&result](int number) {
@@ -795,7 +883,9 @@ SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode)
     // following it: a link, or nothing, gives way to the new file; a folder,
     // or a file, is left as it is.
     struct stat there {};
-    if (::fstatat(directory, name.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0 && !S_ISLNK(there.st_mode)) {
+    const bool exists = ::fstatat(directory, name.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0;
+    if ((exists && !S_ISLNK(there.st_mode)) || (!exists && errno != ENOENT)
+        || (expectedLink && (!exists || quint64(there.st_dev) != expectedLink->device || quint64(there.st_ino) != expectedLink->inode))) {
         result.status = SaveStatus::Conflict;
         result.error = QCoreApplication::translate("DiskFile", "Something is already at that name");
         return result;
@@ -924,20 +1014,20 @@ QByteArray encode(const QString &text, const TextConvention &convention)
     return bytes;
 }
 
-SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion &expected, const KeepCurrent &keep)
+SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion &expected, const KeepCurrent &keep,
+                int directory)
 {
     SaveResult result;
     DiskVersion initial;
     struct stat original {};
-    if (!probeForSave(path, initial, result, expected, &original)) return result;
+    const QString checked = directory < 0 ? path : QStringLiteral("/proc/self/fd/%1/").arg(directory) + QFileInfo(path).fileName();
+    if (!probeForSave(checked, initial, result, expected, &original)) return result;
     if (initial != expected) return changedOnDisk();
+    const QByteArray target = QFile::encodeName(directory < 0 ? initial.canonicalPath : checked);
     // A file with other names would lose them to a new file, and a file of
     // another account its owner, so such a file is written in place.
     if (initial.exists && (original.st_nlink > 1 || !ownedBySavingUser(original.st_uid)))
-        return writeInPlace(path, initial, bytes, keep);
-    // The canonical path is already resolved by the kernel and is not a link, so
-    // a symlink path saves into its target and stays a link.
-    const QByteArray target = QFile::encodeName(initial.canonicalPath);
+        return writeInPlace(checked, initial, bytes, keep, target);
     // A file its owner made read-only is not replaced either.
     if (initial.exists && ::faccessat(AT_FDCWD, target.constData(), W_OK, AT_EACCESS) != 0) {
         result.error = QCoreApplication::translate("DiskFile", "The file is read-only (%1)").arg(systemError(errno));
@@ -975,7 +1065,7 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
         ::close(from);
         if (carried == Carried::Uncarried) {
             output.discard();
-            return writeInPlace(path, initial, bytes, keep);
+            return writeInPlace(checked, initial, bytes, keep, target);
         }
         if (carried == Carried::Failed) return result;
     }
@@ -1001,7 +1091,7 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
     // The first look's stamp is the newer, and may stand for the file where
     // the expected version's could not.
     DiskVersion latest;
-    if (!probeForSave(path, latest, result, initial)) return result;
+    if (!probeForSave(checked, latest, result, initial)) return result;
     if (latest != expected) return changedOnDisk();
     if (!output.commit()) {
         result.error = systemError(errno);

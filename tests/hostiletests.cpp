@@ -236,10 +236,15 @@ void readsStopAtTheirLimit()
     // A cross-filesystem copy must account for every byte in the original.
     QFile sample(large);
     QVERIFY(sample.open(QIODevice::ReadOnly));
-    QVERIFY(!SafeRead::readForCopy(sample.handle(), sample.size() + 1, bytes, error));
-    QVERIFY(!error.isEmpty() && bytes.isEmpty());
-    QVERIFY(!SafeRead::readForCopy(-1, sample.size(), bytes, error));
-    QVERIFY(!error.isEmpty() && bytes.isEmpty());
+    const int directory = ::open(QFile::encodeName(folder.path()), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    QVERIFY(directory >= 0);
+    const auto close = qScopeGuard([directory] { ::close(directory); });
+    for (int source : {sample.handle(), -1}) {
+        const auto copy = DiskFile::copyAt(directory, folder.path(), "copy.md", source, sample.size() + 1, 0600);
+        QCOMPARE(copy.status, SaveStatus::Failed);
+        QVERIFY(!copy.error.isEmpty());
+        QVERIFY(!QFileInfo::exists(folder.filePath("copy.md")));
+    }
     QCOMPARE(release.released(), 0);
 }
 

@@ -1,6 +1,10 @@
 #include "librarytests.h"
 
 #include "apppaths.h"
+#include "appservice.h"
+#include "documentcitations.h"
+#include "librarywalk.h"
+#include "saferead.h"
 #include "autosave.h"
 #include "backend.h"
 #include "diskfile.h"
@@ -34,6 +38,8 @@
 #include <QQuickWindow>
 #include <QScopeGuard>
 #include <QSignalSpy>
+#include <QStandardPaths>
+#include <sys/stat.h>
 #include <QTemporaryDir>
 #include <QThreadPool>
 #include <QTimeZone>
@@ -1911,6 +1917,356 @@ void movingADocumentLeavesUnchangedCitationPathsAlone()
     QVERIFY(f.organizer.review().isEmpty());
     QCOMPARE(moved.count(), 1);
     QCOMPARE(readFile(destination + u"/paper.md"_s), original);
+}
+
+void linkedFoldersOutsideTheLibraryAreNotWalked()
+{
+    QTemporaryDir home;
+    const QString library = home.filePath("Library"), outside = home.filePath("Garden"), link = library + "/Garden";
+    QVERIFY(QDir().mkpath(library));
+    Backend backend(AppPaths::under(home.filePath("app")));
+    backend.start({});
+    backend.settings()->setLibraryFolders({library});
+    writeFile(outside + "/seeds.md", "Seeds");
+    QVERIFY(QFile::link(outside, link));
+    QVERIFY(QFile::link(outside + "/seeds.md", library + "/seeds.md"));
+    QStringList files;
+    LibraryWalk::walk({library}, [&](const LibraryWalk::Found &file) { files << file.path; return true; });
+    QVERIFY(files.isEmpty());
+    auto *model = backend.activeWindow()->library();
+    const QModelIndex root = model->index(2, 0);
+    model->setExpanded(root, true);
+    QTRY_COMPARE(model->rowCount(root), 2);
+    for (int row = 0; row < 2; ++row) {
+        const auto at = model->index(row, 0, root);
+        QVERIFY(at.data(model->roleNames().key("outsideLink")).toBool());
+        QVERIFY(!model->hasChildren(at));
+        QVERIFY(!model->canFetchMore(at));
+    }
+    model->setFilter("seeds");
+    QTRY_VERIFY(!model->searching());
+    QCOMPARE(model->matchCount(), 0);
+    model->setFilter({});
+    backend.settings()->setLibraryFolders({library, outside});
+    const int linkRole = model->roleNames().key("outsideLink");
+    QTRY_VERIFY(!model->index(0, 0, root).data(linkRole).toBool());
+    backend.settings()->setLibraryFolders({library});
+    QTRY_VERIFY(model->index(0, 0, root).data(linkRole).toBool());
+    backend.openFromLibrary(library + "/seeds.md", true);
+    QCOMPARE(backend.document()->path(), outside + "/seeds.md");
+}
+
+void linkUpdatesNeverRewriteFilesOutsideTheLibrary()
+{
+    LibraryMoves f;
+    const QString other = f.root.filePath("Garden"), outside = other + "/garden.md";
+    const QByteArray original = "[Notes](notes.md)\n";
+    writeFile(outside, original);
+    QVERIFY(QFile::link(outside, f.file("index.md")));
+    writeFile(f.file("notes.md"), "Notes");
+    f.organizer.rename(f.file("notes.md"), "journal");
+    QTRY_VERIFY(!f.organizer.busy());
+    QVERIFY(f.organizer.review().isEmpty());
+    QVERIFY(QFile::exists(f.file("journal.md")));
+    QCOMPARE(readFile(outside), original);
+
+    // Removing a library while the move is under review withdraws the
+    // permission to update links in it.
+    f.settings.setLibraryFolders({f.library, other});
+    writeFile(f.file("notes.md"), "Notes");
+    f.organizer.rename(f.file("notes.md"), "daily");
+    QTRY_VERIFY(!f.organizer.review().isEmpty());
+    f.settings.setLibraryFolders({f.library});
+    f.organizer.confirmMove(true);
+    QTRY_VERIFY(!f.organizer.busy());
+    QCOMPARE(readFile(outside), original);
+    QVERIFY(QFile::exists(f.file("daily.md")));
+}
+
+void aLinkedFolderOutsideIsNotAMoveDestination()
+{
+    LibraryMoves f;
+    const QString outside = f.root.path() + "/Garden", link = f.file("Garden");
+    QVERIFY(QDir().mkpath(outside));
+    QVERIFY(QFile::link(outside, link));
+    f.organizer.listFolders();
+    QTRY_VERIFY(!f.organizer.busy());
+    for (const QVariant &row : f.organizer.folders()) QVERIFY(row.toMap().value("path") != link);
+    writeFile(f.file("seeds.txt"), "Seeds");
+    f.organizer.move(f.file("seeds.txt"), link);
+    QTRY_VERIFY(!f.organizer.busy());
+    QVERIFY(QFile::exists(f.file("seeds.txt")));
+    QVERIFY(!QFile::exists(outside + "/seeds.txt"));
+}
+
+void renameAndTrashRefuseAPathThroughALinkOutside()
+{
+    LibraryMoves f;
+    const QString outside = f.root.path() + "/Garden", link = f.file("Garden");
+    writeFile(outside + "/seeds.txt", "Seeds");
+    QVERIFY(QFile::link(outside, link));
+    QVERIFY(!f.organizer.organizes(link + "/seeds.txt"));
+    f.organizer.rename(link + "/seeds.txt", "flowers");
+    f.organizer.askToTrash(link + "/seeds.txt");
+    QTRY_VERIFY(!f.organizer.busy());
+    QVERIFY(f.organizer.trashing().isEmpty());
+    f.settings.setLibraryFolders({f.library, outside});
+    f.organizer.askToTrash(link + "/seeds.txt");
+    QVERIFY(!f.organizer.trashing().isEmpty());
+    f.settings.setLibraryFolders({f.library});
+    f.organizer.confirmTrash();
+    QCOMPARE(readFile(outside + "/seeds.txt"), QByteArray("Seeds"));
+}
+
+void linksInsideTheLibraryStillWork()
+{
+    LibraryMoves f;
+    const QString garden = f.root.path() + "/Garden";
+    writeFile(garden + "/seeds.txt", "Seeds");
+    QVERIFY(QFile::link(garden, f.file("plants")));
+    f.settings.setLibraryFolders({f.library, garden});
+    QStringList files;
+    LibraryWalk::walk({f.library, garden}, [&](const LibraryWalk::Found &file) { files << file.path; return true; });
+    QCOMPARE(files.size(), 1);
+    QCOMPARE(canonical(files.first()), garden + "/seeds.txt");
+    f.organizer.rename(f.file("plants/seeds.txt"), "flowers");
+    QTRY_VERIFY(QFile::exists(garden + "/flowers.txt"));
+}
+
+void saveAsOntoADanglingLinkAsks()
+{
+    LibraryMoves f;
+    const QString name = f.file("Notes.md"), target = f.file("Missing.md");
+    QVERIFY(QFile::link(target, name));
+    Document *draft = f.store.newDraft();
+    draft->buffer()->replace({0, 0}, "Notes");
+    auto *store = &f.store;
+    using Choice = DocumentStore::SaveLinkChoice;
+    QSignalSpy asked(store, &DocumentStore::saveLinkRequested);
+    store->saveAs(draft, name);
+    QCOMPARE(asked.size(), 1);
+    QCOMPARE(asked.last().at(2).toString(), target);
+    QVERIFY(!asked.last().at(3).toBool());
+    store->answerSaveLink(draft, name, target, Choice::Cancel);
+    store->waitForSaves();
+    QVERIFY(!QFileInfo::exists(target));
+    QVERIFY(QFileInfo(name).isSymLink());
+    QVERIFY(draft->isDraft());
+    store->saveAs(draft, name);
+    store->answerSaveLink(draft, name, target, Choice::Replace);
+    store->waitForSaves();
+    QCOMPARE(draft->path(), name);
+    QCOMPARE(readFile(name), QByteArray("Notes"));
+    QVERIFY(!QFileInfo(name).isSymLink());
+    QVERIFY(!QFileInfo::exists(target));
+
+    const QString link = f.file("Other.md");
+    writeFile(target, "Old text");
+    QVERIFY(QFile::link(target, link));
+    store->saveAs(draft, link);
+    QCOMPARE(asked.size(), 3);
+    QVERIFY(asked.last().at(3).toBool());
+    QCOMPARE(readFile(target), QByteArray("Old text"));
+    store->answerSaveLink(draft, link, target, Choice::Follow);
+    store->waitForSaves();
+    QCOMPARE(draft->path(), target);
+    QCOMPARE(readFile(target), QByteArray("Notes"));
+    QVERIFY(QFileInfo(link).isSymLink());
+}
+
+void savingAtALinkOffersTheAvailableChoices()
+{
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    NamePicker picker;
+    shell.backend->setFilePicker(&picker);
+    const QString file = shell.root.filePath("notes.md"), target = shell.root.filePath("journal.md");
+    QVERIFY(QFile::link(target, file));
+    auto *window = shell.window.get();
+    activate(window);
+    typeText(window, "Notes");
+    const auto choose = [&] {
+        shell.backend->saveAs();
+        emit picker.saveSelected(QUrl::fromLocalFile(file));
+    };
+    choose();
+    QObject *dialog = shell.object("saveLinkDialog");
+    QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QVERIFY(dialog->findChild<QObject *>("saveLinkQuestion")->property("text").toString().contains(target));
+    QCOMPARE(window->activeFocusItem()->objectName(), QString("saveLinkCancel"));
+    QVERIFY(!shell.item("saveLinkFollow")->isVisible());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QVERIFY(!QFileInfo::exists(target));
+    writeFile(target, "Original");
+    choose();
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QVERIFY(shell.item("saveLinkFollow")->isVisible());
+    QVERIFY(QMetaObject::invokeMethod(shell.item("saveLinkFollow"), "clicked"));
+    QTRY_COMPARE(shell.document()->path(), target);
+    QCOMPARE(readFile(target), QByteArray("Notes"));
+    QVERIFY(QFileInfo(file).isSymLink());
+}
+
+void aDanglingLinkNamedAtLaunchCreatesNothing()
+{
+    QTemporaryDir root;
+    const QString name = root.filePath("Notes.md"), target = root.filePath("Missing.md");
+    QVERIFY(QFile::link(target, name));
+    Backend backend(AppPaths::under(root.path()));
+    backend.start({name});
+    QVERIFY(backend.document());
+    QCOMPARE(backend.document()->state(), Document::State::ReadOnly);
+    QVERIFY((backend.problem() + backend.problemDetail()).contains(target));
+    QVERIFY(!QFileInfo::exists(target));
+    QVERIFY(QFileInfo(name).isSymLink());
+}
+
+void savingADocumentOpenedThroughALinkStillWritesItsTarget()
+{
+    LibraryMoves f;
+    const QString target = f.file("Notes.md"), name = f.file("Current.md");
+    writeFile(target, "Before");
+    QVERIFY(QFile::link(target, name));
+    Document *document = f.store.open(f.file("Current.md"));
+    document->buffer()->replace({0, 6}, "After");
+    f.store.save(document);
+    f.store.waitForSaves();
+    QVERIFY(QFileInfo(name).isSymLink());
+    QCOMPARE(readFile(target), QByteArray("After"));
+}
+
+void bibliographyReadsStayWithinTheDocumentsFolders()
+{
+    LibraryMoves f;
+    const QString path = f.file("sources.bib"), outside = f.root.path() + "/sources.bib";
+    writeFile(outside, "@book{garden,title={Garden}}");
+    QVERIFY(QFile::link(outside, path));
+    const auto reach = DocumentCitations::Reach::of({}, f.library);
+    const auto read = BibliographyDatabase::fromFile(path, BibliographyDatabase::Format::Auto, &reach.folders);
+    QVERIFY(!read.isValid());
+    QVERIFY(!read.find("garden"));
+    QCOMPARE(read.diagnostics().first().kind, BibliographyDiagnostic::Kind::Unreadable);
+    const QString style = f.file("style.csl");
+    QVERIFY(QFile::link(outside, style));
+    QString reason;
+    QVERIFY(!CslCatalog::styleFromFile(style, &reason, &reach.folders));
+    QVERIFY(reason.contains("outside"));
+    Dialect::Choice choice;
+    choice.options.citations = true;
+    choice.bibliography = {path};
+    choice.bibliographyFrom = "document";
+    QVERIFY(DocumentCitations::prepare(choice, true, reach).keys().contains("garden"));
+    choice.bibliographyFrom = "front-matter";
+    QVERIFY(DocumentCitations::prepare(choice, true, reach).keys().isEmpty());
+}
+
+void aCrossDeviceMoveOfALargeFileIsRefused()
+{
+    LibraryMoves f;
+    QTemporaryDir destination;
+    QVERIFY(destination.isValid());
+    f.settings.setLibraryFolders({f.library, destination.path()});
+    f.organizer.setCrossDeviceForTests(true);
+    QFile file(f.file("notes.txt"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QVERIFY(file.resize(SafeRead::DocumentBytes + 1));
+    file.close();
+    QSignalSpy refused(&f.organizer, &FileOrganizer::problem);
+    f.organizer.move(file.fileName(), destination.path());
+    QTRY_VERIFY(!f.organizer.busy());
+    QCOMPARE(refused.size(), 1);
+    QVERIFY(file.exists());
+    QVERIFY(!QFileInfo::exists(destination.filePath("notes.txt")));
+}
+
+void oneBusyDocumentDoesNotPruneOthersHistory()
+{
+    QTemporaryDir root;
+    QDateTime now(QDate(2026, 1, 1), QTime(12, 0), QTimeZone::UTC);
+    History history(AppPaths::under(root.path()), HistoryLimits{100, 30, 600}, [&] { return now; });
+    const QString quiet = newDocumentId(), busy = newDocumentId();
+    for (int i = 0; i < 12; ++i) {
+        now = now.addSecs(600);
+        QVERIFY(!history.capture(i < 3 ? quiet : busy, QByteArray(100, char('a' + i))).isEmpty());
+    }
+    QCOMPARE(history.versions(quiet).size(), 3);
+    QCOMPARE(history.versions(busy).size(), 3);
+    QCOMPARE(history.usage().bytes, 600);
+
+    // Two documents exceed their share. The one using the most bytes
+    // gives up its oldest version even though it has fewer versions.
+    History mixed(AppPaths::under(root.filePath("mixed")), HistoryLimits{100, 30, 1050}, [&] { return now; });
+    const QString large = newDocumentId();
+    mixed.capture(large, QByteArray(250, 'x'));
+    now = now.addSecs(600);
+    mixed.capture(large, QByteArray(300, 'y'));
+    mixed.capture(quiet, QByteArray(110, 'q'));
+    for (int i = 0; i < 4; ++i) {
+        now = now.addSecs(600);
+        mixed.capture(busy, QByteArray(100, char('a' + i)));
+    }
+    QCOMPARE(mixed.versions(large).size(), 1);
+    QCOMPARE(mixed.versions(large).first().bytes, 300);
+    QCOMPARE(mixed.versions(busy).size(), 4);
+    QCOMPARE(mixed.versions(quiet).size(), 1);
+}
+
+void outsideReloadsShareTheHistoryInterval()
+{
+    LibraryMoves f;
+    writeFile(f.file("notes.md"), "Opened");
+    Document *doc = f.store.open(f.file("notes.md"));
+    auto *store = &f.store;
+    doc->buffer()->replace({0, 0}, "First ");
+    store->save(doc);
+    QTRY_COMPARE(doc->state(), Document::State::Clean);
+    const auto count = store->history()->versions(doc->id()).size();
+    writeFile(doc->path(), "Reloaded");
+    QTRY_COMPARE(doc->buffer()->text(), QString("Reloaded"));
+    doc->buffer()->replace({0, 0}, "Second ");
+    store->save(doc);
+    QTRY_COMPARE(doc->state(), Document::State::Clean);
+    QCOMPARE(store->history()->versions(doc->id()).size(), count);
+}
+
+void withoutARuntimeFolderParchUsesItsOwn()
+{
+    QTemporaryDir root;
+    const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR"), state = qgetenv("XDG_STATE_HOME");
+    const auto restore = qScopeGuard([&] {
+        if (runtime.isNull()) qunsetenv("XDG_RUNTIME_DIR");
+        else qputenv("XDG_RUNTIME_DIR", runtime);
+        if (state.isNull()) qunsetenv("XDG_STATE_HOME");
+        else qputenv("XDG_STATE_HOME", state);
+    });
+    const bool testPaths = QStandardPaths::isTestModeEnabled();
+    const auto restoreLocations = qScopeGuard([testPaths] { QStandardPaths::setTestModeEnabled(testPaths); });
+    QStandardPaths::setTestModeEnabled(false);
+    qunsetenv("XDG_RUNTIME_DIR");
+    qputenv("XDG_STATE_HOME", QFile::encodeName(root.path()));
+    auto paths = AppPaths::standard();
+    QVERIFY(paths.singleInstance);
+    auto longest = paths;
+    longest.runtime = QString(107 - QStringLiteral("/parch.sock").size(), 'a');
+    QVERIFY(longest.socketPathFits());
+    longest.runtime += u'b';
+    QVERIFY(!longest.socketPathFits());
+    QVERIFY(paths.runtime.startsWith(paths.state + '/'));
+    struct stat mode {};
+    QVERIFY(::lstat(QFile::encodeName(paths.runtime).constData(), &mode) == 0);
+    QCOMPARE(mode.st_mode & 0777U, 0700U);
+    qputenv("XDG_STATE_HOME", QFile::encodeName(root.filePath(QString(110, 's'))));
+    paths = AppPaths::standard();
+    QVERIFY(!paths.singleInstance);
+    QCOMPARE(paths.runtime, AppPaths::standard().runtime);
+    QVERIFY(::lstat(QFile::encodeName(paths.runtime).constData(), &mode) == 0);
+    QCOMPARE(mode.st_mode & 0777U, 0700U);
+    AppService service(paths);
+    QVERIFY2(service.listen(), qPrintable(service.error()));
+    QVERIFY(!AppService::forward(paths, {}));
+    QVERIFY(!QFileInfo::exists(AppService::socketPath(paths)));
 }
 
 } // namespace LibraryTests

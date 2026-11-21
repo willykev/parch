@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QString>
 #include <functional>
+#include <optional>
 #include <sys/stat.h>
 
 // What stat says of a file, in nanoseconds, enough to know that it has not
@@ -103,7 +104,7 @@ struct LoadedFile {
     DiskVersion version;
 };
 
-enum class SaveStatus { Saved, Conflict, Failed };
+enum class SaveStatus { Saved, Conflict, Failed, Cancelled };
 
 struct SaveResult {
     SaveStatus status = SaveStatus::Failed;
@@ -136,6 +137,16 @@ using KeepCurrent = std::function<bool(const QByteArray &current, QString *reaso
 // The file's version. A file that still stands as `known` did, at the same
 // place, is that version without being read; any other is read and hashed.
 DiskVersion fingerprint(const QString &path, const DiskVersion &known = {});
+// The link at a chosen name and the regular file it leads to, if any.
+struct NameLink {
+    QString name;
+    QString target;
+    quint64 device = 0, inode = 0;
+    bool regular = false;
+    quint64 targetDevice = 0, targetInode = 0;
+    bool operator==(const NameLink &) const = default;
+};
+std::optional<NameLink> nameLink(const QString &path);
 // The path with its folder resolved by the kernel and its last part as it
 // is, never followed: where create() makes a file.
 QString literalPath(const QString &path);
@@ -160,7 +171,7 @@ QString canonicalPath(const QString &path);
 // Larger files are not read: load() refuses them as unreadable, saying
 // why, so that one never fills memory or holds up the thread reading it.
 constexpr qint64 MaxLoadBytes = qint64(64) << 20;
-LoadedFile load(const QString &path);
+LoadedFile load(const QString &path, const QStringList *folders = nullptr);
 // A pool for short looks at the file system made for the UI, as whether a
 // folder or file is there, which a file system that stopped answering can
 // hold up for ever: a caller waits for one only so long, if at all, and
@@ -201,9 +212,10 @@ QByteArray encode(const QString &text, const TextConvention &convention);
 // owner, group or any attribute the new file cannot have, is written in
 // place instead, so that it stays the same file: only once keep has taken
 // the bytes it holds, since a write cut short leaves a torn file. Without
-// keep, such a file is not saved.
+// keep, such a file is not saved. With an open directory, the expected
+// file and its replacement are accessed relative to that directory.
 SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion &expected,
-                const KeepCurrent &keep = {});
+                const KeepCurrent &keep = {}, int directory = -1);
 // Makes a new file with the bytes at a name parch made up, or at a file it
 // makes again: in the path's folder, resolved, under its last part taken as
 // it is. It has the permission bits given, or else the default ones, less
@@ -219,7 +231,13 @@ SaveResult createAt(int directory, const QString &folder, const QString &leaf, c
 // there, which is never followed: the file a link led to is never opened.
 // Anything there but a link, a folder or a file, is left as it is:
 // Conflict, and nothing is written.
-SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode = 0);
+SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode = 0, const NameLink *expectedLink = nullptr);
+// Streams a regular file into a temporary sibling, then links it at a free name.
+SaveResult copyAt(int directory, const QString &folder, const QString &leaf, int source, qint64 size, quint32 mode);
+
+// Checks the published copy by identity and content before deleting either file.
+bool copyStillAt(int directory, const QByteArray &leaf, const DiskVersion &expected);
+
 // For tests: called with the path just before create() gives the new file
 // its name; and whether the file system is taken to rename without
 // replacing, or else to link and unlink, as on one that cannot.

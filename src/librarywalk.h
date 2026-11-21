@@ -8,7 +8,7 @@
 // Every text document in a set of folders, as the library lists them: .md,
 // .markdown and .txt files, hidden entries left out. A walk runs on whatever
 // thread calls it and asks the file system as it goes, so it belongs off the
-// UI thread. Links are followed, but each folder and each file is visited
+// UI thread. Links within the library are followed. Each folder and each file is visited
 // once, by device and inode, so that a link back into a folder already
 // walked, or a loop of links, ends there.
 namespace LibraryWalk {
@@ -42,8 +42,11 @@ bool isTextDocument(const QString &name);
 // Calls `found` for each document beneath the folders, in the order given
 // and, within a folder, its files before its subfolders, each sorted by
 // name. Stops early once `cancel` is set or `found` returns false.
+// The outermost configured folder containing an already resolved path.
+QString rootOf(const QString &canonicalPath, const QStringList &roots);
+
 Stats walk(const QStringList &folders, const std::function<bool(const Found &)> &found,
-           const std::atomic<bool> *cancel = nullptr);
+           const std::atomic<bool> *cancel = nullptr, const QStringList &allowedRoots = {});
 
 // Every folder beneath the folders given, and those folders themselves, in
 // the order a tree of them shows them, each once; at most `limit`.

@@ -33,7 +33,7 @@ ApplicationWindow {
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
                                        || encodingDialog.visible
                                        || documentSettingsDialog.visible || exportDialog.visible || openLinkDialog.visible
-                                       || exportLinkDialog.visible || exportReplacePrompt.visible
+                                       || saveLinkDialog.visible || exportLinkDialog.visible || exportReplacePrompt.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -655,6 +655,9 @@ ApplicationWindow {
         }
         function onCloseConfirmationRequested(document, discarding) { closeConfirmation.made().ask(document, discarding) }
         function onEncodingConfirmationRequested(document) { encodingDialog.made().confirm(document) }
+        function onSaveLinkRequested(document, name, target, canFollow) {
+            saveLinkDialog.made().ask(document, name, target, canFollow)
+        }
         function onExportLinkQuestionRequested(output, target) { exportLinkDialog.made().ask(output, target) }
         function onViewShowRequested() { window.showView() }
     }
@@ -1389,7 +1392,7 @@ ApplicationWindow {
             encodingDialog: encodingDialog, closeConfirmation: closeConfirmation, attachmentDialog: attachmentDialog,
             linkDialog: openLinkDialog, checkDocumentDialog: checkDocumentDialog, commandPalette: commandPalette,
             preferencesDialog: preferencesDialog, documentSettingsDialog: documentSettingsDialog,
-            exportDialog: exportDialog, exportLinkDialog: exportLinkDialog, exportReplacePrompt: exportReplacePrompt,
+            saveLinkDialog: saveLinkDialog, exportDialog: exportDialog, exportLinkDialog: exportLinkDialog, exportReplacePrompt: exportReplacePrompt,
             shortcutsDialog: shortcutsDialog, headingsDialog: headingsDialog, folderSearchDialog: folderSearchDialog
         }
         return popups[name] ? popups[name].made() : null
@@ -1528,6 +1531,17 @@ ApplicationWindow {
             ExportDialog {
                 objectName: "exportDialog"
                 context: window.context
+                onClosed: window.dialogClosed()
+            }
+        }
+    }
+
+    LazyPopup {
+        id: saveLinkDialog
+        owner: window
+        component: Component {
+            SaveLinkDialog {
+                objectName: "saveLinkDialog"
                 onClosed: window.dialogClosed()
             }
         }

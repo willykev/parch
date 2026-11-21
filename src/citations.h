@@ -127,7 +127,7 @@ QList<StyleInfo> bundledStyles();
 QString bundledId(const QString &name);
 std::shared_ptr<const CslStyle> bundledStyle(const QString &id, QString *error = nullptr);
 // A style chosen by the writer, from a .csl file.
-std::shared_ptr<const CslStyle> styleFromFile(const QString &path, QString *error = nullptr);
+std::shared_ptr<const CslStyle> styleFromFile(const QString &path, QString *error = nullptr, const QStringList *folders = nullptr);
 // The bundled en-US locale.
 std::shared_ptr<const CslLocale> defaultLocale();
 std::shared_ptr<const CslLocale> localeFromFile(const QString &path, QString *error = nullptr);

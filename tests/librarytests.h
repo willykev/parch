@@ -5,6 +5,20 @@
 // files and drafts taken out of the library, searching a large library, and
 // the user guide. ParchTests runs each of them as a test function of its own.
 namespace LibraryTests {
+void linkedFoldersOutsideTheLibraryAreNotWalked();
+void linkUpdatesNeverRewriteFilesOutsideTheLibrary();
+void aLinkedFolderOutsideIsNotAMoveDestination();
+void renameAndTrashRefuseAPathThroughALinkOutside();
+void linksInsideTheLibraryStillWork();
+void saveAsOntoADanglingLinkAsks();
+void savingAtALinkOffersTheAvailableChoices();
+void aDanglingLinkNamedAtLaunchCreatesNothing();
+void savingADocumentOpenedThroughALinkStillWritesItsTarget();
+void bibliographyReadsStayWithinTheDocumentsFolders();
+void aCrossDeviceMoveOfALargeFileIsRefused();
+void oneBusyDocumentDoesNotPruneOthersHistory();
+void outsideReloadsShareTheHistoryInterval();
+void withoutARuntimeFolderParchUsesItsOwn();
 void renameUpdatesTextFilesAndHtmlAttributes_data();
 void renameUpdatesTextFilesAndHtmlAttributes();
 void undoRenameRestoresExactReferenceSpelling_data();

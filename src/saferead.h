@@ -60,9 +60,8 @@ QString pictureRefusal(const QString &path, const QStringList &folders, PictureP
 bool readDescriptor(int descriptor, qint64 limit, QByteArray &bytes, QString &error, bool *tooLarge = nullptr,
                     qint64 sizeHint = 0);
 
-// Reads a copy from an open file. A short read, extra bytes or an I/O error
-// leaves no bytes to publish at the destination.
-bool readForCopy(int descriptor, qint64 expectedSize, QByteArray &bytes, QString &error);
+// The name of the opened file or directory, with every link resolved.
+QString descriptorPath(int descriptor);
 
 // Whether a canonical path is in /proc, /sys or /dev (or is one of them):
 // the system's files, never a document or a picture.

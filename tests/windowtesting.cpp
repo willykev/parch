@@ -174,7 +174,7 @@ const QStringList lazyPopups{
     QStringLiteral("linkDialog"),          QStringLiteral("checkDocumentDialog"), QStringLiteral("commandPalette"),
     QStringLiteral("preferencesDialog"),   QStringLiteral("documentSettingsDialog"), QStringLiteral("exportDialog"),
     QStringLiteral("exportLinkDialog"),    QStringLiteral("exportReplacePrompt"), QStringLiteral("shortcutsDialog"),
-    QStringLiteral("headingsDialog"),      QStringLiteral("folderSearchDialog")};
+    QStringLiteral("headingsDialog"),      QStringLiteral("folderSearchDialog"), QStringLiteral("saveLinkDialog")};
 
 QObject *popupNamed(QQuickWindow *window, const QString &name)
 {

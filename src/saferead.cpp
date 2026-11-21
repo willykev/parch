@@ -41,6 +41,13 @@ QString systemError(int number)
 
 } // namespace
 
+QString descriptorPath(int descriptor)
+{
+    char name[PATH_MAX];
+    const ssize_t size = ::readlink(QByteArray("/proc/self/fd/") + QByteArray::number(descriptor), name, sizeof name);
+    return size > 0 && size < ssize_t(sizeof name) ? QFile::decodeName(QByteArray(name, size)) : QString();
+}
+
 bool isSystemPath(const QString &canonicalPath)
 {
     for (const QLatin1StringView root : {QLatin1StringView("/proc"), QLatin1StringView("/sys"), QLatin1StringView("/dev")})
@@ -95,20 +102,6 @@ bool readDescriptor(int descriptor, qint64 limit, QByteArray &bytes, QString &er
     }
     bytes.resize(qsizetype(filled));
     return true;
-}
-
-bool readForCopy(int descriptor, qint64 expectedSize, QByteArray &bytes, QString &error)
-{
-    if (expectedSize < 0 || expectedSize >= QByteArray::maxSize()) {
-        bytes.clear();
-        error = tr("the file is too large to copy");
-        return false;
-    }
-    if (!readDescriptor(descriptor, expectedSize, bytes, error, nullptr, expectedSize)) return false;
-    if (bytes.size() == expectedSize) return true;
-    bytes.clear();
-    error = tr("the file ended before its reported size");
-    return false;
 }
 
 namespace {
@@ -172,10 +165,7 @@ Result readFile(const QString &path, qint64 limit, const QStringList *folders)
         result.error = systemError(errno);
         return result;
     }
-    char name[PATH_MAX];
-    const ssize_t length = ::readlink(QStringLiteral("/proc/self/fd/%1").arg(descriptor).toLatin1().constData(), name,
-                                      sizeof name - 1);
-    if (length > 0) result.canonicalPath = QFile::decodeName(QByteArray(name, length));
+    result.canonicalPath = descriptorPath(descriptor);
     if (result.canonicalPath.isEmpty() || isSystemPath(result.canonicalPath)) {
         result.error = result.canonicalPath.isEmpty() ? tr("its real name cannot be found")
                                                       : systemPathReason(result.canonicalPath);

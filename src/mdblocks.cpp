@@ -13,6 +13,18 @@
 
 namespace md::detail {
 
+std::vector<Piece> tableCellPieces(QStringView text, int start, int end, int line)
+{
+    std::vector<Piece> pieces;
+    for (int i = start; i + 1 < end; ++i) {
+        if (text[i] != u'\\' || text[i + 1] != u'|') continue;
+        if (i > start) pieces.push_back({start, i - start, line, false});
+        start = ++i;
+    }
+    if (start < end) pieces.push_back({start, end - start, line, false});
+    return pieces;
+}
+
 Block *ParseState::newBlock(NodeType type, int file, int run)
 {
     blocks.emplace_back();
@@ -841,10 +853,16 @@ bool BlockParser::htmlBlockEnds(const Block *block) const
 
 void BlockParser::addLiteralLine(Block *block)
 {
+    int padding = 0;
     if (partialTab) {
         ++offset;
-        block->literal.append(QString(4 - (column % 4), u' '));
+        padding = 4 - (column % 4);
+        block->literal.append(QString(padding, u' '));
     }
+    if (block->type == NodeType::HtmlBlock)
+        block->pieces.push_back({offset, lineEnd - offset, lineNumber, true, false, quint8(padding)});
+    else if (block->type == NodeType::CodeBlock)
+        block->markers.push_back({offset - (padding > 0), lineEnd});
     block->literal.append(QStringView(s + offset, lineEnd - offset));
     block->literal.append(u'\n');
     if (!blank || (block->type == NodeType::CodeBlock && block->fenced)) {
@@ -1324,30 +1342,7 @@ void BlockParser::addTableRow(Block *table, int from, int to, bool header, int l
         block->column = column;
         block->span = cell.span;
         block->align = table->aligns[column];
-        // The content, with `\|` read as a pipe.
-        int pieceStart = cell.start;
-        for (int i = cell.start; i < cell.end; ++i) {
-            if (s[i] == u'\\' && i + 1 < cell.end && s[i + 1] == u'|') {
-                if (i > pieceStart) {
-                    Piece piece;
-                    piece.src = pieceStart;
-                    piece.len = i - pieceStart;
-                    piece.line = line;
-                    piece.newline = false;
-                    block->pieces.push_back(piece);
-                }
-                pieceStart = i + 1;
-                ++i;
-            }
-        }
-        if (cell.end > pieceStart) {
-            Piece piece;
-            piece.src = pieceStart;
-            piece.len = cell.end - pieceStart;
-            piece.line = line;
-            piece.newline = false;
-            block->pieces.push_back(piece);
-        }
+        block->pieces = tableCellPieces(QStringView(s, n), cell.start, cell.end, line);
         appendChild(row, block);
         column += cell.span;
     }
@@ -1551,6 +1546,8 @@ void BlockParser::finalize(Block *block, int line)
             }
         } else {
             block->literal.truncate(block->literalTextLength);
+            while (!block->markers.empty() && block->markers.back().end > block->lastTextEnd)
+                block->markers.pop_back();
             block->end = block->lastTextEnd;
             block->endLine = block->lastTextLine;
         }

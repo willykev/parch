@@ -1,10 +1,15 @@
 #include "documentlinks.h"
 
+#include "dialectchoice.h"
+#include "documentcitations.h"
 #include "librarywalk.h"
+#include "mdhtml.h"
 #include "mdinclude.h"
+#include "mdparser_p.h"
 #include "pathtext.h"
 #include "textsearch.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QHash>
@@ -92,9 +97,12 @@ private:
             Link link;
             link.kind = image ? Kind::Image : Kind::Link;
             link.html = true;
-            link.written = attribute.value;
+            const md::Range value = attribute.valueRange;
+            link.editable = !value.isEmpty() && value.end <= m_text.size();
+            link.quote = attribute.quote;
+            link.written = link.editable ? m_text.sliced(value.start, value.length()).toString() : attribute.value;
             link.dest = attribute.value;
-            link.range = {node.range.start, (node.open.isEmpty() ? node.range : node.open).end - node.range.start};
+            link.range = link.editable ? SourceRange{value.start, value.length()} : SourceRange{node.range.start, 0};
             link.destination = md::classifyDestination(attribute.value, m_folder);
             links.append(link);
         }
@@ -148,12 +156,142 @@ QString encodedLike(const QString &encoded, const QString &written)
     return result;
 }
 
+// The query and fragment belong to the same spelling as before, including
+// Markdown escapes and entities that stand for structural delimiters.
+QString markdownSuffix(const DocumentLinks::Link &link)
+{
+    const auto &destination = link.destination;
+    if (!destination.query && !destination.encodedFragment) return {};
+    const QString &raw = link.written;
+    for (int i = 0; i < raw.size();) {
+        const int start = i;
+        QChar c = raw.at(i++);
+        if (c == u'\\' && i < raw.size() && md::detail::isAsciiPunct(raw.at(i).unicode())) c = raw.at(i++);
+        else if (c == u'&') {
+            QString entity;
+            if (const int n = md::detail::scanEntity(raw.constData(), int(raw.size()), start, &entity)) {
+                i = start + n;
+                c = entity.size() == 1 ? entity.front() : QChar();
+            }
+        }
+        if (c == u'?' || c == u'#') return raw.mid(start);
+    }
+    return md::destinationSuffix(destination, md::DestinationSyntax::Markdown);
+}
+
 QString shownAround(QStringView line, qsizetype start, qsizetype end, const QString &with)
 {
     const qsizetype from = std::max<qsizetype>(0, start - contextUnits);
     const qsizetype until = std::min(line.size(), end + contextUnits);
     return (from > 0 ? QStringLiteral("…") : QString()) + line.sliced(from, start - from).toString() + with
            + line.sliced(end, until - end).toString() + (until < line.size() ? QStringLiteral("…") : QString());
+}
+
+DocumentLinks::Change reviewedChange(QStringView text, SourceRange range, int line, const QString &before,
+                                     const QString &after, const QString &problem = {})
+{
+    int lineStart = range.start, lineEnd = range.start + range.length;
+    while (lineStart > 0 && text.at(lineStart - 1) != u'\n' && text.at(lineStart - 1) != u'\r') --lineStart;
+    while (lineEnd < text.size() && text.at(lineEnd) != u'\n' && text.at(lineEnd) != u'\r') ++lineEnd;
+    const QStringView lineText = text.sliced(lineStart, lineEnd - lineStart);
+    const int start = range.start - lineStart;
+    const int end = start + range.length;
+    return {range, before, after, line, shownAround(lineText, start, end, before),
+            problem.isEmpty() ? shownAround(lineText, start, end, after) : problem, problem};
+}
+
+QString yamlPath(const QString &path, QChar quote, bool inFlow)
+{
+    const bool controls = std::any_of(path.begin(), path.end(), [](QChar c) {
+        return c.unicode() < 0x20 || c.unicode() == 0x7f;
+    });
+    if (controls || quote == u'"') {
+        QString escaped;
+        for (const QChar c : path) {
+            if (c == u'"' || c == u'\\') escaped += u'\\' + QString(c);
+            else if (c.unicode() < 0x20 || c.unicode() == 0x7f)
+                escaped += QStringLiteral("\\x%1").arg(uint(c.unicode()), 2, 16, QLatin1Char('0'));
+            else escaped += c;
+        }
+        return u'"' + escaped + u'"';
+    }
+    static const QRegularExpression plainSpecial(QStringLiteral("^(?:[-?:](?:\\s|$)|[#!&*|>'\"%@`\\[\\]{},])|\\s#|:(?:\\s|$)"));
+    static const QRegularExpression flowSpecial(QStringLiteral("[,\\[\\]{}'\"]"));
+    if (quote == u'\'' || path.trimmed() != path || path.contains(plainSpecial) || (inFlow && path.contains(flowSpecial))
+        || path == u"~" || path.compare(QLatin1StringView("null"), Qt::CaseInsensitive) == 0) {
+        QString escaped = path;
+        escaped.replace(u'\'', QStringLiteral("''"));
+        return u'\'' + escaped + u'\'';
+    }
+    return path;
+}
+
+void citationChanges(const md::FrontMatter &front, const QString &text, const QString &folder, const QString &newFolder,
+                     const QString &library, const QString &newLibrary, const QList<DocumentLinks::Move> &moves,
+                     QList<DocumentLinks::Change> &found)
+{
+    const md::YamlValue *bib = front.data.find(u"bibliography");
+    const md::YamlValue *style = front.data.find(u"csl");
+    if (!bib && !style) return;
+    const auto before = DocumentCitations::Reach::of(library, folder);
+    const auto after = DocumentCitations::Reach::of(newLibrary, newFolder);
+    TextSearch::LineCounter lines(text);
+    const auto add = [&](const md::YamlValue &value, const QString &path, bool isStyle) {
+        if (path.isEmpty()) return;
+        const QString plain = value.scalar.trimmed();
+        QString replacement, problem;
+        if (isStyle && !Dialect::isStyleFile(path)) {
+            // A bundled style may have been written as a filename because
+            // there was no file of that name beside the document.
+            if (folder == newFolder || !Dialect::isStyleFile(Dialect::styleReference(plain, newFolder))) return;
+            replacement = path;
+        } else {
+            const QString normalized = QDir::cleanPath(path);
+            const QString target = DocumentLinks::moved(normalized, moves);
+            const bool absolute = QDir::isAbsolutePath(plain);
+            const bool fromHome = plain == u"~" || plain.startsWith(QLatin1StringView("~/"));
+            if (target == normalized && (folder == newFolder || absolute || fromHome)) return;
+            const QString canonical = QFileInfo(path).canonicalFilePath();
+            if (!before.allows(path) || !after.allows(target)
+                || (!canonical.isEmpty() && !after.allows(DocumentLinks::moved(canonical, moves)))) {
+                problem = QCoreApplication::translate("DocumentLinks", "“%1” is outside the allowed folders.").arg(plain);
+            } else if (absolute) {
+                replacement = target;
+            } else if (fromHome) {
+                const QString home = QDir::homePath();
+                replacement = md::isWithin(target, home) ? QStringLiteral("~/") + QDir(home).relativeFilePath(target) : target;
+            } else {
+                if (QDir::cleanPath(newFolder + u'/' + plain) == target) return;
+                replacement = QDir(newFolder).relativeFilePath(target);
+                if (plain.startsWith(QLatin1StringView("./")) && !replacement.startsWith(u'.'))
+                    replacement.prepend(QStringLiteral("./"));
+            }
+        }
+        const int offset = value.sourceOffset < 0 ? front.contentStart : value.sourceOffset;
+        const SourceRange range{offset, value.sourceLength};
+        QString written;
+        if (range.length > 0) {
+            written = text.mid(range.start, range.length);
+            const QChar first = written.front();
+            replacement = yamlPath(replacement, first == u'"' || first == u'\'' ? first : QChar(), value.inFlow);
+        } else {
+            written = plain;
+            if (problem.isEmpty())
+                problem = QCoreApplication::translate("DocumentLinks", "“%1” has no exact YAML source range.").arg(plain);
+        }
+        found.append(reviewedChange(text, range, lines.lineOf(offset), written, replacement, problem));
+    };
+    const auto bibliography = [&](const md::YamlValue &value) {
+        if (value.isScalar()) add(value, Dialect::bibliographyReference(value.scalar, folder), false);
+    };
+    if (bib) {
+        if (bib->isList()) {
+            for (const md::YamlValue &value : bib->list) bibliography(value);
+        } else {
+            bibliography(*bib);
+        }
+    }
+    if (style && style->isScalar()) add(*style, Dialect::styleReference(style->scalar, folder), true);
 }
 } // namespace
 
@@ -242,38 +380,26 @@ QString DocumentLinks::moved(const QString &path, const QList<Move> &moves)
 }
 
 QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const QString &path, const QString &library,
-                                                    const QList<Move> &moves, const md::Options &options)
+                                                    const QList<Move> &moves, const md::Options &options,
+                                                    const QString &destinationLibrary)
 {
     QList<Change> found;
     const QString newPath = moved(path, moves);
     const QString folder = PathText::folderOf(path);
     const QString newFolder = PathText::folderOf(newPath);
-    for (const Link &link : find(text, folder, library, options)) {
+    const md::Document document = md::parse(text, options);
+    for (const Link &link : find(document, folder, library)) {
         const md::Destination &destination = link.destination;
-        if (link.html || destination.kind != md::Destination::Kind::LocalFile || !destination.absolute) continue;
+        if (destination.kind != md::Destination::Kind::LocalFile || !destination.absolute) continue;
         const bool include = link.kind == Kind::Include;
         const bool fileUrl = destination.scheme == u"file";
-        // The path as written, its escapes and percent-encoding read, and
-        // the fragment after it, kept as written.
-        QString plain;
-        QString suffix;
-        if (include) {
-            plain = link.dest;
-        } else if (fileUrl) {
-            plain = destination.path;
-            const qsizetype hash = link.written.indexOf(u'#');
-            if (hash >= 0) suffix = link.written.mid(hash);
-        } else {
-            const qsizetype hash = link.written.indexOf(u'#');
-            if (hash >= 0) suffix = link.written.mid(hash);
-            const qsizetype mark = link.dest.indexOf(u'#');
-            plain = QUrl::fromPercentEncoding((mark >= 0 ? link.dest.first(mark) : link.dest).toUtf8());
-        }
+        const QString &plain = include ? link.dest : destination.localPath;
         if (plain.isEmpty()) continue;
         const QString target = destination.path;
         const QString newTarget = moved(target, moves);
         if (newTarget == target && newPath == path) continue;
         const bool absolute = fileUrl || plain.startsWith(u'/');
+        if (!absolute && QDir::cleanPath(newFolder + u'/' + plain) == newTarget) continue;
         QString relative;
         if (absolute && include && (newTarget == library || newTarget.startsWith(library + u'/'))) {
             // Library-rooted it was, and library-rooted it stays.
@@ -289,7 +415,7 @@ QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const Q
         if (plain.endsWith(u'/') && !relative.endsWith(u'/')) relative.append(u'/');
         if (include && md::isUrlSpelling(relative)) relative.prepend(QStringLiteral("./"));
         if (relative == plain) continue;
-        QString after;
+        QString after, problem;
         if (include) {
             // The range holds the path alone, inside its quotes when it has them.
             const bool quote = !md::isBareIncludePath(relative);
@@ -298,31 +424,33 @@ QList<DocumentLinks::Change> DocumentLinks::changes(const QString &text, const Q
             if (link.enclosed || quote)
                 after.replace(u'\\', QStringLiteral("\\\\")).replace(delimiter, u'\\' + QString(delimiter));
             if (!link.enclosed && quote) after = delimiter + after + delimiter;
+        } else if (link.html) {
+            QString url = md::encodeUrlPath(relative) + md::destinationSuffix(destination);
+            if (fileUrl) url.prepend(QStringLiteral("file://"));
+            after = md::htmlAttributeValue(url, link.quote);
+            if (!link.editable)
+                problem = QCoreApplication::translate("DocumentLinks", "The HTML attribute has no exact source range.");
         } else {
             QString encoded;
             if (link.enclosed) {
                 // Angle brackets allow spaces and parentheses. The path
                 // still goes through Markdown unescaping and URL decoding.
                 encoded = relative.replace(u'%', QStringLiteral("%25")).replace(u'#', QStringLiteral("%23"))
+                              .replace(u'?', QStringLiteral("%3F"))
                               .replace(u'&', QStringLiteral("%26")).replace(u'\\', QStringLiteral("%5C"))
                               .replace(u'<', QStringLiteral("\\<")).replace(u'>', QStringLiteral("\\>"));
             } else {
                 encoded = md::encodeDestination(relative);
             }
-            if (fileUrl) encoded.replace(u'?', QStringLiteral("%3F"));
-            after = encodedLike(encoded, link.written) + suffix;
+            after = encodedLike(encoded, link.written) + markdownSuffix(link);
             if (fileUrl) after.prepend(QStringLiteral("file://"));
         }
-        if (after == link.written) continue;
-        qsizetype lineStart = link.range.start;
-        while (lineStart > 0 && text.at(lineStart - 1) != u'\n' && text.at(lineStart - 1) != u'\r') --lineStart;
-        qsizetype lineEnd = link.range.start + link.range.length;
-        while (lineEnd < text.size() && text.at(lineEnd) != u'\n' && text.at(lineEnd) != u'\r') ++lineEnd;
-        const QStringView lineText = QStringView(text).sliced(lineStart, lineEnd - lineStart);
-        const qsizetype start = link.range.start - lineStart;
-        const qsizetype end = start + link.range.length;
-        found.append({link.range, link.written, after, link.line, shownAround(lineText, start, end, link.written),
-                      shownAround(lineText, start, end, after)});
+        if (problem.isEmpty() && after == link.written) continue;
+        found.append(reviewedChange(text, link.range, link.line, link.written, after, problem));
     }
+    if (!document.files.empty() && document.files.front().frontMatter.present)
+        citationChanges(document.files.front().frontMatter, text, folder, newFolder, library,
+                        newPath == path || destinationLibrary.isEmpty() ? library : destinationLibrary, moves, found);
+    std::stable_sort(found.begin(), found.end(), [](const Change &a, const Change &b) { return a.range.start < b.range.start; });
     return found;
 }

@@ -35,6 +35,8 @@ void typeText(QQuickWindow *window, const QString &text);
 void selectRange(QQuickItem *editor, int start, int end);
 QQuickItem *findItem(QQuickItem *item, const QString &name);
 QPoint centreOf(QQuickItem *item);
+// Compare the drawn caret with the current layout at a source character.
+bool caretDrawnAt(EditorBinding *binding, QQuickItem *editor, int source);
 // Gives the window a new width and waits until its content has taken it,
 // since a resize reaches the window's items only through the event loop.
 void resizeWindow(QQuickWindow *window, int width);

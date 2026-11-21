@@ -77,7 +77,8 @@ public:
     // `going`, when given, is told how far it has come, from 0 to 1, as it
     // builds and lays out block by block, and stops it by answering false:
     // then nothing is laid out as it should be, and layOut() is false.
-    bool layOut(QPagedPaintDevice *device, const std::function<bool(qreal done)> &going = {});
+    bool layOut(QPagedPaintDevice *device, const std::function<bool(qreal done)> &going = {},
+                const QString &outputFolder = {});
 
     int pageCount() const;
     // The page, from 0, of the line a position of the laid-out text is in.

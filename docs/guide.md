@@ -243,15 +243,16 @@ cells counting the header's, so that the new table is one. With the caret in
 a table, the same keys and button open that table's menu instead. A table you
 type by hand, pipes and all, becomes a grid as soon as the caret leaves it.
 
-**Write in the cells.** Click a cell to put the caret where you clicked, and
-type; double-click to select a word, triple-click to select the cell's text. A
-cell's Markdown stays in view, styled as in the rest of the text, so
-`**bold**`, `[links](…)` and `code` work in cells as anywhere. A `|` you type
-is written `\|`, as Markdown needs it in a table, and a `` ` `` that would
-start code ending in another cell is written `` \` ``, until you type the one
-that closes it in the same cell. Spaces at the start or end of a cell are
-dropped, since Markdown ignores them. Typing in a cell is one step for
-`Ctrl+Z`, as in a paragraph, and the preview and saving follow as you type.
+**Write in the cells.** Click a cell to place the caret and type.
+Double-click to select a word and triple-click to select the cell's text.
+A cell's Markdown stays in view, styled as in the rest of the text, so
+`**bold**`, `[links](…)` and `code` work in cells as anywhere. A pipe that
+would split a cell is written `\|`. Matching backtick runs make inline code
+in a cell. If an opening run could join two cells, parch escapes it until
+you type a closing run of the same length in that cell. Spaces at the
+start or end of a cell are dropped, since Markdown ignores them. Typing in
+a cell is one step for `Ctrl+Z`, as in a paragraph, and the preview and
+saving follow as you type.
 
 **Move from cell to cell.**
 
@@ -275,16 +276,19 @@ other commands for whole lines are not made in a table, and the status line
 says so. `Ctrl+A` selects the cell's text, then every cell of the table, then
 the whole document; `Esc` lets go of a block. A selection that starts in a
 paragraph and reaches into a table takes the whole table, as does one that
-starts in a cell and goes on out of the table. One that ends where a table
-starts, as lines selected above it do, leaves the table out.
+starts in a cell and goes on out of the table. Selecting prose up to the
+start of a table keeps the selection in the prose in either direction.
 
-**Copy and paste.** A block of cells copies as cells, which paste into a
-spreadsheet as cells; **Cut** copies them and empties them. Cells copied from
-a spreadsheet, a web page or another table paste from the caret's cell on,
-over what is there, and add rows and columns where they reach past the
-table. One value pasted over a block fills each of its cells, and text with
-tabs between its values pastes over a block as cells. Any other text pastes
-into the cell at the caret, its tabs and line breaks made spaces.
+**Copy and paste.** A block of cells copies as readable text and line breaks
+for a spreadsheet and keeps its Markdown when pasted into another parch
+grid. **Cut** copies the cells and empties them. Spreadsheet data keeps its
+rows and columns, including when it has only one column. Grid paste from a
+web page takes the first table and keeps values in their columns across
+spans. Pasted cells overwrite from the caret's cell on, adding rows and
+columns when needed. One value pasted over a selection fills each selected
+cell. Text with tabs between values pastes over a block as cells. At a
+single caret, ordinary text goes into the current cell with tabs and line
+breaks made spaces.
 
 **Add, move and delete rows and columns.** Pointing at a table, or having the
 caret in it, shows a handle beside the row and above the column, a **+** on
@@ -300,14 +304,16 @@ or delete them together.
 - A column's menu: **Insert column left** and **right**, **Move left** and
   **right**, **Align as written**, **Align left**, **center** and **right**,
   **Sort ascending**, **Sort descending** and **Delete column**. A table keeps
-  at least one column. Sorting orders the rows under the header by the
-  column: numbers as numbers and before text, empty cells last, Markdown
-  marks left out of the comparison, and rows that compare the same in the
-  order they were.
-- A right click in a cell, or the `Menu` key there, offers all of these with
-  **Merge cells**, **Split cell**, **Show as Markdown** and **Delete table**.
-  On a misspelled word it offers its spellings first, and the table's
-  commands under **Table**.
+  at least one column. Sorting uses the text each cell shows, including
+  punctuation such as the underscore in `1_0`. Numbers sort before text and
+  empty cells come last. Rows that compare the same stay in their original
+  order.
+- A right click in a cell, or the `Menu` key there, offers row insertion,
+  duplication and deletion, column insertion and deletion, and **Merge
+  cells**, **Split cell**, **Show as Markdown** and **Delete table**, where
+  they can act. Use the row handle's menu to move a row and the column
+  handle's menu to move, align or sort a column. On a misspelled word, the
+  spellings come first and the table commands are under **Table**.
 - `Alt+Shift+Up` and `Alt+Shift+Down` move the caret's row, or the rows
   selected; `Alt+Shift+Left` and `Alt+Shift+Right` move its column.
 
@@ -325,9 +331,9 @@ Inserting a column inside a merged cell widens it and deleting a column it
 covers narrows it. A move or a paste that would cut one in two says so in the
 status line and changes nothing.
 
-**Around a table.** The line after a table stays blank: text you write on it
-goes on the line below, so that it never becomes a row of the table, and
-nothing pulls the text below up against it. `Backspace` on that blank line
+**Around a table.** Text you write on the blank line below a table starts
+its own paragraph. A blank line separates it from the table above and from
+any paragraph below. `Backspace` on the blank line next to the table
 selects the table, and pressed again deletes it, as **Delete table** does.
 For a table at the very start or end of the document, `Up` from its first
 row or `Down` from its last makes a line beside it to write on. A table
@@ -341,10 +347,15 @@ wide, with its colons for alignment. Opening, reading or selecting a table
 changes nothing in the file. One written untidily elsewhere is tidied by its
 first change, and `Ctrl+Z` brings back exactly what was there.
 
-**Show as Markdown**, in a cell's menu, shows that table's Markdown in this
-window, as text you edit directly, until **Show table as grid**. **Show
-tables as Markdown** in the menu, or **Tables** in **Preferences**, shows
-every table as Markdown; **Format table** lines up one shown that way.
+**Show as Markdown** in a cell's menu keeps the caret in the table and
+shows its Markdown in this window for direct editing. With the caret in
+the table, use **Show table as grid** in **Format → Table** or the command
+palette to bring back the grid. A table written by hand becomes a grid
+when the caret leaves it. Once parch has read a completed table it can show
+as a grid, the same command shows it there and then.
+
+**Show tables as Markdown** in the menu, or **Tables** in **Preferences**,
+shows every table as Markdown. **Format table** lines up one shown that way.
 
 A table stays as Markdown, as it is written, when it could not be written as
 a grid without losing something: a row with more cells than the header, a
@@ -394,6 +405,9 @@ plain text; turning it on again styles it at once.
   quotes, code and tables. Scripts, styles and hidden text are left out, and
   characters that would otherwise turn into Markdown are escaped. One undo
   takes the whole paste back. `Ctrl+Shift+V` always pastes plain text.
+  Web tables pasted into prose keep values aligned across spanning rows
+  and columns. Horizontal spans become merged cells in the Writer dialect
+  with merged cells enabled.
 - A pasted image, such as a screenshot, is saved in the `assets` folder beside
   the document, named after the day as in `pasted-2026-11-16-1.png`, and
   linked where you pasted it. Pasting the same image again reuses its file.
@@ -484,8 +498,7 @@ What it shows:
 - Footnotes as numbered notes after the text, a table of contents for
   `{{TOC}}`, the text of included files, and `[%key]` values from the front
   matter.
-- Citations and the bibliography as the document's citation style writes
-  them, with a note style's citations among the notes; see
+- Citations and the bibliography in the selected style. See
   [Citations and bibliographies](#citations-and-bibliographies).
 - Not comments or front matter. Raw HTML that parch supports is formatted;
   anything else is shown as the text it is and never run (see
@@ -504,9 +517,10 @@ In the preview:
 - It scrolls with the text beside it, each showing the same place. **Scroll
   sync** in the status line turns that off and on.
 - A click on a link opens a web or mail address in your browser or mail
-  program and a Markdown file in a tab, at the heading the link names if it
-  names one, and scrolls to a heading in the same document. A footnote's
-  number goes to the note and the arrow after the note comes back.
+  program. A link to a Markdown or `.txt` document opens a tab at the
+  heading if the link names one. A link to a heading in the same document
+  scrolls there. A footnote's number goes to the note and the arrow after
+  the note comes back.
 - A link of any other kind asks first. An address such as `zoommtg:` or
   `steam:` names the program it would go to by its scheme, and shows the
   whole address; **Open** hands it to that program. A link to any other file
@@ -652,14 +666,20 @@ style** in **Document settings…**, or with `--bibliography` and `--csl`.
 Whatever the file, parch reads it only if it is a regular file of at most
 32 MiB, never a device, a pipe or a file of `/proc`, `/sys` or `/dev`.
 
-With a style, the preview, `parch render` and the HTML export write each
-citation as the style has it, `(Doe, 2006, p. 23)` or `[1, p. 23]`, and the
-bibliography after the text: the style's entries, then the document's own
-Writer entries, numbered as they are first cited. A note style, such as
-Chicago notes and bibliography, puts each citation of the text in a footnote
-of its own, numbered with your other notes; a citation inside a footnote
-stays in it. Without a style or a bibliography file, Writer citations are
-numbered as they are first cited: `[1, p. 23]`.
+With a style, the preview, `parch render` and formatted exports write each
+citation as the style has it, such as `(Doe, 2006, p. 23)` or `[1, p. 23]`.
+The bibliography lists the style's entries first, followed by the
+document's own Writer entries in order of first citation. In the preview,
+HTML, PDF and EPUB, author-date and numeric styles put the bibliography
+before collected notes, directly after a closing References heading when
+present. Writer citations use the same order. Note styles put the
+collected notes before the bibliography.
+
+A note style such as Chicago notes and bibliography gives each citation
+in the main text a footnote numbered with the other notes. A citation
+inside a footnote stays in it. Without a style or a bibliography file,
+Writer citations are numbered in the order you first cite them, as in
+`[1, p. 23]`.
 
 In the preview a key that nothing defines stays where it is cited, in the
 theme's colour for what is wrong, and says which key it is when the pointer
@@ -749,10 +769,21 @@ page to page.
   through your desktop's print dialog, which chooses the printer and the
   paper; the dialog before it chooses the margins and the type.
 
+Markdown, HTML, PDF and DOCX preserve the query and fragment when writing a
+relative link from the export folder.
+
+A front-matter title supplies document metadata in HTML, PDF, DOCX and
+EPUB. Write a heading in the Markdown body to put a title on the page.
+
 What each format holds:
 
-- **Markdown** assembles the document and its includes into one file. The
-  default image setting, **auto**, links pictures within the new document’s
+- **Markdown** assembles the document and its includes into one file. Lists,
+  definition lists and code blocks stay separate. Link definitions keep
+  their scope, and repeated copies of the same inline note share a number.
+  Links to included headings jump within the new file. A link to an included
+  file goes to its first heading when it has one. An explicit query keeps
+  the link pointing to the separate file.
+  The default image setting, **auto**, links pictures within the new document’s
   folder and copies other readable pictures into `NAME_files` beside it.
   Choose **copy** to carry all its pictures, **link** to point back to the
   originals, or **Write the text as it is** to keep the source text.
@@ -771,22 +802,28 @@ What each format holds:
   points; **modern**, the desktop's sans-serif at 10 points; or **compact**,
   10 points with close lines and 15 mm margins. A font, a size or margins
   you choose go over the template's. The pages are numbered, with text you
-  can search and copy, working links, and an outline of the headings. `+++` starts a new page, and a heading never stays
+  can search and copy, working links, and an outline of the headings.
+  Relative links lead from the folder the PDF is saved in.
+  `+++` starts a new page, and a heading never stays
   at the foot of a page without its text. Formulas and diagrams are vectors;
   a diagram that cannot be drawn as one is printed as a picture at four times
-  its size, and the notice says so. Notes and the bibliography follow the
-  text.
-- **DOCX**: a Word document with real styles (Title, Heading 1 to 6, Quote,
-  Code), bulleted, numbered and task lists, tables with merged cells, links,
-  notes as footnotes or endnotes, pictures with their descriptions, and the
-  title, author, subject, keywords and language from the front matter.
+  its size, and the notice says so. The citation style determines the
+  order of the bibliography and collected notes.
+- **DOCX**: a Word document with styles for headings, quotes and code,
+  bulleted, numbered and task lists, tables with merged cells, links, and
+  pictures with their descriptions. Block code and inline code use a
+  fixed-width font. Word places notes as footnotes or endnotes, according
+  to the export setting. The title, author, subject, keywords and language
+  from the front matter are document properties.
   Formulas and diagrams are pictures, not Word equations.
 - **EPUB**: an EPUB 3 book with a file for each chapter (each heading of
   level 1, or of level 2 when the document has a single title), a table of
   contents from the headings, its images, formulas and diagrams as SVG, and
   its title, author, language, description and date from the front matter.
   Page breaks are hints, since a reader sets its own pages, and pictures from
-  the web are left out with their descriptions in their place.
+  the web are left out with their descriptions in their place. Links to the
+  book's chapters and to the web work in the book. Other local links appear
+  as text, and the export notice names the destinations it leaves out.
 
 Formulas and diagrams are drawn by the same helpers as the preview, dark on
 white whatever the desktop's theme. Without them they are written as their
@@ -807,6 +844,10 @@ when you ask, without holding up the window. `Up` and `Down` move through
 the list, and `Enter` opens the place, in the included file when the
 problem is in one.
 
+Heading checks include linked `.txt` files. For `notes.txt?view=plain#opening`,
+the check looks for `notes.txt` and its `opening` heading. The query stays on
+the link.
+
 `parch check` reports the same problems from the terminal, and can check
 several documents at once (see [Command line](#command-line)).
 
@@ -816,10 +857,12 @@ several documents at once (see [Command line](#command-line)).
   next match, `Shift+Enter` and `Shift+F3` to the one before, and the bar
   counts them ("3 of 12"). The bar's buttons match case, whole words, or a
   regular expression.
-- **Find and replace…** (`Ctrl+H`) adds a replace field: **Replace** changes
-  the current match and **All** every match, as one step for
-  `Ctrl+Z`. With regular expressions, `$1` in the replacement is the first
-  group.
+- **Find and replace…** (`Ctrl+H`) adds a replace field. **Replace** changes
+  the current match. **All** uses the Find settings and replacement in
+  effect when pressed and makes one step for `Ctrl+Z`. The bar shows how
+  many matches were replaced, and the status line says when a table
+  refused a change. With regular expressions, `$1` in the replacement is
+  the first group.
 - `Escape` closes the bar and gives the keys back to the text.
 - **Search the library…** (`Ctrl+Shift+F`) searches the text of every
   document in the library's folders and the drafts. Matches arrive as they
@@ -864,13 +907,19 @@ you chose last.
   The same commands are in the menu (`F10`) and the command palette for the
   document in front, with **New document in folder…**, which makes one
   beside it, when it is in one of the library's folders.
-- When a renamed or moved document has links, images, includes or reference
-  definitions leading to it in other documents of the library, or relative
-  ones of its own, parch lists them and offers to update them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
-  A moved document keeps its tab, its history and any unsaved text.
-- **Undo**, in the notice a rename or move leaves, puts it back where it
-  was, and the links it updated with it, as long as nothing else has taken
-  its old name and no other rename or move has been made since.
+- When a document or folder moves or gets a new name, parch reviews affected links, images,
+  includes and reference definitions in the library's Markdown and `.txt`
+  documents. This includes supported HTML link and image attributes and
+  front-matter paths to bibliography and citation style files. The review
+  names references that need attention, such as a bibliography outside
+  the destination library. **Update links** applies the offered changes,
+  as one step for `Ctrl+Z` in each open document. **Move only** keeps the source
+  text as written. A moved document keeps its tab, history and unsaved text.
+- **Undo**, in the latest move or rename notice, puts the file or folder
+  back if its old name is free. It restores the exact spelling of the
+  references the move updated and keeps later edits elsewhere. If a later
+  edit makes a reference ambiguous, Undo names the affected document and
+  leaves the move in place.
 
 ## Work in tabs and windows
 
@@ -1101,22 +1150,31 @@ parch watches the files you have open.
 - If you have unsaved changes too, the document goes into **conflict** and
   nothing is saved over the file until you choose. You can keep writing
   meanwhile. **Review** (or `Ctrl+S`) shows your text beside the file's,
-  with the differing lines marked, and offers:
-  - **Reload**: take the file's text. Yours stays in history and undo.
-  - **Keep both**: save your text as a copy beside the file, and take the
+  with the differing lines marked. An ordinary change to a named file
+  offers four choices.
+  - **Reload** takes the file's text. Yours stays in history and undo.
+  - **Keep both** saves your text as a copy beside the file and takes the
     file's text.
-  - **Overwrite**: save your text over the file. The file's text goes to
+  - **Overwrite** saves your text over the file. The file's text goes to
     history.
-  - **Save as…**: put your text somewhere else.
+  - **Cancel** closes the review and leaves the conflict pending.
+
+  A draft's conflict offers **Reload**, **Overwrite** and **Cancel**.
 - If another program renames the file, or moves it into a folder parch
   watches (that of another open file, or a library folder you have open),
   the tab follows it, with any unsaved text, its history and its place among
   the recent files, and a notice says so. Moved anywhere else, the file is
   missing, as if it had been deleted.
-- If the file was deleted, **Save again** puts your text back where it was.
-- If the file was replaced by a link to another file, nothing is read from
-  or written to that file unless you choose **Follow the link**. **Put this
-  text at “name”** replaces the link with a file holding your text.
+- If the file was deleted and the document has text to keep, **Save again**
+  puts it back where it was. **Save as…** writes it somewhere else.
+- If the file cannot be read, **Retry** tries to read it again. If the
+  document has its own text, **Save as…** writes it somewhere else.
+- If the file was replaced by a link to another file, **Follow the link**
+  reads the linked file and makes it the tab's file for future saves. If
+  the document has its own text, **Keep both** saves a copy of it and leaves
+  the conflict pending. **Put this text at “name”** replaces the link with
+  that text, and **Save as…** writes it somewhere else. A tab with no text
+  of its own can also open **Version history…**.
 
 ## Choose how a document is read
 
@@ -1287,7 +1345,10 @@ parch export book.md -o book.pdf --page-size Letter
 parch export book.md -o book.docx    # Also .epub for a book
 parch export book.md -o whole.md     # One Markdown file with its includes in place
 parch stats book.md                  # Words, characters, reading time, headings
+parch stats -- -style                # Count a file named -style
 ```
+
+Put `--` before filenames that start with a dash.
 
 - **check** reports each problem as `file:line:column: severity: message
   [code]`: includes that cannot be read, references, footnotes, citations and
@@ -1306,13 +1367,15 @@ parch stats book.md                  # Words, characters, reading time, headings
 - **render** writes the HTML fragment the preview and exports are made from
   (`html`, the default), the text a reader sees (`text`), the headings
   indented by level (`outline`), or the whole semantic tree with source ranges
-  (`json-tree`). Relative links and images lead from the folder the HTML is
-  written to, or from the document's.
+  (`json-tree`). Reader text keeps code indentation and includes formatted
+  citations and the bibliography. In a note style, collected citation notes
+  come before the bibliography. Relative links and images lead from the
+  folder the HTML is written to, or from the document's.
 - **export** writes the document in any of the formats the window's
   [Export](#export-and-print) writes, in the same way: `md`, the document
   as one file with each include in place (an included file's front matter
-  left out and its variables written out, its footnote and link labels kept
-  apart from the document's, and its paths written from the new file's
+  left out and its variables written out, its link definitions kept in
+  scope, and its relative paths written from the new file's
   folder. Markdown’s `--images auto` copies pictures that would otherwise
   be outside the exported document’s folder. Use `--images copy` to copy
   all pictures, `--images link` to keep their original locations, or
@@ -1325,12 +1388,16 @@ parch stats book.md                  # Words, characters, reading time, headings
   is printed as a note. The format follows `-o`'s name unless `--to` gives
   one.
 - **stats** counts the words, characters (with and without spaces) and
-  headings a reader reads, and the reading time at 200 words a minute.
+  headings in the written text and its notes, and the reading time at 200
+  words a minute. Inline notes in tables count with their cell, and HTML
+  line breaks separate words.
 
 An export never writes over the document or a file it includes, never
 writes through a symbolic link, even with `--force`, replaces a file that
 is there only with `--force`, and is not made at all when a file the
-document includes cannot be read. `--quiet` prints nothing but errors.
+document includes cannot be read. With `--quiet`, export prints errors if
+there are any. Add `--json` to request its report. Numeric export options must
+be finite and within the ranges shown by `parch help export`.
 `render -o` follows the same file rules. `render` to standard output can
 preview an incomplete document and reports that an include could not be read.
 
@@ -1367,8 +1434,11 @@ dialect version, and the version of what drew the result.
 | 0 | Done, and nothing wrong |
 | 1 | The command line is wrong |
 | 2 | `check` found problems, or `export` or `render -o` could not read an include |
-| 3 | A file could not be read or written, an argument was invalid UTF-8, or an output needs `--force` |
+| 3 | A file could not be read or written, a result could not be written to standard output, an argument was invalid UTF-8, or an output needs `--force` |
 | 4 | The export could not be made |
+
+If a command has written a file and its report to standard output fails,
+exit 3 describes the report failure. The file is available at its output path.
 
 ### Pictures of the window
 
@@ -1512,12 +1582,13 @@ A TeX command parch cannot draw is listed under [Math](#math), and a Mermaid
 syntax error is said as Merman reports it. If none is drawn at all, the
 helpers are missing from `/usr/lib/parch`: install the package again.
 
-**A table shows as Markdown, not as a grid.** It may be shown so on purpose:
-**Show table as grid** in the command palette, with the caret in it, shows
-it as a grid again, and **Show tables as grids** in the menu turns grids on
-for every table. Otherwise parch could not write it as a grid without losing
-something; [Write in tables](#write-in-tables) says what that is. A table you
-are typing by hand becomes a grid once the caret leaves it.
+**A table shows as Markdown, not as a grid.** To restore a grid you hid,
+put the caret in the table and choose **Show table as grid** in the command
+palette. **Show tables as grids** in the menu turns grids on for every table
+that can use them. A table you are typing by hand becomes a grid once the
+caret leaves it. For a completed table that parch can show as a grid,
+**Show table as grid** does it while the caret is still there. The cases
+that need Markdown are listed in [Write in tables](#write-in-tables).
 
 **Words are not underlined, or parch says spelling is not checked.** The
 English dictionary is missing: `sudo pacman -S hunspell-en_us`. Spelling may

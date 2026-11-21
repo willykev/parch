@@ -779,14 +779,15 @@ DocumentStore::KeptCopy DocumentStore::keepBothJob(const QString &path, const QB
 void DocumentStore::keepBoth(Document *document)
 {
     const QString path = fileOf(document);
+    document->m_resolving = true;
     const auto snapshot = document->m_buffer->snapshot();
+    const auto view = m_conflictCopyView ? m_conflictCopyView(document) : std::nullopt;
     const QByteArray local = DiskFile::encode(snapshot->text, document->m_convention);
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HHmmss"));
     QSet<QString> open;
     for (const Document *other : std::as_const(m_documents))
         if (!other->m_path.isEmpty()) open.insert(other->m_path);
     for (auto claim = m_claims.cbegin(); claim != m_claims.cend(); ++claim) open.insert(claim.key());
-    document->m_resolving = true;
     // The document as the choice found it.
     const DiskVersion version = document->m_diskVersion;
     const QString leadsTo = document->m_leadsTo, own = document->m_path, title = document->title();
@@ -794,7 +795,8 @@ void DocumentStore::keepBoth(Document *document)
     auto *watcher = new QFutureWatcher<KeptCopy>(this);
     m_running.append(watcher);
     connect(watcher, &QFutureWatcherBase::finished, this,
-            [this, watcher, path, snapshot, version, leadsTo, own, missing, title, target = QPointer<Document>(document)] {
+            [this, watcher, path, snapshot, view, version, leadsTo, own, missing, title,
+             target = QPointer<Document>(document)] {
         m_running.removeOne(watcher);
         watcher->deleteLater();
         const KeptCopy kept = watcher->result();
@@ -838,7 +840,7 @@ void DocumentStore::keepBoth(Document *document)
             refuseChoice(document, tr("Cannot open the conflict copy: %1").arg(error), nullptr);
             return;
         }
-        emit conflictCopyOpened(copy, document);
+        emit conflictCopyOpened(copy, document, view);
         // A document whose path leads to another file keeps its own text,
         // and waits on; so does one written to while the copy was made,
         // whose newer text the copy lacks.
@@ -846,6 +848,11 @@ void DocumentStore::keepBoth(Document *document)
     });
     watcher->setFuture(
         QtConcurrent::run(&DocumentStore::keepBothJob, path, local, stamp, open, document->m_diskVersion.mode));
+}
+
+void DocumentStore::setConflictCopyView(std::function<std::optional<ViewState>(Document *)> view)
+{
+    m_conflictCopyView = std::move(view);
 }
 
 DocumentStore::Followed DocumentStore::followJob(const QString &path, const AppPaths &paths)

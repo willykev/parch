@@ -246,6 +246,32 @@ QString relativeTo(const QString &outputFolder, const QString &absolutePath)
     return QDir(outputFolder).relativeFilePath(absolutePath);
 }
 
+QString rebasedDestination(const md::Destination &destination, const QString &folder, md::DestinationSyntax syntax)
+{
+    const QString path = relativeTo(folder, destination.path);
+    return (syntax == md::DestinationSyntax::Markdown ? md::encodeDestination(path) : md::encodeUrlPath(path))
+        + md::destinationSuffix(destination, syntax);
+}
+
+std::function<QString(const md::Node &, const QString &)> destinationsFrom(const md::Document &document,
+                                                                          const QString &folder)
+{
+    return [&document, folder = folder.isEmpty() ? QString() : QDir::cleanPath(folder)](const md::Node &node,
+                                                                                      const QString &written) -> QString {
+        if (written.isEmpty() || written.startsWith(u'#')) return written;
+        const QString directory = md::destinationDirectory(document, node);
+        const md::Destination target = md::classifyDestination(written, directory);
+        if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return written;
+        const bool link = node.type == md::NodeType::Link || node.type == md::NodeType::Autolink
+                          || (node.type == md::NodeType::HtmlElement && node.label == u"a");
+        if (link)
+            if (const QString anchor = md::includedAnchor(document, target); !anchor.isEmpty()) return u'#' + anchor;
+        if (folder.isEmpty() || directory.isEmpty() || QDir::cleanPath(directory) == folder || written.startsWith(u'/'))
+            return written;
+        return rebasedDestination(target, folder);
+    };
+}
+
 QString count(int n, const QString &one, const QString &many)
 {
     return QStringLiteral("%1 %2").arg(n).arg(n == 1 ? one : many);

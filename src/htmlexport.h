@@ -30,12 +30,6 @@ public:
 
     // The folder a page's pictures are copied into: "notes_files" beside "notes.html".
     static QString assetFolder(const QString &output);
-
-    // For md::HtmlOptions::destination: relative links and images as HTML
-    // in `folder` reaches the files the document means, whichever of its
-    // files they are written in. The document must outlive it.
-    static std::function<QString(const md::Node &, const QString &)> destinationsFrom(const md::Document &document,
-                                                                                     const QString &folder);
 };
 
 namespace ExportWeb {
@@ -52,7 +46,7 @@ struct Body {
     QStringList fallbackLinks;
 };
 Body body(const md::Document &document, const ExportRecipe &recipe, const ExportPictures *pictures, Assets &assets,
-          bool book);
+          bool book, const md::HtmlOptions::DestinationWriter &destination = {});
 
 // What the document's formulas and diagrams come to in a format that draws
 // them as the helpers do: none drawn without a helper, some refused.

@@ -9,14 +9,17 @@
 #include "pathtext.h"
 #include "saferead.h"
 #include "settings.h"
+#include "sourceboundaries.h"
 #include "sourcebuffer.h"
 #include "tablegrids.h"
 #include "textsearch.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QScopeGuard>
+#include <QPointer>
 #include <QStandardPaths>
 #include <QtConcurrent>
 #include <cerrno>
@@ -29,6 +32,7 @@
 namespace {
 // How many changes a review lists; the rest are counted.
 constexpr int shownChanges = 500;
+constexpr int contextUnits = 64;
 
 QString systemError(int error)
 {
@@ -62,12 +66,25 @@ int renameWithoutReplacing(const QString &from, const QString &to)
     return ::rename(source.constData(), target.constData()) == 0 ? 0 : errno;
 }
 
-bool isMarkdown(const QString &path)
+bool canEditReferences(const Document *document)
 {
-    return path.endsWith(QLatin1String(".md"), Qt::CaseInsensitive)
-           || path.endsWith(QLatin1String(".markdown"), Qt::CaseInsensitive);
+    return document && !document->isTextless() && document->state() != Document::State::ReadOnly
+           && document->state() != Document::State::Conflict;
+}
+
+QByteArray textDigest(const QString &text)
+{
+    return QCryptographicHash::hash(text.toUtf8(), QCryptographicHash::Sha256);
 }
 } // namespace
+
+struct FileOrganizer::OpenRanges {
+    QPointer<SourceBuffer> buffer;
+    Revision revision = 0;
+    QList<int> starts;
+    QMetaObject::Connection connection;
+    ~OpenRanges() { QObject::disconnect(connection); }
+};
 
 FileOrganizer::FileOrganizer(DocumentStore *store, Settings *settings, QObject *parent)
     : QObject(parent), m_store(store), m_settings(settings)
@@ -81,6 +98,7 @@ FileOrganizer::~FileOrganizer()
 }
 
 bool FileOrganizer::busy() const { return m_busy > 0; }
+bool FileOrganizer::canStartMove() const { return !m_review && !busy(); }
 QVariantMap FileOrganizer::trashing() const { return m_trashing; }
 QVariantList FileOrganizer::folders() const { return m_folders; }
 
@@ -254,7 +272,7 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
         refuse(tr("It can only go to a folder of the library."));
         return;
     }
-    if (m_review || busy()) {
+    if (!canStartMove()) {
         refuse(tr("Another move is waiting; finish it first."));
         return;
     }
@@ -290,12 +308,13 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
     plan.from = from;
     plan.to = to;
     plan.library = libraryOf(from);
+    plan.destinationLibrary = libraryOf(to);
     plan.folder = S_ISDIR(state.st_mode);
     plan.documents = plan.folder ? 0 : 1;
     if (m_dialects) plan.dialects = m_dialects();
     // Only a document or a folder can be what a reference leads to here.
     if (!plan.folder && !LibraryWalk::isTextDocument(name)) {
-        if (perform(plan)) finishMove(plan, false, 0, 0);
+        if (perform(plan)) finishMove(plan, false, {});
         return;
     }
     // Open documents are read as their text is now, by their file's identity.
@@ -311,7 +330,7 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
         // The question, or the move, comes before the organizer says it is
         // no longer busy, so that a window waiting for it hears of it.
         if (planned.files.isEmpty()) {
-            if (perform(planned)) finishMove(planned, false, 0, 0);
+            if (perform(planned)) finishMove(planned, false, {});
         } else {
             m_review = planned;
             emit reviewChanged();
@@ -326,13 +345,12 @@ FileOrganizer::Plan FileOrganizer::planJob(Plan plan, QHash<std::pair<quint64, q
     const QList<DocumentLinks::Move> moves{{plan.from, plan.to}};
     LibraryWalk::walk({plan.library}, [&](const LibraryWalk::Found &found) {
         if (plan.folder && found.path.startsWith(plan.from + u'/')) ++plan.documents;
-        if (!isMarkdown(found.path)) return true;
         QString text;
         const auto opened = open.constFind({found.device, found.inode});
         if (opened != open.cend()) text = *opened;
         else if (!FolderSearch::readText(found.path, found.size, found.modified, &text)) return true;
         const md::Options options = plan.dialects ? plan.dialects(found.path) : md::Options();
-        QList<DocumentLinks::Change> changes = DocumentLinks::changes(text, found.path, plan.library, moves, options);
+        auto changes = DocumentLinks::changes(text, found.path, plan.library, moves, options, plan.destinationLibrary);
         if (!changes.isEmpty()) plan.files.append({found.path, std::move(changes)});
         return true;
     }, cancel.get());
@@ -345,10 +363,12 @@ QVariantMap FileOrganizer::review() const
     const Plan &plan = *m_review;
     const bool renaming = PathText::folderOf(plan.from) == PathText::folderOf(plan.to);
     int changes = 0;
+    int unresolved = 0;
     QVariantList rows;
     for (const FilePlan &file : plan.files) {
         for (const DocumentLinks::Change &change : file.changes) {
             ++changes;
+            if (!change.problem.isEmpty()) ++unresolved;
             if (rows.size() >= shownChanges) continue;
             rows.append(QVariantMap{{QStringLiteral("file"), PathText::fileName(file.path)},
                                     {QStringLiteral("folder"), shownName(PathText::folderOf(file.path))},
@@ -364,9 +384,10 @@ QVariantMap FileOrganizer::review() const
     const QString references = changes == 1 ? tr("1 link") : tr("%1 links").arg(changes);
     const QString documents = plan.files.size() == 1 ? tr("1 document") : tr("%1 documents").arg(plan.files.size());
     return {{QStringLiteral("title"), title},
-            {QStringLiteral("detail"),
-             tr("%1 in %2 would no longer lead where they lead now. Update them as it moves, so that they do?")
-                 .arg(references, documents)},
+            {QStringLiteral("detail"), unresolved > 0
+                 ? tr("Review the affected references in %1. Some need attention after the move.").arg(documents)
+                 : tr("%1 in %2 would no longer lead where they lead now. Update them as it moves, so that they do?")
+                       .arg(references, documents)},
             {QStringLiteral("files"), int(plan.files.size())},
             {QStringLiteral("changes"), changes},
             {QStringLiteral("rows"), rows}};
@@ -376,10 +397,12 @@ void FileOrganizer::confirmMove(bool updateReferences)
 {
     if (!m_review) return;
     const Plan plan = *std::exchange(m_review, std::nullopt);
+    setBusy(1);
+    const auto release = qScopeGuard([this] { setBusy(-1); });
     emit reviewChanged();
     if (!perform(plan)) return;
     if (!updateReferences) {
-        finishMove(plan, false, 0, 0);
+        finishMove(plan, false, {});
         return;
     }
     this->updateReferences(plan);
@@ -392,7 +415,7 @@ void FileOrganizer::cancelMove()
     emit reviewChanged();
 }
 
-bool FileOrganizer::perform(const Plan &plan)
+bool FileOrganizer::perform(const Plan &plan, std::optional<DiskVersion> *copiedVersion)
 {
     const QString name = PathText::fileName(plan.from);
     const bool renaming = PathText::folderOf(plan.from) == PathText::folderOf(plan.to);
@@ -499,104 +522,229 @@ bool FileOrganizer::perform(const Plan &plan)
     }
     emit relocated(plan.from, plan.to);
     if (!canonicalFrom.isEmpty() && canonicalFrom != plan.from) emit relocated(canonicalFrom, canonicalTo);
+    if (copiedVersion) *copiedVersion = copied;
     return true;
+}
+
+std::optional<FileOrganizer::Patched> FileOrganizer::inverseFor(const QString &path, const QString &documentId,
+                                                                const QString &text, const QList<SourceEdit> &edits,
+                                                                int references, QString *written)
+{
+    Patched patch{path, documentId, {}, {}, references, {}};
+    int end = 0;
+    for (const SourceEdit &edit : edits) {
+        const SourceRange range = edit.range;
+        if (range.start < end || !sourceGraphemeRange(text, range)) return std::nullopt;
+        written->append(QStringView(text).sliced(end, range.start - end));
+        const int start = int(written->size());
+        written->append(edit.replacement);
+        patch.inverses.append({{{start, int(edit.replacement.size())}, text.mid(range.start, range.length)},
+                               edit.replacement, {}, {}});
+        end = range.start + range.length;
+    }
+    written->append(QStringView(text).sliced(end));
+    patch.digest = textDigest(*written);
+    for (InverseEdit &inverse : patch.inverses) {
+        const SourceRange range = inverse.edit.range;
+        if (!sourceGraphemeRange(*written, range)) return std::nullopt;
+        const int before = std::min(contextUnits, range.start);
+        const int after = range.start + range.length;
+        inverse.contextBefore = written->mid(range.start - before, before);
+        inverse.contextAfter = written->mid(after, contextUnits);
+        // Identical surrounding text cannot identify this occurrence once
+        // the file has changed and there is no open buffer tracking it.
+        const QString context = inverse.contextBefore + inverse.expected + inverse.contextAfter;
+        inverse.uniqueContext = !context.isEmpty() && written->indexOf(context) == range.start - before
+                                && written->indexOf(context, range.start - before + 1) < 0;
+    }
+    return patch;
+}
+
+std::optional<QList<SourceEdit>> FileOrganizer::inverseEdits(const Patched &patch, const QString &text, SourceBuffer *buffer)
+{
+    const bool unchanged = textDigest(text) == patch.digest;
+    const bool tracked = buffer && patch.openRanges && patch.openRanges->buffer == buffer
+                         && patch.openRanges->revision == buffer->revision();
+    QList<SourceEdit> edits;
+    int end = 0;
+    for (qsizetype i = 0; i < patch.inverses.size(); ++i) {
+        const InverseEdit &inverse = patch.inverses.at(i);
+        SourceEdit edit = inverse.edit;
+        if (!unchanged) {
+            if (tracked) {
+                edit.range.start = patch.openRanges->starts.at(i);
+            } else {
+                if (!inverse.uniqueContext) return std::nullopt;
+                const QString context = inverse.contextBefore + inverse.expected + inverse.contextAfter;
+                const qsizetype at = text.indexOf(context);
+                if (at < 0 || text.indexOf(context, at + 1) >= 0) return std::nullopt;
+                edit.range.start = int(at + inverse.contextBefore.size());
+            }
+        }
+        if (edit.range.start < end || !sourceGraphemeRange(text, edit.range)
+            || QStringView(text).sliced(edit.range.start, edit.range.length) != inverse.expected)
+            return std::nullopt;
+        end = edit.range.start + edit.range.length;
+        if (!unchanged) {
+            // A prefix or suffix added at the edge can change the reference
+            // even when its old bytes are all still present.
+            const auto boundary = [](QChar c) { return c.isNull() || c == u'\r' || c == u'\n'; };
+            const auto matchesEdge = [&](QChar actual, QChar expected) {
+                return actual == expected || (boundary(actual) && boundary(expected));
+            };
+            if (!matchesEdge(edit.range.start > 0 ? text[edit.range.start - 1] : QChar(),
+                             inverse.contextBefore.isEmpty() ? QChar() : inverse.contextBefore.back())
+                || !matchesEdge(end < text.size() ? text[end] : QChar(),
+                                inverse.contextAfter.isEmpty() ? QChar() : inverse.contextAfter.front()))
+                return std::nullopt;
+        }
+        edits.append(std::move(edit));
+    }
+    return edits;
+}
+
+void FileOrganizer::rewriteOpen(const StagedRewrite &staged, Document *open, Rewritten &done)
+{
+    if (!canEditReferences(open) || open->id() != staged.documentId || open->buffer() != staged.buffer
+        || open->buffer()->revision() != staged.revision) {
+        done.failed << staged.path;
+        return;
+    }
+    SourceBuffer *buffer = open->buffer();
+    QString written;
+    auto patch = inverseFor(open->path(), open->id(), buffer->text(), staged.edits, staged.references, &written);
+    if (!patch || buffer->replaceAtRevision(staged.revision, staged.edits) != SourceBuffer::EditOutcome::Applied) {
+        done.failed << staged.path;
+        return;
+    }
+    // Track the ranges while this buffer is open. Its other edits can be
+    // right beside an update, and don't have to leave its context intact.
+    if (buffer->text() == written) {
+        auto tracked = std::make_shared<OpenRanges>();
+        tracked->buffer = buffer;
+        tracked->revision = buffer->revision();
+        QList<int> lengths;
+        for (const InverseEdit &inverse : std::as_const(patch->inverses)) {
+            tracked->starts.append(inverse.edit.range.start);
+            lengths.append(inverse.edit.range.length);
+        }
+        tracked->connection = QObject::connect(
+            buffer, &SourceBuffer::sourceChanged, buffer,
+            [ranges = tracked.get(), lengths](Revision revision, SourceRange range, const QString &replacement) {
+                for (qsizetype i = 0; i < ranges->starts.size(); ++i) {
+                    int &start = ranges->starts[i];
+                    if (start < 0) continue;
+                    if (range.start + range.length <= start) start += int(replacement.size()) - range.length;
+                    else if (range.start < start + lengths.at(i)) start = -1;
+                }
+                ranges->revision = revision;
+            });
+        patch->openRanges = std::move(tracked);
+    }
+    done.changes += staged.references;
+    done.patched.append(std::move(*patch));
+}
+
+void FileOrganizer::rewriteClosed(const StagedRewrite &staged, History *history, Rewritten &done)
+{
+    const LoadedFile &loaded = staged.loaded;
+    QString written;
+    auto patch = inverseFor(loaded.version.canonicalPath, staged.documentId, loaded.text, staged.edits,
+                            staged.references, &written);
+    if (!patch) {
+        done.failed << staged.path;
+        return;
+    }
+    // What the file held stays in its history, from where it can come back.
+    History::CaptureStatus status = History::CaptureStatus::Failed;
+    if (history) history->captureUnlessNewest(staged.documentId, loaded.originalBytes, History::Reason::Links, &status);
+    if (status != History::CaptureStatus::Recorded && status != History::CaptureStatus::Held) {
+        done.failed << staged.path;
+        return;
+    }
+    const auto keep = [&](const QByteArray &current, QString *why) {
+        if (current == loaded.originalBytes) return true;
+        *why = tr("The file changed after its version was kept.");
+        return false;
+    };
+    const SaveResult saved = DiskFile::save(staged.path, DiskFile::encode(written, loaded.convention), loaded.version, keep);
+    if (saved.status != SaveStatus::Saved) {
+        done.failed << staged.path;
+        return;
+    }
+    done.changes += staged.references;
+    done.patched.append(std::move(*patch));
+}
+
+QList<SourceEdit> FileOrganizer::referenceEdits(const QList<DocumentLinks::Change> &changes, const QString &path, Rewritten &done)
+{
+    QList<SourceEdit> edits;
+    for (const DocumentLinks::Change &change : changes) {
+        if (change.problem.isEmpty()) edits.append({change.range, change.after});
+        else if (!done.failed.contains(path)) done.failed << path;
+    }
+    return edits;
 }
 
 void FileOrganizer::updateReferences(const Plan &plan)
 {
     const QList<DocumentLinks::Move> moves{{plan.from, plan.to}};
-    int changes = 0, files = 0;
-    QStringList failed, paths;
+    Rewritten done;
     QList<Rewrite> closed;
     for (const FilePlan &file : plan.files) {
         const QString now = DocumentLinks::moved(file.path, moves);
         const QString canonical = QFileInfo(now).canonicalFilePath();
-        if (Document *open = m_store->documentOf(canonical)) {
-            // An open document is updated as it is now, as one undo step.
-            if (open->state() == Document::State::ReadOnly || open->isTextless()) {
-                failed << PathText::fileName(now);
-                continue;
-            }
-            SourceBuffer *buffer = open->buffer();
-            const QString text = buffer->text();
-            const QList<DocumentLinks::Change> found =
-                DocumentLinks::changes(text, file.path, plan.library, moves, open->markdownOptions());
-            if (found.isEmpty()) continue;
-            QList<TextSearch::Edit> edits;
-            if (m_settings && m_settings->tableGrids() && open->markdownOptions().tables) {
-                // A link in a table's cell is changed with the table written tidy around it.
-                QList<SourceEdit> inText;
-                for (const DocumentLinks::Change &change : found) inText.append({change.range, change.after});
-                inText = TableGrids::tidyCellEdits(text, inText, TableGrids::dialectOf(open->markdownOptions()));
-                for (const SourceEdit &edit : std::as_const(inText)) edits.append({edit.range, edit.replacement});
-            } else {
-                for (const DocumentLinks::Change &change : found) edits.append({change.range, change.after});
-            }
-            const TextSearch::Edit edit = TextSearch::combine(text, edits);
-            if (buffer->replace(edit.range, edit.text, EditKind::Other) != SourceBuffer::EditOutcome::Applied) {
-                failed << PathText::fileName(now);
-                continue;
-            }
-            changes += int(found.size());
-            ++files;
-            paths << now;
+        Document *open = m_store->documentOf(canonical);
+        if (!open) {
+            closed.append({now, file.path, m_store->documentIdFor(canonical.isEmpty() ? now : canonical)});
             continue;
         }
-        closed.append({now, file.path, m_store->documentIdFor(canonical.isEmpty() ? now : canonical)});
+        if (!canEditReferences(open)) {
+            done.failed << now;
+            continue;
+        }
+        SourceBuffer *buffer = open->buffer();
+        const QString text = buffer->text();
+        const auto found = DocumentLinks::changes(text, file.path, plan.library, moves, open->markdownOptions(),
+                                                  plan.destinationLibrary);
+        QList<SourceEdit> edits = referenceEdits(found, now, done);
+        const int references = int(edits.size());
+        if (references == 0) continue;
+        if (m_settings && m_settings->tableGrids() && open->markdownOptions().tables)
+            edits = TableGrids::tidyCellEdits(text, edits, TableGrids::dialectOf(open->markdownOptions()));
+        rewriteOpen({now, open->id(), references, edits, {}, buffer->revision(), buffer}, open, done);
     }
     if (closed.isEmpty()) {
-        finishMove(plan, true, changes, files, failed, paths);
+        finishMove(plan, true, std::move(done));
         return;
     }
     setBusy(1);
-    QtConcurrent::run(&m_pool, &FileOrganizer::rewriteJob, closed, plan.library, moves, m_store->history(), plan.dialects)
-        .then(this, [this, plan, changes, files, failed, paths](const Rewritten &rewritten) {
-            finishMove(plan, true, changes + rewritten.changes, files + rewritten.files, failed + rewritten.failed,
-                       paths + rewritten.paths);
+    QtConcurrent::run(&m_pool, &FileOrganizer::rewriteJob, closed, plan, m_store->history())
+        .then(this, [this, plan, done = std::move(done)](const Rewritten &rewritten) mutable {
+            done.changes += rewritten.changes;
+            done.failed += rewritten.failed;
+            done.patched += rewritten.patched;
+            finishMove(plan, true, std::move(done));
             setBusy(-1);
         });
 }
 
-FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString library,
-                                                   QList<DocumentLinks::Move> moves, History *history,
-                                                   Dialects dialects)
+FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, Plan plan, History *history)
 {
+    const QList<DocumentLinks::Move> moves{{plan.from, plan.to}};
     Rewritten done;
     for (const Rewrite &file : files) {
-        const LoadedFile loaded = DiskFile::load(file.path);
+        LoadedFile loaded = DiskFile::load(file.path);
         if (!loaded.ok || loaded.readOnly) {
-            done.failed << PathText::fileName(file.path);
+            done.failed << file.path;
             continue;
         }
-        const md::Options options = dialects ? dialects(file.oldPath) : md::Options();
-        const QList<DocumentLinks::Change> changes =
-            DocumentLinks::changes(loaded.text, file.oldPath, library, moves, options);
-        if (changes.isEmpty()) continue;
-        QList<TextSearch::Edit> edits;
-        for (const DocumentLinks::Change &change : changes) edits.append({change.range, change.after});
-        const TextSearch::Edit edit = TextSearch::combine(loaded.text, edits);
-        QString text = loaded.text;
-        text.replace(edit.range.start, edit.range.length, edit.text);
-        // What the file held stays in its history, from where it can come back.
-        History::CaptureStatus status = History::CaptureStatus::Failed;
-        if (history) history->captureUnlessNewest(file.documentId, loaded.originalBytes, History::Reason::Links, &status);
-        if (status != History::CaptureStatus::Recorded && status != History::CaptureStatus::Held) {
-            done.failed << PathText::fileName(file.path);
-            continue;
-        }
-        const auto keep = [&](const QByteArray &current, QString *why) {
-            if (current == loaded.originalBytes) return true;
-            *why = tr("The file changed after its version was kept.");
-            return false;
-        };
-        const SaveResult saved = DiskFile::save(file.path, DiskFile::encode(text, loaded.convention), loaded.version, keep);
-        if (saved.status != SaveStatus::Saved) {
-            done.failed << PathText::fileName(file.path);
-            continue;
-        }
-        ++done.files;
-        done.changes += int(changes.size());
-        done.paths << file.path;
+        const md::Options options = plan.dialects ? plan.dialects(file.oldPath) : md::Options();
+        const auto changes = DocumentLinks::changes(loaded.text, file.oldPath, plan.library, moves, options,
+                                                    plan.destinationLibrary);
+        const auto edits = referenceEdits(changes, file.path, done);
+        if (edits.isEmpty()) continue;
+        rewriteClosed({file.path, file.documentId, int(edits.size()), edits, std::move(loaded), 0, {}}, history, done);
     }
     return done;
 }
@@ -604,30 +752,129 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, QString
 void FileOrganizer::undoMove(quint64 move)
 {
     if (!m_done || m_done->id != move) return;
-    const Done done = *std::exchange(m_done, std::nullopt);
-    const QString name = PathText::fileName(done.plan.to);
-    const bool renaming = PathText::folderOf(done.plan.from) == PathText::folderOf(done.plan.to);
-    if (m_review || busy()) {
-        emit problem(renaming ? tr("Not renamed: %1").arg(name) : tr("Not moved: %1").arg(name),
-                     tr("Another move is waiting; finish it first."));
+    if (!canStartMove()) {
+        emit problem(tr("Could not undo move"), tr("Another move is waiting; finish it first."));
         return;
     }
-    // The same move the other way, which updates again only the documents
-    // it updated, as they are now, so that their links lead where they led.
-    Plan back = done.plan;
+    const Done taken = *std::exchange(m_done, std::nullopt);
+    Plan back = taken.plan;
     std::swap(back.from, back.to);
+    std::swap(back.library, back.destinationLibrary);
     back.files.clear();
-    for (const QString &path : done.updated) back.files.append({path, {}});
-    if (!perform(back)) return;
-    if (back.files.isEmpty()) finishMove(back, false, 0, 0);
-    else updateReferences(back);
+
+    QList<Patched> open, closed;
+    QStringList failed;
+    for (const Patched &patch : taken.updated) {
+        if (m_store->documentOf(patch.path)) open.append(patch);
+        else if (m_store->documentIdFor(patch.path) == patch.documentId) closed.append(patch);
+        else failed << patch.path;
+    }
+    setBusy(1);
+    if (closed.isEmpty()) {
+        finishUndo(std::move(back), open, {}, std::move(failed));
+        return;
+    }
+    using StagedFiles = std::pair<QList<StagedRewrite>, QStringList>;
+    QtConcurrent::run(&m_pool, [closed, failed = std::move(failed)]() mutable {
+        QList<StagedRewrite> staged;
+        for (const Patched &patch : closed) {
+            LoadedFile loaded = DiskFile::load(patch.path);
+            auto edits = loaded.ok && !loaded.readOnly && loaded.version.canonicalPath == patch.path
+                             ? inverseEdits(patch, loaded.text) : std::nullopt;
+            if (!edits) {
+                failed << patch.path;
+                continue;
+            }
+            staged.append({patch.path, patch.documentId, patch.references, std::move(*edits), std::move(loaded), 0, {}});
+        }
+        return StagedFiles{std::move(staged), std::move(failed)};
+    }).then(this, [this, back = std::move(back), open](StagedFiles staged) {
+        finishUndo(back, open, std::move(staged.first), std::move(staged.second));
+    });
 }
 
-void FileOrganizer::finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed,
-                              const QStringList &paths)
+void FileOrganizer::forgetMove(quint64 move)
+{
+    if (m_done && m_done->id == move) m_done.reset();
+}
+
+void FileOrganizer::finishUndo(Plan back, const QList<Patched> &open, QList<StagedRewrite> closed, QStringList failed)
+{
+    auto release = qScopeGuard([this] { setBusy(-1); });
+    QList<StagedRewrite> buffers;
+    for (const Patched &patch : open) {
+        Document *document = m_store->documentOf(patch.path);
+        if (!canEditReferences(document) || document->id() != patch.documentId) {
+            failed << patch.path;
+            continue;
+        }
+        SourceBuffer *buffer = document->buffer();
+        auto edits = inverseEdits(patch, buffer->text(), buffer);
+        if (!edits) {
+            failed << patch.path;
+            continue;
+        }
+        buffers.append({patch.path, patch.documentId, patch.references, std::move(*edits), {}, buffer->revision(), buffer});
+    }
+    for (const StagedRewrite &file : std::as_const(closed))
+        if (m_store->documentOf(file.path)) failed << file.path;
+    if (!failed.isEmpty()) {
+        QStringList names;
+        for (const QString &path : std::as_const(failed)) names << shownName(path);
+        emit problem(tr("Could not undo move"),
+                     tr("Undo could not verify the references in %1. The files are still in their current locations.")
+                         .arg(names.join(QStringLiteral(", "))));
+        return;
+    }
+
+    std::optional<DiskVersion> copied;
+    if (!perform(back, &copied)) return;
+    const QList<DocumentLinks::Move> moves{{back.from, back.to}};
+    Rewritten done;
+    for (StagedRewrite &file : buffers) {
+        file.path = DocumentLinks::moved(file.path, moves);
+        rewriteOpen(file, m_store->documentOf(file.path), done);
+    }
+    // A move changes where the staged version is expected. A copy between
+    // file systems also has a new inode, which perform() reports itself.
+    QList<StagedRewrite> prepared;
+    for (StagedRewrite &file : closed) {
+        const QString now = DocumentLinks::moved(file.path, moves);
+        if (copied && file.path == back.from) {
+            if (copied->sha256 != file.loaded.version.sha256) {
+                done.failed << now;
+                continue;
+            }
+            file.loaded.version = *copied;
+        } else {
+            file.loaded.version.canonicalPath = now;
+        }
+        file.path = now;
+        prepared.append(std::move(file));
+    }
+    if (prepared.isEmpty()) {
+        finishMove(back, true, std::move(done));
+        return;
+    }
+    release.dismiss();
+    QtConcurrent::run(&m_pool, [prepared, history = m_store->history(), done = std::move(done)]() mutable {
+        for (const StagedRewrite &file : prepared) rewriteClosed(file, history, done);
+        return done;
+    }).then(this, [this, back = std::move(back)](Rewritten rewritten) {
+        finishMove(back, true, std::move(rewritten));
+        setBusy(-1);
+    });
+}
+
+void FileOrganizer::finishMove(const Plan &plan, bool updated, Rewritten done)
 {
     // It can be taken back, until another move is made.
-    m_done = Done{plan, updated ? paths : QStringList(), ++m_moves};
+    const qsizetype files = done.patched.size();
+    const int changes = done.changes;
+    Plan identity = plan;
+    identity.files.clear();
+    identity.dialects = {};
+    m_done = Done{std::move(identity), std::move(done.patched), ++m_moves};
     const QString what = PathText::fileName(plan.from);
     const bool renaming = PathText::folderOf(plan.from) == PathText::folderOf(plan.to);
     const QString title = renaming ? tr("Renamed “%1” to “%2”").arg(what, PathText::fileName(plan.to))
@@ -647,13 +894,14 @@ void FileOrganizer::finishMove(const Plan &plan, bool updated, int changes, int 
         detail << (planned == 1 ? tr("1 link to it, or from it, was left as it was and no longer leads there.")
                                 : tr("%1 links to it, or from it, were left as they were and no longer lead there.")
                                       .arg(planned));
-    if (!failed.isEmpty()) {
-        emit problem(tr("Links not updated: %1").arg(failed.join(QStringLiteral(", "))),
-                     tr("%1 %2 But these documents could not be updated, and their links still lead to where it was: %3")
-                         .arg(title + u'.', detail.join(u' '), failed.join(QStringLiteral(", "))));
-        return;
+    if (!done.failed.isEmpty()) {
+        done.failed.removeDuplicates();
+        QStringList names;
+        for (const QString &path : std::as_const(done.failed)) names << shownName(path);
+        const QString affected = names.join(QStringLiteral(", "));
+        detail << tr("References still need attention in %1.").arg(affected);
     }
-    emit moved(title, detail.join(u' '), m_moves);
+    emit moved(title, detail.join(u' '), m_moves, !done.failed.isEmpty());
 }
 
 void FileOrganizer::askToTrash(const QString &path)

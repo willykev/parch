@@ -4,6 +4,9 @@
 #include "documentcitations.h"
 #include "exportweb.h"
 #include "htmlexport.h"
+#include "mdhtml.h"
+#include "mdparser_p.h"
+#include "mdtable.h"
 #include "saferead.h"
 
 #include <QDir>
@@ -15,6 +18,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 
 namespace MarkdownExport {
 namespace {
@@ -22,7 +26,7 @@ namespace {
 // Labels match as CommonMark matches them: case and white space folded.
 QString normalized(QStringView label)
 {
-    return label.toString().simplified().toCaseFolded();
+    return md::detail::normalizeLabel(label);
 }
 
 // Text that reads back as itself: every ASCII punctuation mark escaped.
@@ -94,39 +98,61 @@ QString withoutKeys(const md::FrontMatter &frontMatter, const QStringList &keys)
     return out;
 }
 
-QString attributeEscaped(QStringView text)
-{
-    QString out;
-    for (const QChar c : text) {
-        if (c == u'&') out += QStringLiteral("&amp;");
-        else if (c == u'"') out += QStringLiteral("&quot;");
-        else if (c == u'<') out += QStringLiteral("&lt;");
-        else out.append(c);
-    }
-    return out;
-}
-
 struct Edit {
     int start = 0;
     int end = 0;
     QString text;
 };
 
-QString applied(const QString &text, std::vector<Edit> edits)
+QString applied(QStringView text, std::vector<Edit> edits, int start = 0)
 {
     std::stable_sort(edits.begin(), edits.end(), [](const Edit &a, const Edit &b) { return a.start < b.start; });
     QString out;
     out.reserve(text.size());
-    int at = 0;
+    int at = start;
     for (const Edit &edit : edits) {
-        // A file included twice gives its edits twice; overlaps are dropped.
-        if (edit.start < at || edit.end > text.size()) continue;
-        out.append(QStringView(text).sliced(at, edit.start - at));
+        if (edit.start < at || edit.end > start + text.size()) continue;
+        out.append(text.sliced(at - start, edit.start - at));
         out.append(edit.text);
         at = edit.end;
     }
-    out.append(QStringView(text).sliced(at));
+    out.append(text.sliced(at - start));
     return out;
+}
+
+QStringView lineEnding(QStringView text, int at)
+{
+    const QStringView rest = text.sliced(at);
+    if (rest.startsWith(u"\r\n")) return rest.first(2);
+    if (rest.startsWith(u'\n') || rest.startsWith(u'\r')) return rest.first(1);
+    return {};
+}
+
+QString withTitle(QString destination, const QString &title)
+{
+    if (title.isEmpty()) return destination;
+    QString written = title;
+    written.replace(u'\\', QStringLiteral("\\\\")).replace(u'"', QStringLiteral("\\\""))
+        .replace(u'&', QStringLiteral("\\&"));
+    return destination + QStringLiteral(" \"") + written + u'"';
+}
+
+// An inline note's lines remain inline content in its named definition.
+void appendNoteLine(QString &out, QStringView line)
+{
+    static const QRegularExpression blockStart(QStringLiteral(
+        "^[ \\t]*(?:(>)|(#)(?=#{0,5}(?:[ \\t]|$))|([-+*:])(?=[ \\t]|$)|[0-9]{1,9}([.)])(?=[ \\t]|$)"
+        "|(=+|-+)(?=[ \\t]*$)|(?<rule>[-*_])(?=(?:[ \\t]*\\k<rule>){2,}[ \\t]*$)|(/)(?=/)"
+        "|(\\x60)(?=\\x60\\x60[^\\x60]*$)|(~)(?=~~)|\\[[^\\]]+\\](:))"));
+    const auto starts = blockStart.matchView(line);
+    qsizetype marker = starts.hasMatch() ? starts.capturedStart(starts.lastCapturedIndex()) : -1;
+    if (marker < 0 && line.contains(u'|') && MdTable::delimiterRow(line, 0, int(line.size()))) marker = line.indexOf(u'|');
+    if (marker >= 0) {
+        out.append(line.first(marker));
+        out += u'\\';
+        line = line.sliced(marker);
+    }
+    out.append(line);
 }
 
 class Assembler {
@@ -140,8 +166,7 @@ public:
     Assembled run()
     {
         plan(doc.root);
-        relabel(noteDefinitions, noteLabels, noteRenames);
-        relabel(linkDefinitions, linkLabels, linkRenames);
+        allocateLabels();
         for (auto it = citations.cbegin(); it != citations.cend(); ++it) {
             QSet<QString> texts;
             for (const auto &[file, text] : it.value()) texts.insert(text);
@@ -243,81 +268,150 @@ public:
     }
 
 private:
-    using Definitions = std::map<QString, std::vector<int>>; // label -> defining files, in file order
-    using Renames = QHash<int, QHash<QString, QString>>;     // file -> label -> its new label
+    using Definitions = std::map<QString, std::vector<int>>;
+    using Renames = QHash<int, QHash<QString, QString>>;
+    using ReferenceKey = std::pair<int, QString>;
+    struct Reference {
+        QString label;
+        bool image = false;
+    };
 
-    // What every file defines, and every label in use.
     void plan(const md::Node &node)
     {
-        for (const md::Node &child : node.children) {
-            if (child.generated) continue;
-            const QString label = normalized(child.label);
-            switch (child.type) {
-            case md::NodeType::FootnoteDefinition:
-                addDefinition(noteDefinitions, label, child.file);
-                noteLabels.insert(label);
-                break;
-            case md::NodeType::FootnoteReference:
-                noteLabels.insert(label);
-                break;
-            case md::NodeType::LinkDefinition:
-                addDefinition(linkDefinitions, label, child.file);
-                linkLabels.insert(label);
-                break;
-            case md::NodeType::Link:
-            case md::NodeType::Image:
-                if (!child.label.isEmpty()) linkLabels.insert(label);
-                break;
-            case md::NodeType::Heading: {
-                // A new link label must not take the name of a heading's.
-                const QString title = normalized(md::plainText(child));
-                if (!child.label.isEmpty()) {
-                    linkLabels.insert(label);
-                    if (label != title) ++headingAliases[label];
-                }
-                linkLabels.insert(title);
-                ++headingAliases[title];
-                break;
+        if (node.generated) return;
+        using Type = md::NodeType;
+        if (node.type == Type::LinkDefinition || node.type == Type::FootnoteDefinition) {
+            if (!sourceDefinitions.emplace(node.file, node.range.start).second) {
+                duplicateDefinitions.insert(&node);
+                return;
             }
-            case md::NodeType::Citation:
-                hasCitations = true;
-                break;
-            case md::NodeType::CitationDefinition: {
-                QString text = doc.source(child).toString();
-                text.remove(0, doc.source(child.file, child.open).size());
-                citations[child.label.toCaseFolded()].append({child.file, text.simplified()});
-                break;
-            }
-            default:
-                break;
-            }
-            plan(child);
         }
+        switch (node.type) {
+        case md::NodeType::FootnoteDefinition: {
+            auto &files = noteDefinitions[normalized(node.label)];
+            if (std::find(files.begin(), files.end(), node.file) == files.end()) files.push_back(node.file);
+            break;
+        }
+        case md::NodeType::LinkDefinition:
+            references.try_emplace({node.file, normalized(node.label)});
+            break;
+        case md::NodeType::Image:
+            if (node.destinationFile >= 0)
+                references[{node.destinationFile, normalized(node.label)}].image = true;
+            break;
+        case md::NodeType::Heading: {
+            const QString title = normalized(md::plainText(node));
+            const QString label = normalized(node.label);
+            if (!label.isEmpty() && label != title) ++headingAliases[label];
+            ++headingAliases[title];
+            break;
+        }
+        case md::NodeType::Citation:
+            hasCitations = true;
+            break;
+        case md::NodeType::CitationDefinition: {
+            QString text = doc.source(node).toString();
+            text.remove(0, doc.source(node.file, node.open).size());
+            citations[node.label.toCaseFolded()].append({node.file, text.simplified()});
+            break;
+        }
+        default:
+            break;
+        }
+        for (const md::Node &child : node.children) plan(child);
     }
 
-    static void addDefinition(Definitions &definitions, const QString &label, int file)
+    void allocateLabels()
     {
-        std::vector<int> &files = definitions[label];
-        if (std::find(files.begin(), files.end(), file) == files.end()) files.push_back(file);
-    }
-
-    // A label defined in more than one file stays with the document's own
-    // definition, or else the first file's; every other file's gets a new one.
-    static void relabel(const Definitions &definitions, QSet<QString> &labels, Renames &renames)
-    {
-        for (const auto &[label, files] : definitions) {
+        if (doc.files.size() <= 1) return;
+        const auto repeated = [](const md::Footnote &note) {
+            return note.references > 1 && note.content && note.content->type == md::NodeType::InlineNote;
+        };
+        if (std::none_of(references.cbegin(), references.cend(), [](const auto &ref) { return ref.first.first != 0; })
+            && std::none_of(noteDefinitions.cbegin(), noteDefinitions.cend(), [](const auto &note) { return note.second.size() > 1; })
+            && std::none_of(doc.footnotes.cbegin(), doc.footnotes.cend(), repeated)) return;
+        // Reserve a spelling absent from all the source text as the parser
+        // folds labels, including brackets that do not resolve to a link.
+        static const QRegularExpression prefix(QStringLiteral("PARCH-(?:(\\d+)-)?(?:LINK|NOTE)-"));
+        QSet<int> used;
+        for (const md::SourceFile &file : doc.files) {
+            const QString folded = normalized(file.text);
+            for (const auto &match : prefix.globalMatch(folded))
+                used.insert(match.captured(1).isEmpty() ? 1 : match.captured(1).toInt());
+        }
+        int space = 1;
+        while (used.contains(space)) ++space;
+        const QString stem = space == 1 ? QStringLiteral("parch-") : QStringLiteral("parch-%1-").arg(space);
+        int link = 0;
+        for (auto &[key, reference] : references)
+            if (key.first != 0) reference.label = stem + QStringLiteral("link-") + QString::number(++link);
+        int note = 0;
+        for (const auto &[label, files] : noteDefinitions) {
             if (files.size() < 2) continue;
-            const int keeper = std::find(files.begin(), files.end(), 0) != files.end()
-                                   ? 0
-                                   : *std::min_element(files.begin(), files.end());
-            for (const int file : files) {
-                if (file == keeper) continue;
-                int suffix = 2;
-                QString fresh;
-                do fresh = label + u'-' + QString::number(suffix++);
-                while (labels.contains(fresh));
-                labels.insert(fresh);
-                renames[file].insert(label, fresh);
+            const int keeper = *std::min_element(files.begin(), files.end());
+            for (const int file : files)
+                if (file != keeper)
+                    noteRenames[file].insert(label, stem + QStringLiteral("note-") + QString::number(++note));
+        }
+        for (const md::Footnote &footnote : doc.footnotes)
+            if (repeated(footnote))
+                inlineLabels.insert(footnote.number, stem + QStringLiteral("note-") + QString::number(++note));
+    }
+
+    const Reference &reference(int file, QStringView label) const
+    {
+        static const Reference empty;
+        const auto found = references.find({file, normalized(label)});
+        return found == references.end() ? empty : found->second;
+    }
+
+    QString noteDefinitionsForOutput()
+    {
+        QString definitions;
+        for (const md::Footnote &note : doc.footnotes) {
+            const auto label = inlineLabels.constFind(note.number);
+            if (label == inlineLabels.cend()) continue;
+            const md::Node &inlineNote = *note.content;
+            const md::Range body{inlineNote.open.end, inlineNote.close.start};
+            std::vector<Edit> edits;
+            collect(note.file, inlineNote, edits);
+            joinCodeSpanLines(inlineNote, edits);
+            for (const md::Range prefix : inlineNote.markers) edits.push_back({prefix.start, prefix.end, {}});
+            const QString written = applied(doc.source(note.file, body), std::move(edits), body.start).trimmed();
+            definitions += QStringLiteral("[^%1]: ").arg(*label);
+            // A reference definition opens the paragraph and disappears
+            // when it is read, keeping leading display math inside it.
+            if (written.startsWith(u"$$")) definitions += QStringLiteral("[%1]: <>\n    ").arg(*label);
+            const QStringView text(written);
+            for (int start = 0, end = 0; start < written.size(); start = end) {
+                end = start;
+                while (end < written.size() && text[end] != u'\r' && text[end] != u'\n') ++end;
+                appendNoteLine(definitions, text.sliced(start, end - start));
+                if (end == written.size()) break;
+                const QStringView ending = lineEnding(text, end);
+                end += int(ending.size());
+                definitions.append(ending);
+                definitions += QStringLiteral("    ");
+            }
+            definitions += QStringLiteral("\n\n");
+        }
+        return definitions;
+    }
+
+    void joinCodeSpanLines(const md::Node &node, std::vector<Edit> &edits) const
+    {
+        if (node.type != md::NodeType::Code) {
+            for (const md::Node &child : node.children) joinCodeSpanLines(child, edits);
+            return;
+        }
+        const QStringView code = doc.source(node);
+        for (int i = 0; i < code.size();) {
+            const QStringView ending = lineEnding(code, i);
+            if (ending.isEmpty()) {
+                ++i;
+            } else {
+                edits.push_back({node.range.start + i, node.range.start + i + int(ending.size()), QStringLiteral(" ")});
+                i += int(ending.size());
             }
         }
     }
@@ -325,17 +419,29 @@ private:
     QString assemble(int file, const md::Node &container)
     {
         std::vector<Edit> edits;
-        if (file == 0)
-            if (const std::optional<Edit> front = citationFiles()) edits.push_back(*front);
+        const md::SourceFile &source = doc.files[size_t(file)];
+        if (file == 0) {
+            if (const auto front = citationFiles()) edits.push_back(*front);
+            if (!inlineLabels.isEmpty()) {
+                // Definitions must stay outside the blocks the book ends with,
+                // in particular a fence or HTML block left open on purpose.
+                const int at = source.frontMatter.present ? source.frontMatter.bodyStart
+                             : source.text.startsWith(QChar(0xfeff)) ? 1 : 0;
+                QString written = noteDefinitionsForOutput();
+                if (at > 1 && !source.text.startsWith(QChar(0xfeff)) && lineEnding(source.text, at - 1).isEmpty())
+                    written.prepend(u'\n');
+                edits.push_back({at, at, written});
+            }
+        }
         collect(file, container, edits);
-        return applied(doc.files[size_t(file)].text, std::move(edits));
+        return applied(source.text, std::move(edits));
     }
 
     // The block at either edge of an include after its front matter and
     // any nested include lines have been removed.
-    static const md::Node *includeEdge(const md::Node &node, bool first)
+    const md::Node *includeEdge(const md::Node &node, bool first) const
     {
-        if (node.generated || node.type == md::NodeType::FrontMatter) return nullptr;
+        if (node.generated || node.type == md::NodeType::FrontMatter || duplicateDefinitions.contains(&node)) return nullptr;
         if (node.type != md::NodeType::Include || !node.resolved) return &node;
         for (size_t i = 0; i < node.children.size(); ++i) {
             const md::Node &child = node.children[first ? i : node.children.size() - 1 - i];
@@ -344,38 +450,68 @@ private:
         return nullptr;
     }
 
-    static bool listsJoin(const md::Node *before, const md::Node *after)
+    static bool joins(const md::Node *before, const md::Node *after)
     {
-        return before && after && before->type == md::NodeType::List && after->type == md::NodeType::List
-               && before->ordered == after->ordered && before->marker == after->marker;
+        if (!before || !after) return false;
+        using Type = md::NodeType;
+        const auto indented = [](const md::Node &node) { return node.type == Type::CodeBlock && !node.fenced; };
+        if (indented(*after))
+            return indented(*before) || before->type == Type::List || before->type == Type::DefinitionList;
+        if (before->type == Type::DefinitionList) return after->type == Type::DefinitionList;
+        return before->type == Type::List && after->type == Type::List
+            && before->ordered == after->ordered && before->marker == after->marker;
     }
 
     void collect(int file, const md::Node &node, std::vector<Edit> &edits)
     {
         const md::Node *previous = nullptr;
-        for (size_t i = 0; i < node.children.size(); ++i) {
-            const md::Node &child = node.children[i];
-            if (child.generated || child.file != file) continue;
+        std::optional<size_t> previousSplice;
+        for (const md::Node &child : node.children) {
+            if (child.file != file || (child.generated && child.type != md::NodeType::HtmlElement)) continue;
+            if (duplicateDefinitions.contains(&child)) {
+                if (previous) previousSplice = edits.size();
+                edits.push_back({child.range.start, child.range.end, {}});
+                continue;
+            }
             if (child.type == md::NodeType::Include && child.resolved && child.includedFile >= 0) {
                 const md::Node *first = includeEdge(child, true);
                 const md::Node *last = includeEdge(child, false);
-                const md::Node *following = i + 1 < node.children.size() ? &node.children[i + 1] : nullptr;
-                const bool before = listsJoin(previous, first);
+                const size_t at = edits.size();
+                edits.push_back(include(file, child, joins(previous, first)));
                 if (last) previous = last;
-                include(file, child, edits, before, listsJoin(previous, following));
+                if (previous) previousSplice = at;
                 continue;
             }
+            // An include on the right owns the join before it. An ordinary
+            // block on the right can instead use the end of the include.
+            if (previousSplice && joins(previous, &child)) {
+                Edit &preceding = edits[*previousSplice];
+                const QStringView ending = lineEnding(doc.files[size_t(file)].text, preceding.end);
+                const QString newline = ending.isEmpty() ? QStringLiteral("\n") : ending.toString();
+                preceding.text += newline + newline + QStringLiteral("<!-- -->");
+            }
             previous = &child;
+            previousSplice.reset();
+
+            using Type = md::NodeType;
+            if (child.type == Type::InlineNote) {
+                const auto label = inlineLabels.constFind(child.number);
+                if (label != inlineLabels.cend()) {
+                    edits.push_back({child.range.start, child.range.end, QStringLiteral("[^%1]").arg(*label)});
+                    continue;
+                }
+            }
             visit(file, child, edits);
             collect(file, child, edits);
         }
     }
 
-    void include(int file, const md::Node &node, std::vector<Edit> &edits, bool separateBefore, bool separateAfter)
+    Edit include(int file, const md::Node &node, bool separateBefore)
     {
         QString text = assemble(node.includedFile, node);
-        while (text.endsWith(u'\n') || text.endsWith(u'\r')) text.chop(1);
-        // A fence the included file leaves open ends with that file.
+        const QString &around = doc.files[size_t(file)].text;
+        const QStringView ending = lineEnding(around, node.range.end);
+        const QString newline = ending.isEmpty() ? QStringLiteral("\n") : ending.toString();
         if (!node.children.empty()) {
             const md::Node &last = node.children.back();
             if ((last.type == md::NodeType::CodeBlock || last.type == md::NodeType::MermaidBlock) && last.fenced &&
@@ -383,19 +519,19 @@ private:
                 const QStringView open = doc.source(last.file, last.open).trimmed();
                 qsizetype run = 0;
                 while (run < open.size() && open[run] == last.marker) ++run;
-                text += u'\n' + open.first(run).toString();
+                if (!text.endsWith(u'\r') && !text.endsWith(u'\n')) text += newline;
+                text += open.first(run);
             }
         }
-        // A blank line alone would merge these lists on the next read.
-        if (separateBefore) text.prepend(QStringLiteral("\n<!-- -->\n\n"));
-        if (separateAfter) text += QStringLiteral("\n\n<!-- -->");
-        // What follows the include line starts a block of its own.
-        const QString &around = doc.files[size_t(file)].text;
-        QStringView rest = QStringView(around).sliced(node.range.end);
-        if (rest.startsWith(u"\r\n")) rest = rest.sliced(2);
-        else if (rest.startsWith(u'\n') || rest.startsWith(u'\r')) rest = rest.sliced(1);
-        if (!rest.isEmpty() && !rest.startsWith(u'\n') && !rest.startsWith(u'\r')) text += u'\n';
-        edits.push_back({node.range.start, node.range.end, text});
+        while (text.endsWith(u'\n') || text.endsWith(u'\r')) text.chop(1);
+        if (separateBefore) text.prepend(newline + QStringLiteral("<!-- -->") + newline + newline);
+        const int next = node.range.end + int(ending.size());
+        if (next < around.size() && lineEnding(around, next).isEmpty()) text += newline;
+        // The include is a whole line. Its indentation should not become
+        // indentation of the chapter's first block.
+        int start = node.range.start;
+        while (start > 0 && (around[start - 1] == u' ' || around[start - 1] == u'\t')) --start;
+        return {start, node.range.end, std::move(text)};
     }
 
     void visit(int file, const md::Node &node, std::vector<Edit> &edits)
@@ -416,44 +552,46 @@ private:
                 edits.push_back({node.open.start, node.open.end, QStringLiteral("[^%1]:").arg(fresh)});
             break;
         case md::NodeType::FootnoteReference:
-            if (const QString fresh = noteRenames.value(file).value(normalized(node.label)); !fresh.isEmpty())
-                edits.push_back({node.range.start, node.range.end, QStringLiteral("[^%1]").arg(fresh)});
+            if (node.number > 0 && size_t(node.number) <= doc.footnotes.size()) {
+                const int origin = doc.footnotes[size_t(node.number - 1)].file;
+                const QString fresh = noteRenames.value(origin).value(normalized(node.label));
+                if (!fresh.isEmpty()) edits.push_back({node.range.start, node.range.end, QStringLiteral("[^%1]").arg(fresh)});
+            }
             break;
         case md::NodeType::LinkDefinition: {
-            if (const QString fresh = linkRenames.value(file).value(normalized(node.label)); !fresh.isEmpty())
-                edits.push_back({node.open.start, node.open.end, QStringLiteral("[%1]:").arg(fresh)});
-            const QString anchor = file > 0 && node.dest.startsWith(u'#') ? md::anchorInFile(doc, file, node.dest.mid(1)) : QString();
-            if (!anchor.isEmpty() && anchor != QUrl::fromPercentEncoding(node.dest.mid(1).toUtf8()))
-                edits.push_back({node.target.start, node.target.end, u'#' + anchor});
-            else
-                rebase(file, node.target, node.dest, edits);
+            const Reference &ref = reference(file, node.label);
+            if (!ref.label.isEmpty())
+                edits.push_back({node.open.start, node.open.end, QStringLiteral("[%1]:").arg(ref.label)});
+            QString destination;
+            if (file > 0 && node.dest.startsWith(u'#')) {
+                const QString anchor = md::anchorInFile(doc, file, node.dest.mid(1));
+                if (!anchor.isEmpty() && anchor != md::classifyDestination(node.dest, {}).fragment)
+                    destination = u'#' + anchor;
+            } else {
+                destination = rewritten(file, node.dest, !ref.image);
+            }
+            if (!destination.isEmpty()) edits.push_back({node.target.start, node.target.end, destination});
             break;
         }
+        case md::NodeType::Autolink:
+            if (const QString destination = rewritten(file, node.dest, true); !destination.isEmpty())
+                edits.push_back({node.range.start, node.range.end,
+                                 QStringLiteral("[%1](%2)").arg(escaped(md::plainText(node)), destination)});
+            break;
         case md::NodeType::Link:
         case md::NodeType::Image:
             if (node.type == md::NodeType::Image && copyImage(node, edits)) break;
-            if (node.label.isEmpty() && file != 0 && node.type == md::NodeType::Link && node.dest.startsWith(u'#')
-                && !node.target.isEmpty()) {
-                // An anchor of the included file's own, under the name it
-                // has in the whole document (see md::anchorInFile()).
-                const QStringView written = doc.source(file, node.target);
-                if (QUrl::fromPercentEncoding(written.toString().mid(1).toUtf8()) != node.dest.mid(1))
-                    edits.push_back({node.target.start, node.target.end, node.dest});
-            } else if (node.label.isEmpty()) {
-                rebase(file, node.target, node.dest, edits);
-            } else if (node.type == md::NodeType::Link && node.destinationFile < 0 && node.dest.startsWith(u'#')
-                       && (headingAliases.value(normalized(node.label)) > 1 || linkDefinitions.contains(normalized(node.label)))) {
-                // Flattening the files loses the heading reference's local scope.
-                edits.push_back({node.close.start, node.close.end, QStringLiteral("](%1)").arg(node.dest)});
-            } else if (const QString fresh = linkRenames.value(node.destinationFile >= 0 ? node.destinationFile : file)
-                                               .value(normalized(node.label));
-                       !fresh.isEmpty()) {
-                // `[text][label]` names its label after the text; `[label][]`
-                // and `[label]` are named by their text, which stays.
-                if (node.target.start >= node.close.start && !node.close.isEmpty())
-                    edits.push_back({node.target.start, node.target.end, fresh});
-                else
-                    edits.push_back({node.close.start, node.close.end, QStringLiteral("][%1]").arg(fresh)});
+            if (node.label.isEmpty()) {
+                if (node.target.isEmpty()) break;
+                QString destination = rewritten(file, node.dest, node.type == md::NodeType::Link);
+                if (file > 0 && node.type == md::NodeType::Link && node.dest.startsWith(u'#')) {
+                    const QString written = md::detail::unescape(doc.source(file, node.target));
+                    if (md::classifyDestination(written, {}).fragment != md::classifyDestination(node.dest, {}).fragment)
+                        destination = node.dest;
+                }
+                if (!destination.isEmpty()) edits.push_back({node.target.start, node.target.end, destination});
+            } else {
+                referenceUse(node, edits);
             }
             break;
         case md::NodeType::HtmlElement:
@@ -464,17 +602,46 @@ private:
         }
     }
 
-    // A relative destination, as the folder written to reaches the same file.
-    QString rebased(int file, const QString &dest) const
+    void referenceUse(const md::Node &node, std::vector<Edit> &edits) const
     {
-        if (dest.isEmpty() || dest.startsWith(u'/') || dest.startsWith(u'#')) return {};
+        if (node.destinationFile < 0) {
+            // More than one heading can have this name. The source has
+            // already chosen the one in this occurrence of the chapter.
+            if (headingAliases.value(normalized(node.label)) > 1 && node.dest.startsWith(u'#'))
+                edits.push_back({node.close.start, node.close.end, QStringLiteral("](%1)").arg(node.dest)});
+            return;
+        }
+        const Reference &ref = reference(node.destinationFile, node.label);
+        if (node.type == md::NodeType::Link && ref.image) {
+            const QString anchor = md::includedAnchor(doc, md::classifyDestination(doc, node));
+            if (!anchor.isEmpty()) {
+                // Keep the definition's file destination for the image.
+                edits.push_back({node.close.start, node.close.end, QStringLiteral("](%1)").arg(withTitle(u'#' + anchor, node.title))});
+                return;
+            }
+        }
+        if (ref.label.isEmpty()) return;
+        // A full reference names its label apart from its display text.
+        // Collapsed and shortcut references keep the display text as written.
+        if (node.target.start >= node.close.start && !node.close.isEmpty())
+            edits.push_back({node.target.start, node.target.end, ref.label});
+        else
+            edits.push_back({node.close.start, node.close.end, QStringLiteral("][%1]").arg(ref.label)});
+    }
+
+    QString rewritten(int file, const QString &dest, bool link, md::DestinationSyntax syntax = md::DestinationSyntax::Markdown) const
+    {
+        if (dest.isEmpty() || dest.startsWith(u'#')) return {};
         const QString &directory = doc.files[size_t(file)].directory;
-        if (directory.isEmpty() || QDir::cleanPath(directory) == folder) return {};
         const md::Destination target = md::classifyDestination(dest, directory);
         if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return {};
-        QString written = md::encodeDestination(Exporters::relativeTo(folder, target.path));
-        if (!target.fragment.isEmpty()) written += u'#' + target.fragment;
-        return written;
+        if (link)
+            if (const QString anchor = md::includedAnchor(doc, target); !anchor.isEmpty()) {
+                const QString href = u'#' + anchor;
+                return syntax == md::DestinationSyntax::Url ? md::encodeUrl(href) : href;
+            }
+        if (dest.startsWith(u'/') || directory.isEmpty() || QDir::cleanPath(directory) == folder) return {};
+        return Exporters::rebasedDestination(target, folder, syntax);
     }
 
     // An image the writer has copied beside the output, at its new place.
@@ -485,60 +652,36 @@ private:
         if (found.kind != md::Destination::Kind::LocalFile || !found.absolute) return false;
         const QString placed = imageDestination(found.path);
         if (placed.isEmpty()) return false;
-        QString dest = md::encodeDestination(placed);
-        if (!found.fragment.isEmpty()) dest += u'#' + found.fragment;
+        QString dest = md::encodeDestination(placed) + md::destinationSuffix(found, md::DestinationSyntax::Markdown);
         if (node.label.isEmpty()) {
             edits.push_back({node.target.start, node.target.end, dest});
         } else {
             // Inline only the picture. Ordinary links using the same definition keep their destination.
-            if (!node.title.isEmpty()) {
-                QString title = node.title;
-                title.replace(u'\\', QStringLiteral("\\\\")).replace(u'"', QStringLiteral("\\\""));
-                dest += QStringLiteral(" \"%1\"").arg(title);
-            }
-            edits.push_back({node.close.start, node.close.end, QStringLiteral("](%1)").arg(dest)});
+            edits.push_back({node.close.start, node.close.end, QStringLiteral("](%1)").arg(withTitle(dest, node.title))});
         }
         return true;
-    }
-
-    void rebase(int file, md::Range target, const QString &dest, std::vector<Edit> &edits) const
-    {
-        if (target.isEmpty()) return;
-        const QString written = rebased(file, dest);
-        if (!written.isEmpty()) edits.push_back({target.start, target.end, written});
     }
 
     void rebaseAttribute(int file, const md::Node &node, std::vector<Edit> &edits) const
     {
         const QLatin1StringView name(node.label == u"img" ? "src" : "href");
-        QString dest;
-        for (const md::Attribute &attribute : node.attributes)
-            if (attribute.name == name) dest = attribute.value;
-        QString written;
-        if (node.label == u"img" && imageDestination && !dest.isEmpty()) {
-            const md::Destination found = md::classifyDestination(dest, doc.files[size_t(file)].directory);
-            if (found.kind == md::Destination::Kind::LocalFile && found.absolute)
-                if (const QString placed = imageDestination(found.path); !placed.isEmpty()) {
-                    written = QString::fromUtf8(QUrl::toPercentEncoding(placed, "/"));
-                    if (!found.fragment.isEmpty()) written += u'#' + found.fragment;
-                }
-        }
-        if (written.isEmpty() && file != 0 && node.label == u"a" && node.resolved && dest.startsWith(u'#'))
-            written = dest;
-        if (written.isEmpty()) written = rebased(file, dest);
-        if (written.isEmpty()) return;
-        static const QRegularExpression value(
-            QStringLiteral("\\s(src|href)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s\"'=<>`]+)"),
-            QRegularExpression::CaseInsensitiveOption);
-        const QStringView tag = doc.source(node.file, node.open);
-        for (auto match = value.globalMatchView(tag); match.hasNext();) {
-            const QRegularExpressionMatch found = match.next();
-            if (found.captured(1).compare(name, Qt::CaseInsensitive) != 0) continue;
-            const int start = node.open.start + int(found.capturedStart(2));
-            const QString replacement = u'"' + attributeEscaped(written) + u'"';
-            if (found.captured(2) != replacement)
-                edits.push_back({start, start + int(found.capturedLength(2)), replacement});
-            return;
+        for (const md::Attribute &attribute : node.attributes) {
+            const md::Range range = attribute.valueRange;
+            if (attribute.name != name || range.isEmpty()) continue;
+            const QString &dest = attribute.value;
+            QString written;
+            if (node.label == u"img" && imageDestination && !dest.isEmpty()) {
+                const md::Destination found = md::classifyDestination(dest, doc.files[size_t(file)].directory);
+                if (found.kind == md::Destination::Kind::LocalFile && found.absolute)
+                    if (const QString placed = imageDestination(found.path); !placed.isEmpty())
+                        written = md::encodeUrlPath(placed) + md::destinationSuffix(found);
+            }
+            if (written.isEmpty() && file != 0 && node.label == u"a" && node.resolved && dest.startsWith(u'#'))
+                written = dest;
+            if (written.isEmpty()) written = rewritten(file, dest, node.label == u"a", md::DestinationSyntax::Url);
+            if (written.isEmpty()) continue;
+            const QString replacement = md::htmlAttributeValue(written, attribute.quote);
+            if (doc.source(node.file, range) != replacement) edits.push_back({range.start, range.end, replacement});
         }
     }
 
@@ -547,10 +690,13 @@ private:
     const Dialect::Choice &dialect;
     const ImageDestination imageDestination;
     const FileDestination citationDestination;
-    Definitions noteDefinitions, linkDefinitions;
-    QSet<QString> noteLabels, linkLabels;
+    Definitions noteDefinitions;
+    std::map<ReferenceKey, Reference> references;
+    std::set<std::pair<int, int>> sourceDefinitions;
+    QSet<const md::Node *> duplicateDefinitions;
     QHash<QString, int> headingAliases;
-    Renames noteRenames, linkRenames;
+    Renames noteRenames;
+    QHash<int, QString> inlineLabels;
     QHash<QString, QList<std::pair<int, QString>>> citations;
     bool hasCitations = false;
     QStringList limitations;

@@ -66,6 +66,57 @@ bool overgrown(const QString &markdown, const QString &html)
     return markdown.size() > MaxGrowthFloor && markdown.size() > MaxGrowth * html.size();
 }
 
+bool mergesIn(const Document *document)
+{
+    return TableGrids::dialectOf(document->markdownOptions()).mergedCells;
+}
+
+void convertPaste(Attachments *attachments, Insertion *insertion, const QString &html, const QString &plain,
+                  const QString &folder, const QDate &date, bool images)
+{
+    const bool mergedCells = mergesIn(insertion->document());
+    attachments->run<Converted>(
+        insertion,
+        [html, folder, date, images, mergedCells] {
+            Converted converted;
+            HtmlMarkdown::ImageSink save;
+            if (images) {
+                save = [&](const QByteArray &bytes, const QString &type) -> QString {
+                    QString extension = Attachments::extensionFor(type);
+                    QByteArray data = bytes;
+                    if (extension.isEmpty()) {
+                        QImage image;
+                        if (!image.loadFromData(bytes)) return {};
+                        data.clear();
+                        QBuffer buffer(&data);
+                        if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) return {};
+                        extension = QStringLiteral("png");
+                    }
+                    const Attachments::Placed placed = Attachments::savePasted(folder, date, extension, data);
+                    if (!placed.error.isEmpty()) converted.errors << placed.error;
+                    return placed.relative;
+                };
+            }
+            converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly, mergedCells);
+            if (!images && overgrown(converted.markdown, html)) converted.markdown.clear();
+            return converted;
+        },
+        [insertion, attachments, html, plain, folder, date, images, mergedCells](Converted converted) {
+            // The insertion still follows the source while a changed dialect
+            // gets its own conversion. Any saved images are reused by bytes.
+            if (insertion->document() && mergesIn(insertion->document()) != mergedCells) {
+                convertPaste(attachments, insertion, html, plain, folder, date, images);
+                return;
+            }
+            if (!converted.errors.isEmpty())
+                attachments->report(EditorBinding::tr("Pasted images not saved"),
+                                    EditorBinding::tr("Their alt text was pasted instead. %1").arg(converted.errors.join(u' ')));
+            if (!converted.markdown.isEmpty()) insertion->insert(converted.markdown, !converted.inlineOnly);
+            else if (!plain.isEmpty()) insertion->insert(plain, false);
+            else insertion->cancel();
+        });
+}
+
 } // namespace
 
 // A drop of files on its way in: looked at first, then asked about, then copied.
@@ -140,13 +191,24 @@ void EditorBinding::pastePlainText()
 {
     if (!editable()) return;
     const QString text = QGuiApplication::clipboard()->text();
-    if (!text.isEmpty()) insertText(withDocumentBreaks(text), EditKind::Other);
+    if (text.isEmpty()) return;
+    QMimeData plain;
+    plain.setText(text);
+    if (m_tables->pasteCells(&plain, true) == TableGrids::Paste::NotCells)
+        insertText(withDocumentBreaks(text), EditKind::Other);
 }
 
 void EditorBinding::pasteFrom(const QMimeData *mime)
 {
     // Cells from a spreadsheet, or another grid, fill a grid's cells from the caret's.
-    if (m_tables->pasteCells(mime) != TableGrids::Paste::NotCells) return;
+    const bool hasImage = holdsImage(mime);
+    const auto pasted = m_tables->pasteCells(mime, !mime->hasUrls() && !hasImage);
+    if (pasted == TableGrids::Paste::PlainText) {
+        const QString text = mime->text();
+        if (!text.isEmpty()) insertText(withDocumentBreaks(text), EditKind::Other);
+        return;
+    }
+    if (pasted != TableGrids::Paste::NotCells) return;
     cancelComposition();
     // Files copied in a file manager come in as when they are dropped.
     const QStringList files = mime->hasUrls() ? localFiles(mime->urls()) : QStringList();
@@ -154,7 +216,7 @@ void EditorBinding::pasteFrom(const QMimeData *mime)
         attachFiles(files, selection());
         return;
     }
-    const bool image = m_attachments && holdsImage(mime);
+    const bool image = m_attachments && hasImage;
     if (mime->hasHtml()) {
         const QString html = mime->html();
         QString alt;
@@ -186,47 +248,11 @@ bool EditorBinding::insertHtml(const QString &html, SourceRange range, const QSt
         writeThrough(insertion);
         const QString folder = m_attachments->documentFolder(m_document);
         const QDate date = m_attachments->today();
-        Attachments *attachments = m_attachments;
-        attachments->run<Converted>(
-            insertion,
-            [html, folder, date, images] {
-                Converted converted;
-                if (!images) {
-                    converted.markdown = HtmlMarkdown::convert(html, {}, &converted.inlineOnly);
-                    if (overgrown(converted.markdown, html)) converted.markdown.clear();
-                    return converted;
-                }
-                const auto save = [&](const QByteArray &bytes, const QString &type) -> QString {
-                    QString extension = Attachments::extensionFor(type);
-                    QByteArray data = bytes;
-                    if (extension.isEmpty()) {
-                        QImage image;
-                        if (!image.loadFromData(bytes)) return {};
-                        data.clear();
-                        QBuffer buffer(&data);
-                        if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) return {};
-                        extension = QStringLiteral("png");
-                    }
-                    const Attachments::Placed placed = Attachments::savePasted(folder, date, extension, data);
-                    if (!placed.error.isEmpty()) converted.errors << placed.error;
-                    return placed.relative;
-                };
-                converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly);
-                return converted;
-            },
-            [insertion, attachments, plain](Converted converted) {
-                if (!converted.errors.isEmpty())
-                    attachments->report(tr("Pasted images not saved"),
-                                        tr("Their alt text was pasted instead. %1").arg(converted.errors.join(u' ')));
-                // What shows nothing, or would not fit, is the plain text.
-                if (!converted.markdown.isEmpty()) insertion->insert(converted.markdown, !converted.inlineOnly);
-                else if (!plain.isEmpty()) insertion->insert(plain, false);
-                else insertion->cancel();
-            });
+        convertPaste(m_attachments, insertion, html, plain, folder, date, images);
         return true;
     }
     bool inlineOnly = true;
-    const QString markdown = HtmlMarkdown::convert(html, {}, &inlineOnly);
+    const QString markdown = HtmlMarkdown::convert(html, {}, &inlineOnly, mergesIn(m_document));
     if (markdown.isEmpty() || overgrown(markdown, html)) return false;
     cancelComposition();
     // One edit, so that one undo takes the whole paste back.

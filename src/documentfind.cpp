@@ -6,6 +6,7 @@
 #include "tablegrids.h"
 #include "workerfailure.h"
 
+#include <QFutureWatcher>
 #include <QtConcurrent>
 #include <algorithm>
 #include <utility>
@@ -21,6 +22,7 @@ DocumentFind::DocumentFind(QObject *parent) : QObject(parent)
 DocumentFind::~DocumentFind()
 {
     if (m_cancel) m_cancel->store(true);
+    cancelReplaceAll();
     m_pool.waitForDone();
 }
 
@@ -31,7 +33,7 @@ bool DocumentFind::caseSensitive() const { return m_query.caseSensitive; }
 bool DocumentFind::wholeWord() const { return m_query.wholeWord; }
 bool DocumentFind::regex() const { return m_query.regex; }
 TextQuery DocumentFind::query() const { return m_query; }
-QString DocumentFind::error() const { return m_error; }
+QString DocumentFind::error() const { return m_error.isEmpty() ? m_replaceError : m_error; }
 int DocumentFind::count() const { return int(m_matches.size()); }
 bool DocumentFind::truncated() const { return m_truncated; }
 bool DocumentFind::searching() const { return m_active && m_document && m_expression && !m_forQuery; }
@@ -51,12 +53,14 @@ QVariantList DocumentFind::ranges() const
 void DocumentFind::setDocument(Document *document)
 {
     if (document == m_document) return;
+    cancelReplaceAll();
     for (const auto &connection : std::as_const(m_connections)) disconnect(connection);
     m_connections.clear();
     m_document = document;
     if (document) {
         m_connections.append(connect(document->buffer(), &SourceBuffer::sourceChanged, this, &DocumentFind::sourceChanged));
         m_connections.append(connect(document, &Document::changed, this, &DocumentFind::refreshCanReplace));
+        m_connections.append(connect(document, &QObject::destroyed, this, &DocumentFind::refreshCanReplace));
     }
     m_anchor = m_cursor = 0;
     m_pending = Pending::None;
@@ -114,6 +118,7 @@ void DocumentFind::queryEdited()
     if (m_cancel) m_cancel->store(true);
     m_timer.stop();
     m_expression = TextSearch::compile(m_query, &m_error);
+    m_replaceError.clear();
     m_matches.clear();
     m_truncated = false;
     m_forQuery = false;
@@ -264,6 +269,7 @@ void DocumentFind::refreshCanReplace()
     const bool can = m_document && m_document->state() != Document::State::ReadOnly && !m_document->isTextless();
     if (can == m_canReplace) return;
     m_canReplace = can;
+    if (!can) cancelReplaceAll();
     emit canReplaceChanged();
 }
 
@@ -420,74 +426,118 @@ void DocumentFind::findInTable(int position)
 
 void DocumentFind::replaceAll(const QString &replacement)
 {
-    if (!m_canReplace || !m_expression || !m_document || m_replacing) return;
-    startReplaceAll(replacement);
+    if (!m_canReplace || !m_expression || !m_document || m_replaceRequest) return;
+    const auto request = std::make_shared<ReplaceRequest>(m_document, *m_expression, replacement, m_query.regex);
+    m_replaceRequest = request;
+    startReplaceAll(request);
+    if (!m_replaceError.isEmpty()) {
+        m_replaceError.clear();
+        emit resultsChanged();
+    }
 }
 
-void DocumentFind::startReplaceAll(const QString &replacement)
+bool DocumentFind::replaceInGrids() const
 {
-    m_replacing = true;
-    const QPointer<Document> document = m_document;
-    const bool each = m_binding && !m_binding->tables()->grids().isEmpty();
-    QtConcurrent::run(&m_pool, &DocumentFind::replaceJob, m_document->buffer()->snapshot(), *m_expression, replacement,
-                      m_query.regex, each)
-        .then(this, [this, document, replacement](const Replaced &replaced) {
-            m_replacing = false;
-            if (!document || document != m_document || !m_canReplace) return;
-            SourceBuffer *buffer = document->buffer();
-            // Written to meanwhile: the matches are found again in the newer text.
-            if (replaced.revision != buffer->revision()) {
-                startReplaceAll(replacement);
-                return;
-            }
-            int count = replaced.count;
-            if (count > 0 && m_binding && !m_binding->tables()->grids().isEmpty() && !replaced.edits.isEmpty()) {
-                // Matches in a table's syntax are none; those in cells are
-                // written into them, each table tidy, all one step. Those a
-                // table cannot take are left, the others made, and why said.
-                QList<SourceEdit> edits;
-                for (const TextSearch::Edit &edit : replaced.edits)
-                    if (m_binding->tables()->inCellText(edit.range.start, edit.range.start + edit.range.length))
-                        edits.append({edit.range, edit.text});
-                int left = 0;
-                const TableGrids::Adapted adapted =
-                    edits.isEmpty() ? TableGrids::Adapted{} : m_binding->tables()->adapt(edits, 0, 0, &left);
-                count = int(edits.size()) - left;
-                if (count > 0)
-                    buffer->replace(adapted.kind == TableGrids::Adapted::Changed ? adapted.edits : edits);
-                if (left > 0 && !adapted.reason.isEmpty()) emit m_binding->tables()->refused(adapted.reason);
-            } else if (count > 0) {
-                buffer->replace(replaced.edit.range, replaced.edit.text, EditKind::Other);
-            }
-            emit replacedAll(count);
-        })
-        .onFailed(this, [this](const QUnhandledException &failure) {
-            m_replacing = false;
-            failed(WorkerFailure::reason(failure.exception()));
-        })
-        .onFailed(this, [this] {
-            m_replacing = false;
-            failed(QString());
-        });
+    return m_binding && m_binding->document() == m_document && !m_binding->tables()->grids().isEmpty();
+}
+
+void DocumentFind::cancelReplaceAll()
+{
+    if (!m_replaceRequest) return;
+    m_replaceRequest->canceled.store(true, std::memory_order_relaxed);
+    m_replaceRequest.reset();
+}
+
+void DocumentFind::startReplaceAll(const std::shared_ptr<const ReplaceRequest> &request)
+{
+    const bool each = replaceInGrids();
+    auto *watcher = new QFutureWatcher<Replaced>(this);
+    // Deliver even a fast result after the current editor event has finished.
+    connect(watcher, &QFutureWatcher<Replaced>::finished, this, [this, watcher, request, each] {
+        watcher->deleteLater();
+        if (m_replaceRequest != request) return;
+        try {
+            takeReplacements(request, watcher->result(), each);
+        } catch (...) {
+            if (m_replaceRequest != request) return;
+            m_replaceRequest.reset();
+            m_replaceError = tr("Replace All stopped: %1").arg(WorkerFailure::reason(std::current_exception()));
+            emit resultsChanged();
+        }
+    });
+    watcher->setFuture(QtConcurrent::run(&m_pool, &DocumentFind::replaceJob, request->document->buffer()->snapshot(),
+                                         request, each));
+}
+
+void DocumentFind::takeReplacements(const std::shared_ptr<const ReplaceRequest> &request, const Replaced &result,
+                                    bool each)
+{
+    if (!request->document || request->document != m_document || !m_canReplace) {
+        cancelReplaceAll();
+        return;
+    }
+    SourceBuffer *buffer = request->document->buffer();
+    if (result.revision != buffer->revision() || each != replaceInGrids()) {
+        startReplaceAll(request);
+        return;
+    }
+    int count = result.count;
+    int unchanged = 0;
+    QList<SourceEdit> edits;
+    QString refusal;
+    if (each) {
+        TableGrids *tables = m_binding->tables();
+        const QString source = buffer->text();
+        // Only cell text is searchable in a grid. Count matches that
+        // already have the requested text without rewriting their cells.
+        for (const TextSearch::Edit &edit : result.edits) {
+            if (!tables->inCellText(edit.range.start, edit.range.start + edit.range.length)) continue;
+            if (QStringView(source).mid(edit.range.start, edit.range.length) == edit.text) ++unchanged;
+            else edits.append({edit.range, edit.text});
+        }
+        int left = 0;
+        if (!edits.isEmpty()) {
+            TableGrids::Adapted adapted = tables->adapt(edits, 0, 0, &left);
+            count = unchanged + int(edits.size()) - left;
+            if (adapted.kind != TableGrids::Adapted::Pass) edits = std::move(adapted.edits);
+            refusal = std::move(adapted.reason);
+        } else {
+            count = unchanged;
+        }
+    } else if (count > 0) {
+        edits.append({result.edit.range, result.edit.text});
+    }
+    if (!edits.isEmpty() && buffer->replaceAtRevision(result.revision, edits) == SourceBuffer::EditOutcome::Rejected) {
+        count = unchanged;
+        refusal = tr("The replacements could not be written.");
+    }
+    if (m_replaceRequest != request) return;
+    m_replaceRequest.reset();
+    if (!refusal.isEmpty() && m_binding) emit m_binding->tables()->refused(refusal);
+    emit replacedAll(count);
 }
 
 DocumentFind::Replaced DocumentFind::replaceJob(QSharedPointer<const SourceSnapshot> snapshot,
-                                                QRegularExpression expression, QString replacement, bool regex,
+                                                const std::shared_ptr<const ReplaceRequest> &request,
                                                 bool each)
 {
-    WorkerFailure::check(WorkerFailure::Job::Search);
     Replaced replaced;
     replaced.revision = snapshot->revision;
+    if (request->canceled.load(std::memory_order_relaxed)) return replaced;
+    WorkerFailure::check(WorkerFailure::Job::Search);
     const QString &text = snapshot->text;
     QList<TextSearch::Edit> edits;
-    TextSearch::forEachMatch(text, expression, [&](const QRegularExpressionMatch &match) {
-        edits.append({{int(match.capturedStart()), int(match.capturedLength())},
-                      TextSearch::expand(replacement, match, regex)});
-        return true;
-    });
+    TextSearch::forEachMatch(text, request->expression,
+                            [&](const QRegularExpressionMatch &match) {
+                                edits.append({{int(match.capturedStart()), int(match.capturedLength())},
+                                              TextSearch::expand(request->replacement, match, request->regex)});
+                                return true;
+                            },
+                            &request->canceled);
+    if (request->canceled.load(std::memory_order_relaxed)) return replaced;
     replaced.count = int(edits.size());
-    replaced.edit = TextSearch::combine(text, edits);
     if (each) replaced.edits = std::move(edits);
+    else replaced.edit = TextSearch::combine(text, edits);
     return replaced;
 }
 

@@ -148,31 +148,6 @@
 
 namespace {
 
-// Occupies every thread of the global pool until released, so that work the
-// store queues there starts only when the test lets it.
-class PoolBlock {
-public:
-    explicit PoolBlock(QThreadPool *pool = QThreadPool::globalInstance())
-        : m_pool(pool), m_gate(std::make_shared<QSemaphore>())
-    {
-        m_count = m_pool->maxThreadCount();
-        // Each blocker owns the gate, so that it outlives this object: a
-        // thread woken by release() is still inside the semaphore afterwards.
-        for (int i = 0; i < m_count; ++i)
-            m_pool->start([gate = m_gate] { gate->acquire(); });
-    }
-    ~PoolBlock() { release(); }
-    void release()
-    {
-        if (const int count = std::exchange(m_count, 0); count > 0) m_gate->release(count);
-    }
-
-private:
-    QThreadPool *m_pool;
-    std::shared_ptr<QSemaphore> m_gate;
-    int m_count = 0;
-};
-
 // A test that needs the local time to be another zone's runs again in a
 // process of its own, with TZ set from that process's start: setting it in
 // this one would race whatever other threads read the local time. In that
@@ -359,6 +334,8 @@ private slots:
     void cliUsageErrorsExitOne() { CliTests::usageErrorsExitOne(); }
     void cliCheckReportsEveryKindOfProblem() { CliTests::checkReportsEveryKindOfProblem(); }
     void cliCheckPassesACleanDocument() { CliTests::checkPassesACleanDocument(); }
+    void cliCheckChecksAnchorsInTextDocuments() { CliTests::checkChecksAnchorsInTextDocuments(); }
+    void cliCheckingRelativeLinksIgnoresTheQueryForFileLookup() { CliTests::checkingRelativeLinksIgnoresTheQueryForFileLookup(); }
     void cliCheckSaysWhatCannotBeRead() { CliTests::checkSaysWhatCannotBeRead(); }
     void cliRejectsNonUtf8FileNames() { CliTests::rejectsNonUtf8FileNames(); }
     void cliDistinguishesNonregularPictures() { CliTests::distinguishesNonregularPictures(); }
@@ -370,6 +347,13 @@ private slots:
     void cliExportAssemblesMarkdown() { CliTests::exportAssemblesMarkdown(); }
     void cliExportAssemblyKeepsMeaning() { CliTests::exportAssemblyKeepsMeaning(); }
     void cliAssembledHeadingLinksKeepTheirTarget() { CliTests::assembledHeadingLinksKeepTheirTarget(); }
+    void cliAssembledLinksReachChaptersWithoutTheirFiles() { CliTests::assembledLinksReachChaptersWithoutTheirFiles(); }
+    void cliAssembledDestinationsKeepEncodedFragments() { CliTests::assembledDestinationsKeepEncodedFragments(); }
+    void cliAssembledChaptersKeepIndependentBlocks_data() { CliTests::assembledChaptersKeepIndependentBlocks_data(); }
+    void cliAssembledChaptersKeepIndependentBlocks() { CliTests::assembledChaptersKeepIndependentBlocks(); }
+    void cliAssembledLinksKeepTheirDefinitionScope() { CliTests::assembledLinksKeepTheirDefinitionScope(); }
+    void cliAssembledRepeatedChaptersShareTheirInlineNote() { CliTests::assembledRepeatedChaptersShareTheirInlineNote(); }
+    void cliEpubReportsOmittedLocalLinksOnTheCli() { CliTests::epubReportsOmittedLocalLinksOnTheCli(); }
     void cliAssembledListsKeepTheirNumbering() { CliTests::assembledListsKeepTheirNumbering(); }
     void cliHtmlHeadingLinksResolveInTheirChapter() { CliTests::htmlHeadingLinksResolveInTheirChapter(); }
     void cliInheritedReferencesUseTheirDefinitionFolder() { CliTests::inheritedReferencesUseTheirDefinitionFolder(); }
@@ -386,12 +370,31 @@ private slots:
     void cliExportFormatsPlugInThroughOneInterface() { CliTests::exportFormatsPlugInThroughOneInterface(); }
     void cliStatsCountWhatAReaderReads() { CliTests::statsCountWhatAReaderReads(); }
     void cliStatsCountVisibleCodeOnce() { CliTests::statsCountVisibleCodeOnce(); }
+    void cliPlainTextAndStatsRespectHtmlBreaks_data() { CliTests::plainTextAndStatsRespectHtmlBreaks_data(); }
+    void cliPlainTextAndStatsRespectHtmlBreaks() { CliTests::plainTextAndStatsRespectHtmlBreaks(); }
+    void cliPlainTextAndStatsIncludeCellInlineNotes_data() { CliTests::plainTextAndStatsIncludeCellInlineNotes_data(); }
+    void cliPlainTextAndStatsIncludeCellInlineNotes() { CliTests::plainTextAndStatsIncludeCellInlineNotes(); }
+    void cliPlainTextRendersCitationsAndBibliography_data() { CliTests::plainTextRendersCitationsAndBibliography_data(); }
+    void cliPlainTextRendersCitationsAndBibliography() { CliTests::plainTextRendersCitationsAndBibliography(); }
+    void cliPlainTextKeepsCodeIndentation_data() { CliTests::plainTextKeepsCodeIndentation_data(); }
+    void cliPlainTextKeepsCodeIndentation() { CliTests::plainTextKeepsCodeIndentation(); }
     void cliReadingTextOmitsUnusedNotes() { CliTests::readingTextOmitsUnusedNotes(); }
     void cliSkillPrintsAndInstalls() { CliTests::skillPrintsAndInstalls(); }
     void cliSkillLeavesOtherFilesAlone() { CliTests::skillLeavesOtherFilesAlone(); }
     void cliJsonAndTextAreSafeToPrint() { CliTests::jsonAndTextAreSafeToPrint(); }
     void cliHtmlDestinationsCanBeRewritten() { CliTests::htmlDestinationsCanBeRewritten(); }
     void cliCommandsNeedNoDisplay() { CliTests::commandsNeedNoDisplay(); }
+    void cliReportsWhenStdoutCannotBeWritten_data() { CliTests::reportsWhenStdoutCannotBeWritten_data(); }
+    void cliReportsWhenStdoutCannotBeWritten() { CliTests::reportsWhenStdoutCannotBeWritten(); }
+    void cliWritesThroughShortWrites() { CliTests::writesThroughShortWrites(); }
+    void cliKeepsQtNamedFilesAfterDoubleDash_data() { CliTests::keepsQtNamedFilesAfterDoubleDash_data(); }
+    void cliKeepsQtNamedFilesAfterDoubleDash() { CliTests::keepsQtNamedFilesAfterDoubleDash(); }
+    void cliQtOptionsBeforeDoubleDash() { CliTests::qtOptionsBeforeDoubleDash(); }
+    void cliQuietExportSwitchesDoNotLogWarnings_data() { CliTests::quietExportSwitchesDoNotLogWarnings_data(); }
+    void cliQuietExportSwitchesDoNotLogWarnings() { CliTests::quietExportSwitchesDoNotLogWarnings(); }
+    void cliQuietExportsKeepUsageAndErrors() { CliTests::quietExportsKeepUsageAndErrors(); }
+    void cliNonfiniteExportNumbersAreUsageErrors_data() { CliTests::nonfiniteExportNumbersAreUsageErrors_data(); }
+    void cliNonfiniteExportNumbersAreUsageErrors() { CliTests::nonfiniteExportNumbersAreUsageErrors(); }
     void cliBibliographyLinksAreOnlyWebMailOrDoi() { CliTests::bibliographyLinksAreOnlyWebMailOrDoi(); }
     void cliExportNeverWritesThroughALink() { CliTests::exportNeverWritesThroughALink(); }
     void cliCheckSaysWhetherHelpersAreIsolated() { CliTests::checkSaysWhetherHelpersAreIsolated(); }
@@ -407,6 +410,8 @@ private slots:
     void screenshotNamesWhatCannotBeDone() { ScreenshotTests::namesWhatCannotBeDone(); }
     // Exports and printing. The tests themselves are in exporttests.cpp.
     void exportPdfSetsPagesWithSearchableText() { ExportTests::pdfSetsPagesWithSearchableText(); }
+    void pdfLocalLinksLeadFromTheOutputFolder() { ExportTests::pdfLocalLinksLeadFromTheOutputFolder(); }
+    void epubReportsLinksToFilesOutsideTheBook() { ExportTests::epubReportsLinksToFilesOutsideTheBook(); }
     void exportPdfKeepsHeadingsWithTheirText() { ExportTests::pdfKeepsHeadingsWithTheirText(); }
     void exportPdfTallTableRowsRunOntoTheNextPage() { ExportTests::pdfTallTableRowsRunOntoTheNextPage(); }
     void exportPdfSetsALongDocumentWhole() { ExportTests::pdfSetsALongDocumentWhole(); }
@@ -414,6 +419,12 @@ private slots:
     void exportPaperFormulasSitOnTheBaseline() { ExportTests::paperFormulasSitOnTheBaseline(); }
     void exportPaperDiagramsAreVectorsWhereQtDrawsThem() { ExportTests::paperDiagramsAreVectorsWhereQtDrawsThem(); }
     void exportDocxIsWordprocessingMarkup() { ExportTests::docxIsWordprocessingMarkup(); }
+    void bibliographyPrecedesCollectedNotes_data() { ExportTests::bibliographyPrecedesCollectedNotes_data(); }
+    void bibliographyPrecedesCollectedNotes() { ExportTests::bibliographyPrecedesCollectedNotes(); }
+    void docxDeclaresFixedWidthCodeFonts() { ExportTests::docxDeclaresFixedWidthCodeFonts(); }
+    void frontMatterTitleIsMetadataAcrossFormats_data() { ExportTests::frontMatterTitleIsMetadataAcrossFormats_data(); }
+    void frontMatterTitleIsMetadataAcrossFormats() { ExportTests::frontMatterTitleIsMetadataAcrossFormats(); }
+    void exportLinksKeepQueryAndFragment() { ExportTests::exportLinksKeepQueryAndFragment(); }
     void exportDocxOpensInLibreOffice() { ExportTests::docxOpensInLibreOffice(); }
     void exportEpubFollowsTheContainerRules() { ExportTests::epubFollowsTheContainerRules(); }
     void exportEpubSplitsIntoChapters() { ExportTests::epubSplitsIntoChapters(); }
@@ -767,6 +778,10 @@ private slots:
     void noteMenuFindsItsReferenceAgain() { EditingTests::noteMenuFindsItsReferenceAgain(); }
     void assistiveTechnologyEditsTheSource() { EditingTests::assistiveTechnologyEditsTheSource(); }
     void wordCountsFollowTextAndSelection() { EditingTests::wordCountsFollowTextAndSelection(); }
+    void guideDescribesTheConflictChoicesShown_data() { EditingTests::guideDescribesTheConflictChoicesShown_data(); }
+    void guideDescribesTheConflictChoicesShown() { EditingTests::guideDescribesTheConflictChoicesShown(); }
+    void keepBothRestoresTheCaretOfTheKeptText_data() { EditingTests::keepBothRestoresTheCaretOfTheKeptText_data(); }
+    void keepBothRestoresTheCaretOfTheKeptText() { EditingTests::keepBothRestoresTheCaretOfTheKeptText(); }
     // How much history keeps, other encodings, the library's width, files
     // renamed elsewhere, recent files and drafts, library search and the
     // user guide, written in librarytests.cpp.
@@ -779,6 +794,15 @@ private slots:
     void userGuideOpensAsReadOnlyHelp() { LibraryTests::userGuideOpensAsReadOnlyHelp(); }
     void eachWindowKeepsItsLibraryWidth() { LibraryTests::eachWindowKeepsItsLibraryWidth(); }
     void renamesByOtherProgramsAreFollowed() { LibraryTests::renamesByOtherProgramsAreFollowed(); }
+    void renameUpdatesTextFilesAndHtmlAttributes_data() { LibraryTests::renameUpdatesTextFilesAndHtmlAttributes_data(); }
+    void renameUpdatesTextFilesAndHtmlAttributes() { LibraryTests::renameUpdatesTextFilesAndHtmlAttributes(); }
+    void undoRenameRestoresExactReferenceSpelling_data() { LibraryTests::undoRenameRestoresExactReferenceSpelling_data(); }
+    void undoRenameRestoresExactReferenceSpelling() { LibraryTests::undoRenameRestoresExactReferenceSpelling(); }
+    void undoMoveWaitsForAnOpenReview() { LibraryTests::undoMoveWaitsForAnOpenReview(); }
+    void undoNoticeWaitsForAMoveReview() { LibraryTests::undoNoticeWaitsForAMoveReview(); }
+    void moveKeepsFrontMatterCitationFilesReachable_data() { LibraryTests::moveKeepsFrontMatterCitationFilesReachable_data(); }
+    void moveKeepsFrontMatterCitationFilesReachable() { LibraryTests::moveKeepsFrontMatterCitationFilesReachable(); }
+    void movingADocumentLeavesUnchangedCitationPathsAlone() { LibraryTests::movingADocumentLeavesUnchangedCitationPathsAlone(); }
     void encodingsDecodeWhatUtf8CannotRead() { LibraryTests::encodingsDecodeWhatUtf8CannotRead(); }
     void reopeningInAnotherEncodingSavesOnlyOnceConfirmed() { LibraryTests::reopeningInAnotherEncodingSavesOnlyOnceConfirmed(); }
     void reopeningRefusesAFileThatChanged() { LibraryTests::reopeningRefusesAFileThatChanged(); }
@@ -889,11 +913,20 @@ private slots:
     void handlesMoveRowsAndColumnsByDragging() { TableGridTests::handlesMoveRowsAndColumnsByDragging(); }
     void theSizePickerInsertsATidyEmptyTable() { TableGridTests::theSizePickerInsertsATidyEmptyTable(); }
     void tablesCanBeShownAsMarkdownPerView() { TableGridTests::tablesCanBeShownAsMarkdownPerView(); }
+    void guideDescribesTheActionsInEachTableMenu() { TableGridTests::guideDescribesTheActionsInEachTableMenu(); }
+    void showMarkdownFromTheCellMenuKeepsTheCaret_data() { TableGridTests::showMarkdownFromTheCellMenuKeepsTheCaret_data(); }
+    void showMarkdownFromTheCellMenuKeepsTheCaret() { TableGridTests::showMarkdownFromTheCellMenuKeepsTheCaret(); }
+    void externallyReloadedTablesProjectInANewView_data() { TableGridTests::externallyReloadedTablesProjectInANewView_data(); }
+    void externallyReloadedTablesProjectInANewView() { TableGridTests::externallyReloadedTablesProjectInANewView(); }
+    void showGridCanRestoreACompletedTableUnderTheCaret_data() { TableGridTests::showGridCanRestoreACompletedTableUnderTheCaret_data(); }
+    void showGridCanRestoreACompletedTableUnderTheCaret() { TableGridTests::showGridCanRestoreACompletedTableUnderTheCaret(); }
     void readOnlyTablesTakeNoEdits() { TableGridTests::readOnlyTablesTakeNoEdits(); }
     void copyingCellsGivesTabsAndAnHtmlTable() { TableGridTests::copyingCellsGivesTabsAndAnHtmlTable(); }
     void pastingCellsFillsOverwritesAndGrows() { TableGridTests::pastingCellsFillsOverwritesAndGrows(); }
     void wideTablesScrollSidewaysAndTheTextScrollsOver() { TableGridTests::wideTablesScrollSidewaysAndTheTextScrollsOver(); }
     void handTypedTablesWaitUntilTheCaretLeaves() { TableGridTests::handTypedTablesWaitUntilTheCaretLeaves(); }
+    void handTypedTablesKeepWaitingThroughEdits_data() { TableGridTests::handTypedTablesKeepWaitingThroughEdits_data(); }
+    void handTypedTablesKeepWaitingThroughEdits() { TableGridTests::handTypedTablesKeepWaitingThroughEdits(); }
     void everyGeometryQuestionHasAnAnswerInATable() { TableGridTests::everyGeometryQuestionHasAnAnswerInATable(); }
     void fontAndWidthChangesKeepTheGrid() { TableGridTests::fontAndWidthChangesKeepTheGrid(); }
     void tablesTheGridCannotHoldStayMarkdown() { TableGridTests::tablesTheGridCannotHoldStayMarkdown(); }
@@ -932,6 +965,29 @@ private slots:
     void upAndDownKeepToTheColumnClickedIn() { TableGridTests::upAndDownKeepToTheColumnClickedIn(); }
     void aLineBreakPastedInACellLeavesTheCaretAfterIt() { TableGridTests::aLineBreakPastedInACellLeavesTheCaretAfterIt(); }
     void replaceAllMakesTheReplacementsTablesCanTake() { TableGridTests::replaceAllMakesTheReplacementsTablesCanTake(); }
+    void backwardCutAboveATableLeavesItWhole_data() { TableGridTests::backwardCutAboveATableLeavesItWhole_data(); }
+    void backwardCutAboveATableLeavesItWhole() { TableGridTests::backwardCutAboveATableLeavesItWhole(); }
+    void replaceAllKeepsItsQueryWhenItRetries_data() { TableGridTests::replaceAllKeepsItsQueryWhenItRetries_data(); }
+    void replaceAllKeepsItsQueryWhenItRetries() { TableGridTests::replaceAllKeepsItsQueryWhenItRetries(); }
+    void replaceAllKeepsSafeEditsInTheSameTable_data() { TableGridTests::replaceAllKeepsSafeEditsInTheSameTable_data(); }
+    void replaceAllKeepsSafeEditsInTheSameTable() { TableGridTests::replaceAllKeepsSafeEditsInTheSameTable(); }
+    void backtickRunsCloseInsideTheirOwnCell_data() { TableGridTests::backtickRunsCloseInsideTheirOwnCell_data(); }
+    void backtickRunsCloseInsideTheirOwnCell() { TableGridTests::backtickRunsCloseInsideTheirOwnCell(); }
+    void writingBelowAGridKeepsTheNextParagraphSeparate_data() { TableGridTests::writingBelowAGridKeepsTheNextParagraphSeparate_data(); }
+    void writingBelowAGridKeepsTheNextParagraphSeparate() { TableGridTests::writingBelowAGridKeepsTheNextParagraphSeparate(); }
+    void plainPasteFillsEverySelectedCell_data() { TableGridTests::plainPasteFillsEverySelectedCell_data(); }
+    void plainPasteFillsEverySelectedCell() { TableGridTests::plainPasteFillsEverySelectedCell(); }
+    void typedTsvPastesItsRowsAndColumns_data() { TableGridTests::typedTsvPastesItsRowsAndColumns_data(); }
+    void typedTsvPastesItsRowsAndColumns() { TableGridTests::typedTsvPastesItsRowsAndColumns(); }
+    void htmlRowspanKeepsTheNextCellInItsColumn_data() { TableGridTests::htmlRowspanKeepsTheNextCellInItsColumn_data(); }
+    void htmlRowspanKeepsTheNextCellInItsColumn() { TableGridTests::htmlRowspanKeepsTheNextCellInItsColumn(); }
+    void gridPasteUsesTheFirstHtmlTable_data() { TableGridTests::gridPasteUsesTheFirstHtmlTable_data(); }
+    void gridPasteUsesTheFirstHtmlTable() { TableGridTests::gridPasteUsesTheFirstHtmlTable(); }
+    void sortUsesTheVisibleCellText() { TableGridTests::sortUsesTheVisibleCellText(); }
+    void richTablePasteKeepsHorizontalMerges_data() { EditingTests::richTablePasteKeepsHorizontalMerges_data(); }
+    void richTablePasteKeepsHorizontalMerges() { EditingTests::richTablePasteKeepsHorizontalMerges(); }
+    void copiedCellsReadWellAndPasteBackAsMarkdown_data() { TableGridTests::copiedCellsReadWellAndPasteBackAsMarkdown_data(); }
+    void copiedCellsReadWellAndPasteBackAsMarkdown() { TableGridTests::copiedCellsReadWellAndPasteBackAsMarkdown(); }
     void slowPastesLeaveTablesShownAsMarkdownAsWritten() { TableGridTests::slowPastesLeaveTablesShownAsMarkdownAsWritten(); }
     void aTableGrowsNoLargerThanAGridHolds() { TableGridTests::aTableGrowsNoLargerThanAGridHolds(); }
     void escapeWithTextSelectedInACellIsTheViews() { TableGridTests::escapeWithTextSelectedInACellIsTheViews(); }
@@ -985,6 +1041,7 @@ private slots:
     void commandLineSavesAndClosesTabs() { VimTests::commandLineSavesAndClosesTabs(); }
     void windowShowsAndLeavesVimKeys() { VimTests::windowShowsAndLeavesVimKeys(); }
     void editorDrawsFromTheme();
+    void textEditDrawsOnlyTheEditorCaret() { EditingTests::textEditDrawsOnlyTheEditorCaret(); }
     void caretBlinksThenRestsAndDrawsNothing();
     void caretIsSteadyWithoutMotionOrFlash();
     void caretNeverStartsQtQuicksAnimations();
@@ -1005,6 +1062,7 @@ private slots:
     void stylingKeepsEveryGlyphWhereItWas() { StylingTests::stylingKeepsEveryGlyphWhereItWas(); }
     void liveFormattingTurnsOff() { StylingTests::liveFormattingTurnsOff(); }
     void liveFormattingIsAPreferenceAndACommand() { StylingTests::liveFormattingIsAPreferenceAndACommand(); }
+    void resettingStylingStatsLeavesAnIdleViewSettled() { StylingTests::resettingStylingStatsLeavesAnIdleViewSettled(); }
     void typingWithLiveFormattingStaysWithinAFrame() { StylingTests::typingWithLiveFormattingStaysWithinAFrame(); }
     void everyViewReadsOneParseOfEachRevision() { ParseTests::everyViewReadsOneParseOfEachRevision(); }
     void staleParsesAreNeverHandedOver() { ParseTests::staleParsesAreNeverHandedOver(); }
@@ -1143,6 +1201,8 @@ private slots:
     void anInvalidPatternSaysWhy();
     void findStepsRoundTheMatchesAndFollowsEdits();
     void replaceAndReplaceAllAreEachOneUndoStep();
+    void replaceAllFinishesAfterFindCloses_data() { EditingTests::replaceAllFinishesAfterFindCloses_data(); }
+    void replaceAllFinishesAfterFindCloses() { EditingTests::replaceAllFinishesAfterFindCloses(); }
     void findInALargeDocumentRunsOffTheUiThread();
     void headingsAreTheEnginesOutline();
     void outlineFollowsEditsOffTheUiThread();
@@ -17560,7 +17620,7 @@ void ParchTests::movesRewriteRelativeReferences()
 
     // Links split across lines and in quotes, definitions whose destination
     // is on the next line, `file:` URLs, includes in single quotes and
-    // percent-encoding beyond ASCII are all followed; HTML is left as it is.
+    // percent-encoding beyond ASCII and HTML attributes are all followed.
     const QString split = QStringLiteral(
         "> See [the\n> plan](\n> plan.md\n> \"Plan\") and <img src=\"plan.md\">.\n"
         "\n"
@@ -17579,11 +17639,12 @@ void ParchTests::movesRewriteRelativeReferences()
         listed << QStringLiteral("%1:%2 -> %3").arg(change.line).arg(change.before, change.after);
         edits.append({change.range, change.after});
     }
-    QCOMPARE(listed, (QStringList{"2:plan.md -> archive/plan.md", "6:plan.md -> archive/plan.md",
+    QCOMPARE(listed, (QStringList{"2:plan.md -> archive/plan.md", "3:plan.md -> archive/plan.md",
+                                  "6:plan.md -> archive/plan.md",
                                   "8:file:///lib/plan.md#top -> file:///lib/archive/plan.md#top",
                                   "8:caf%C3%A9/plan.md -> %C3%BCber%20caf%C3%A9/plan.md",
                                   "10:chapters/one.md -> my chapters/one.md"}));
-    // Once changed, every link but the HTML leads where the moves took what it led to.
+    // Once changed, every link leads where the moves took what it led to.
     QString updated = split;
     const TextSearch::Edit edit = TextSearch::combine(split, edits);
     updated.replace(edit.range.start, edit.range.length, edit.text);
@@ -17591,8 +17652,7 @@ void ParchTests::movesRewriteRelativeReferences()
     const QList<DocumentLinks::Link> after = DocumentLinks::find(updated, library, library);
     QCOMPARE(after.size(), before.size());
     for (qsizetype i = 0; i < before.size(); ++i) {
-        const QString expected = before[i].html ? before[i].destination.path
-                                                : DocumentLinks::moved(before[i].destination.path, moves);
+        const QString expected = DocumentLinks::moved(before[i].destination.path, moves);
         QCOMPARE(after[i].destination.path, expected);
     }
 }
@@ -17656,6 +17716,9 @@ void ParchTests::renameRewritesEncodedDestinations_data()
     QTest::newRow("file URL") << QStringLiteral("old.md") << QStringLiteral("What?Now#2.md")
         << QStringLiteral("[Chapter](file://LIBRARY/old.md#point)")
         << QStringLiteral("[Chapter](file://LIBRARY/What%3FNow%232.md#point)");
+    QTest::newRow("question mark in a relative path") << QStringLiteral("old.md") << QStringLiteral("What?Now.md")
+        << QStringLiteral("[Chapter](old.md?view=plain#point)")
+        << QStringLiteral("[Chapter](What%3FNow.md?view=plain#point)");
 }
 
 void ParchTests::renameRewritesEncodedDestinations()
@@ -18291,6 +18354,7 @@ void ParchTests::findBarFindsAndReplacesFromTheKeys()
     settle(bar);
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(all));
     QTRY_COMPARE(buffer->text(), QStringLiteral("1 two 1 three 1\nfour 1\n"));
+    QCOMPARE(count->property("text").toString(), QStringLiteral("3 replaced"));
     buffer->undo();
     QCOMPARE(buffer->text(), QStringLiteral("one two 1 three one\nfour one\n"));
     // A pattern that is no regular expression says why.
@@ -22814,13 +22878,13 @@ void ParchTests::htmlDataImagesGoToTheSink()
     QList<QPair<QByteArray, QString>> saved;
     const QString markdown = HtmlMarkdown::convert(html, [&](const QByteArray &bytes, const QString &type) {
         saved.append({bytes, type});
-        return QStringLiteral("assets/pasted 1 (ü).png");
+        return QStringLiteral("assets/pasted 1 (ü)?.png");
     });
     // Only the image the HTML carries is saved; a placeholder for one loaded later is not.
     QCOMPARE(saved.size(), 1);
     QCOMPARE(saved.first().first, png);
     QCOMPARE(saved.first().second, QStringLiteral("image/png"));
-    QCOMPARE(markdown, QStringLiteral("See ![chart (v2)](assets/pasted%201%20%28ü%29.png) and "
+    QCOMPARE(markdown, QStringLiteral("See ![chart (v2)](assets/pasted%201%20%28ü%29%3F.png) and "
                                       "![lazy](https://example.org/real.png)"));
     // Kept nowhere, the image leaves its alt text.
     const QString withoutImage = QStringLiteral("See chart (v2) and ![lazy](https://example.org/real.png)");
@@ -22893,7 +22957,7 @@ void ParchTests::markdownPathsAndTextAreEncoded()
     // by it as the same path.
     QCOMPARE(md::encodeDestination(QStringLiteral("assets/my photo (1).png")),
              QStringLiteral("assets/my%20photo%20%281%29.png"));
-    QCOMPARE(md::encodeDestination(QStringLiteral("assets/café #2?.png")), QStringLiteral("assets/café%20%232?.png"));
+    QCOMPARE(md::encodeDestination(QStringLiteral("assets/café #2?.png")), QStringLiteral("assets/café%20%232%3F.png"));
     QCOMPARE(md::encodeDestination(QStringLiteral("../notes/a_b-c.d~e+f.pdf")), QStringLiteral("../notes/a_b-c.d~e+f.pdf"));
     QCOMPARE(md::encodeDestination(QStringLiteral("100%[x]<y>&z:\\.png")),
              QStringLiteral("100%25[x]%3Cy%3E%26z%3A%5C.png"));
@@ -23215,6 +23279,27 @@ void ParchTests::droppedFilesAreCopiedOrLinked()
     // Several files are a paragraph each.
     QCOMPARE(dropped(6, {folders.outside + QStringLiteral("/photo one.png"), folders.outside + QStringLiteral("/café.pdf")}),
              QStringLiteral("Start \n\n![photo one](assets/photo%20one.png)\n\n[café.pdf](assets/café.pdf)\n\nend\n"));
+    // A question mark in a filename stays part of the path for images and links.
+    const QString imageName = QStringLiteral("/diagram?.png");
+    const QString pdfName = QStringLiteral("/plan?.pdf");
+    writeFile(folders.outside + imageName, red);
+    writeFile(folders.notes + QStringLiteral("/img") + imageName, blue);
+    writeFile(folders.outside + pdfName, "pdf");
+    const QString withQuestionMarks = dropped(6, {folders.outside + imageName,
+                                                  folders.notes + QStringLiteral("/img") + imageName,
+                                                  folders.outside + pdfName});
+    QVERIFY2(withQuestionMarks.contains(QStringLiteral("![diagram?](assets/diagram%3F.png)")), qPrintable(withQuestionMarks));
+    QVERIFY(withQuestionMarks.contains(QStringLiteral("![diagram?](img/diagram%3F.png)")));
+    QVERIFY(withQuestionMarks.contains(QStringLiteral("[plan?.pdf](assets/plan%3F.pdf)")));
+    const auto destinations = DocumentLinks::find(withQuestionMarks, folders.notes, folders.library);
+    QCOMPARE(destinations.size(), 3);
+    QCOMPARE(destinations[0].destination.path, assets + imageName);
+    QCOMPARE(destinations[1].destination.path, folders.notes + QStringLiteral("/img") + imageName);
+    QCOMPARE(destinations[2].destination.path, assets + pdfName);
+    for (const auto &link : destinations) QVERIFY(!link.destination.query);
+    QCOMPARE(readFile(destinations[0].destination.path), red);
+    QCOMPARE(readFile(destinations[1].destination.path), blue);
+    QCOMPARE(readFile(destinations[2].destination.path), QByteArray("pdf"));
     // A folder is not attached, and says so.
     QSignalSpy problems(attachments.get(), &Attachments::problem);
     QVERIFY(dropFiles(view, 0, {folders.outside + QStringLiteral("/folder")}));

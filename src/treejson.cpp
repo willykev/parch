@@ -72,7 +72,7 @@ public:
             for (const md::Attribute &attribute : node.attributes) attributes.insert(attribute.name, attribute.value);
             out.insert(QStringLiteral("attributes"), attributes);
         }
-        if (!node.markers.empty()) {
+        if (!node.markers.empty() && node.type != md::NodeType::CodeBlock) {
             QJsonArray markers;
             for (const md::Range &marker : node.markers) markers.append(range(marker));
             out.insert(QStringLiteral("markers"), markers);

@@ -252,11 +252,9 @@ struct BuildOptions {
     QObject *islandParent = nullptr;
     // Task boxes, links and notes can be followed: they are anchors.
     bool interactive = true;
-    // For a document that leaves this computer (paper, a PDF): a link to a
-    // file the document includes leads to where that file is in it, and a
-    // link to any other file is written as the document has it, never as
-    // the full path on this computer.
-    bool portableLinks = false;
+    // On paper, resolve local links for the exported document. Without a
+    // callback, the editor preview uses local file URLs for activation.
+    std::function<QString(const md::Node &, const QString &)> localLinks;
     // The document's citations as its citation style formats them: each
     // citation's words, such as "(Doe 2020, p. 3)", in place of its number
     // and locator in brackets, and the style's bibliography in place of the
@@ -342,9 +340,9 @@ private:
     void entry(const Part &part);
 
     void inlines(const std::vector<md::Node> &nodes, const Char &state);
-    // Where a link to a local file leads (see BuildOptions::portableLinks);
+    // Where a link to a local file leads, for the editor or for export.
     // `written` is the destination as the document has it.
-    QString localHref(const md::Destination &target, const QString &written) const;
+    QString localHref(const md::Node &node, const md::Destination &target, const QString &written) const;
     void inl(const md::Node &node, const Char &state);
     void htmlInline(const md::Node &node, const Char &state);
     void image(const md::Node &node, const QString &destination, const QString &alt, const QString &title,

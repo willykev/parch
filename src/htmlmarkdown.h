@@ -2,7 +2,9 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <functional>
+#include <optional>
 
 // Rich text, as the clipboard or a drop offers it in HTML, turned into clean
 // Markdown that means what the HTML showed: headings, paragraphs, emphasis,
@@ -24,7 +26,18 @@ using ImageSink = std::function<QString(const QByteArray &bytes, const QString &
 // The Markdown for the HTML, without a final line break; nothing when the
 // HTML shows nothing. Line breaks are LF. `inlineOnly`, when given, says
 // whether the Markdown is one paragraph, which can go inside a line.
-QString convert(const QString &html, const ImageSink &images = {}, bool *inlineOnly = nullptr);
+QString convert(const QString &html, const ImageSink &images = {}, bool *inlineOnly = nullptr,
+                bool mergedCells = false);
+
+struct TableCells {
+    QList<QStringList> rows;
+    bool hasGeometry = false; // spans or more than one table
+    bool tooLarge = false;
+};
+
+// The first table's visible cell text. Spanned positions are empty except
+// at the origin, and the rows hold the same number of columns.
+std::optional<TableCells> firstTableCells(const QString &html);
 
 // Whether the HTML may carry images in data: URLs, which only a sink keeps.
 bool mayEmbedImages(const QString &html);

@@ -2,6 +2,8 @@
 
 #include <QStringList>
 
+#include <algorithm>
+
 namespace md {
 namespace {
 
@@ -267,7 +269,9 @@ private:
     // starts in the text. The current line is the one after it.
     YamlValue parseValue(QStringView rest, int offset, int parentIndent, int depth)
     {
-        rest = trimmed(rest);
+        const QStringView trimmedRest = trimmed(rest);
+        offset += int(trimmedRest.data() - rest.data());
+        rest = trimmedRest;
         if (rest.isEmpty()) return {};
         const QChar first = rest[0];
         if (first == u'!' || first == u'&') {
@@ -276,23 +280,26 @@ private:
             while (i < rest.size() && !isBlankChar(rest[i])) ++i;
             if (first == u'!')
                 issue(offset, QStringLiteral("The tag %1 is ignored; its value is read as plain data").arg(rest.first(i)));
-            QStringView after = rest.sliced(i);
-            const int skipped = int(after.size() - trimmed(after).size());
-            after = trimmed(after);
+            const QStringView after = trimmed(rest.sliced(i));
             if (after.isEmpty()) {
                 skipBlank();
                 if (m_line < m_lines.size() && m_lines[m_line].indent > parentIndent && depth < MaxDepth)
                     return parseBlock(m_lines[m_line].indent, parentIndent, depth + 1);
                 return {};
             }
-            return parseValue(after, offset + int(i) + skipped, parentIndent, depth);
+            return parseValue(after, offset + int(after.data() - rest.data()), parentIndent, depth);
         }
-        if (first == u'|' || first == u'>') return blockScalar(rest, parentIndent);
+        if (first == u'|' || first == u'>') {
+            YamlValue value = blockScalar(rest, parentIndent);
+            value.sourceOffset = m_base + offset;
+            return value;
+        }
         if (first == u'[' || first == u'{') return flow(rest, offset, parentIndent);
         if (first == u'"' || first == u'\'') return quoted(rest, offset, parentIndent);
 
         // A plain scalar, which more indented lines continue.
-        QString text = stripComment(rest).toString();
+        const QStringView original = stripComment(rest);
+        QString text = original.toString();
         for (;;) {
             if (m_line >= m_lines.size()) break;
             const Line &next = m_lines[m_line];
@@ -313,7 +320,12 @@ private:
             }
             ++m_line;
         }
-        return plain(text);
+        YamlValue value = plain(text);
+        if (value.isScalar()) {
+            value.sourceOffset = m_base + offset;
+            if (text.size() == original.size()) value.sourceLength = int(original.size());
+        }
+        return value;
     }
 
     YamlValue blockScalar(QStringView header, int parentIndent)
@@ -372,16 +384,25 @@ private:
         return value;
     }
 
+    struct FlowLine {
+        int start;  // in the gathered text
+        int length;
+        int offset; // in the source
+    };
+
     // Gathers the lines a quoted scalar or a flow collection runs over.
     template <typename Closed>
-    QString gather(QStringView rest, int parentIndent, Closed closed)
+    QString gather(QStringView rest, int parentIndent, Closed closed, std::vector<FlowLine> *lines = nullptr)
     {
         QString text = rest.toString();
         while (!closed(text) && m_line < m_lines.size()) {
             const Line &next = m_lines[m_line];
             if (next.start != next.end && next.indent <= parentIndent) break;
+            const QStringView piece = trimmed(content(next));
             text.append(u' ');
-            text.append(trimmed(content(next)));
+            if (lines && !piece.isEmpty())
+                lines->push_back({int(text.size()), int(piece.size()), int(piece.data() - m_text.data())});
+            text.append(piece);
             ++m_line;
         }
         return text;
@@ -406,6 +427,7 @@ private:
         const int end = quotedEnd(text);
         YamlValue value;
         value.kind = YamlValue::Kind::Scalar;
+        value.sourceOffset = m_base + offset;
         if (end < 0) {
             issue(offset, QStringLiteral("The quoted text is not closed"));
             value.scalar = text.mid(1);
@@ -413,6 +435,7 @@ private:
         }
         const QStringView inner = QStringView(text).sliced(1, end - 2);
         value.scalar = text[0] == u'"' ? unquoteDouble(inner) : unquoteSingle(inner);
+        if (end <= rest.size()) value.sourceLength = end;
         return value;
     }
 
@@ -436,10 +459,11 @@ private:
 
     YamlValue flow(QStringView rest, int offset, int parentIndent)
     {
-        const QString text = gather(rest, parentIndent, flowClosed);
+        std::vector<FlowLine> lines{{0, int(rest.size()), offset}};
+        const QString text = gather(rest, parentIndent, flowClosed, &lines);
         qsizetype pos = 0;
         bool ok = true;
-        YamlValue value = flowValue(text, pos, 0, ok);
+        YamlValue value = flowValue(text, lines, pos, 0, ok);
         if (!ok) issue(offset, QStringLiteral("The bracketed list or mapping is not closed"));
         return value;
     }
@@ -449,7 +473,20 @@ private:
         while (pos < text.size() && (isBlankChar(text[pos]) || text[pos] == u'\n')) ++pos;
     }
 
-    YamlValue flowValue(const QString &text, qsizetype &pos, int depth, bool &ok)
+    void flowSpan(YamlValue &value, const std::vector<FlowLine> &lines, qsizetype start, qsizetype length)
+    {
+        if (!value.isScalar()) return;
+        value.inFlow = true;
+        const auto next = std::upper_bound(lines.begin(), lines.end(), start,
+                                           [](qsizetype at, const FlowLine &line) { return at < line.start; });
+        const FlowLine &line = *(next - 1);
+        const int from = int(start) - line.start;
+        if (from >= line.length) return;
+        value.sourceOffset = m_base + line.offset + from;
+        if (length <= line.length - from) value.sourceLength = int(length);
+    }
+
+    YamlValue flowValue(const QString &text, const std::vector<FlowLine> &lines, qsizetype &pos, int depth, bool &ok)
     {
         skipSpace(text, pos);
         YamlValue value;
@@ -460,21 +497,21 @@ private:
             const QChar close = map ? u'}' : u']';
             value.kind = map ? YamlValue::Kind::Map : YamlValue::Kind::List;
             ++pos;
-            for (;;) {
+            while (ok) {
                 skipSpace(text, pos);
                 if (pos >= text.size()) { ok = false; break; }
                 if (text[pos] == close) { ++pos; break; }
                 if (text[pos] == u',') { ++pos; continue; }
                 if (!map) {
-                    value.list.push_back(flowValue(text, pos, depth + 1, ok));
+                    value.list.push_back(flowValue(text, lines, pos, depth + 1, ok));
                     continue;
                 }
-                const YamlValue key = flowValue(text, pos, depth + 1, ok);
+                const YamlValue key = flowValue(text, lines, pos, depth + 1, ok);
                 skipSpace(text, pos);
                 YamlValue item;
                 if (pos < text.size() && text[pos] == u':') {
                     ++pos;
-                    item = flowValue(text, pos, depth + 1, ok);
+                    item = flowValue(text, lines, pos, depth + 1, ok);
                 }
                 value.map.emplace_back(key.scalar, std::move(item));
             }
@@ -486,11 +523,13 @@ private:
             if (end < 0) {
                 ok = false;
                 value.scalar = text.mid(pos + 1);
+                flowSpan(value, lines, pos, 0);
                 pos = text.size();
                 return value;
             }
             const QStringView inner = QStringView(text).sliced(pos + 1, end - 2);
             value.scalar = c == u'"' ? unquoteDouble(inner) : unquoteSingle(inner);
+            flowSpan(value, lines, pos, end);
             pos += end;
             return value;
         }
@@ -501,7 +540,11 @@ private:
             if (p == u':' && (pos + 1 == text.size() || isBlankChar(text[pos + 1]))) break;
             ++pos;
         }
-        return plain(trimmed(QStringView(text).sliced(start, pos - start)));
+        if (pos == start) ok = false;
+        const QStringView token = trimmed(QStringView(text).sliced(start, pos - start));
+        value = plain(token);
+        flowSpan(value, lines, start, token.size());
+        return value;
     }
 
     QStringView m_text;

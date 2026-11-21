@@ -3,9 +3,13 @@
 #include "apppaths.h"
 #include "autosave.h"
 #include "backend.h"
+#include "diskfile.h"
+#include "documentlinks.h"
+#include "documentreading.h"
 #include "documentstore.h"
 #include "encodings.h"
 #include "filepicker.h"
+#include "fileorganizer.h"
 #include "foldersearch.h"
 #include "history.h"
 #include "librarymodel.h"
@@ -13,6 +17,7 @@
 #include "rendertesting.h"
 #include "session.h"
 #include "settings.h"
+#include "sourcebuffer.h"
 #include "tabmodel.h"
 #include "testfiles.h"
 #include "windowcontext.h"
@@ -27,6 +32,7 @@
 #include <QMutex>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QThreadPool>
@@ -1499,6 +1505,412 @@ void repeatedLibrarySearchesReadLittleAgain()
         }
     }
     FolderSearch::clearCache();
+}
+
+namespace {
+
+using namespace Qt::StringLiterals;
+
+struct LibraryMoves {
+    QTemporaryDir root;
+    QString library = root.filePath(u"library"_s);
+    AppPaths paths = AppPaths::under(root.filePath(u"app"_s));
+    DocumentStore store{paths};
+    Settings settings{paths.settingsFile()};
+    FileOrganizer organizer{&store, &settings};
+
+    LibraryMoves()
+    {
+        QDir().mkpath(library);
+        settings.setLibraryFolders({library});
+    }
+    QString file(const QString &relative) const { return library + u'/' + relative; }
+    void save(Document *document, const QByteArray &bytes)
+    {
+        store.save(document);
+        QTRY_VERIFY(!document->differsFromFile());
+        QCOMPARE(readFile(document->path()), bytes);
+    }
+};
+
+} // namespace
+
+void renameUpdatesTextFilesAndHtmlAttributes_data()
+{
+    QTest::addColumn<bool>("approve");
+    QTest::newRow("update") << true;
+    QTest::newRow("leave-links") << false;
+}
+
+void renameUpdatesTextFilesAndHtmlAttributes()
+{
+    QFETCH(bool, approve);
+    LibraryMoves f;
+    const QString old = f.file(u"chapter.md"_s), renamed = f.file(u"first chapter (draft).md"_s);
+    const QString html = f.file(u"index.md"_s), notes = f.file(u"notes.txt"_s);
+    const QByteArray original =
+        "[Chapter](chapter.md?mode=1#top)\n\n"
+        "<a title=\"href='chapter.md'\" HrEf='chapter.md?view=plain&amp;mode=1#top'>One</a>\n\n"
+        "<a\n  href=chapter.md>Two</a>\n\n"
+        "> <a title=\"A\"\n>   href=chapter.md>Quoted</a>\n\n"
+        "> <p>\r\n> <img alt='Quoted'\r\n>      src=chapter.md>\r\n> </p>\r\n\r\n"
+        "`<a href='chapter.md'>Code</a>` <a href='https://e.com/chapter.md'>Web</a>\n\n"
+        "<a href='javascript:chapter.md'>Dropped URL</a>\n\n"
+        "<!-- <a href='chapter.md'>Comment</a> -->\n\n"
+        "<img alt='Map' SRC='assets/map%20one.png?zoom=2#mark'>\n";
+    const QByteArray withLinks =
+        "[Chapter](first%20chapter%20%28draft%29.md?mode=1#top)\n\n"
+        "<a title=\"href='chapter.md'\" HrEf='first%20chapter%20%28draft%29.md?view=plain&amp;mode=1#top'>One</a>\n\n"
+        "<a\n  href=first%20chapter%20%28draft%29.md>Two</a>\n\n"
+        "> <a title=\"A\"\n>   href=first%20chapter%20%28draft%29.md>Quoted</a>\n\n"
+        "> <p>\r\n> <img alt='Quoted'\r\n>      src=first%20chapter%20%28draft%29.md>\r\n> </p>\r\n\r\n"
+        "`<a href='chapter.md'>Code</a>` <a href='https://e.com/chapter.md'>Web</a>\n\n"
+        "<a href='javascript:chapter.md'>Dropped URL</a>\n\n"
+        "<!-- <a href='chapter.md'>Comment</a> -->\n\n"
+        "<img alt='Map' SRC='assets/map%20one.png?zoom=2#mark'>\n";
+    writeFile(old, "# Top\n");
+    writeFile(notes, "Read [the chapter](chapter.md#top).\r\n");
+    writeFile(html, original);
+    writeFile(f.file(u"assets/map one.png"_s), "map");
+    QVERIFY(QDir().mkpath(f.file(u"archive"_s)));
+    Document *index = f.store.open(html);
+    QVERIFY(index);
+    QSignalSpy moved(&f.organizer, &FileOrganizer::moved);
+    f.organizer.rename(old, u"first chapter (draft).md"_s);
+    QTRY_VERIFY(!f.organizer.review().isEmpty());
+    QCOMPARE(f.organizer.review().value(u"changes"_s).toInt(), 6);
+    QCOMPARE(f.organizer.review().value(u"files"_s).toInt(), 2);
+    f.organizer.confirmMove(approve);
+    QTRY_COMPARE(moved.count(), 1);
+    QCOMPARE(readFile(renamed), QByteArray("# Top\n"));
+    QCOMPARE(index->buffer()->text().toUtf8(), approve ? withLinks : original);
+    QCOMPARE(readFile(notes), approve ? QByteArray("Read [the chapter](first%20chapter%20%28draft%29.md#top).\r\n")
+                                      : QByteArray("Read [the chapter](chapter.md#top).\r\n"));
+    f.save(index, approve ? withLinks : original);
+    if (!approve) return;
+    const auto links = DocumentLinks::find(index->buffer()->text(), f.library, f.library);
+    QCOMPARE(std::count_if(links.cbegin(), links.cend(), [&](const DocumentLinks::Link &link) {
+        return link.destination.path == renamed;
+    }), 5);
+    f.organizer.move(f.file(u"assets"_s), f.file(u"archive"_s));
+    QTRY_VERIFY(!f.organizer.review().isEmpty());
+    QCOMPARE(f.organizer.review().value(u"changes"_s).toInt(), 1);
+    f.organizer.confirmMove(true);
+    QTRY_COMPARE(moved.count(), 2);
+    QByteArray after = withLinks;
+    after.replace("'assets/map", "'archive/assets/map");
+    f.save(index, after);
+    QCOMPARE(readFile(f.file(u"archive/assets/map one.png"_s)), QByteArray("map"));
+
+    const QString splitPath = f.file(u"split\npath.md"_s), quoted = f.file(u"quoted.md"_s);
+    const QByteArray originalQuote = "> <p>\n> <a href='split\n> path.md'>Split</a>\n> </p>\n";
+    writeFile(splitPath, "Split");
+    writeFile(quoted, originalQuote);
+    f.organizer.rename(splitPath, u"whole.md"_s);
+    QTRY_VERIFY(!f.organizer.review().isEmpty());
+    const auto row = f.organizer.review().value(u"rows"_s).toList().first().toMap();
+    QCOMPARE(row.value(u"file"_s).toString(), u"quoted.md"_s);
+    QVERIFY(row.value(u"after"_s).toString().contains(u"no exact source range"));
+    f.organizer.confirmMove(true);
+    QTRY_COMPARE(moved.count(), 3);
+    QVERIFY(moved.last().at(3).toBool());
+    QCOMPARE(readFile(quoted), originalQuote);
+}
+
+void undoRenameRestoresExactReferenceSpelling_data()
+{
+    QTest::addColumn<QString>("variation");
+    QTest::newRow("exact-bytes") << u"clean"_s;
+    QTest::newRow("later-edits") << u"later"_s;
+    QTest::newRow("edited-reference") << u"touched"_s;
+    QTest::newRow("edited-reference-prefix") << u"prefix"_s;
+    QTest::newRow("table-formatting") << u"table"_s;
+    QTest::newRow("old-name-taken") << u"collision"_s;
+    QTest::newRow("closed-file-changed-before-saving") << u"write"_s;
+}
+
+void undoRenameRestoresExactReferenceSpelling()
+{
+    QFETCH(QString, variation);
+    LibraryMoves f;
+    const QString chapter = f.file(u"chapter.md"_s), renamed = f.file(u"first chapter.md"_s);
+    const QString openPath = f.file(u"index.md"_s), closed = f.file(u"notes.md"_s);
+    const QByteArray original = "\xef\xbb\xbf" "chapter.md\r\n\r\nCustom: <% keep %>\n";
+    QByteArray updated = original;
+    updated.replace("chapter.md", "\"first chapter.md\"");
+    writeFile(chapter, "# Chapter\n");
+    QByteArray openOriginal = original;
+    if (variation == u"table")
+        openOriginal += "\n| Doc | Note |\n| --- | --- |\n| [C](chapter.md) | see |\n";
+    writeFile(openPath, openOriginal);
+    writeFile(closed, original);
+    Document *index = f.store.open(openPath);
+    QVERIFY(index);
+    const QString closedId = f.store.documentIdFor(closed);
+    QSignalSpy moved(&f.organizer, &FileOrganizer::moved);
+    QSignalSpy problems(&f.organizer, &FileOrganizer::problem);
+    f.organizer.rename(chapter, u"first chapter.md"_s);
+    QTRY_VERIFY(!f.organizer.review().isEmpty());
+    QCOMPARE(f.organizer.review().value(u"changes"_s).toInt(), variation == u"table" ? 3 : 2);
+    f.organizer.confirmMove(true);
+    QTRY_COMPARE(moved.count(), 1);
+    QCOMPARE(readFile(closed), updated);
+    const QByteArray openUpdated = index->bytes();
+    if (variation == u"table") {
+        QVERIFY(openUpdated.startsWith(updated));
+        QVERIFY(openUpdated.contains("[C](first%20chapter.md)"));
+        QVERIFY(openUpdated.contains("| Doc"));
+        QVERIFY(!openUpdated.contains("| Doc | Note |"));
+    } else {
+        QCOMPARE(openUpdated, updated);
+    }
+    f.save(index, openUpdated);
+
+    QByteArray openExpected = openOriginal, closedExpected = original;
+    if (variation == u"later") {
+        index->buffer()->replace({0, 0}, u"An unsaved preface.\r\n\r\n"_s);
+        openExpected.insert(3, "An unsaved preface.\r\n\r\n");
+        writeFile(closed, updated + "\nAn external postscript.\n");
+        closedExpected += "\nAn external postscript.\n";
+    } else if (variation == u"touched") {
+        const QString path = u"first chapter.md"_s;
+        const int at = int(index->buffer()->text().indexOf(path));
+        index->buffer()->replace({at, int(path.size())}, u"different.md"_s);
+    } else if (variation == u"prefix") {
+        index->buffer()->replace({0, 0}, u"other/"_s);
+    } else if (variation == u"collision") {
+        writeFile(chapter, "Another file\n");
+    }
+    const QByteArray beforeUndo = index->bytes();
+    const auto resetHook = qScopeGuard([] { History::setBeforeCapture({}); });
+    if (variation == u"write") {
+        History::setBeforeCapture([closed, once = std::make_shared<std::atomic<bool>>(false)] {
+            if (once->exchange(true)) return;
+            QFile file(closed);
+            if (file.open(QIODevice::Append)) file.write("\nAn edit during the save.\n");
+        });
+    }
+    f.organizer.undoMove(moved.first().at(2).toULongLong());
+    QTRY_VERIFY(!f.organizer.busy());
+    if (variation == u"touched" || variation == u"prefix" || variation == u"collision") {
+        QTRY_COMPARE(problems.count(), 1);
+        QVERIFY(QFileInfo::exists(renamed));
+        QCOMPARE(readFile(chapter), variation == u"collision" ? QByteArray("Another file\n") : QByteArray());
+        QCOMPARE(index->bytes(), beforeUndo);
+        QCOMPARE(readFile(closed), updated);
+        if (variation != u"collision")
+            QVERIFY((problems.first()[0].toString() + problems.first()[1].toString()).contains(u"index.md"));
+        return;
+    }
+    QCOMPARE(readFile(chapter), QByteArray("# Chapter\n"));
+    QVERIFY(!QFileInfo::exists(renamed));
+    QCOMPARE(index->bytes(), openExpected);
+    f.save(index, openExpected);
+    if (variation == u"write") {
+        QTRY_COMPARE(moved.count(), 2);
+        QVERIFY(moved.last().at(3).toBool());
+        QVERIFY(moved.last().at(1).toString().contains(u"notes.md"));
+        const QByteArray external = updated + "\nAn edit during the save.\n";
+        QCOMPARE(readFile(closed), external);
+        // Taking the partial undo back only reapplies the edits that succeeded.
+        f.organizer.undoMove(moved.last().at(2).toULongLong());
+        QTRY_COMPARE(moved.count(), 3);
+        QVERIFY(!moved.last().at(3).toBool());
+        QCOMPARE(index->bytes(), updated);
+        QCOMPARE(readFile(closed), external);
+        QCOMPARE(readFile(renamed), QByteArray("# Chapter\n"));
+    } else {
+        QTRY_COMPARE(moved.count(), 2);
+        QCOMPARE(readFile(closed), closedExpected);
+    }
+    const auto versions = f.store.history()->versions(closedId);
+    QVERIFY(std::any_of(versions.begin(), versions.end(), [&](const History::Version &version) {
+        return f.store.history()->read(closedId, version.id) == original;
+    }));
+}
+
+void undoMoveWaitsForAnOpenReview()
+{
+    LibraryMoves f;
+    const QString first = f.file(u"first.md"_s), movedFirst = f.file(u"renamed.md"_s);
+    const QString second = f.file(u"second.md"_s);
+    writeFile(first, "First.\n");
+    writeFile(second, "Second.\n");
+    writeFile(f.file(u"index.md"_s), "[Second](second.md)\n");
+    QSignalSpy moved(&f.organizer, &FileOrganizer::moved);
+    QSignalSpy problems(&f.organizer, &FileOrganizer::problem);
+    f.organizer.rename(first, u"renamed.md"_s);
+    QTRY_COMPARE(moved.count(), 1);
+    const quint64 undo = moved.first().at(2).toULongLong();
+    QVERIFY(undo > 0);
+    QVERIFY(QFileInfo::exists(movedFirst));
+
+    f.organizer.rename(second, u"new-second.md"_s);
+    QTRY_VERIFY(!f.organizer.review().isEmpty());
+    f.organizer.undoMove(undo);
+    QCOMPARE(problems.count(), 1);
+    QCOMPARE(moved.count(), 1);
+    QVERIFY(QFileInfo::exists(movedFirst));
+
+    f.organizer.cancelMove();
+    f.organizer.undoMove(undo);
+    QTRY_COMPARE(moved.count(), 2);
+    QCOMPARE(readFile(first), QByteArray("First.\n"));
+    QVERIFY(!QFileInfo::exists(movedFirst));
+    QVERIFY(QFileInfo::exists(second));
+}
+
+void undoNoticeWaitsForAMoveReview()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString library = root.filePath(u"library"_s);
+    const QString first = library + u"/first.md"_s, movedFirst = library + u"/renamed.md"_s;
+    const QString second = library + u"/second.md"_s;
+    writeFile(first, "First.\n");
+    writeFile(second, "Second.\n");
+    writeFile(library + u"/index.md"_s, "[Second](second.md)\n");
+    Backend backend(AppPaths::under(root.filePath(u"app"_s)));
+    backend.start({});
+    backend.settings()->setLibraryFolders({library});
+    FileOrganizer *organizer = backend.organizer();
+    organizer->rename(first, u"renamed.md"_s);
+    QTRY_VERIFY(backend.noticeUndoable());
+    QTRY_VERIFY(!organizer->busy());
+
+    organizer->rename(second, u"new-second.md"_s);
+    QVERIFY(organizer->busy());
+    backend.undoNotice();
+    QVERIFY(backend.noticeUndoable());
+    QTRY_VERIFY(!organizer->review().isEmpty());
+    backend.undoNotice();
+    QVERIFY(backend.noticeUndoable());
+    QVERIFY(QFileInfo::exists(movedFirst));
+
+    organizer->cancelMove();
+    backend.undoNotice();
+    QTRY_VERIFY(QFileInfo::exists(first));
+    QVERIFY(!QFileInfo::exists(movedFirst));
+    QVERIFY(QFileInfo::exists(second));
+}
+
+void moveKeepsFrontMatterCitationFilesReachable_data()
+{
+    QTest::addColumn<QString>("variation");
+    QTest::newRow("flow-list-in-an-open-document") << u"flow"_s;
+    QTest::newRow("block-list-in-a-closed-document") << u"block"_s;
+    QTest::newRow("bundled-style") << u"bundled"_s;
+    QTest::newRow("folder-with-dependencies") << u"folder"_s;
+    QTest::newRow("same-folder-rename") << u"rename"_s;
+    QTest::newRow("dependency-outside-destination-library") << u"outside"_s;
+}
+
+void moveKeepsFrontMatterCitationFilesReachable()
+{
+    QFETCH(QString, variation);
+    LibraryMoves f;
+    const QString paper = f.file(u"docs/paper.md"_s), deeper = f.file(u"docs/book/deeper"_s);
+    const QString outside = f.root.filePath(u"second-library"_s);
+    const QString movedPaper = variation == u"rename" ? f.file(u"docs/revised.md"_s)
+                             : variation == u"folder" ? f.file(u"archive/docs/paper.md"_s)
+                             : variation == u"outside" ? outside + u"/paper.md"_s : deeper + u"/paper.md"_s;
+    const QString style = variation == u"bundled" ? u"ieee"_s : u"'style.csl'"_s;
+    QString bibliography = u"bibliography: refs.bib # Keep this comment"_s;
+    if (variation == u"flow") bibliography = u"Bibliography: [ refs.bib,\r\n  'other refs.bib', \"third.bib\" ] # Keep this comment"_s;
+    if (variation == u"block") bibliography = u"bibliography:\r\n  - refs.bib # Keep this comment\r\n  - 'other refs.bib'"_s;
+    const QString original = u"---\r\n%1\r\ncsl: %2\r\nunknown: { untouched: yes }\r\nbibliography: ignored.bib\r\n---\r\n\r\nSee [@doe].\r\n"_s
+                                 .arg(bibliography, style);
+    writeFile(paper, original.toUtf8());
+    writeFile(f.file(u"docs/refs.bib"_s), "@book{doe, author={Jane Doe}, title={The Sample Book}, year={2024}}");
+    writeFile(f.file(u"docs/other refs.bib"_s), "");
+    writeFile(f.file(u"docs/third.bib"_s), "");
+    writeFile(f.file(u"docs/style.csl"_s),
+              "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\">"
+              "<info><title>Numbers</title><id>http://example.org/local</id></info>"
+              "<citation><layout prefix=\"[\" suffix=\"]\"><text variable=\"citation-number\"/></layout></citation>"
+              "<bibliography><layout><text variable=\"title\"/></layout></bibliography></style>");
+    QVERIFY(QDir().mkpath(deeper));
+    QVERIFY(QDir().mkpath(f.file(u"archive"_s)));
+    QVERIFY(QDir().mkpath(outside));
+    f.settings.setLibraryFolders({f.library, outside});
+    Document *open = variation == u"flow" ? f.store.open(paper) : nullptr;
+    if (variation == u"flow") QVERIFY(open);
+    const QString id = f.store.documentIdFor(paper);
+    QSignalSpy moved(&f.organizer, &FileOrganizer::moved);
+    const bool together = variation == u"folder" || variation == u"rename";
+    if (variation == u"folder") f.organizer.move(f.file(u"docs"_s), f.file(u"archive"_s));
+    else if (variation == u"rename") f.organizer.rename(paper, u"revised.md"_s);
+    else f.organizer.move(paper, variation == u"outside" ? outside : deeper);
+    QString expected = original;
+    if (!together) {
+        QTRY_VERIFY(!f.organizer.busy());
+        QVERIFY(!f.organizer.review().isEmpty());
+        const QVariantMap review = f.organizer.review();
+        const int references = variation == u"flow" ? 4 : variation == u"block" ? 3 : variation == u"bundled" ? 1 : 2;
+        QCOMPARE(review.value(u"changes"_s).toInt(), references);
+        if (variation == u"outside")
+            QVERIFY(review.value(u"rows"_s).toList().first().toMap().value(u"after"_s).toString().contains(u"outside"));
+        f.organizer.confirmMove(true);
+        if (variation != u"outside") {
+            for (const QString &name : {u"refs.bib"_s, u"other refs.bib"_s, u"third.bib"_s, u"style.csl"_s})
+                expected.replace(name, u"../../"_s + name);
+            // The suffix of the quoted path is also a substring of a longer path.
+            expected.replace(u"other ../../refs.bib"_s, u"../../other refs.bib"_s);
+        }
+    }
+    if (variation == u"outside") {
+        QTRY_COMPARE(moved.count(), 1);
+        QVERIFY(moved.last().at(3).toBool());
+        QVERIFY(moved.last().at(1).toString().contains(u"paper.md"));
+        QCOMPARE(readFile(movedPaper), original.toUtf8());
+        f.organizer.undoMove(moved.last().at(2).toULongLong());
+        QTRY_COMPARE(moved.count(), 2);
+        QCOMPARE(readFile(paper), original.toUtf8());
+        return;
+    }
+    QTRY_COMPARE(moved.count(), 1);
+    if (open) {
+        QCOMPARE(open->path(), movedPaper);
+        f.save(open, expected.toUtf8());
+    }
+    QCOMPARE(readFile(movedPaper), expected.toUtf8());
+    QCOMPARE(f.store.documentIdFor(movedPaper), id);
+    md::Source source;
+    source.path = movedPaper;
+    source.libraryRoot = f.library;
+    const auto reading = DocumentReading::read(expected, {}, source);
+    const QString rendered = md::toHtml(reading.document, reading.htmlOptions());
+    QCOMPARE(reading.document.bibliography.size(), 1u);
+    QVERIFY2(rendered.contains(u"The Sample Book", Qt::CaseInsensitive), qPrintable(rendered));
+    const QString resources = f.file(variation == u"folder" ? u"archive/docs"_s : u"docs"_s);
+    QCOMPARE(reading.dialect.bibliography.first(), resources + u"/refs.bib"_s);
+    QCOMPARE(reading.dialect.citationStyle, variation == u"bundled" ? u"ieee"_s : resources + u"/style.csl"_s);
+    QVERIFY(std::none_of(reading.citations.problems.cbegin(), reading.citations.problems.cend(), [](const auto &problem) {
+        return problem.code == u"unreadable-bibliography" || problem.code == u"missing-citation";
+    }));
+    f.organizer.undoMove(moved.first().at(2).toULongLong());
+    QTRY_COMPARE(moved.count(), 2);
+    if (open) f.save(open, original.toUtf8());
+    QCOMPARE(readFile(paper), original.toUtf8());
+    QCOMPARE(f.store.documentIdFor(paper), id);
+}
+
+void movingADocumentLeavesUnchangedCitationPathsAlone()
+{
+    LibraryMoves f;
+    const QString paper = f.file(u"notes/paper.md"_s);
+    const QString destination = f.file(u"archive"_s);
+    const QString bibliography = f.root.filePath(u"resources/refs.bib"_s);
+    const QByteArray original = u"---\nbibliography: ['%1', '~/refs.bib']\ncsl: ~/style.csl\n---\n\nSee [@doe].\n"_s
+                                    .arg(bibliography).toUtf8();
+    writeFile(paper, original);
+    QVERIFY(QDir().mkpath(destination));
+    QSignalSpy moved(&f.organizer, &FileOrganizer::moved);
+    f.organizer.move(paper, destination);
+    QTRY_VERIFY(!f.organizer.busy());
+    QVERIFY(f.organizer.review().isEmpty());
+    QCOMPARE(moved.count(), 1);
+    QCOMPARE(readFile(destination + u"/paper.md"_s), original);
 }
 
 } // namespace LibraryTests

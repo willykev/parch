@@ -1,15 +1,22 @@
 #include "editingtests.h"
 
 #include "apppaths.h"
+#include "attachments.h"
 #include "commandfilter.h"
 #include "commandregistry.h"
+#include "diskfile.h"
+#include "documentfind.h"
+#include "documentparse.h"
 #include "documentstore.h"
 #include "editorbinding.h"
 #include "markdownediting.h"
+#include "mdhtml.h"
 #include "mdtree.h"
+#include "recovery.h"
 #include "settings.h"
 #include "sourcebuffer.h"
 #include "tabmodel.h"
+#include "tablegrids.h"
 #include "testfiles.h"
 #include "theme.h"
 #include "windowcontext.h"
@@ -17,20 +24,29 @@
 #include "wordcounter.h"
 
 #include <QAccessible>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMap>
+#include <QMimeData>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSemaphore>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QStyleHints>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QThreadPool>
 #include <QtTest>
 #include <functional>
 #include <memory>
+#include <unistd.h>
 
 namespace {
 
@@ -167,6 +183,89 @@ struct Editor {
 } // namespace
 
 namespace EditingTests {
+
+void textEditDrawsOnlyTheEditorCaret()
+{
+    QStyleHints *hints = QGuiApplication::styleHints();
+    const int flash = hints->cursorFlashTime();
+    const auto restoreFlash = qScopeGuard([hints, flash] { hints->setCursorFlashTime(flash); });
+    hints->setCursorFlashTime(0);
+
+    Editor view(QStringLiteral("Some\n\nText."));
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    activate(&view.window);
+    view.editor->forceActiveFocus();
+    view.select(5, 5);
+    auto *caret = findItem(view.editor, QStringLiteral("caret"));
+    QVERIFY(caret && caret->isVisible());
+    QTRY_VERIFY(!view.editor->property("cursorVisible").toBool());
+    const QImage lit = view.window.grabWindow();
+    QVERIFY(!lit.isNull());
+
+    view.pane->setProperty("caretLit", false);
+    QVERIFY(!caret->isVisible());
+    const QImage dark = view.window.grabWindow();
+    QVERIFY(!dark.isNull() && dark != lit);
+    // Focus can ask Qt to show its cursor before the binding hides it again.
+    QVERIFY(view.editor->setProperty("cursorVisible", true));
+    QVERIFY(view.editor->property("cursorVisible").toBool());
+    const QImage native = view.window.grabWindow();
+    QVERIFY2(native == dark, "The TextEdit drew a cursor while the editor's caret was hidden.");
+}
+
+void replaceAllFinishesAfterFindCloses_data()
+{
+    QTest::addColumn<bool>("tableRefuses");
+    QTest::newRow("count") << false;
+    QTest::newRow("table-refusal") << true;
+}
+
+void replaceAllFinishesAfterFindCloses()
+{
+    QFETCH(bool, tableRefuses);
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.settings()->setTableGrids(true);
+    const QString original = tableRefuses ? QStringLiteral("| A | B |\n| --- | --- |\n| \\`aaa | bbb` |\n\nSome \\ prose.")
+                                         : QStringLiteral("one and one");
+    SourceBuffer *buffer = shell.document()->buffer();
+    QCOMPARE(buffer->replace({0, 0}, original), SourceBuffer::EditOutcome::Applied);
+    TableGrids *tables = shell.binding()->tables();
+    if (tableRefuses) QTRY_COMPARE(tables->grids().size(), 1);
+
+    auto *find = qobject_cast<DocumentFind *>(shell.object(QStringLiteral("documentFind")));
+    auto *bar = shell.item(QStringLiteral("findBar"));
+    auto *hint = shell.item(QStringLiteral("editHint"));
+    QVERIFY(find && bar && hint);
+    shell.item(QStringLiteral("editor"))->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_H, Qt::ControlModifier);
+    QTRY_VERIFY(bar->isVisible());
+    find->setPattern(tableRefuses ? QStringLiteral("\\") : QStringLiteral("one"));
+    QTRY_COMPARE(find->count(), 2);
+    QSignalSpy replaced(find, &DocumentFind::replacedAll);
+    QSignalSpy refused(tables, &TableGrids::refused);
+    find->replaceAll(tableRefuses ? QString() : QStringLiteral("two"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(!bar->isVisible());
+
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(replaced.first().first().toInt(), tableRefuses ? 1 : 2);
+    if (tableRefuses) {
+        QCOMPARE(buffer->text(), QStringLiteral("| A | B |\n| --- | --- |\n| \\`aaa | bbb` |\n\nSome  prose."));
+        QCOMPARE(refused.count(), 1);
+        const QString reason = refused.first().first().toString();
+        QVERIFY(!reason.isEmpty());
+        QTRY_COMPARE(hint->property("text").toString(), reason);
+    } else {
+        QCOMPARE(buffer->text(), QStringLiteral("two and two"));
+        QTRY_COMPARE(hint->property("text").toString(), QStringLiteral("2 replaced"));
+    }
+    QVERIFY(hint->isVisible());
+    buffer->undo();
+    QCOMPARE(buffer->text(), original);
+}
 
 void sourceEditsGroupIntoOneUndoStep()
 {
@@ -1700,6 +1799,18 @@ void wordCountsFollowTextAndSelection()
     QCOMPARE(WordCounter::count(linked, int(linked.indexOf(u"eight")), int(linked.size())), 1);
     QCOMPARE(WordCounter::count(u"café naïve été"), 3);
 
+    const QString table = QStringLiteral("| Topic |\n| --- |\n| left<br>right[^A short note.] |\n");
+    const int left = int(table.indexOf(u"left"));
+    const int right = int(table.indexOf(u"right"));
+    const int end = int(table.indexOf(u']')) + 1;
+    QCOMPARE(WordCounter::count(table, left, right + 5), 2);
+    QCOMPARE(WordCounter::count(table, left, end), 5);
+    QCOMPARE(WordCounter::count(table, int(table.indexOf(u"short")), int(table.indexOf(u']'))), 2);
+    const QString code = QStringLiteral("```\n    one\n    two\n```\n");
+    md::PlainTextOptions clipped;
+    clipped.range = md::Range{int(code.indexOf(u"    one")), int(code.indexOf(u"two")) + 2};
+    QCOMPARE(md::parse(code).plainText(clipped), QStringLiteral("    one\n    tw"));
+
     ShellFixture shell;
     QVERIFY2(shell.ok(), qPrintable(shell.error));
     QQuickWindow *window = shell.window.get();
@@ -1742,6 +1853,333 @@ void wordCountsFollowTextAndSelection()
     QTRY_COMPARE(counter.words(), 8001);
     QVERIFY(!counter.counting());
     QCOMPARE(counter.minutes(), 41);
+}
+
+void richTablePasteKeepsHorizontalMerges_data()
+{
+    QTest::addColumn<int>("dialect");
+    QTest::addColumn<bool>("worker");
+    QTest::addColumn<bool>("switchDialect");
+    QTest::newRow("writer") << 0 << false << false;
+    QTest::newRow("standard") << 1 << false << false;
+    QTest::newRow("merges-disabled") << 2 << false << false;
+    QTest::newRow("worker-after-source-edit") << 0 << true << false;
+    QTest::newRow("worker-after-dialect-change") << 0 << true << true;
+}
+
+void richTablePasteKeepsHorizontalMerges()
+{
+    using namespace Qt::StringLiterals;
+    QFETCH(int, dialect);
+    QFETCH(bool, worker);
+    QFETCH(bool, switchDialect);
+    const QString original = u"Intro.\r\n\r\nTail.\r\n"_s;
+    Editor view(original);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    Dialect::Layers layers;
+    if (dialect == 1) layers.document.profile = md::Profile::Standard;
+    if (dialect == 2) layers.document.extensions.append({u"merged-cells"_s, false});
+    view.document->setSavedDialect(layers);
+    Attachments attachments(AppPaths::under(view.root.path()));
+    if (worker) view.binding->setAttachments(&attachments);
+    QString html = u"<table><caption>Schedule</caption><thead>"
+                   "<tr><th colspan=2 align=center>Slot</th><th>Room</th></tr></thead><tbody>"
+                   "<tr><td colspan=2><strong>Holiday | free</strong><br>All day</td><td>Annex</td></tr>"
+                   "<tr><td rowspan=2>Block</td><td>AM</td><td>A</td></tr>"
+                   "<tr><td>PM</td><td>B</td></tr></tbody></table>"
+                   "<p>Between</p><table><tr><td>Other</td><td>table</td></tr></table>"_s;
+    if (worker) html += u"<!--"_s + QString(65536, u' ') + u"-->"_s;
+    auto *mime = new QMimeData;
+    mime->setHtml(html);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    const int tail = int(original.indexOf(u"Tail."));
+    view.select(tail, tail);
+    view.binding->paste();
+    QString beforePaste = original;
+    if (worker) {
+        QCOMPARE(view.text(), original);
+        const QString prefix = u"Preface.\r\n\r\n"_s;
+        view.document->buffer()->replace({0, 0}, prefix);
+        beforePaste.prepend(prefix);
+        if (switchDialect) {
+            layers.document.profile = md::Profile::Standard;
+            view.document->setSavedDialect(layers);
+        }
+    }
+    QTRY_VERIFY(view.text().contains(u"| Other | table |"));
+    QVERIFY(view.text().startsWith(beforePaste.left(beforePaste.indexOf(u"Tail."))));
+    QVERIFY(view.text().endsWith(u"Tail.\r\n"));
+    const bool merged = dialect == 0 && !switchDialect;
+    QCOMPARE(view.text().contains(u"||"), merged);
+    const md::Document parsed = md::parse(view.text(), view.document->markdownOptions());
+    const md::Node *table = nullptr;
+    int tables = 0;
+    for (const md::Node &node : parsed.root.children) {
+        if (node.type != md::NodeType::Table) continue;
+        if (!table) table = &node;
+        ++tables;
+    }
+    QCOMPARE(tables, 2);
+    QCOMPARE(table->children.size(), 4u);
+    const auto &header = table->children[0].children;
+    const auto &holiday = table->children[1].children;
+    QCOMPARE(header.front().span, merged ? 2 : 1);
+    QCOMPARE(header.front().align, md::Align::Center);
+    QCOMPARE(header.back().column, 2);
+    QCOMPARE(holiday.front().span, merged ? 2 : 1);
+    QCOMPARE(holiday.back().column, 2);
+    const auto &last = table->children[3].children;
+    QCOMPARE(last.size(), 3u);
+    QCOMPARE(md::plainText(last[0]), QString());
+    QCOMPARE(md::plainText(last[1]), u"PM"_s);
+    QCOMPARE(md::plainText(last[2]), u"B"_s);
+    const QString rendered = md::toHtml(parsed);
+    QVERIFY(rendered.contains(u"<strong>Holiday | free</strong><br"));
+    QVERIFY(rendered.contains(u"<p>Schedule</p>"));
+    QVERIFY(rendered.contains(u"<p>Between</p>"));
+    const QString pasted = view.text();
+    view.store->save(view.document);
+    QTRY_VERIFY(!view.document->differsFromFile());
+    QCOMPARE(readFile(view.document->path()), pasted.toUtf8());
+    view.binding->undo();
+    QCOMPARE(view.text(), beforePaste);
+    view.store->save(view.document);
+    QTRY_VERIFY(!view.document->differsFromFile());
+    QCOMPARE(readFile(view.document->path()), beforePaste.toUtf8());
+    view.binding->setAttachments(nullptr);
+}
+
+namespace {
+
+QMap<QString, QQuickItem *> conflictChoices(QQuickWindow *window, const QObject *dialog)
+{
+    QMap<QString, QQuickItem *> choices;
+    auto *footer = dialog->property("footer").value<QQuickItem *>();
+    if (!footer) return choices;
+    footer->ensurePolished();
+    for (QQuickItem *item : visibleItems(window))
+        if (footer->isAncestorOf(item) && item->inherits("QQuickAbstractButton"))
+            choices.insert(item->property("text").toString(), item);
+    return choices;
+}
+
+QString recoveredText(const ShellFixture &shell, const QString &id)
+{
+    for (const auto &entry : shell.backend->recovery()->pending())
+        if (entry.documentId == id) return entry.text;
+    return {};
+}
+
+} // namespace
+
+void guideDescribesTheConflictChoicesShown_data()
+{
+    QTest::addColumn<QString>("kind");
+    for (const char *kind : {"ordinary", "deleted", "unreadable", "link"})
+        QTest::newRow(kind) << QString::fromLatin1(kind);
+}
+
+void guideDescribesTheConflictChoicesShown()
+{
+    QFETCH(QString, kind);
+    if (kind == u"unreadable" && ::geteuid() == 0) QSKIP("Root can read files regardless of mode");
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    const QString path = shell.root.filePath(QStringLiteral("notes.md"));
+    const QString other = shell.root.filePath(QStringLiteral("other.md"));
+    writeFile(path, "Base text.\n");
+    writeFile(other, "Linked text.\n");
+    shell.backend->openFiles({path});
+    Document *document = shell.document();
+    QVERIFY(document);
+    const QString mine = QStringLiteral("Local text.\n");
+    document->buffer()->replace({0, document->buffer()->length()}, mine);
+    const auto permissions = qScopeGuard([&] {
+        if (kind == u"unreadable") QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner);
+    });
+    if (kind == u"ordinary") writeFile(path, "Changed on disk.\n");
+    else if (kind == u"unreadable") QVERIFY(QFile::setPermissions(path, {}));
+    else {
+        QVERIFY(QFile::remove(path));
+        if (kind == u"link") QVERIFY(QFile::link(other, path));
+    }
+    QTRY_COMPARE(document->state(), Document::State::Conflict);
+    if (kind == u"deleted") QTRY_VERIFY(document->fileMissing());
+    if (kind == u"unreadable") QTRY_VERIFY(document->fileUnreadable());
+    if (kind == u"link") QTRY_COMPARE(document->leadsTo(), QFileInfo(other).canonicalFilePath());
+    QVERIFY(QMetaObject::invokeMethod(window, "reviewConflict"));
+    QObject *dialog = findObject(window, QStringLiteral("conflictDialog"));
+    QTRY_VERIFY(isOpen(dialog));
+    QTRY_VERIFY(conflictChoices(window, dialog).contains(QStringLiteral("Cancel")));
+    const auto choices = conflictChoices(window, dialog);
+    const QStringList shown = choices.keys();
+    QTRY_COMPARE(window->activeFocusItem(), choices.value(QStringLiteral("Cancel")));
+    sendKey(window, Qt::Key_Return);
+    QTRY_VERIFY(!isOpen(dialog));
+    QCOMPARE(document->state(), Document::State::Conflict);
+    QCOMPARE(document->buffer()->text(), mine);
+    QTRY_COMPARE(recoveredText(shell, document->id()), mine);
+    if (kind == u"ordinary") QCOMPARE(readFile(path), QByteArray("Changed on disk.\n"));
+    if (kind == u"deleted") QVERIFY(!QFileInfo::exists(path));
+    if (kind == u"link") {
+        QVERIFY(QFileInfo(path).isSymLink());
+        QCOMPARE(readFile(other), QByteArray("Linked text.\n"));
+    }
+
+    const QString guide = QString::fromUtf8(readFile(QStringLiteral(PARCH_SOURCE_DIR "/docs/guide.md")));
+    const QString section = guide.section(QStringLiteral("### Changes on disk\n"), 1, 1).section(QStringLiteral("\n## "), 0, 0);
+    QVERIFY(!section.isEmpty());
+    if (kind == u"ordinary") {
+        QStringList documented;
+        const QRegularExpression row(QStringLiteral("^  - \\*\\*([^*]+)\\*\\*"), QRegularExpression::MultilineOption);
+        for (const auto &found : row.globalMatch(section)) documented.append(found.captured(1));
+        documented.sort();
+        QCOMPARE(documented, shown);
+        QVERIFY(section.contains(u"conflict pending"));
+    } else {
+        const QString state = kind == u"deleted" ? QStringLiteral("the file was deleted")
+                            : kind == u"unreadable" ? QStringLiteral("the file cannot be read")
+                                                    : QStringLiteral("the file was replaced by a link");
+        const QString paragraph = section.section(state, 1, 1).section(QStringLiteral("\n- "), 0, 0);
+        for (const QString &label : {QStringLiteral("Save as…"), kind == u"deleted" ? QStringLiteral("Save again")
+                                                 : kind == u"unreadable" ? QStringLiteral("Retry") : QStringLiteral("Follow the link")}) {
+            QVERIFY2(shown.contains(label), qPrintable(shown.join(u'|')));
+            QVERIFY2(paragraph.contains(QStringLiteral("**%1**").arg(label)), qPrintable(paragraph));
+        }
+        QVERIFY(shown.contains(QStringLiteral("Cancel")));
+    }
+}
+
+void keepBothRestoresTheCaretOfTheKeptText_data()
+{
+    QTest::addColumn<bool>("typingDuringCopy");
+    QTest::addColumn<bool>("tallGrid");
+    QTest::newRow("projection-after-restore") << false << false;
+    QTest::newRow("later-edit-in-original") << true << false;
+    QTest::newRow("projection-changes-the-viewport") << false << true;
+}
+
+void keepBothRestoresTheCaretOfTheKeptText()
+{
+    QFETCH(bool, typingDuringCopy);
+    QFETCH(bool, tallGrid);
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    const int flash = QGuiApplication::styleHints()->cursorFlashTime();
+    QGuiApplication::styleHints()->setCursorFlashTime(0);
+    const auto blink = qScopeGuard([flash] { QGuiApplication::styleHints()->setCursorFlashTime(flash); });
+    shell.settings()->setTableGrids(true);
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    resizeWindow(window, 1100);
+    const QString path = shell.root.filePath(QStringLiteral("table.md"));
+    QString base = QStringLiteral("Before the table.\n\n| A | B |\n|---|---|\n");
+    if (tallGrid) {
+        // Each column has long cells that wrap more in the grid than the whole raw row does.
+        const QString words = QStringLiteral("A table cell with enough words to wrap. ").repeated(12).trimmed();
+        base += QStringLiteral("| %1 | two |\n| one | %1 |\n").arg(words).repeated(10);
+    } else {
+        base += QStringLiteral("| one | two |\n");
+    }
+    base += QStringLiteral("\nAfter text.\n");
+    if (tallGrid) base += QStringLiteral("\nA paragraph below the caret.\n").repeated(25);
+    writeFile(path, base.toUtf8());
+    shell.backend->openFiles({path});
+    Document *original = shell.document();
+    EditorBinding *binding = shell.binding();
+    QVERIFY(original && binding);
+    QTRY_COMPARE(binding->tables()->grids().size(), 1);
+    const QString sentence = QStringLiteral("After text."), local = QStringLiteral(" Mine.");
+    const int top = int(base.indexOf(sentence));
+    const int end = top + int(sentence.size());
+    original->buffer()->replace({end, 0}, local);
+    const QString mine = original->buffer()->text();
+    const int position = end + int(local.size());
+    if (tallGrid) binding->restore(position, position, top);
+    else binding->select(position, position);
+    QCOMPARE(binding->cursorSource(), position);
+    if (tallGrid) QCOMPARE(binding->topSourcePosition(), top);
+    const QByteArray external("Disk text, kept intact.\n");
+    writeFile(path, external);
+    QTRY_COMPARE(original->state(), Document::State::Conflict);
+    QVERIFY(QMetaObject::invokeMethod(window, "reviewConflict"));
+    QObject *dialog = findObject(window, QStringLiteral("conflictDialog"));
+    QTRY_VERIFY(isOpen(dialog));
+    QTRY_COMPARE(dialog->property("diskText").toString(), QString::fromUtf8(external));
+    QTRY_VERIFY(conflictChoices(window, dialog).contains(QStringLiteral("Keep both")));
+
+    const auto entered = std::make_shared<QSemaphore>();
+    const auto release = std::make_shared<QSemaphore>();
+    if (typingDuringCopy)
+        DiskFile::setBeforeNaming([entered, release](const QString &name) {
+            if (!name.contains(u" (conflict ")) return;
+            entered->release();
+            release->acquire();
+        });
+    const auto unblock = qScopeGuard([&] {
+        release->release();
+        DiskFile::setBeforeNaming({});
+    });
+    auto *parsePool = QCoreApplication::instance()->findChild<QThreadPool *>(QStringLiteral("parse"));
+    QVERIFY(parsePool);
+    PoolBlock parsing(parsePool);
+    bool restoredBeforeParse = false;
+    const auto opening = QObject::connect(shell.context()->tabs(), &TabModel::activeViewChanged, window, [&] {
+        Document *copy = shell.document();
+        if (copy && copy != original) restoredBeforeParse = !copy->parse()->current();
+    });
+    const auto disconnectOpening = qScopeGuard([opening] { QObject::disconnect(opening); });
+    QQuickItem *keep = conflictChoices(window, dialog).value(QStringLiteral("Keep both"));
+    QSignalSpy clicked(keep, SIGNAL(clicked()));
+    keep->forceActiveFocus(Qt::TabFocusReason);
+    QTRY_COMPARE(window->activeFocusItem(), keep);
+    sendKey(window, Qt::Key_Return);
+    QCOMPARE(clicked.size(), 1);
+    QTRY_VERIFY(!isOpen(dialog));
+    const QString later = QStringLiteral("A later edit above the table.\n\n");
+    if (typingDuringCopy) {
+        QTRY_COMPARE(entered->available(), 1);
+        QCOMPARE(shell.document(), original);
+        original->buffer()->replace({0, 0}, later);
+        QCOMPARE(binding->cursorSource(), position + int(later.size()));
+        release->release();
+    }
+    QTRY_VERIFY(shell.document() && shell.document() != original);
+    Document *copy = shell.document();
+    QVERIFY(restoredBeforeParse);
+    QVERIFY(!copy->parse()->current());
+    parsing.release();
+    QTRY_COMPARE(binding->tables()->grids().size(), 1);
+    QTRY_VERIFY(binding->tables()->settled());
+    QQuickItem *editor = shell.item(QStringLiteral("editor"));
+    QTRY_COMPARE(window->activeFocusItem(), editor);
+    QCOMPARE(copy->buffer()->text(), mine);
+    QCOMPARE(readFile(copy->path()), mine.toUtf8());
+    QCOMPARE(readFile(path), external);
+    if (typingDuringCopy) {
+        QCOMPARE(original->state(), Document::State::Conflict);
+        QCOMPARE(original->buffer()->text(), later + mine);
+        QTRY_COMPARE(recoveredText(shell, original->id()), later + mine);
+    } else {
+        QTRY_COMPARE(original->state(), Document::State::Clean);
+        QCOMPARE(original->buffer()->text(), QString::fromUtf8(external));
+    }
+    QCOMPARE(binding->cursorSource(), position);
+    QTRY_VERIFY(caretDrawnAt(binding, editor, position));
+    auto *flickable = shell.item(QStringLiteral("flickable"));
+    QVERIFY(flickable);
+    QTRY_VERIFY(flickable->mapRectToItem(editor, flickable->boundingRect()).contains(binding->sourceRectangle(position).center()));
+    if (tallGrid) QCOMPARE(binding->topSourcePosition(), top);
+    typeText(window, QStringLiteral("x"));
+    QString typed = mine;
+    typed.insert(position, u'x');
+    QCOMPARE(copy->buffer()->text(), typed);
+    shell.backend->store()->save(copy);
+    QTRY_COMPARE(copy->state(), Document::State::Clean);
+    QCOMPARE(readFile(copy->path()), typed.toUtf8());
+    QCOMPARE(readFile(path), external);
 }
 
 } // namespace EditingTests

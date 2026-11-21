@@ -62,8 +62,8 @@ struct Launch {
 // --screenshot, and every value is checked here, before any window.
 Launch parseLaunch(const QStringList &arguments);
 
-// The arguments without the options Qt reads and removes itself, with
-// their values, so that parch sees what it will once Qt has started.
+// Remove the options Qt handles, and their values, before the first "--".
+// The separator and the positional arguments follow as given.
 QStringList withoutQtOptions(const QStringList &arguments);
 
 // The files as full paths, each relative one taken from `workingDirectory`.

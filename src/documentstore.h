@@ -6,6 +6,7 @@
 #include "filewatch.h"
 #include "history.h"
 #include "recovery.h"
+#include "session.h"
 #include "sourcetypes.h"
 
 #include <QFuture>
@@ -178,6 +179,8 @@ public:
     // The folders the libraries watch, where a document's file renamed by
     // another program is looked for too. Asked on the UI thread.
     void setWatchedFolders(std::function<QStringList()> folders);
+    // The originating view's place in the text as Keep both takes a copy of it.
+    void setConflictCopyView(std::function<std::optional<ViewState>(Document *)> view);
     // How long a file gone from its name, and found under another, is given
     // to come back, as when a program sets the old file aside and writes a
     // new one in its place, before the document follows it.
@@ -269,10 +272,9 @@ signals:
     void saveFinished(Document *document, const QString &name, SaveStatus status);
     void documentClosed(const QString &id);
     // Keep both has saved the local text to a file beside the original and
-    // opened it as a document, so that a view can show it. The original
-    // still holds that text as this is said, and takes its file's text
-    // right after, so that a view can open the copy where it was in it.
-    void conflictCopyOpened(Document *copy, Document *original);
+    // opened it as a document. The view belongs to the copy's text as it
+    // was when the choice was made.
+    void conflictCopyOpened(Document *copy, Document *original, const std::optional<ViewState> &view);
     // Keep both made its copy, at this path, with the text as it was then,
     // but the document had moved on meanwhile: saved, named, no longer in
     // that conflict, or closed. The copy stays on disk and is not opened,
@@ -587,6 +589,7 @@ private:
     FileWatch m_watch;
     std::function<QString(const QString &path)> m_folderNames;
     std::function<QStringList()> m_watchedFolders;
+    std::function<std::optional<ViewState>(Document *)> m_conflictCopyView;
     // The entries recovery holds, by document id.
     QHash<QString, Held> m_held;
 };

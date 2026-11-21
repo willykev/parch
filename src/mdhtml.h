@@ -56,9 +56,10 @@ struct CitationHtml {
     // The HTML of one citation: a Citation node that stands alone or holds
     // a group. It must be safe, as the renderer writes it as it is.
     std::function<QString(const Node &citation)> citation;
-    // The whole bibliography, safe HTML, written after the notes; empty
-    // for none.
+    // The whole bibliography as safe HTML. Empty when there is none.
     QString bibliography;
+    // A note style puts collected notes before the bibliography.
+    bool noteStyle = false;
 };
 
 struct HtmlOptions {
@@ -75,7 +76,9 @@ struct HtmlOptions {
     // destination (href or src) as the document has it, it returns the one
     // to write. A script URL it returns is still emptied in Safe mode. When
     // unset, every destination is written as the document has it.
-    std::function<QString(const Node &node, const QString &destination)> destination;
+    // A missing result omits the destination while keeping its content.
+    using DestinationWriter = std::function<std::optional<QString>(const Node &, const QString &)>;
+    DestinationWriter destination;
     // When set, citations and the bibliography as a citation style made them.
     std::optional<CitationHtml> citations;
     // When set, what is written for a formula, a diagram or an image in
@@ -90,11 +93,13 @@ struct HtmlOptions {
 };
 
 QString toHtml(const Document &document, const HtmlOptions &options = HtmlOptions());
+// Safe HTML for the contents of a cell, suitable for the clipboard.
+QString cellHtml(const Document &document, const Node &cell);
 
 QString escapeHtml(QStringView text);
-// A URL as an href carries it: characters outside the URL syntax
-// percent-encoded as UTF-8, existing escapes kept.
-QString encodeUrl(QStringView url);
+// Spelling for an existing attribute's value range, excluding its quotes.
+// Add quotes if a value that was unquoted now needs them.
+QString htmlAttributeValue(QStringView value, QChar quote);
 
 // The raw HTML policy above as data, for reports and the user guide: the
 // supported elements, text level and blocks, in the order above, and the

@@ -21,6 +21,19 @@
 #include <linux/sockios.h>
 #include <sys/ioctl.h>
 
+bool caretDrawnAt(EditorBinding *binding, QQuickItem *editor, int source)
+{
+    QQuickItem *caret = findItem(editor, QStringLiteral("caret"));
+    if (!caret || !caret->isVisible()) return false;
+    const int shown = binding->sourceToEditor(source);
+    QRectF line;
+    if (shown < 0 || !QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, line),
+                                               Q_ARG(int, shown)) || line.height() <= 0)
+        return false;
+    const QPointF drawn = caret->mapToItem(editor, QPointF());
+    return qAbs(drawn.y() - line.y()) <= 1 && qAbs(drawn.x() - line.x()) <= 1;
+}
+
 FakeHyprland::FakeHyprland(const QString &folder) : m_folder(folder)
 {
     QObject::connect(&m_requests, &QLocalServer::newConnection, this, [this] {

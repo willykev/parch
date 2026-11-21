@@ -366,6 +366,7 @@ void Assembler::convert(Block *block, Node &node)
         node.label = block->label;
         node.fenced = block->fenced;
         node.marker = block->listChar;
+        if (node.type == NodeType::CodeBlock) node.markers = std::move(block->markers);
         if (st.files[block->file].hasNul) node.text.replace(QChar(0), QChar(0xfffd));
         return;
     case NodeType::MathBlock:
@@ -384,7 +385,7 @@ void Assembler::convert(Block *block, Node &node)
         const int rawStart = block->target.start;
         const bool contiguous = rawStart + block->literal.size() <= text.size()
             && QStringView(text).sliced(rawStart, block->literal.size()) == block->literal;
-        parseHtmlFragment(st, block->literal, block->file, node.range, contiguous ? rawStart : -1,
+        parseHtmlFragment(st, block->literal, block->pieces, block->file, node.range, contiguous ? rawStart : -1,
                           qMax(0, block->start - rawStart), node.children);
         return;
     }
@@ -452,6 +453,17 @@ void Assembler::convert(Block *block, Node &node)
 void Assembler::structure(Node &node)
 {
     switch (node.type) {
+    case NodeType::Include:
+        if (node.includedFile >= 0) {
+            auto &headings = doc.files[size_t(node.includedFile)].headings;
+            if (!headings) {
+                const int first = int(doc.headings.size());
+                for (Node &child : node.children) structure(child);
+                headings = Range{first, int(doc.headings.size())};
+                return;
+            }
+        }
+        break;
     case NodeType::HtmlElement:
         if (node.label == u"a") {
             for (Attribute &attribute : node.attributes)
@@ -664,6 +676,7 @@ void Assembler::resolve()
 {
     headingSlugs.resize(st.headings.size());
     structure(doc.root);
+    doc.files.front().headings = Range{0, int(doc.headings.size())};
 
     flow(doc.root);
     // The notes, in the order of their numbers: a note may refer to another,

@@ -161,6 +161,10 @@ enum class Align : quint8 { None, Left, Center, Right };
 struct Attribute {
     QString name;
     QString value;
+    // The exact source of the value, excluding the quotes. Empty when there
+    // is no value or it cannot be traced to one unbroken source range.
+    Range valueRange;
+    QChar quote;
     bool operator==(const Attribute &) const = default;
 };
 
@@ -222,7 +226,7 @@ struct Node {
     QString label;
 
     std::vector<Attribute> attributes; // HtmlElement: the attributes the HTML policy allows
-    std::vector<Range> markers;        // BlockQuote, TableRow
+    std::vector<Range> markers;        // BlockQuote, TableRow, InlineNote; CodeBlock: literal source lines
     std::vector<Node> children;
 
     QString attribute(QLatin1StringView name) const
@@ -287,6 +291,7 @@ struct SourceFile {
     QString text;
     FrontMatter frontMatter;
     int includedFrom = -1; // the file that first included it; -1 for the root
+    std::optional<Range> headings; // outline indices in this file's first occurrence
 };
 
 // A heading of the outline, in document order, included files included.
@@ -350,6 +355,8 @@ struct PlainTextOptions {
     // (file 0), as for a selection; the whole document when unset. Of a
     // construct the range cuts through, the part of its source inside it.
     std::optional<Range> range;
+    // When set, the reading text of a citation. Counts leave it unset.
+    std::function<QString(const Node &)> citation;
 };
 
 class Document {
@@ -402,9 +409,14 @@ public:
 // The text of a node and everything in it, without markup: what an image's
 // alternative text and a heading's outline entry are.
 QString plainText(const Node &node);
+// Text as a cell displays it, with the requested separator at every inline
+// line break, including HTML br elements.
+QString inlineText(const Node &node, QChar lineBreak);
 
 // Parses one text. Includes are recognised and left unexpanded.
 Document parse(const QString &text, const Options &options = Options());
+// Reads just the inline source of a table cell, with the cell as the root.
+Document parseTableCell(const QString &text, const Options &options);
 // Parses a document and assembles the files it includes into its tree.
 Document parse(const QString &text, const Options &options, const Source &source);
 // How many texts parse() has read since the program started, on any
@@ -421,7 +433,11 @@ struct Destination {
     Kind kind = Kind::Empty;
     QString scheme;   // lower case, for Remote, Mail and OtherScheme
     QString path;     // LocalFile: the absolute path when a base folder is known, else the relative path, percent-decoded
-    QString fragment; // Anchor: the slug; LocalFile: what follows `#`
+    QString localPath; // LocalFile: the decoded path before resolving it against the base folder
+    QString fragment; // Anchor or LocalFile: the decoded fragment for lookup
+    // Spelling before URL decoding, with presence tracked even for an empty component.
+    std::optional<QString> query;
+    std::optional<QString> encodedFragment;
     bool absolute = false; // LocalFile: `path` is absolute
 };
 // `baseDirectory` is the folder of the file the destination was written in
@@ -434,19 +450,25 @@ Destination classifyDestination(const Document &document, const Node &linkOrImag
 // Where in `document` a link to the file `path`, at `fragment`, leads when
 // that file is the document or one it includes: its heading whose anchor,
 // as the file read on its own would number it, is `fragment` (and the
-// file's first heading when there is no fragment, or none matches), as that
-// heading's slug in the whole document. Empty when the file is not part of
-// the document, or holds no heading. An export that holds the whole document
-// links there, not to a file its reader does not have.
-QString includedAnchor(const Document &document, const QString &path, const QString &fragment);
+// file's first heading when there is no fragment), as that
+// heading's slug in the whole document. Empty for a missing file or heading.
+// An export that holds the whole document links to its own heading.
+QString includedAnchor(const Document &document, const QString &path, const QString &decodedFragment);
+// A local link's heading inside the assembly. A query keeps the external URL.
+QString includedAnchor(const Document &document, const Destination &destination);
 // The same by the file's index in Document::files, without falling back to
-// its first heading: empty when no heading of the file has that anchor.
-QString anchorInFile(const Document &document, int file, const QString &fragment);
+// its first heading. Takes the fragment as written in the source.
+QString anchorInFile(const Document &document, int file, const QString &encodedFragment);
 
 // A file path as a link or image destination can carry it: spaces,
-// parentheses, angle brackets, `#`, `%`, `&` (which could start an entity),
+// parentheses, angle brackets, `?`, `#`, `%`, `&` (which could start an entity),
 // `:` (which could end a scheme), `\`, `"` and control characters are
 // percent-encoded, so that `[text](destination)` reads back as the path.
 QString encodeDestination(QStringView path);
+QString encodeUrlPath(QStringView path);
+// A URL spelling with its existing percent escapes preserved.
+QString encodeUrl(QStringView url);
+enum class DestinationSyntax { Url, Markdown };
+QString destinationSuffix(const Destination &destination, DestinationSyntax syntax = DestinationSyntax::Url);
 
 } // namespace md

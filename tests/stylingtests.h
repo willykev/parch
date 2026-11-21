@@ -14,6 +14,7 @@ void themeChangeRecoloursTheStyling();
 void stylingKeepsEveryGlyphWhereItWas();
 void liveFormattingTurnsOff();
 void liveFormattingIsAPreferenceAndACommand();
+void resettingStylingStatsLeavesAnIdleViewSettled();
 void typingWithLiveFormattingStaysWithinAFrame();
 
 } // namespace StylingTests

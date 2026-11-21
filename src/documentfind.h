@@ -128,13 +128,19 @@ private:
         int count = 0;
         Revision revision = 0;
     };
+    struct ReplaceRequest {
+        QPointer<Document> document;
+        QRegularExpression expression;
+        QString replacement;
+        bool regex;
+        mutable std::atomic<bool> canceled{false};
+    };
 
     static Found findJob(QSharedPointer<const SourceSnapshot> snapshot, QRegularExpression expression,
                          std::shared_ptr<std::atomic<bool>> cancel);
-    // With `each`, every replacement is kept besides, for a view's grids to
-    // write into their cells; otherwise they go with the worker.
-    static Replaced replaceJob(QSharedPointer<const SourceSnapshot> snapshot, QRegularExpression expression,
-                               QString replacement, bool regex, bool each);
+    // With grids, the worker keeps the individual matches for cell editing.
+    static Replaced replaceJob(QSharedPointer<const SourceSnapshot> snapshot,
+                               const std::shared_ptr<const ReplaceRequest> &request, bool each);
 
     void queryEdited();
     void schedule(int delayMs);
@@ -152,7 +158,10 @@ private:
     void step(bool forward);
     void selectMatch(int index);
     void replaceCurrent(const QString &replacement);
-    void startReplaceAll(const QString &replacement);
+    bool replaceInGrids() const;
+    void cancelReplaceAll();
+    void startReplaceAll(const std::shared_ptr<const ReplaceRequest> &request);
+    void takeReplacements(const std::shared_ptr<const ReplaceRequest> &request, const Replaced &result, bool each);
     // The matches are those of the query as it is now, in the text as it is
     // now or moved along with its edits since.
     bool settled() const;
@@ -184,6 +193,7 @@ private:
     bool m_running = false;
     bool m_searchAgain = false;
     std::shared_ptr<std::atomic<bool>> m_cancel;
-    bool m_replacing = false;
+    std::shared_ptr<const ReplaceRequest> m_replaceRequest;
+    QString m_replaceError;
     QThreadPool m_pool;
 };

@@ -7,8 +7,11 @@
 // stand-in for the desktop's print portal. ParchTests runs each of them as a
 // test function of its own.
 namespace ExportTests {
+void exportLinksKeepQueryAndFragment();
 
 void pdfSetsPagesWithSearchableText();
+void pdfLocalLinksLeadFromTheOutputFolder();
+void epubReportsLinksToFilesOutsideTheBook();
 void pdfKeepsHeadingsWithTheirText();
 void pdfTallTableRowsRunOntoTheNextPage();
 void pdfSetsALongDocumentWhole();
@@ -16,6 +19,11 @@ void pdfOutlineIsAnIncrementalUpdate();
 void paperFormulasSitOnTheBaseline();
 void paperDiagramsAreVectorsWhereQtDrawsThem();
 void docxIsWordprocessingMarkup();
+void bibliographyPrecedesCollectedNotes_data();
+void bibliographyPrecedesCollectedNotes();
+void docxDeclaresFixedWidthCodeFonts();
+void frontMatterTitleIsMetadataAcrossFormats_data();
+void frontMatterTitleIsMetadataAcrossFormats();
 void docxOpensInLibreOffice();
 void epubFollowsTheContainerRules();
 void epubSplitsIntoChapters();

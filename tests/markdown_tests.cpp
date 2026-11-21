@@ -1569,8 +1569,11 @@ void rawHtmlPolicy()
     QCOMPARE(doc.source(0, elements[0]->close).toString(), QStringLiteral("</sup>"));
     QCOMPARE(md::plainText(*elements[0]), QStringLiteral("2"));
     QCOMPARE(elements[1]->label, QStringLiteral("img"));
-    QCOMPARE(elements[1]->attributes, (std::vector<md::Attribute>{{QStringLiteral("src"), QStringLiteral("a.png")},
-                                                                  {QStringLiteral("alt"), QStringLiteral("A")}}));
+    const int src = int(text.indexOf(QLatin1StringView("a.png")));
+    const int alt = int(text.indexOf(QLatin1StringView("A")));
+    QCOMPARE(elements[1]->attributes,
+             (std::vector<md::Attribute>{{QStringLiteral("src"), QStringLiteral("a.png"), {src, src + 5}, u'"'},
+                                         {QStringLiteral("alt"), QStringLiteral("A"), {alt, alt + 1}, u'"'}}));
     QCOMPARE(all(doc, NodeType::HtmlInline).size(), size_t(2));
     // Reported: the two tags that are shown as text, and the attribute that was dropped.
     QCOMPARE(count(doc, DiagnosticCode::UnsupportedHtml), 3);
@@ -3003,7 +3006,7 @@ void htmlRenderer()
     QVERIFY(full.startsWith(QLatin1StringView("<h1 id=\"title\">Title</h1>\n")));
     QVERIFY(full.contains(QLatin1StringView("<section class=\"footnotes\">")));
     QVERIFY(full.contains(QLatin1StringView("<section class=\"bibliography\">")));
-    QVERIFY(full.indexOf(QLatin1StringView("footnotes")) < full.indexOf(QLatin1StringView("bibliography")));
+    QVERIFY(full.indexOf(QLatin1StringView("bibliography")) < full.indexOf(QLatin1StringView("footnotes")));
     md::HtmlOptions bare;
     bare.headingIds = false;
     bare.endnotes = false;

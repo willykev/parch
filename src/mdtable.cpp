@@ -1,9 +1,11 @@
 #include "mdtable.h"
 
+#include "mdtree.h"
 #include <QCoreApplication>
 #include <QRegularExpression>
 #include <QTextBoundaryFinder>
 #include <algorithm>
+#include <cmath>
 
 namespace MdTable {
 
@@ -470,6 +472,32 @@ Layout write(const Model &model)
     return layout;
 }
 
+static bool readsRow(QStringView text, const Line &line, const QList<Item> &items, int columns, const Dialect &dialect)
+{
+    bool extra = false, leading = false;
+    const Row read = rowOf(text, line, columns, dialect, &extra, &leading);
+    if (extra || leading || read.cells.size() != items.size()) return false;
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        const Cell &cell = read.cells[i];
+        if (cell.span != items[i].span || text.mid(cell.start, cell.end - cell.start) != items[i].text) return false;
+    }
+    return true;
+}
+
+bool readsBack(const QList<Item> &items, int columns, const Dialect &dialect)
+{
+    // Padding and alignment leave the boundaries the same as this row's.
+    QString text = QStringLiteral("|");
+    for (const Item &item : items) {
+        text += u' ';
+        text += item.text;
+        text += u' ';
+        text += QString(item.span, u'|');
+    }
+    const int end = int(text.size());
+    return readsRow(text, {0, 0, end, end}, items, columns, dialect);
+}
+
 bool readsBack(const Layout &layout, const Model &model, int row, const Dialect &dialect, int columns)
 {
     if (columns < 0) columns = columnCount(model);
@@ -482,15 +510,7 @@ bool readsBack(const Layout &layout, const Model &model, int row, const Dialect 
     const int end = physical + 1 < layout.lineStarts.size() ? layout.lineStarts[physical + 1] - int(brk.size())
                                                             : int(text.size());
     const Line line{start, start + int(model.prefixes.value(physical).size()), end, end};
-    bool extra = false, leading = false;
-    const Row read = rowOf(text, line, columns, dialect, &extra, &leading);
-    const QList<Item> &items = model.rows[row];
-    if (extra || leading || read.cells.size() != items.size()) return false;
-    for (qsizetype i = 0; i < items.size(); ++i) {
-        const Cell &cell = read.cells[i];
-        if (cell.span != items[i].span || text.mid(cell.start, cell.end - cell.start) != items[i].text) return false;
-    }
-    return true;
+    return readsRow(text, line, model.rows[row], columns, dialect);
 }
 
 } // namespace MdTable
@@ -718,17 +738,12 @@ QString setAlignment(Model &model, int first, int count, Align align)
 
 QString plainText(const QString &markdown)
 {
-    QString text = markdown;
-    static const QRegularExpression link(QStringLiteral("!?\\[([^\\]]*)\\]\\([^)]*\\)"));
-    text.replace(link, QStringLiteral("\\1"));
-    static const QRegularExpression escape(QStringLiteral("\\\\([!-/:-@\\[-`{-~])"));
-    text.replace(escape, QStringLiteral("\\1"));
-    static const QRegularExpression markers(QStringLiteral("\\*\\*|__|~~|==|[*_`]"));
-    text.remove(markers);
-    return text.trimmed();
+    if (markdown.isEmpty()) return {};
+    const md::Document cell = md::parseTableCell(markdown, {});
+    return md::inlineText(cell.root, u' ').trimmed();
 }
 
-QString sortRows(Model &model, int column, bool descending)
+QString sortRows(Model &model, int column, bool descending, const QStringList &keys)
 {
     if (model.rows.size() < 3) return {};
     struct Key {
@@ -737,22 +752,25 @@ QString sortRows(Model &model, int column, bool descending)
         QString text;
     };
     static const QRegularExpression numeric(QStringLiteral("^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$"));
-    const auto keyOf = [&](const QList<Item> &row) {
+    const auto keyOf = [&](int r) {
         Key key;
+        const QList<Item> &row = model.rows[r];
         const int index = itemAt(row, column);
-        key.text = index < 0 ? QString() : plainText(row[index].text);
+        if (keys.size() == model.rows.size() - 1) key.text = keys[r - 1].trimmed();
+        else if (index >= 0) key.text = plainText(row[index].text);
+        bool number = false;
+        if (numeric.match(key.text).hasMatch()) key.number = key.text.toDouble(&number);
         if (key.text.isEmpty()) {
             key.group = 2;
-        } else if (numeric.match(key.text).hasMatch()) {
+        } else if (number && std::isfinite(key.number)) {
             key.group = 0;
-            key.number = key.text.toDouble();
         } else {
             key.text = key.text.toCaseFolded();
         }
         return key;
     };
     QList<std::pair<Key, QList<Item>>> rows;
-    for (int r = 1; r < model.rows.size(); ++r) rows.append({keyOf(model.rows[r]), model.rows[r]});
+    for (int r = 1; r < model.rows.size(); ++r) rows.append({keyOf(r), model.rows[r]});
     std::stable_sort(rows.begin(), rows.end(), [&](const auto &a, const auto &b) {
         const Key &x = a.first, &y = b.first;
         if (x.group != y.group) return x.group < y.group;
@@ -801,10 +819,15 @@ QString splitCell(Model &model, int row, int column)
 
 QString clearCells(Model &model, int firstRow, int lastRow, int firstColumn, int lastColumn)
 {
+    return fillCells(model, firstRow, lastRow, firstColumn, lastColumn, {});
+}
+
+QString fillCells(Model &model, int firstRow, int lastRow, int firstColumn, int lastColumn, const QString &markdown)
+{
     for (int r = qMax(0, firstRow); r <= lastRow && r < model.rows.size(); ++r) {
         int column = 0;
         for (Item &item : model.rows[r]) {
-            if (column + item.span > firstColumn && column <= lastColumn) item.text.clear();
+            if (column + item.span > firstColumn && column <= lastColumn) item.text = markdown;
             column += item.span;
         }
     }
@@ -812,7 +835,7 @@ QString clearCells(Model &model, int firstRow, int lastRow, int firstColumn, int
 }
 
 QString pasteCells(Model &model, int row, int column, const QList<QStringList> &values, const Dialect &dialect,
-                   const QString &newline)
+                   const QString &newline, bool markdown)
 {
     if (values.isEmpty()) return {};
     int width = 0;
@@ -834,7 +857,7 @@ QString pasteCells(Model &model, int row, int column, const QList<QStringList> &
         for (int j = 0; j < values[i].size(); ++j) {
             QList<Item> &cells = model.rows[row + i];
             const int index = itemAt(cells, column + j);
-            if (index >= 0) cells[index].text = encodeCell(values[i][j], dialect);
+            if (index >= 0) cells[index].text = markdown ? values[i][j] : encodeCell(values[i][j], dialect);
         }
     }
     return {};

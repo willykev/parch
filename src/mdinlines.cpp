@@ -1785,6 +1785,16 @@ void InlineParserPrivate::pairHtml(int parent)
         if (tag.droppedAttributes)
             unsupported(i, QStringLiteral("Attributes of <%1> that are not supported are left out").arg(tag.name));
         if (!tag.closing) {
+            for (Attribute &attribute : tag.attributes) {
+                const Range value = attribute.valueRange;
+                if (value.isEmpty()) continue;
+                const Range source = sourceRange(nodes[i].start + value.start, nodes[i].start + value.end);
+                attribute.valueRange = {};
+                if (source.length() == value.length() && source.end <= file->text.size()
+                    && QStringView(file->text).sliced(source.start, source.length())
+                           == QStringView(data(i).text).sliced(value.start, value.length()))
+                    attribute.valueRange = source;
+            }
             if (info.isVoid || tag.selfClosing) {
                 INode &x = nodes[i];
                 x.type = NodeType::HtmlElement;
@@ -1968,6 +1978,19 @@ Node InlineParserPrivate::finish(int index)
     node.open = x.openEnd > x.start ? sourceRange(x.start, x.openEnd) : Range{node.range.start, node.range.start};
     node.close = x.closeStart < x.end ? sourceRange(x.closeStart, x.end) : Range{node.range.end, node.range.end};
     if (x.targetEnd > x.targetStart) node.target = sourceRange(x.targetStart, x.targetEnd);
+    if (node.type == NodeType::InlineNote && map.size() > 1) {
+        const PieceMap *piece = &pieceAt(x.openEnd);
+        const QString &source = file->text;
+        for (const PieceMap *next = piece + 1; next < map.data() + map.size() && next->content <= x.closeStart;
+             piece = next++) {
+            int start = piece->src + piece->len;
+            // Keep the source line ending. Quote and list prefixes, and
+            // escapes for grid pipes, belong to the enclosing block.
+            if (start < next->src && source[start] == u'\r') ++start;
+            if (start < next->src && source[start] == u'\n') ++start;
+            if (start < next->src) node.markers.push_back({start, next->src});
+        }
+    }
     if (node.type == NodeType::SoftBreak || node.type == NodeType::HardBreak) {
         // The break ends with the line terminator, which may be two characters.
         const QString &text = file->text;
@@ -2050,3 +2073,21 @@ void InlineParser::parse(const std::vector<Piece> &pieces, const InlineContext &
 }
 
 } // namespace md::detail
+
+md::Document md::parseTableCell(const QString &text, const Options &options)
+{
+    Document document;
+    document.options = options;
+    document.files.emplace_back().text = text;
+    const Source source;
+    detail::ParseState state;
+    state.source = &source;
+    state.options = options;
+    state.document = &document;
+    state.files.emplace_back().text = text;
+    state.runs.emplace_back();
+    document.root.type = NodeType::TableCell;
+    document.root.range = {0, int(text.size())};
+    detail::InlineParser(state).parse(detail::tableCellPieces(text, 0, int(text.size()), 1), {}, document.root.children);
+    return document;
+}

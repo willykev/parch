@@ -154,6 +154,9 @@ Formatted format(const md::Document &document, const Setup &setup);
 // id="ref-key">…</div>…</section>. Nothing when the style formatted nothing.
 std::optional<md::CitationHtml> html(const Formatted &formatted);
 
+// Reader text with the same citations and bibliography as the formatted document.
+QString plainText(const md::Document &document, const Formatted &formatted);
+
 // The id of a bibliography entry in HTML: "ref-" and the key, spaces as hyphens.
 QString entryId(const QString &key);
 

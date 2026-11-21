@@ -266,6 +266,8 @@ signals:
     // The projection was filled with the whole source anew, as when it is
     // first shown or shown again after a write that did not come from it.
     void projectionLoaded();
+    // The prose caret's fresh rectangle after a table changes the layout.
+    void caretLaidOut(const QRectF &rectangle);
     void vimKeysChanged();
     void tableGridsChanged();
 
@@ -285,7 +287,7 @@ private:
     friend class TableGrid;
     // Where a caret at a projection position is drawn, in the editor's
     // coordinates: in a grid as the grid draws it, elsewhere as Qt lays it out.
-    QRectF rectangleAt(int editorPosition) const;
+    QRectF rectangleAt(int editorPosition, bool fresh = false) const;
     void attach();
     void detach();
     void load();
@@ -368,6 +370,11 @@ private:
     // its top, and the preview beside it would follow there and back.
     void scrollView(QQuickItem *view, qreal y) const;
     void revealCursor();
+    void revealCursor(QQuickItem *view, const QRectF &rectangle);
+    void restoreTop(QQuickItem *view, int source, bool fresh = false);
+    // A grid can change the layout while the source and selection stay put.
+    void queueTableLayout(bool reveal);
+    void finishTableLayout();
 
     QPointer<Document> m_document;
     QPointer<SourceBuffer> m_buffer;
@@ -386,6 +393,8 @@ private:
     int m_appliedLineHeight = 0;
     int m_cursorSource = 0;
     int m_anchorSource = 0;
+    // The revision the view is writing directly into its raw text.
+    Revision m_rawEditRevision = 0;
     bool m_loaded = false;
     bool m_wrapAnywhere = false;
     bool m_editable = false;
@@ -429,6 +438,13 @@ private:
         qreal contentY = 0;
     };
     TopAnchor m_topAnchor;
+    struct TableLayout {
+        Revision revision;
+        qreal scroll;
+        bool reveal;
+    };
+    std::optional<TableLayout> m_tableLayout;
+    bool m_tableLayoutQueued = false;
     QPointer<Attachments> m_attachments;
     // The drop waiting for its files to be looked at or for an answer.
     std::shared_ptr<DropRequest> m_drop;

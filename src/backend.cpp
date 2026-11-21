@@ -135,24 +135,23 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
         if (write > m_refusedAfter) forgetUnsafe(documentId);
     });
     connect(m_store.get(), &DocumentStore::documentClosed, this, &Backend::forgetUnsafe);
-    // Keep both opens the local text as a copy beside the file, in the
-    // window in front, where the writer was in that text: the view of the
-    // original in front of the window in front, or else its first tab in the
-    // most recent window that shows it.
-    connect(m_store.get(), &DocumentStore::conflictCopyOpened, this, [this](Document *copy, Document *original) {
-        WindowContext *window = activeWindow();
-        if (!window) return;
-        std::optional<ViewState> view;
+    // Keep both takes the place in the original when it takes the text:
+    // the active tab, or the first tab that shows it, in the most recent
+    // window with a view of the document.
+    m_store->setConflictCopyView([this](Document *original) -> std::optional<ViewState> {
         for (WindowContext *holder : std::as_const(m_recent)) {
             TabModel *tabs = holder->tabs();
             const int index = tabs->activeDocument() == original ? tabs->activeIndex() : tabs->indexOf(original);
             if (index < 0) continue;
             holder->captureView();
-            view = tabs->viewState(index);
-            break;
+            return tabs->viewState(index);
         }
-        window->tabs()->openDocument(copy, view);
+        return std::nullopt;
     });
+    connect(m_store.get(), &DocumentStore::conflictCopyOpened, this,
+            [this](Document *copy, Document *, const std::optional<ViewState> &view) {
+                if (WindowContext *window = activeWindow()) window->tabs()->openDocument(copy, view);
+            });
     // A document whose tab closed while its save ran, and whose save then
     // failed or met a conflict, comes back as a tab of the window in front,
     // behind the one being written in, and a notice says so.
@@ -303,9 +302,12 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     connect(m_organizer.get(), &FileOrganizer::problem, this, &Backend::notify);
     connect(m_organizer.get(), &FileOrganizer::news, this, &Backend::inform);
     // A move or rename made can be taken back from its notice.
-    connect(m_organizer.get(), &FileOrganizer::moved, this, [this](const QString &title, const QString &detail, quint64 move) {
-        postUndoable(title, detail, [this, move] { m_organizer->undoMove(move); });
-    });
+    connect(m_organizer.get(), &FileOrganizer::moved, this,
+            [this](const QString &title, const QString &detail, quint64 move, bool incomplete) {
+                postUndoable(title, detail, [this, move] { m_organizer->undoMove(move); },
+                             [this, move] { m_organizer->forgetMove(move); }, incomplete ? Warning : News,
+                             [this] { return m_organizer->canStartMove(); });
+            });
     // A new document opens in the window in front, which asked for it.
     connect(m_organizer.get(), &FileOrganizer::created, this, [this](const QString &path) {
         if (WindowContext *window = activeWindow()) openIn(window, {path}, Absent::NotFound)->raise();
@@ -1732,7 +1734,7 @@ void Backend::setDraftAside(const QString &documentId, const std::optional<QByte
 
 void Backend::undoNotice()
 {
-    if (!noticeUndoable()) return;
+    if (!noticeUndoable() || (m_undoReady && !m_undoReady())) return;
     // Undone, it needs forgetting no more.
     const std::function<void()> undo = std::exchange(m_undo, {});
     m_forgetUndo = {};
@@ -1741,9 +1743,9 @@ void Backend::undoNotice()
 }
 
 void Backend::postUndoable(const QString &news, const QString &detail, std::function<void()> undo,
-                           std::function<void()> forget)
+                           std::function<void()> forget, NoticeTone tone, std::function<bool()> ready)
 {
-    post(news, detail, News);
+    post(news, detail, tone);
     // A refused quit holds the notice; the news joins it, without Undo.
     if (!m_unsafe.isEmpty()) {
         if (forget) forget();
@@ -1751,12 +1753,14 @@ void Backend::postUndoable(const QString &news, const QString &detail, std::func
     }
     m_undo = std::move(undo);
     m_forgetUndo = std::move(forget);
+    m_undoReady = std::move(ready);
     emit problemChanged();
 }
 
 void Backend::dropUndo()
 {
     m_undo = {};
+    m_undoReady = {};
     if (const std::function<void()> forget = std::exchange(m_forgetUndo, {})) forget();
 }
 

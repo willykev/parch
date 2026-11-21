@@ -136,12 +136,14 @@ public:
            const QPageSize &page)
         : m_doc(document), m_recipe(recipe), m_pictures(pictures), m_endnotes(endnotes), m_page(page),
           m_citations(recipe.citations && recipe.citations->active ? recipe.citations.get() : nullptr),
-          m_destinations(HtmlExporter::destinationsFrom(document, QFileInfo(recipe.output).absolutePath()))
+          m_destinations(Exporters::destinationsFrom(document, QFileInfo(recipe.output).absolutePath()))
     {
         // Relationships the document part always has, first.
         m_body.next = 1;
         m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"),
                       QStringLiteral("styles.xml"), false);
+        m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable"),
+                      QStringLiteral("fontTable.xml"), false);
         m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"),
                       QStringLiteral("numbering.xml"), false);
         m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"),
@@ -1160,6 +1162,7 @@ private:
 };
 
 const QString kMain = QStringLiteral("http://schemas.openxmlformats.org/wordprocessingml/2006/main");
+const QString kCodeFont = QStringLiteral("Consolas");
 
 QString Writer::styles() const
 {
@@ -1176,7 +1179,8 @@ QString Writer::styles() const
             .arg(id, name, rPr);
     };
     const QString sans = QStringLiteral("<w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\" w:cs=\"Arial\"/>");
-    const QString mono = QStringLiteral("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\" w:cs=\"Consolas\"/>");
+    const QString mono = QStringLiteral("<w:rFonts w:ascii=\"%1\" w:hAnsi=\"%1\" w:eastAsia=\"%1\" w:cs=\"%1\"/>")
+                             .arg(kCodeFont);
     QString out = QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:styles xmlns:w=\"%1\">").arg(kMain);
     out += QStringLiteral("<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Georgia\" w:hAnsi=\"Georgia\" "
                           "w:eastAsia=\"Georgia\" w:cs=\"Georgia\"/><w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/>"
@@ -1299,14 +1303,6 @@ QByteArray Writer::package(QString *error)
     m_language = Exporters::language(m_doc);
     if (m_language.isEmpty()) m_language = QStringLiteral("en-US");
     const QString title = Exporters::title(m_doc, m_recipe);
-    // The front matter's title opens the document in the Title style.
-    if (const QString given = Exporters::frontMatterText(m_doc, QStringLiteral("title")); !given.isEmpty()) {
-        Para p;
-        p.style = QStringLiteral("Title");
-        open(p);
-        text(given, Look());
-        close();
-    }
     Flow flow;
     block(m_doc.root, flow);
     // Notes never referred to are not written, as in every other format.
@@ -1373,6 +1369,10 @@ QByteArray Writer::package(QString *error)
                                        "xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\">"
                                        "<Application>parch %1</Application></Properties>")
                             .arg(QStringLiteral(PARCH_VERSION));
+    const QString fonts = QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+                                         "<w:fonts xmlns:w=\"%1\"><w:font w:name=\"%2\"><w:altName w:val=\"Courier New\"/>"
+                                         "<w:family w:val=\"modern\"/><w:pitch w:val=\"fixed\"/></w:font></w:fonts>")
+                              .arg(kMain, kCodeFont);
     const QString types = QStringLiteral(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
         "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
@@ -1381,6 +1381,7 @@ QByteArray Writer::package(QString *error)
         "<Default Extension=\"png\" ContentType=\"image/png\"/>"
         "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
         "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
+        "<Override PartName=\"/word/fontTable.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml\"/>"
         "<Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/>"
         "<Override PartName=\"/word/footnotes.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/>"
         "<Override PartName=\"/word/endnotes.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml\"/>"
@@ -1401,6 +1402,7 @@ QByteArray Writer::package(QString *error)
     zip.add(QStringLiteral("word/document.xml"), document.toUtf8());
     zip.add(QStringLiteral("word/_rels/document.xml.rels"), m_body.relationshipsXml());
     zip.add(QStringLiteral("word/styles.xml"), styles().toUtf8());
+    zip.add(QStringLiteral("word/fontTable.xml"), fonts.toUtf8());
     zip.add(QStringLiteral("word/numbering.xml"), numberingXml().toUtf8());
     zip.add(QStringLiteral("word/footnotes.xml"), footnotes.toUtf8());
     zip.add(QStringLiteral("word/endnotes.xml"), endnotes.toUtf8());

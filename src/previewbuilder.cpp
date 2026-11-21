@@ -277,7 +277,8 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
         part.key = h.value;
         list.push_back(part);
     }
-    if (!document.footnotes.empty()) {
+    const auto appendNotes = [&] {
+        if (document.footnotes.empty()) return;
         list.push_back({Part::NotesRule, nullptr, 0, 0x6e6f7465ULL});
         for (size_t i = 0; i < document.footnotes.size(); ++i) {
             const md::Footnote &note = document.footnotes[i];
@@ -289,7 +290,9 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
             if (note.content) hashWithSource(document, *note.content, h, citations, &unresolved);
             list.push_back({Part::Note, nullptr, int(i), h.value});
         }
-    }
+    };
+    const bool notesFirst = citations && citations->noteStyle;
+    if (notesFirst) appendNotes();
     if (citations) {
         // The style's bibliography, in the style's order, in place of the
         // works the text defines.
@@ -312,9 +315,7 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
                 list.push_back({Part::Entry, nullptr, int(i), h.value});
             }
         }
-        return list;
-    }
-    if (!document.bibliography.empty()) {
+    } else if (!document.bibliography.empty()) {
         list.push_back({Part::BibliographyRule, nullptr, 0, 0x62696262ULL});
         for (size_t i = 0; i < document.bibliography.size(); ++i) {
             const md::BibliographyEntry &entry = document.bibliography[i];
@@ -327,6 +328,7 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
             list.push_back({Part::Entry, nullptr, int(i), h.value});
         }
     }
+    if (!notesFirst) appendNotes();
     return list;
 }
 
@@ -470,16 +472,11 @@ QString Builder::taskImageName(bool checked)
 
 QString Builder::taskLink(int offset) { return QStringLiteral("parch:task/%1").arg(offset); }
 
-QString Builder::localHref(const md::Destination &target, const QString &written) const
+QString Builder::localHref(const md::Node &node, const md::Destination &target, const QString &written) const
 {
+    if (m_options.localLinks) return m_options.localLinks(node, written);
     if (!target.absolute) return written;
-    if (m_options.portableLinks) {
-        const QString anchor = md::includedAnchor(m_document, target.path, target.fragment);
-        return anchor.isEmpty() ? written : u'#' + anchor;
-    }
-    QUrl url = QUrl::fromLocalFile(target.path);
-    if (!target.fragment.isEmpty()) url.setFragment(target.fragment);
-    return url.toString();
+    return QUrl::fromLocalFile(target.path).toString(QUrl::FullyEncoded) + md::destinationSuffix(target);
 }
 
 QImage Builder::taskImage(const PreviewStyle &style, bool checked, qreal size)
@@ -1785,7 +1782,7 @@ void Builder::inl(const Node &node, const Char &given)
             inner.href = u'#' + target.fragment;
             break;
         case md::Destination::Kind::LocalFile:
-            inner.href = localHref(target, node.dest);
+            inner.href = localHref(node, target, node.dest);
             break;
         default:
             inner.href = node.dest;
@@ -1879,7 +1876,7 @@ void Builder::htmlInline(const Node &node, const Char &state)
         md::Destination target;
         if (md::detail::isSafeUrl(href, false)) target = md::classifyDestination(m_document, node);
         if (target.kind == md::Destination::Kind::Anchor) inner.href = u'#' + target.fragment;
-        else if (target.kind == md::Destination::Kind::LocalFile) inner.href = localHref(target, href);
+        else if (target.kind == md::Destination::Kind::LocalFile) inner.href = localHref(node, target, href);
         else if (target.kind != md::Destination::Kind::Empty) inner.href = href;
         if (!inner.href.isEmpty()) {
             inner.ink = PreviewStyle::Link;

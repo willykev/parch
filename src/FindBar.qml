@@ -23,6 +23,8 @@ Rectangle {
     // The keys that open the bar and step through it, for the tooltips.
     property var keys: ({})
 
+    property int replacedCount: 0
+
     // Escape or the close button: the window closes the bar and gives the
     // keys back to the text.
     signal closeRequested()
@@ -31,10 +33,14 @@ Rectangle {
     readonly property real rowHeight: Math.round(theme.fontSize * 2.4)
     readonly property real iconSize: Math.round(theme.fontSize * 1.15)
     readonly property real buttonSize: rowHeight
+    readonly property string replacedText: qsTr("%1 replaced").arg(Number(replacedCount).toLocaleString(Qt.locale(), "f", 0))
+    readonly property string statusHint: !visible && replaceSummary.running ? replacedText : ""
 
     // What the count says: where the selection is among the matches, how
     // many there are, or that there are none yet.
     readonly property string countText: {
+        if (replaceSummary.running)
+            return replacedText
         if (find.pattern.length === 0 || find.error.length > 0)
             return ""
         if (find.searching)
@@ -45,6 +51,21 @@ Rectangle {
         if (find.current >= 0)
             return qsTr("%1 of %2").arg(Number(find.current + 1).toLocaleString(Qt.locale(), "f", 0)).arg(total)
         return find.count === 1 ? qsTr("1 match") : qsTr("%1 matches").arg(total)
+    }
+
+    Connections {
+        target: bar.find
+        function onReplacedAll(count) {
+            bar.replacedCount = count
+            replaceSummary.restart()
+        }
+        function onQueryChanged() { replaceSummary.stop() }
+        function onDocumentChanged() { replaceSummary.stop() }
+        function onActiveChanged() { replaceSummary.stop() }
+    }
+    QuietTimer {
+        id: replaceSummary
+        interval: 4000
     }
 
     // The keys go to the find field, with what it holds selected.
@@ -166,7 +187,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     font.family: theme.fontFamily
                     font.pixelSize: theme.sizes.small
-                    color: bar.find.count === 0 && !bar.find.searching ? theme.danger : theme.dim
+                    color: bar.find.count === 0 && !bar.find.searching && !replaceSummary.running ? theme.danger : theme.dim
                     elide: Text.ElideRight
                     Accessible.ignored: true
                 }

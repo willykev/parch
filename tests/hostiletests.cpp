@@ -1051,6 +1051,23 @@ void searchesSurviveAFailedJob()
     QTRY_COMPARE(find.count(), 1);
     QVERIFY(find.error().isEmpty());
 
+    // A failed Replace All ends the request and leaves the source ready
+    // for another command using the same expression.
+    QSignalSpy replaced(&find, &DocumentFind::replacedAll);
+    WorkerFailure::setFailing(Job::Search, true);
+    find.replaceAll(QStringLiteral("lost"));
+    QTRY_VERIFY2(find.error().contains(outOfMemory), qPrintable(find.error()));
+    QCOMPARE(replaced.count(), 0);
+    QCOMPARE(document->buffer()->text(), QStringLiteral("needle\n"));
+    WorkerFailure::setFailing(Job::Search, false);
+    find.replaceAll(QStringLiteral("test"));
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(document->buffer()->text(), QStringLiteral("testle\n"));
+    QVERIFY(find.error().isEmpty());
+    find.setActive(false);
+    document->buffer()->undo();
+    QCOMPARE(document->buffer()->text(), QStringLiteral("needle\n"));
+
     // Searching the library: what cannot be searched is counted as unread,
     // and the search ends.
     FolderSearch search(paths, &store, &settings);

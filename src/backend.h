@@ -458,9 +458,9 @@ private:
     void takeDraftOut(Document *draft);
     void setDraftAside(const QString &documentId, const std::optional<QByteArray> &bytes);
     // A notice whose news can be undone, while it shows: `undo` undoes it,
-    // and `forget`, when given, runs once it can no longer be undone.
+    // `forget` runs once it can no longer be undone, and `ready` can defer undo.
     void postUndoable(const QString &news, const QString &detail, std::function<void()> undo,
-                      std::function<void()> forget = {});
+                      std::function<void()> forget = {}, NoticeTone tone = News, std::function<bool()> ready = {});
     // The notice can no longer be undone.
     void dropUndo();
     void setProblem(const QString &problem, const QString &detail);
@@ -514,6 +514,7 @@ private:
     // What undoes the notice, and what runs once it can no longer be undone.
     std::function<void()> m_undo;
     std::function<void()> m_forgetUndo;
+    std::function<bool()> m_undoReady;
     // The user guide: where it is installed, the document that shows it,
     // and whether it is being read.
     QString m_installedGuide;

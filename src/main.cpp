@@ -40,8 +40,10 @@
 #include <QTimer>
 #include <QUrl>
 #include <algorithm>
+#include <csignal>
 #include <memory>
 #include <optional>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -108,6 +110,7 @@ int main(int argc, char *argv[])
         QStringDecoder decode(QStringDecoder::Utf8, QStringConverter::Flag::Stateless | QStringConverter::Flag::ConvertInitialBom);
         const QString argument = decode(QByteArrayView(argv[i]));
         if (i > 0 && decode.hasError()) {
+            std::signal(SIGPIPE, SIG_IGN);
             QTextStream(stderr) << QCoreApplication::translate("main", "parch: argument %1 is not valid UTF-8").arg(i)
                                 << Qt::endl;
             return Cli::Io;
@@ -115,40 +118,45 @@ int main(int argc, char *argv[])
         arguments.append(argument);
     }
     const Launch launch = parseLaunch(arguments);
-    switch (launch.kind) {
-    case Launch::Version:
-        QTextStream(stdout) << versionLine() << Qt::endl;
-        return 0;
-    case Launch::Help:
-        QTextStream(stdout) << helpText();
-        return 0;
-    case Launch::Invalid:
-        QTextStream(stderr) << launch.error << Qt::endl;
-        return 1;
-    case Launch::Command: {
-        // The commands that read, render and export documents need no
-        // display. Exports set type on pages and draw pictures, which needs
-        // fonts and so a GUI application, but one with no display: Qt's
-        // offscreen platform, whatever the desktop is.
-        std::unique_ptr<QCoreApplication> application;
-        if (launch.commandArguments.value(1) == u"export") {
-            qputenv("QT_QPA_PLATFORM", "offscreen");
-            qputenv("QT_QPA_PLATFORMTHEME", "generic");
-            application = std::make_unique<QGuiApplication>(argc, argv);
-        } else {
-            application = std::make_unique<QCoreApplication>(argc, argv);
-        }
-        QCoreApplication &app = *application;
-        app.setApplicationName(QStringLiteral("parch"));
-        QFile out, err;
-        if (!out.open(STDOUT_FILENO, QIODevice::WriteOnly) ||
-            !err.open(STDERR_FILENO, QIODevice::WriteOnly | QIODevice::Unbuffered))
-            return Cli::Io;
-        const Cli::Context context{QDir::currentPath(), QDir::homePath(), AppPaths::standard(), &out, &err};
-        return Cli::run(launch.commandArguments, context);
+    // Launch holds the positional arguments. Qt receives only the prefix
+    // where its own options can occur.
+    if (const qsizetype separator = arguments.indexOf(QStringLiteral("--"), 1); separator >= 0) {
+        argc = int(separator);
+        argv[argc] = nullptr;
     }
-    case Launch::Gui:
-        break;
+    if (launch.kind != Launch::Gui) {
+        std::signal(SIGPIPE, SIG_IGN);
+        if (launch.kind == Launch::Invalid) {
+            QTextStream(stderr) << launch.error << Qt::endl;
+            return Cli::Usage;
+        }
+
+        // Capture the inherited streams before Qt can reuse a closed descriptor.
+        QFile out, err;
+        const auto mode = QIODevice::WriteOnly | QIODevice::Unbuffered;
+        if (::fcntl(STDOUT_FILENO, F_GETFD) >= 0) out.open(STDOUT_FILENO, mode);
+        if (::fcntl(STDERR_FILENO, F_GETFD) >= 0) err.open(STDERR_FILENO, mode);
+
+        int status;
+        if (launch.kind == Launch::Command) {
+            // Exports set type and draw pictures with Qt's offscreen platform.
+            std::unique_ptr<QCoreApplication> application;
+            if (launch.commandArguments.value(1) == u"export") {
+                qputenv("QT_QPA_PLATFORM", "offscreen");
+                qputenv("QT_QPA_PLATFORMTHEME", "generic");
+                application = std::make_unique<QGuiApplication>(argc, argv);
+            } else {
+                application = std::make_unique<QCoreApplication>(argc, argv);
+            }
+            application->setApplicationName(QStringLiteral("parch"));
+            const Cli::Context context{QDir::currentPath(), QDir::homePath(), AppPaths::standard(), &out, &err};
+            status = Cli::run(launch.commandArguments, context);
+        } else {
+            const QString text = launch.kind == Launch::Version ? versionLine() + u'\n' : helpText();
+            status = Cli::printResult(text, &out, &err);
+        }
+        if (out.isOpen() && !out.flush() && status != Cli::Io) return Cli::outputError(&err, out.errorString());
+        return status;
     }
 
     const auto refused = [](const QString &reason) {

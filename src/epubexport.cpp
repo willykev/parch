@@ -24,10 +24,40 @@ struct Counts {
     int diagrams = 0;
     int remoteImages = 0;
     int pageBreaks = 0;
+    QSet<QString> omittedLinks;
 };
+
+bool isLink(const md::Node &node)
+{
+    return node.type == md::NodeType::Link || node.type == md::NodeType::Autolink
+           || (node.type == md::NodeType::HtmlElement && node.label == u"a");
+}
+
+std::optional<QString> bookDestination(const md::Document &document, const md::Node &node, const QString &written)
+{
+    if (!isLink(node)) return written;
+    const auto target = md::classifyDestination(written, md::destinationDirectory(document, node));
+    if (target.kind != md::Destination::Kind::LocalFile) return written;
+    if (const QString heading = md::includedAnchor(document, target); !heading.isEmpty())
+        return md::encodeUrl(u'#' + heading);
+    return std::nullopt;
+}
+
+void reportOmittedLinks(const Counts &counts, QStringList &limitations)
+{
+    if (counts.omittedLinks.isEmpty()) return;
+    QStringList names = counts.omittedLinks.values();
+    names.sort();
+    limitations.append(QStringLiteral("The EPUB leaves out these local link destinations (%1)")
+                           .arg(names.join(QStringLiteral(", "))));
+}
 
 void count(const md::Document &document, const md::Node &node, Counts &counts)
 {
+    if (isLink(node)) {
+        const QString written = node.type == md::NodeType::HtmlElement ? node.attribute(QLatin1StringView("href")) : node.dest;
+        if (!bookDestination(document, node, written)) counts.omittedLinks.insert(written);
+    }
     switch (node.type) {
     case md::NodeType::MathInline:
     case md::NodeType::MathBlock: ++counts.formulas; break;
@@ -152,6 +182,7 @@ QStringList EpubExporter::limitations(const md::Document &document, const Export
     if (counts.pageBreaks)
         limitations.append(QStringLiteral("Page breaks are hints: a reader sets its own pages (%1)")
                                .arg(Exporters::count(counts.pageBreaks, QStringLiteral("page break"), QStringLiteral("page breaks"))));
+    reportOmittedLinks(counts, limitations);
     return limitations;
 }
 
@@ -259,7 +290,8 @@ ExportResult EpubExporter::write(const md::Document &document, const ExportRecip
     ExportResult result;
     ExportWeb::Assets assets(ExportWeb::Assets::Mode::Package, QStringLiteral("images/"),
                              QFileInfo(recipe.output).absolutePath());
-    const ExportWeb::Body body = ExportWeb::body(document, recipe, pictures.get(), assets, true);
+    const ExportWeb::Body body = ExportWeb::body(document, recipe, pictures.get(), assets, true,
+        [&document](const md::Node &node, const QString &written) { return bookDestination(document, node, written); });
     const QString title = Exporters::title(document, recipe);
     QString language = Exporters::language(document);
     if (language.isEmpty()) language = QStringLiteral("en");
@@ -375,6 +407,7 @@ ExportResult EpubExporter::write(const md::Document &document, const ExportRecip
         result.limitations.append(QStringLiteral("Page breaks are hints: a reader sets its own pages (%1)")
                                       .arg(Exporters::count(counts.pageBreaks, QStringLiteral("page break"),
                                                             QStringLiteral("page breaks"))));
+    reportOmittedLinks(counts, result.limitations);
     result.renderers.insert(QStringLiteral("epub"), QStringLiteral("parch " PARCH_VERSION));
     if (!Exporters::writeFile(recipe.output, bytes, &result.error, recipe.existing)) {
         result.ioFailure = true;

@@ -5,6 +5,14 @@
 // each of them as a test function of its own.
 namespace EditingTests {
 
+void textEditDrawsOnlyTheEditorCaret();
+void replaceAllFinishesAfterFindCloses_data();
+void replaceAllFinishesAfterFindCloses();
+void guideDescribesTheConflictChoicesShown_data();
+void guideDescribesTheConflictChoicesShown();
+void keepBothRestoresTheCaretOfTheKeptText_data();
+void keepBothRestoresTheCaretOfTheKeptText();
+
 void sourceEditsGroupIntoOneUndoStep();
 void inlineFormattingWrapsAndToggles();
 void scriptsWriteWhatTheDialectReads();
@@ -28,5 +36,7 @@ void undefinedNotesBecomeInlineOrDefined();
 void noteMenuFindsItsReferenceAgain();
 void assistiveTechnologyEditsTheSource();
 void wordCountsFollowTextAndSelection();
+void richTablePasteKeepsHorizontalMerges_data();
+void richTablePasteKeepsHorizontalMerges();
 
 } // namespace EditingTests

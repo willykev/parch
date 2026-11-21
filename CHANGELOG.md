@@ -13,6 +13,48 @@
   again with its pipes lined up, as one step to undo. **Table** (`Ctrl+T`)
   asks for the new table's size. **Show as Markdown** shows one table's pipes,
   and **Tables** in Preferences turns grids off.
+- Cutting prose up to the start of a table keeps the table intact, including
+  with a backwards Vim selection.
+- **Replace All** keeps the search and replacement it started with as you
+  type. It applies the changes each table can accept and reports the count
+  and any refusal.
+- Matching backtick runs make code inside a cell. Text typed below a table
+  starts its own paragraph.
+- Pasting one value fills the selected cells. Spreadsheet data keeps its
+  rows and columns, including one-column sheets.
+- Web tables paste with their columns aligned. Grid paste uses the first
+  table. Pasting into prose keeps horizontal merges in the Writer dialect
+  when merged cells are enabled.
+- Copied cells show readable text and line breaks in spreadsheets and keep
+  their Markdown when pasted into another parch grid. Sorting uses the
+  text each cell shows.
+- Library moves update references in text files, supported HTML and citation
+  paths in front matter. Undo restores the references' original spelling
+  and keeps later independent edits.
+- Document checks look for headings in linked text files. Relative links
+  keep their queries and fragments when exported to a new folder.
+- Assembled Markdown links to the included headings it carries and preserves
+  separate blocks, local link definitions and shared notes.
+- Relative links in PDFs work from the export folder. EPUB export names the
+  local link destinations it leaves out of the book.
+- Plain-text rendering keeps code indentation and includes formatted
+  citations and the bibliography. Word counts include inline table notes
+  and treat HTML line breaks as word boundaries.
+- Preview, HTML, PDF and EPUB put the bibliography before collected notes
+  for author-date, numeric and Writer citations. Note styles put collected
+  notes first, including citation notes in plain text.
+- Word exports use fixed-width code and store the front-matter title in
+  document metadata.
+- The command line reports standard-output write failures and invalid
+  numeric export options with the documented exit codes. Filenames after
+  `--` are kept, and valid quiet exports with switches run silently.
+- **Keep both** opens the conflict copy at the saved caret and scroll
+  position, even if you keep writing while the copy is saved. **Show as
+  Markdown** keeps the caret in the table. The guide describes the conflict
+  choices and where to find the table commands.
+- When a file is reloaded, its eligible tables show as grids as soon as the
+  text is parsed. **Show table as grid** can also show a completed
+  hand-written table while the caret is still in it.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

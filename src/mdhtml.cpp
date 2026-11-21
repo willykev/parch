@@ -27,10 +27,11 @@ void appendEscaped(QString &out, QStringView text)
 
 class Writer {
 public:
-    Writer(const Document &document, const HtmlOptions &options)
+    Writer(const Document &document, const HtmlOptions &options, bool inlineFragment = false)
         : doc(document), opt(options), safe(options.rawHtml == HtmlOptions::RawHtml::Safe),
-          referencesSeen(document.footnotes.size(), 0)
+          fragment(inlineFragment), referencesSeen(fragment ? 0 : document.footnotes.size(), 0)
     {
+        if (fragment) return;
         if (!document.footnotes.empty())
             for (const Heading &heading : document.headings) headingIds.insert(heading.slug);
         // In a note style, a citation of the running text is a note.
@@ -42,10 +43,18 @@ public:
     {
         block(doc.root, false);
         if (opt.endnotes) {
-            footnotes();
+            const bool notesFirst = opt.citations && opt.citations->noteStyle;
+            if (notesFirst) footnotes();
             bibliography();
+            if (!notesFirst) footnotes();
         }
         cr();
+        return out;
+    }
+
+    QString runCell(const Node &cell)
+    {
+        inlines(cell.children);
         return out;
     }
 
@@ -64,9 +73,12 @@ private:
         esc(value);
         out.append(u'"');
     }
-    QString url(const Node &node, const QString &written, bool image) const
+    std::optional<QString> destination(const Node &node, const QString &written) const
     {
-        const QString dest = opt.destination ? opt.destination(node, written) : written;
+        return opt.destination ? opt.destination(node, written) : std::optional<QString>(written);
+    }
+    QString url(const QString &dest, bool image) const
+    {
         if (safe && !detail::isSafeUrl(dest, image)) return QString();
         return encodeUrl(dest);
     }
@@ -97,6 +109,7 @@ private:
     const Document &doc;
     const HtmlOptions &opt;
     const bool safe;
+    const bool fragment;
     QString out;
     QSet<QString> headingIds;
     QHash<QString, QString> noteIds;
@@ -342,15 +355,13 @@ void Writer::element(const Node &node)
     const bool image = node.label == u"img";
     const QLatin1StringView leads(image ? "src" : "href");
     for (const Attribute &a : node.attributes) {
+        const bool rewritten = opt.destination && (image || node.label == u"a") && a.name == leads;
+        const auto value = rewritten ? destination(node, a.value) : std::optional<QString>(a.value);
+        if (!value) continue;
         out.append(u' ');
         out.append(a.name);
         lit(QLatin1StringView("=\""));
-        if (opt.destination && (image || node.label == u"a") && a.name == leads) {
-            const QString dest = opt.destination(node, a.value);
-            if (!safe || detail::isSafeUrl(dest, image)) esc(dest);
-        } else {
-            esc(a.value);
-        }
+        if (!rewritten || !safe || detail::isSafeUrl(*value, image)) esc(*value);
         out.append(u'"');
     }
     if (info.isVoid) {
@@ -513,21 +524,27 @@ void Writer::inl(const Node &node)
     case NodeType::Superscript: wrap(QLatin1StringView("<sup>"), QLatin1StringView("</sup>")); break;
     case NodeType::Subscript: wrap(QLatin1StringView("<sub>"), QLatin1StringView("</sub>")); break;
     case NodeType::Link:
-    case NodeType::Autolink:
+    case NodeType::Autolink: {
+        const auto dest = destination(node, node.dest);
+        if (!dest) {
+            inlines(node.children);
+            break;
+        }
         lit(QLatin1StringView("<a"));
-        attribute(QLatin1StringView("href"), url(node, node.dest, false));
+        attribute(QLatin1StringView("href"), url(*dest, false));
         if (!node.title.isEmpty()) attribute(QLatin1StringView("title"), node.title);
         out.append(u'>');
         inlines(node.children);
         lit(QLatin1StringView("</a>"));
         break;
+    }
     case NodeType::Image:
         if (const QString drawn = opt.picture ? opt.picture(node) : QString(); !drawn.isEmpty()) {
             out.append(drawn);
             break;
         }
         lit(QLatin1StringView("<img"));
-        attribute(QLatin1StringView("src"), url(node, node.dest, true));
+        attribute(QLatin1StringView("src"), url(destination(node, node.dest).value_or(QString()), true));
         attribute(QLatin1StringView("alt"), plainText(node));
         if (!node.title.isEmpty()) attribute(QLatin1StringView("title"), node.title);
         lit(QLatin1StringView(" />"));
@@ -559,7 +576,7 @@ void Writer::inl(const Node &node)
         break;
     case NodeType::FootnoteReference:
     case NodeType::InlineNote:
-        noteReference(node);
+        if (!fragment) noteReference(node);
         break;
     case NodeType::Citation:
         citation(node);
@@ -686,35 +703,24 @@ QString toHtml(const Document &document, const HtmlOptions &options)
     return Writer(document, options).run();
 }
 
+QString cellHtml(const Document &document, const Node &cell)
+{
+    HtmlOptions options;
+    options.picture = [](const Node &node) {
+        if (node.type == NodeType::Image || (node.type == NodeType::HtmlElement && node.label == u"img")) {
+            const QString alt = node.type == NodeType::Image ? plainText(node) : node.attribute(QLatin1StringView("alt"));
+            return QStringLiteral("<span>%1</span>").arg(escapeHtml(alt));
+        }
+        return QString();
+    };
+    return Writer(document, options, true).runCell(cell);
+}
+
 QString escapeHtml(QStringView text)
 {
     QString out;
     out.reserve(text.size());
     appendEscaped(out, text);
-    return out;
-}
-
-QString encodeUrl(QStringView url)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    const QByteArray bytes = url.toUtf8();
-    QString out;
-    out.reserve(bytes.size());
-    auto isHex = [](char c) {
-        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-    };
-    for (qsizetype i = 0; i < bytes.size(); ++i) {
-        const uchar c = uchar(bytes[i]);
-        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-            || (c < 128 && c != 0 && strchr(";/?:@&=+$,-_.!~*'()#", c));
-        if (plain || (c == '%' && i + 2 < bytes.size() && isHex(bytes[i + 1]) && isHex(bytes[i + 2]))) {
-            out.append(QLatin1Char(char(c)));
-        } else {
-            out.append(u'%');
-            out.append(QLatin1Char(hex[c >> 4]));
-            out.append(QLatin1Char(hex[c & 15]));
-        }
-    }
     return out;
 }
 

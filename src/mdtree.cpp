@@ -7,6 +7,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <cstring>
 
 namespace md {
 namespace {
@@ -68,8 +69,15 @@ Range contentOf(const Node &node)
             node.close.isEmpty() ? node.range.end : node.close.start};
 }
 
-void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
+struct InlineReading {
+    const Clip *clip = nullptr;
+    QChar clipboardBreak;
+    const PlainTextOptions *options = nullptr;
+};
+
+void appendPlain(const Node &node, QString &out, const InlineReading &reading = {}, QString *notes = nullptr)
 {
+    const Clip *clip = reading.clip;
     if (clip && clip->excludes(node)) return;
     switch (node.type) {
     case NodeType::Text:
@@ -87,16 +95,36 @@ void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
         return;
     case NodeType::SoftBreak:
     case NodeType::HardBreak:
-        out.append(u' ');
+        out.append(reading.clipboardBreak.isNull() ? QChar(u' ') : reading.clipboardBreak);
+        return;
+    case NodeType::HtmlElement:
+        if (node.label == u"br") {
+            out.append(reading.clipboardBreak.isNull() ? QChar(u' ') : reading.clipboardBreak);
+            return;
+        }
+        if (!reading.clipboardBreak.isNull() && node.label == u"img") {
+            out.append(node.attribute(QLatin1StringView("alt")));
+            return;
+        }
+        break;
+    case NodeType::HtmlInline:
+        if (!reading.clipboardBreak.isNull()) out.append(node.text);
         return;
     case NodeType::Variable:
         if (node.resolved) out.append(node.text);
         else out.append(QStringLiteral("[%%1]").arg(node.label));
         return;
-    case NodeType::FootnoteReference:
     case NodeType::InlineNote:
+        if (notes) {
+            QString body;
+            for (const Node &child : node.children) appendPlain(child, body, reading);
+            if (!body.isEmpty()) notes->append(u' ').append(body);
+        }
+        return;
     case NodeType::Citation:
-    case NodeType::HtmlInline:
+        if (reading.options && reading.options->citation) out.append(reading.options->citation(node));
+        return;
+    case NodeType::FootnoteReference:
     case NodeType::HtmlComment:
     case NodeType::CommentLine:
     case NodeType::HeadingLabel:
@@ -105,14 +133,47 @@ void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
     default:
         break;
     }
-    for (const Node &child : node.children) appendPlain(child, out, clip);
+    for (const Node &child : node.children) appendPlain(child, out, reading, notes);
+}
+
+QString inlineBlock(const Node &node, const PlainTextOptions &options, const Clip *clip)
+{
+    QString text, notes;
+    appendPlain(node, text, {clip, {}, &options}, options.notes ? &notes : nullptr);
+    text += notes;
+    return text.trimmed();
+}
+
+QString clippedCode(const Node &node, const Clip &clip)
+{
+    QString out;
+    QStringView code(node.text);
+    for (const Range line : node.markers) {
+        const qsizetype newline = code.indexOf(u'\n');
+        const QStringView text = newline < 0 ? code : code.first(newline);
+        const int first = std::max(clip.range.start, line.start);
+        const int last = std::min(clip.range.end, line.end);
+        if (first < last) {
+            // A tab partly consumed by indentation becomes spaces in the literal.
+            const int extra = int(text.size()) - line.length();
+            const int start = first == line.start ? 0 : first - line.start + extra;
+            out.append(text.sliced(start, last - line.start + extra - start));
+        }
+        if (line.end < clip.text.size()) {
+            const int ending = clip.text.sliced(line.end).startsWith(u"\r\n") ? 2 : 1;
+            if (clip.range.start < line.end + ending && clip.range.end > line.end) out += u'\n';
+        }
+        if (newline < 0) break;
+        code = code.sliced(newline + 1);
+    }
+    return out;
 }
 
 // The text of the blocks of a document, one block per line.
 void appendBlocks(const Node &node, const PlainTextOptions &options, QString &out, const Clip *clip = nullptr)
 {
     if (clip && clip->excludes(node)) return;
-    auto line = [&](const QString &text) {
+    auto line = [&](QStringView text) {
         if (text.isEmpty()) return;
         out.append(text);
         out.append(u'\n');
@@ -120,41 +181,19 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
     switch (node.type) {
     case NodeType::Paragraph:
     case NodeType::Heading:
-    case NodeType::DefinitionTerm: {
-        QString text;
-        appendPlain(node, text, clip);
-        if (options.notes) {
-            // Inline notes are read where they are written.
-            std::vector<const Node *> pending{&node};
-            while (!pending.empty()) {
-                const Node *current = pending.back();
-                pending.pop_back();
-                for (const Node &child : current->children) {
-                    if (child.type == NodeType::InlineNote) {
-                        if (clip && clip->excludes(child)) continue;
-                        text.append(u' ');
-                        for (const Node &inner : child.children) appendPlain(inner, text, clip);
-                    } else if (!child.children.empty()) {
-                        pending.push_back(&child);
-                    }
-                }
-            }
-        }
-        line(text.trimmed());
+    case NodeType::DefinitionTerm:
+        line(inlineBlock(node, options, clip));
+        return;
+    case NodeType::CodeBlock: {
+        if (!options.code) return;
+        const QString text = clip && !clip->holds(node) ? clippedCode(node, *clip) : node.text;
+        if (text.endsWith(u'\n')) out.append(text);
+        else line(text);
         return;
     }
-    case NodeType::CodeBlock:
-        if (!options.code) return;
-        if (clip && !clip->holds(node)) line(clip->cut(contentOf(node)).trimmed().toString());
-        else line(node.text.trimmed());
-        return;
     case NodeType::TableRow: {
         QStringList cells;
-        for (const Node &cell : node.children) {
-            QString text;
-            appendPlain(cell, text, clip);
-            cells.append(text.trimmed());
-        }
+        for (const Node &cell : node.children) cells.append(inlineBlock(cell, options, clip));
         line(cells.join(u'\t').trimmed());
         return;
     }
@@ -163,7 +202,7 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
         break;
     case NodeType::HtmlBlock: {
         QString text;
-        appendPlain(node, text, clip);
+        appendPlain(node, text, {clip, {}, &options});
         line(text.simplified());
         return;
     }
@@ -462,6 +501,13 @@ QString Document::plainText(const PlainTextOptions &options) const
     return out;
 }
 
+QString inlineText(const Node &node, QChar lineBreak)
+{
+    QString out;
+    appendPlain(node, out, {nullptr, lineBreak, nullptr});
+    return out;
+}
+
 QString plainText(const Node &node)
 {
     QString out;
@@ -514,11 +560,6 @@ Destination classifyDestination(const QString &destination, const QString &baseD
 {
     Destination result;
     if (destination.isEmpty()) return result;
-    if (destination.startsWith(u'#')) {
-        result.kind = Destination::Kind::Anchor;
-        result.fragment = QUrl::fromPercentEncoding(destination.mid(1).toUtf8());
-        return result;
-    }
     if (destination.startsWith(QLatin1StringView("//"))) {
         result.kind = Destination::Kind::Remote;
         return result;
@@ -534,7 +575,6 @@ Destination classifyDestination(const QString &destination, const QString &baseD
         }
         if (!alpha && !(i > 0 && ((c >= u'0' && c <= u'9') || c == u'+' || c == u'-' || c == u'.'))) break;
     }
-    QString local = destination;
     if (colon > 0) {
         result.scheme = destination.first(colon).toLower();
         if (result.scheme == u"http" || result.scheme == u"https") {
@@ -549,29 +589,35 @@ Destination classifyDestination(const QString &destination, const QString &baseD
             result.kind = Destination::Kind::OtherScheme;
             return result;
         }
-        const QUrl url(destination);
-        local = url.toLocalFile();
-        result.fragment = url.fragment();
-        result.kind = Destination::Kind::LocalFile;
-        result.path = local;
-        result.absolute = local.startsWith(u'/');
+    }
+    QStringView local(destination);
+    const qsizetype hash = local.indexOf(u'#');
+    if (hash >= 0) {
+        result.encodedFragment = local.sliced(hash + 1).toString();
+        result.fragment = QUrl::fromPercentEncoding(result.encodedFragment->toUtf8());
+        local = local.first(hash);
+    }
+    if (hash == 0) {
+        result.kind = Destination::Kind::Anchor;
         return result;
     }
     result.kind = Destination::Kind::LocalFile;
-    const qsizetype hash = local.indexOf(u'#');
-    if (hash >= 0) {
-        result.fragment = QUrl::fromPercentEncoding(local.mid(hash + 1).toUtf8());
-        local.truncate(hash);
+    const qsizetype question = local.indexOf(u'?');
+    if (question >= 0) {
+        result.query = local.sliced(question + 1).toString();
+        local = local.first(question);
     }
-    local = QUrl::fromPercentEncoding(local.toUtf8());
-    if (local.startsWith(u'/')) {
-        result.path = QDir::cleanPath(local);
+    result.localPath = result.scheme == u"file" ? QUrl(local.toString()).toLocalFile()
+                                                : QUrl::fromPercentEncoding(local.toUtf8());
+    if (result.localPath.isEmpty()) return result;
+    if (result.localPath.startsWith(u'/')) {
+        result.path = QDir::cleanPath(result.localPath);
         result.absolute = true;
     } else if (!baseDirectory.isEmpty()) {
-        result.path = QDir::cleanPath(baseDirectory + u'/' + local);
+        result.path = QDir::cleanPath(baseDirectory + u'/' + result.localPath);
         result.absolute = true;
     } else {
-        result.path = local;
+        result.path = result.localPath;
     }
     return result;
 }
@@ -583,7 +629,7 @@ QString encodeDestination(QStringView path)
     out.reserve(path.size());
     for (const QChar ch : path) {
         const char16_t c = ch.unicode();
-        const bool encode = c <= 0x20 || c == 0x7f || c == u'(' || c == u')' || c == u'<' || c == u'>' || c == u'#'
+        const bool encode = c <= 0x20 || c == 0x7f || c == u'(' || c == u')' || c == u'<' || c == u'>' || c == u'#' || c == u'?'
             || c == u'%' || c == u'\\' || c == u'"' || c == u'&' || c == u':';
         if (!encode) {
             out.append(ch);
@@ -594,6 +640,45 @@ QString encodeDestination(QStringView path)
         out.append(QLatin1Char(hex[c & 15]));
     }
     return out;
+}
+
+QString encodeUrlPath(QStringView path)
+{
+    return QString::fromUtf8(QUrl::toPercentEncoding(path.toString(), "/"));
+}
+
+QString encodeUrl(QStringView url)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const QByteArray bytes = url.toUtf8();
+    QString out;
+    out.reserve(bytes.size());
+    auto isHex = [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    };
+    for (qsizetype i = 0; i < bytes.size(); ++i) {
+        const uchar c = uchar(bytes[i]);
+        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+            || (c < 128 && c != 0 && strchr(";/?:@&=+$,-_.!~*'()#", c));
+        if (plain || (c == '%' && i + 2 < bytes.size() && isHex(bytes[i + 1]) && isHex(bytes[i + 2]))) {
+            out.append(QLatin1Char(char(c)));
+        } else {
+            out.append(u'%');
+            out.append(QLatin1Char(hex[c >> 4]));
+            out.append(QLatin1Char(hex[c & 15]));
+        }
+    }
+    return out;
+}
+
+QString destinationSuffix(const Destination &destination, DestinationSyntax syntax)
+{
+    QString suffix;
+    if (destination.query) suffix = u'?' + encodeUrl(*destination.query);
+    if (destination.encodedFragment) suffix += u'#' + encodeUrl(*destination.encodedFragment);
+    if (syntax == DestinationSyntax::Markdown)
+        suffix.replace(u'(', QStringLiteral("\\(")).replace(u')', QStringLiteral("\\)")).replace(u'&', QStringLiteral("\\&"));
+    return suffix;
 }
 
 QString destinationDirectory(const Document &document, const Node &linkOrImage)
@@ -612,24 +697,16 @@ Destination classifyDestination(const Document &document, const Node &linkOrImag
 
 namespace {
 
-// The whole-document slug of the heading of `file` (or of a file it
-// includes) that the file read on its own would give the anchor `wanted`;
-// `first` gets the file's own first heading.
-QString headingAnchor(const Document &document, int file, const QString &wanted, QString *first)
+// Number the headings as the source file would, using its first occurrence.
+QString headingAnchor(const Document &document, int file, const QString &wanted)
 {
-    const auto within = [&](int index) {
-        for (int depth = 0; index >= 0 && size_t(index) < document.files.size() && depth <= int(document.files.size()); ++depth) {
-            if (index == file) return true;
-            index = document.files[size_t(index)].includedFrom;
-        }
-        return false;
-    };
+    const auto &range = document.files[size_t(file)].headings;
+    if (!range || range->isEmpty()) return {};
+    if (wanted.isEmpty()) return document.headings[size_t(range->start)].slug;
     QSet<QString> slugs;
     QHash<QString, int> nextSuffix;
-    for (const Heading &heading : document.headings) {
-        if (!within(heading.file)) continue;
-        if (first && first->isEmpty() && heading.file == file) *first = heading.slug;
-        if (wanted.isEmpty()) break;
+    for (int i = range->start; i < range->end; ++i) {
+        const Heading &heading = document.headings[size_t(i)];
         QString base = slugify(heading.text);
         if (base.isEmpty()) base = QStringLiteral("section");
         QString slug = base;
@@ -648,25 +725,28 @@ QString headingAnchor(const Document &document, int file, const QString &wanted,
 
 } // namespace
 
-QString anchorInFile(const Document &document, int file, const QString &fragment)
+QString anchorInFile(const Document &document, int file, const QString &encodedFragment)
 {
     if (file < 0 || size_t(file) >= document.files.size()) return {};
-    const QString wanted = QUrl::fromPercentEncoding(fragment.toUtf8());
+    const QString wanted = QUrl::fromPercentEncoding(encodedFragment.toUtf8());
     if (wanted.isEmpty()) return {};
-    return headingAnchor(document, file, wanted, nullptr);
+    return headingAnchor(document, file, wanted);
 }
 
-QString includedAnchor(const Document &document, const QString &path, const QString &fragment)
+QString includedAnchor(const Document &document, const QString &path, const QString &decodedFragment)
 {
     const QFileInfo info(path);
     const QString target = info.exists() ? info.canonicalFilePath() : QDir::cleanPath(info.absoluteFilePath());
-    int file = -1;
-    for (size_t i = 0; i < document.files.size() && file < 0; ++i)
-        if (!document.files[i].path.isEmpty() && document.files[i].path == target) file = int(i);
-    if (file < 0) return {};
-    QString first;
-    const QString found = headingAnchor(document, file, QUrl::fromPercentEncoding(fragment.toUtf8()), &first);
-    return found.isEmpty() ? first : found;
+    for (size_t i = 0; i < document.files.size(); ++i)
+        if (!target.isEmpty() && document.files[i].path == target)
+            return headingAnchor(document, int(i), decodedFragment);
+    return {};
+}
+
+QString includedAnchor(const Document &document, const Destination &destination)
+{
+    if (destination.kind != Destination::Kind::LocalFile || !destination.absolute || destination.query) return {};
+    return includedAnchor(document, destination.path, destination.fragment);
 }
 
 } // namespace md

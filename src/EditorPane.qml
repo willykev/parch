@@ -317,11 +317,28 @@ Rectangle {
             selectionColor: theme.selection
             selectedTextColor: theme.foreground
             renderType: pane.nativeRendering ? TextEdit.NativeRendering : TextEdit.QtRendering
-            cursorDelegate: Rectangle {
+            cursorDelegate: Item {}
+            // The editor's own caret follows the text layout across grid changes.
+            Rectangle {
+                id: caret
                 objectName: "caret"
                 width: Math.max(1, Math.round(pane.fontPixelSize / 8))
                 color: theme.accent
                 visible: pane.caretFocused && pane.caretLit && !pane.blockCaret && !binding.tables.caretInGrid
+
+                readonly property rect nativeRectangle: editor.cursorRectangle
+                onNativeRectangleChanged: place(nativeRectangle)
+                Component.onCompleted: place(nativeRectangle)
+                function place(rectangle) {
+                    x = rectangle.x
+                    y = rectangle.y
+                    height = rectangle.height
+                }
+
+                Connections {
+                    target: binding
+                    function onCaretLaidOut(rectangle) { caret.place(rectangle) }
+                }
             }
 
             // Vim's block caret, over the character the cursor is on, or

@@ -209,6 +209,7 @@ class TableGrids : public QObject {
     Q_PROPERTY(QList<QObject *> grids READ gridObjects NOTIFY gridsChanged)
     // The view's cursor is in a grid, whose caret the grid draws.
     Q_PROPERTY(bool caretInGrid READ caretInGrid NOTIFY caretChanged)
+    Q_PROPERTY(bool canShowGrid READ canShowGrid NOTIFY canShowGridChanged)
     Q_PROPERTY(QString problem READ problem NOTIFY problemChanged)
     // The most cells, the header's counted, and columns a table shown as a grid holds.
     Q_PROPERTY(int maxCells READ maxCells CONSTANT)
@@ -223,6 +224,7 @@ public:
     QList<QObject *> gridObjects() const;
     const QList<TableGrid *> &grids() const { return m_grids; }
     bool caretInGrid() const { return m_caretGrid != nullptr; }
+    bool canShowGrid() const;
     // The tables of the text as it is now have been looked for: those that
     // are to be grids are.
     bool settled() const;
@@ -262,6 +264,13 @@ public:
     // cell to another, as rows and columns of the model; false for none.
     bool block(const TableGrid *grid, int *firstRow, int *lastRow, int *firstColumn, int *lastColumn) const;
 
+    // Backslashes added by the editor to protect ticks in one cell.
+    struct TickEscapes {
+        QPointer<TableGrid> grid;
+        TableGrid::Place place;
+        QList<int> slashes;
+    };
+
     // What an edit of the view becomes: the same, when it touches no grid;
     // an edit of a cell, the table written tidy around it, with where the
     // caret goes; or nothing, refused, with the reason the view shows.
@@ -271,13 +280,14 @@ public:
         int anchor = 0;
         int cursor = 0;
         QString reason;
+        TickEscapes tickEscapes;
     };
     Adapted adapt(SourceRange range, const QString &text) const;
     // The same for several edits made at once, as a command or Replace All
     // makes them, against the text as it is, sorted and apart; and where
     // their selection goes, in the text after them. With `left`, those that
-    // cannot be made are left out, as Replace All leaves them, and counted
-    // there, the reason being the first one's; Refused only when none can be.
+    // cannot be made are left out and counted there, with the first reason.
+    // Replace All supplies no selection to map and gets Refused if none fit.
     Adapted adapt(const QList<SourceEdit> &edits, int anchor, int cursor, int *left = nullptr) const;
     // A change of a grid's table through its model, as the row and column
     // commands make one: the table written tidy, as one edit, and the
@@ -366,11 +376,11 @@ public:
     bool cutBlock();
     // Cells from a spreadsheet pasted at the caret's cell, or over a block
     // of them: they fill it and grow the table where they reach past it. A
-    // single value fills every cell of a block, and over a block any text
-    // with tabs is cells. NotCells for anything else, which the view pastes
-    // as text; Refused when they cannot go there.
-    enum class Paste { NotCells, Pasted, Refused };
-    Paste pasteCells(const QMimeData *mime);
+    // single value fills every cell of a block. An unusable HTML table can
+    // fall back to its plain text. NotCells leaves the ordinary paste route
+    // in charge.
+    enum class Paste { NotCells, PlainText, Pasted, Refused };
+    Paste pasteCells(const QMimeData *mime, bool allowPlain);
     // A double click selects the word at a position in a cell, a triple
     // click the cell's text.
     Q_INVOKABLE void selectWordAt(int position);
@@ -378,14 +388,9 @@ public:
     // What an input method shows changed: the cell it is in is laid out
     // again with it.
     void compositionChanged();
-    // The cells a clipboard holds, row by row: from an HTML table, or the
-    // text with tabs between them that a spreadsheet gives beside one; with
-    // `separated`, from any text with tabs; none for anything else.
-    static std::optional<QList<QStringList>> cellsOf(const QMimeData *mime, bool separated = false);
-
     // The binding's projection: shown anew, a change followed, laid out anew.
     void loaded();
-    void sourceChanged(SourceRange range, int inserted);
+    void sourceChanged(SourceRange range, int inserted, bool localRawEdit, bool localUndo);
     void relayout();
     // The binding lets go of its document and editor.
     void clear();
@@ -398,15 +403,18 @@ signals:
     void enabledChanged();
     void gridsChanged();
     void caretChanged();
+    void canShowGridChanged();
     void problemChanged();
     // An edit was refused, and why, for the view to say.
     void refused(const QString &reason);
 
 private:
     friend class TableGrid;
+    friend class EditorBinding;
     void parsed();
     // Grids for these tables, read from the text; others are shown as Markdown again.
     void adopt(const QList<MdTable::Table> &tables);
+    bool adoptOne(const MdTable::Table &table);
     void project(TableGrid *grid);
     void unproject(int start, int end);
     void placeGrids();
@@ -440,12 +448,18 @@ private:
     struct Span {
         int firstRow = 0, lastRow = 0, firstColumn = 0, lastColumn = 0;
     };
+    std::optional<Span> selectedCells(const TableGrid *grid) const;
     std::optional<Span> span(const TableGrid *grid) const;
     // A change that leaves a block selected, from one cell to another.
     Adapted changeBlock(const TableGrid *grid, const std::function<QString(MdTable::Model &)> &operation,
                         const Span &selected) const;
-    // The table, shown as Markdown in this view, that holds a position.
-    std::optional<MdTable::Table> markdownTableAt(int position) const;
+    struct RawTable {
+        int start, end;
+        bool waiting; // Adopt when the caret leaves a table being written here.
+        bool contains(int position) const { return position >= start && position <= end; }
+    };
+    const RawTable *rawTableAt(int position) const;
+    void updateShowGrid();
     bool enterFromProse(int position, bool down);
 
     EditorBinding *m_binding;
@@ -453,9 +467,14 @@ private:
     bool m_enabled = false;
     QList<TableGrid *> m_grids;
     TableGrid *m_caretGrid = nullptr;
-    // Tables the parse found that hold the caret: shown as Markdown until
-    // the caret leaves them, so that one being typed is not drawn under it.
-    QList<std::pair<int, int>> m_waiting;
+    TickEscapes m_tickEscapes;
+    // Projectable tables left as Markdown, as of the last parse or toggle.
+    QList<RawTable> m_rawTables;
+    // The table being written here, even while its syntax is incomplete.
+    std::optional<RawTable> m_waitingTable;
+    bool m_canShowGrid = false;
+    // Where this view last edited raw text the parser has yet to see.
+    std::optional<SourceRange> m_localRawEdit;
     // Tables this view shows as Markdown, by where they start.
     QList<int> m_markdown;
     QString m_problem;
@@ -467,12 +486,13 @@ private:
     // that move left the caret: a caret moved from there drops it.
     qreal m_goalX = -1;
     int m_goalAt = -1;
-    // The columns a column's handle selected, while the selection it made
-    // stays: the commands act on them, though the block shown takes in the
-    // merged cells that reach into them.
+    // The rows or columns a handle picked while its selection stays.
+    // A column command acts on the picked columns, even if a merge
+    // reaches outside them.
     struct Picked {
         QPointer<TableGrid> grid;
         int anchor = -1, cursor = -1, firstColumn = 0, lastColumn = 0;
+        int firstRow = -1, lastRow = -1; // -1 for a column handle
     };
     Picked m_picked;
     // The selection Ctrl+A made last in a grid, and how far it went: a

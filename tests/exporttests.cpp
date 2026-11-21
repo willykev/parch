@@ -7,6 +7,7 @@
 #include "commandregistry.h"
 #include "document.h"
 #include "documentcheck.h"
+#include "documentlinks.h"
 #include "diskfile.h"
 #include "exporter.h"
 #include "exportpictures.h"
@@ -50,6 +51,7 @@
 #include <QXmlStreamReader>
 #include <sys/xattr.h>
 
+#include <algorithm>
 #include <thread>
 
 namespace ExportTests {
@@ -598,6 +600,222 @@ void paperDiagramsAreVectorsWhereQtDrawsThem()
     QVERIFY(SvgPaper::version().startsWith(QStringLiteral("librsvg ")));
 }
 
+void bibliographyPrecedesCollectedNotes_data()
+{
+    using namespace Qt::StringLiterals;
+    QTest::addColumn<QString>("style");
+    QTest::addColumn<bool>("work");
+    QTest::addColumn<bool>("note");
+    QTest::addColumn<bool>("citeInNote");
+    QTest::newRow("writer") << QString() << true << true << false;
+    QTest::newRow("numeric") << u"ieee"_s << true << true << false;
+    QTest::newRow("author-date") << u"apa"_s << true << true << false;
+    QTest::newRow("note-style") << u"chicago-notes-bibliography"_s << true << true << false;
+    QTest::newRow("cited-in-note-only") << u"chicago-notes-bibliography"_s << true << true << true;
+    QTest::newRow("notes-only") << QString() << false << true << false;
+    QTest::newRow("bibliography-only") << u"ieee"_s << true << false << false;
+}
+
+void bibliographyPrecedesCollectedNotes()
+{
+    using namespace Qt::StringLiterals;
+    QFETCH(QString, style);
+    QFETCH(bool, work);
+    QFETCH(bool, note);
+    QFETCH(bool, citeInNote);
+    const bool styled = !style.isEmpty();
+    const bool notesFirst = style == u"chicago-notes-bibliography";
+    const bool citationNote = notesFirst && !citeInNote;
+    const int noteCount = int(note) + int(citationNote);
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    auto source = styled ? u"---\nbibliography: works.bib\ncsl: %1\n---\n\n"_s.arg(style) : QString();
+    source += u"# Opening\n\nRead"_s;
+    if (work && !citeInNote) source += styled ? u" [@smith]"_s : u" [p. 7][#smith]"_s;
+    if (note) source += u". A note[^detail]"_s;
+    source += u".\n\n## References\n"_s;
+    if (work && !styled) source += u"\n[#smith]: Kim Smith. *Publication marker*.\n"_s;
+    if (note) source += citeInNote ? u"\n[^detail]: Footnote marker. See [@smith].\n"_s : u"\n[^detail]: Footnote marker.\n"_s;
+    writeFile(folder.filePath(u"works.bib"_s), "@book{smith,author={Smith, Kim},title={Publication marker},year={2020}}\n");
+    const QString path = folder.filePath(u"source.md"_s);
+    writeFile(path, source.toUtf8());
+    DocumentCheck::Loaded loaded;
+    QString error;
+    QVERIFY2(DocumentCheck::load(path, Dialect::Layers{}, &loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.formatted.active, styled);
+    QCOMPARE(loaded.formatted.noteStyle, notesFirst);
+
+    const auto ordered = [&](const QString &text) {
+        const qsizetype heading = text.indexOf(u"References");
+        const qsizetype entry = text.indexOf(notesFirst ? u"Smith, Kim." : u"Publication marker");
+        const qsizetype details = text.indexOf(u"Footnote marker");
+        QVERIFY2(heading >= 0, qPrintable(text));
+        if (work) QVERIFY2(entry > heading, qPrintable(text));
+        else QCOMPARE(entry, qsizetype(-1));
+        if (note) QVERIFY2(details > heading, qPrintable(text));
+        else QCOMPARE(details, qsizetype(-1));
+        if (note && work) QVERIFY2(notesFirst ? details < entry : entry < details, qPrintable(text));
+        if (citationNote) {
+            const qsizetype citation = text.indexOf(u"Kim Smith,");
+            QVERIFY2(citation > heading && citation < details, qPrintable(text));
+        }
+    };
+    const QString htmlPath = folder.filePath(u"out.html"_s);
+    const Exporter *html = Exporters::find(u"html"_s);
+    QVERIFY(html->write(loaded.document, recipeFor(loaded, u"html"_s, htmlPath), bareRun()).ok);
+    const QString page = QString::fromUtf8(readFile(htmlPath));
+    ordered(page.sliced(page.indexOf(u"<main>")));
+    for (int i = 1; i <= noteCount; ++i) {
+        QVERIFY(page.contains(u"href=\"#fn-%1\" id=\"fnref-%1\""_s.arg(i)));
+        QVERIFY(page.contains(u"id=\"fn-%1\""_s.arg(i)) && page.contains(u"href=\"#fnref-%1\""_s.arg(i)));
+    }
+    QVERIFY(page.contains(u"class=\"bibliography") == work);
+
+    const QString epubPath = folder.filePath(u"out.epub"_s);
+    const Exporter *epub = Exporters::find(u"epub"_s);
+    QVERIFY(epub->write(loaded.document, recipeFor(loaded, u"epub"_s, epubPath), bareRun()).ok);
+    QString chapters;
+    for (const auto &each : entriesOf(epubPath))
+        if (each.name.startsWith(u"OEBPS/chapter-") || each.name == u"OEBPS/text.xhtml") chapters += QString::fromUtf8(each.data);
+    ordered(chapters);
+    for (int i = 1; i <= noteCount; ++i) {
+        QVERIFY(chapters.contains(u"id=\"fnref-%1\""_s.arg(i)) && chapters.contains(u"id=\"fn-%1\""_s.arg(i)));
+        QVERIFY(chapters.contains(u"#fnref-%1\" class=\"footnote-backref\""_s.arg(i)));
+    }
+
+    const auto parts = preview::parts(loaded.document, &loaded.formatted);
+    std::vector<preview::Part::Kind> kinds;
+    for (const auto &part : parts) kinds.push_back(part.kind);
+    using Part = preview::Part;
+    std::vector<Part::Kind> expected{Part::Block, Part::Block, Part::Block};
+    const auto addNotes = [&] {
+        if (noteCount == 0) return;
+        expected.push_back(Part::NotesRule);
+        expected.insert(expected.end(), size_t(noteCount), Part::Note);
+    };
+    if (notesFirst) addNotes();
+    if (work) expected.insert(expected.end(), {Part::BibliographyRule, Part::Entry});
+    if (!notesFirst) addNotes();
+    QCOMPARE(kinds, expected);
+
+    PaperDocument paper(loaded.document, &loaded.formatted, nullptr, PaperOptions());
+    QBuffer buffer;
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    QPdfWriter device(&buffer);
+    QVERIFY(paper.layOut(&device));
+    ordered(paper.document()->toPlainText());
+    if (!tool("pdftotext").isEmpty()) {
+        const QString pdfPath = folder.filePath(u"out.pdf"_s);
+        const Exporter *pdf = Exporters::find(u"pdf"_s);
+        QVERIFY(pdf->write(loaded.document, recipeFor(loaded, u"pdf"_s, pdfPath), bareRun()).ok);
+        ordered(pdfText(pdfPath));
+    }
+}
+
+void docxDeclaresFixedWidthCodeFonts()
+{
+    using namespace Qt::StringLiterals;
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QString source = folder.filePath(u"code.md"_s);
+    writeFile(source, "```\n    column\n    aligned\n```\n\nAnd `inline code`.\n");
+    const auto loaded = load(source);
+    const QString output = folder.filePath(u"out.docx"_s);
+    const Exporter *docx = Exporters::find(u"docx"_s);
+    QVERIFY(docx->write(loaded.document, recipeFor(loaded, u"docx"_s, output), bareRun()).ok);
+    const auto package = entriesOf(output);
+    const QByteArray fonts = entry(package, u"word/fontTable.xml"_s);
+    QVERIFY(!fonts.isEmpty());
+    QCOMPARE(xmlProblem(fonts), QString());
+    QVERIFY(fonts.contains("<w:font w:name=\"Consolas\">"));
+    QVERIFY(fonts.contains("<w:family w:val=\"modern\"/>"));
+    QVERIFY(fonts.contains("<w:pitch w:val=\"fixed\"/>"));
+    QVERIFY(fonts.contains("<w:altName w:val=\"Courier New\"/>"));
+    const QByteArray relationships = entry(package, u"word/_rels/document.xml.rels"_s);
+    QVERIFY(relationships.contains("/relationships/fontTable\" Target=\"fontTable.xml\""));
+    const QByteArray types = entry(package, u"[Content_Types].xml"_s);
+    QVERIFY(types.contains("/word/fontTable.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml\""));
+
+    const QString styles = QString::fromUtf8(entry(package, u"word/styles.xml"_s));
+    for (const auto &id : {u"Code"_s, u"CodeChar"_s}) {
+        const QRegularExpression style(u"w:styleId=\"%1\"[^>]*>(.*?)</w:style>"_s.arg(id));
+        const QString definition = style.match(styles).captured(1);
+        for (const auto &slot : {u"ascii"_s, u"hAnsi"_s, u"eastAsia"_s, u"cs"_s})
+            QVERIFY2(definition.contains(u"w:%1=\"Consolas\""_s.arg(slot)), qPrintable(id + u'\n' + definition));
+    }
+    QVERIFY(styles.contains(u"w:ascii=\"Georgia\""));
+    const QByteArray document = entry(package, u"word/document.xml"_s);
+    QVERIFY(document.contains("<w:t xml:space=\"preserve\">    column</w:t>"));
+    QVERIFY(document.contains("<w:t xml:space=\"preserve\">    aligned</w:t>"));
+    QVERIFY(document.contains("<w:rStyle w:val=\"CodeChar\"/></w:rPr><w:t xml:space=\"preserve\">inline code</w:t>"));
+}
+
+void frontMatterTitleIsMetadataAcrossFormats_data()
+{
+    QTest::addColumn<bool>("frontMatter");
+    QTest::newRow("metadata-and-heading") << true;
+    QTest::newRow("heading-as-fallback") << false;
+}
+
+void frontMatterTitleIsMetadataAcrossFormats()
+{
+    using namespace Qt::StringLiterals;
+    QFETCH(bool, frontMatter);
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const QByteArray body = "# Heading on the page\n\nOpening paragraph.\n";
+    const QByteArray title = frontMatter ? QByteArray("Catalog title") : QByteArray("Heading on the page");
+    const QString source = folder.filePath(u"source.md"_s);
+    writeFile(source, frontMatter ? "---\ntitle: " + title + "\n---\n\n" + body : body);
+    const auto loaded = load(source);
+    const auto write = [&](const QString &format, const QString &path) {
+        return Exporters::find(format)->write(loaded.document, recipeFor(loaded, format, path), bareRun());
+    };
+    const QString htmlPath = folder.filePath(u"out.html"_s);
+    QVERIFY(write(u"html"_s, htmlPath).ok);
+    const QByteArray html = readFile(htmlPath);
+    QVERIFY(html.contains("<title>" + title + "</title>"));
+    const QByteArray article = html.mid(html.indexOf("<main>"));
+    QCOMPARE(article.count("Heading on the page"), 1);
+    QVERIFY(!article.contains("Catalog title"));
+
+    const QString epubPath = folder.filePath(u"out.epub"_s);
+    QVERIFY(write(u"epub"_s, epubPath).ok);
+    const auto epub = entriesOf(epubPath);
+    QVERIFY(entry(epub, u"OEBPS/content.opf"_s).contains("<dc:title>" + title + "</dc:title>"));
+    const QByteArray chapter = entry(epub, u"OEBPS/text.xhtml"_s);
+    const QByteArray chapterBody = chapter.mid(chapter.indexOf("<body>"));
+    QCOMPARE(chapterBody.count("Heading on the page"), 1);
+    QVERIFY(!chapterBody.contains("Catalog title"));
+
+    const QString pdfPath = folder.filePath(u"out.pdf"_s);
+    QVERIFY(write(u"pdf"_s, pdfPath).ok);
+    if (const QString info = tool("pdfinfo"); !info.isEmpty()) {
+        QProcess read;
+        read.start(info, {pdfPath});
+        QVERIFY(read.waitForFinished());
+        QCOMPARE(read.exitCode(), 0);
+        const QString output = QString::fromUtf8(read.readAllStandardOutput());
+        const QRegularExpression metadata(u"^Title:[ \\t]*([^\\r\\n]+)"_s, QRegularExpression::MultilineOption);
+        QCOMPARE(metadata.match(output).captured(1), QString::fromLatin1(title));
+    }
+    if (!tool("pdftotext").isEmpty()) {
+        const QString page = pdfText(pdfPath);
+        QCOMPARE(page.count(u"Heading on the page"), 1);
+        QVERIFY(!page.contains(u"Catalog title"));
+    }
+
+    const QString docxPath = folder.filePath(u"out.docx"_s);
+    QVERIFY(write(u"docx"_s, docxPath).ok);
+    const auto docx = entriesOf(docxPath);
+    QVERIFY(entry(docx, u"docProps/core.xml"_s).contains("<dc:title>" + title + "</dc:title>"));
+    const QByteArray document = entry(docx, u"word/document.xml"_s);
+    QVERIFY(document.contains("<w:pStyle w:val=\"Heading1\"/>"));
+    QCOMPARE(document.count("Heading on the page"), 1);
+    QVERIFY(!document.contains("Catalog title"));
+    QVERIFY(!document.contains("<w:pStyle w:val=\"Title\"/>"));
+}
+
 void docxIsWordprocessingMarkup()
 {
     QTemporaryDir folder;
@@ -616,7 +834,7 @@ void docxIsWordprocessingMarkup()
     const QList<ZipPackage::Entry> entries = entriesOf(output);
     const QStringList parts = names(entries);
     for (const char *part : {"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/_rels/document.xml.rels",
-                             "word/styles.xml", "word/numbering.xml", "word/footnotes.xml", "word/endnotes.xml",
+                             "word/styles.xml", "word/fontTable.xml", "word/numbering.xml", "word/footnotes.xml", "word/endnotes.xml",
                              "word/settings.xml", "docProps/core.xml", "docProps/app.xml"})
         QVERIFY2(parts.contains(QString::fromLatin1(part)), part);
     // Every part is well-formed XML.
@@ -630,8 +848,9 @@ void docxIsWordprocessingMarkup()
     for (const char *style : {"Title", "Heading1", "Heading2", "Heading6", "Quote", "Code", "CodeChar", "Hyperlink",
                               "FootnoteText", "FootnoteReference", "ListParagraph", "Bibliography"})
         QVERIFY2(styles.contains(QStringLiteral("w:styleId=\"%1\"").arg(QLatin1StringView(style))), style);
-    QVERIFY(document.contains(QStringLiteral("<w:pStyle w:val=\"Title\"/></w:pPr><w:r><w:t xml:space=\"preserve\">The Rich Fixture</w:t>")));
+    QVERIFY(!document.contains(QStringLiteral("The Rich Fixture")));
     QVERIFY(document.contains(QStringLiteral("<w:pStyle w:val=\"Heading1\"/>")));
+    QVERIFY(document.contains(QStringLiteral("<w:t xml:space=\"preserve\">Opening Heading</w:t>")));
     QVERIFY(document.contains(QStringLiteral("<w:pStyle w:val=\"Heading2\"/>")));
     QVERIFY(document.contains(QStringLiteral("<w:pStyle w:val=\"Quote\"/>")));
     QVERIFY(document.contains(QStringLiteral("<w:pStyle w:val=\"Code\"/></w:pPr><w:r><w:t xml:space=\"preserve\">def greet(name):</w:t><w:br/>")));
@@ -729,7 +948,8 @@ void docxOpensInLibreOffice()
     QVERIFY(convert.waitForFinished(180000));
     const QString text = QString::fromUtf8(readFile(folder.path() + QStringLiteral("/text/out.txt")));
     QVERIFY2(!text.isEmpty(), qPrintable(QString::fromUtf8(convert.readAllStandardError())));
-    for (const char *words : {"The Rich Fixture", "Opening Heading", "A paragraph with emphasis, strong text, struck words",
+    QVERIFY(!text.contains(QStringLiteral("The Rich Fixture")));
+    for (const char *words : {"Opening Heading", "A paragraph with emphasis, strong text, struck words",
                               "First bullet", "Nested bullet", "Done task", "Third numbered", "A quoted paragraph that stands apart.",
                               "Term one", "merged across", "def greet(name):", "Notes Heading", "A citation of a work",
                               "Doe, Jane. A Book of Examples.", "Closing Section", "The last paragraph of the document."})
@@ -1389,6 +1609,102 @@ void exportsLinkIncludedFilesWithinThemselves()
     QVERIFY(!bytes.contains(QFile::encodeName(canonical(folder.path()))));
 }
 
+void pdfLocalLinksLeadFromTheOutputFolder()
+{
+    using namespace Qt::StringLiterals;
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVERIFY(QDir().mkpath(root.filePath(u"out"_s)));
+    writeFile(root.filePath(u"extra.html"_s), "Extra");
+    writeFile(root.filePath(u"chapters/near.html"_s), "Near");
+    writeFile(root.filePath(u"docs/notes.md"_s), "# Notes\n");
+    writeFile(root.filePath(u"chapters/part.md"_s), "# Part\n\n[Inherited][shared]\n\n"
+              "<a href='near.html#part'>Nearby</a> and [Notes](../docs/notes.md#notes).\n");
+    const QString source = root.filePath(u"book.md"_s);
+    writeFile(source, "# Book\n\n[Extra](extra.html?view=plain&mode=1#part%201) [Web](https://example.org/guide) "
+              "[Chapter](chapters/part.md#part) [Inside](#part)\n\nchapters/part.md\n\n[shared]: extra.html#inherited\n");
+    const auto loaded = load(source);
+    QVERIFY(!loaded.document.incomplete);
+    const QString output = root.filePath(u"out/paper.pdf"_s);
+    const auto result = Exporters::find(u"pdf"_s)->write(loaded.document, recipeFor(loaded, u"pdf"_s, output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const QByteArray bytes = readFile(output);
+    const QString pdf = QString::fromLatin1(bytes);
+    const QRegularExpression uri(u"/URI\\s*\\(([^\\r\\n)]*)\\)"_s);
+    QSet<QString> named;
+    for (const auto &match : uri.globalMatch(pdf)) named.insert(match.captured(1));
+    const QSet<QString> expected{u"../extra.html?view=plain&mode=1#part%201"_s, u"https://example.org/guide"_s,
+                                 u"../extra.html#inherited"_s, u"../chapters/near.html#part"_s, u"../docs/notes.md#notes"_s};
+    QCOMPARE(named, expected);
+    for (const QString &written : named) {
+        const QUrl url(written);
+        if (url.isRelative())
+            QVERIFY2(QFileInfo::exists(QDir(QFileInfo(output).absolutePath()).filePath(url.path(QUrl::FullyDecoded))),
+                     qPrintable(written));
+    }
+    QVERIFY(bytes.contains("/Dests"));
+    QVERIFY(!bytes.contains("file:"));
+    QVERIFY(!bytes.contains(QFile::encodeName(canonical(root.path()))));
+    const QString qpdf = tool("qpdf");
+    if (!qpdf.isEmpty()) {
+        QProcess check;
+        check.start(qpdf, {u"--check"_s, output});
+        QVERIFY(check.waitForFinished());
+        QVERIFY2(check.exitCode() == 0, check.readAllStandardError().constData());
+    }
+}
+
+void epubReportsLinksToFilesOutsideTheBook()
+{
+    using namespace Qt::StringLiterals;
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    writeFile(root.filePath(u"doc/sub/two.md"_s), "# Two\n\n## Café\n\nSecond chapter.\n");
+    writeFile(root.filePath(u"doc/extra.html"_s), "Extra");
+    writeFile(root.filePath(u"doc/info.html"_s), "Info");
+    writeFile(root.filePath(u"outside.html"_s), "Outside");
+    writeFile(root.filePath(u"doc/pics/cover.svg"_s),
+              "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2'><rect width='2' height='2'/></svg>");
+    const QString source = root.filePath(u"doc/book.md"_s);
+    writeFile(source, "# One\n\n[*Leaflet*](extra.html) [Repeat](extra.html)\n\n"
+              "<a title='Info' href='info.html?view=plain'><strong>HTML label</strong></a> [Outside](../outside.html)\n\n"
+              "[Next](#two) [Included](sub/two.md#two) [Accented](#caf%C3%A9) [Web](https://example.org/guide)\n\n"
+              "![Cover](pics/cover.svg)\n\nsub/two.md\n");
+    const auto loaded = load(source);
+    QVERIFY(!loaded.document.incomplete);
+    const QString output = root.filePath(u"book.epub"_s);
+    const Exporter *epub = Exporters::find(u"epub"_s);
+    const auto recipe = recipeFor(loaded, u"epub"_s, output);
+    const auto preflight = epub->limitations(loaded.document, recipe, {});
+    const auto result = epub->write(loaded.document, recipe, bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(result.limitations, preflight);
+    const QString messages = preflight.join(u'\n');
+    for (const auto &name : {u"extra.html"_s, u"info.html?view=plain"_s, u"../outside.html"_s})
+        QCOMPARE(messages.count(name), 1);
+
+    const auto zip = entriesOf(output);
+    const QByteArray first = entry(zip, u"OEBPS/chapter-1.xhtml"_s);
+    const QByteArray second = entry(zip, u"OEBPS/chapter-2.xhtml"_s);
+    QVERIFY(first.contains("<em>Leaflet</em>"));
+    QVERIFY(first.contains("Repeat"));
+    QVERIFY(first.contains("<strong>HTML label</strong>"));
+    QVERIFY(first.contains("Outside"));
+    QVERIFY(!first.contains("extra.html") && !first.contains("info.html") && !first.contains("outside.html"));
+    QVERIFY(!first.contains("href=\"\""));
+    QCOMPARE(first.count("href=\"chapter-2.xhtml#two\""), 2);
+    QVERIFY(first.contains("href=\"chapter-2.xhtml#caf%C3%A9\""));
+    QVERIFY(first.contains("href=\"https://example.org/guide\""));
+    QVERIFY(second.contains("id=\"two\"") && second.contains("id=\"café\""));
+    QVERIFY(first.contains("src=\"images/cover.svg\""));
+    const QByteArray package = entry(zip, u"OEBPS/content.opf"_s);
+    QVERIFY(package.contains("href=\"chapter-2.xhtml\""));
+    QVERIFY(package.contains("href=\"images/cover.svg\""));
+    QVERIFY(!package.contains("extra.html"));
+    QCOMPARE(entry(zip, u"OEBPS/images/cover.svg"_s), readFile(root.filePath(u"doc/pics/cover.svg"_s)));
+    QCOMPARE(readFile(root.filePath(u"outside.html"_s)), QByteArray("Outside"));
+}
+
 void htmlPicturesKeepTheirViewsAndOddFolderNames()
 {
     QTemporaryDir folder;
@@ -2018,6 +2334,89 @@ void cliExportsEveryFormat()
     QVERIFY(help.out.contains(QStringLiteral("PDF, DOCX: The paper, A4, Letter")));
     QVERIFY(!help.out.contains(QStringLiteral("not available yet")));
     QVERIFY(QFileInfo::exists(folder.path() + QStringLiteral("/rich.md")));
+}
+
+void exportLinksKeepQueryAndFragment()
+{
+    using namespace Qt::StringLiterals;
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVERIFY(QDir().mkpath(root.filePath(u"out"_s)));
+    writeFile(root.filePath(u"sub/other.md"_s), "# Actual\n");
+    writeFile(root.filePath(u"sub/odd?#%.md"_s), "# Actual\n");
+    writeFile(root.filePath(u"sub/icons.svg"_s),
+              "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><view id='small' viewBox='0 0 5 5'/>"
+              "<rect width='10' height='10'/></svg>");
+    writeFile(root.filePath(u"chapters/part.md"_s), "# Inside\n\n[Inherited][ref]\n");
+    const QString fileUrl = QUrl::fromLocalFile(root.filePath(u"sub/odd?#%.md"_s)).toString(QUrl::FullyEncoded);
+    const QString source = root.filePath(u"main.md"_s);
+    writeFile(source, u"[Query](sub/other.md?view=plain&mode=1#actual)\n\n"
+                      "<a title=\"href='sub/other.md'\" href='sub/other.md?view=html&amp;mode=1#actual'>HTML</a>\n\n"
+                      "[Odd](sub/odd%3F%23%25.md?x=%23#name%2523part)\n\n"
+                      "[File](%1?view=file#actual)\n\n"
+                      "[Explicit query](chapters/part.md?#inside)\n\n"
+                      "chapters/part.md\n\n[ref]: sub/other.md?view=reference#act%75al\n\n"
+                      "![Icon](sub/icons.svg?contrast=high#small)\n"_s.arg(fileUrl).toUtf8());
+    const auto loaded = load(source);
+    QVERIFY(!loaded.document.incomplete);
+    const QStringList expected{u"../sub/other.md?view=plain&mode=1#actual"_s,
+                               u"../sub/other.md?view=html&mode=1#actual"_s,
+                               u"../sub/odd%3F%23%25.md?x=%23#name%2523part"_s,
+                               u"../sub/odd%3F%23%25.md?view=file#actual"_s,
+                               u"../chapters/part.md?#inside"_s,
+                               u"../sub/other.md?view=reference#act%75al"_s};
+    for (const QString &format : {u"html"_s, u"docx"_s}) {
+        const Exporter *exporter = Exporters::find(format);
+        QVERIFY(exporter);
+        const QString output = root.filePath(u"out/main."_s + format);
+        const auto result = exporter->write(loaded.document, recipeFor(loaded, format, output), bareRun());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QStringList targets;
+        if (format == u"html") {
+            const QString html = QString::fromUtf8(readFile(output));
+            const QRegularExpression links(u"<a\\b[^>]*\\bhref=\"[^\"]*\"[^>]*>"_s);
+            for (auto it = links.globalMatch(html); it.hasNext();) {
+                QXmlStreamReader xml(it.next().captured() + u"</a>"_s);
+                QVERIFY(xml.readNextStartElement());
+                targets.append(xml.attributes().value(u"href"_s).toString());
+            }
+            QVERIFY(html.contains(u"src=\"main_files/icons.svg?contrast=high#small\""));
+        } else {
+            QXmlStreamReader xml(entry(entriesOf(output), u"word/_rels/document.xml.rels"_s));
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (xml.isStartElement() && xml.attributes().value(u"Type"_s).endsWith(u"/hyperlink"))
+                    targets.append(xml.attributes().value(u"Target"_s).toString());
+            }
+            QVERIFY(!xml.hasError());
+        }
+        QCOMPARE(targets, expected);
+    }
+    const QString output = root.filePath(u"out/main?.md"_s);
+    const auto markdown = Exporters::find(u"md"_s)->write(loaded.document, recipeFor(loaded, u"md"_s, output), bareRun());
+    QVERIFY2(markdown.ok, qPrintable(markdown.error));
+    const QString assembled = QString::fromUtf8(readFile(output));
+    QVERIFY2(assembled.contains(u"title=\"href='sub/other.md'\" href='../sub/other.md?view=html&amp;mode=1#actual'"),
+             qPrintable(assembled));
+    QVERIFY(assembled.contains(u"../sub/other.md?view=plain\\&mode=1#actual"));
+    QVERIFY(assembled.contains(u"../sub/odd%3F%23%25.md?x=%23#name%2523part"));
+    QVERIFY(assembled.contains(u"main%3F_files/icons.svg?contrast=high#small"));
+    QVERIFY(assembled.contains(u"../chapters/part.md?#inside"));
+    const auto references = DocumentLinks::find(assembled, QFileInfo(output).absolutePath());
+    const auto picture = std::find_if(references.cbegin(), references.cend(), [](const DocumentLinks::Link &link) {
+        return link.kind == DocumentLinks::Link::Kind::Image;
+    });
+    QVERIFY(picture != references.cend());
+    QCOMPARE(picture->destination.path, root.filePath(u"out/main?_files/icons.svg"_s));
+    QCOMPARE(readFile(picture->destination.path), readFile(root.filePath(u"sub/icons.svg"_s)));
+    QCOMPARE(picture->destination.query, std::optional<QString>(u"contrast=high"_s));
+
+    const QString linkOutput = root.filePath(u"out/links.html"_s);
+    ExportRecipe linkRecipe = recipeFor(loaded, u"html"_s, linkOutput);
+    linkRecipe.options.insert(u"images"_s, u"link"_s);
+    const auto links = Exporters::find(u"html"_s)->write(loaded.document, linkRecipe, bareRun());
+    QVERIFY2(links.ok, qPrintable(links.error));
+    QVERIFY(readFile(linkOutput).contains("src=\"../sub/icons.svg?contrast=high#small\""));
 }
 
 } // namespace ExportTests

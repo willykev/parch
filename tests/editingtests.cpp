@@ -1,11 +1,13 @@
 #include "editingtests.h"
 
 #include "apppaths.h"
+#include "attachments.h"
 #include "commandfilter.h"
 #include "commandregistry.h"
 #include "documentstore.h"
 #include "editorbinding.h"
 #include "markdownediting.h"
+#include "mdhtml.h"
 #include "mdtree.h"
 #include "settings.h"
 #include "sourcebuffer.h"
@@ -17,6 +19,9 @@
 #include "wordcounter.h"
 
 #include <QAccessible>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -1742,6 +1747,100 @@ void wordCountsFollowTextAndSelection()
     QTRY_COMPARE(counter.words(), 8001);
     QVERIFY(!counter.counting());
     QCOMPARE(counter.minutes(), 41);
+}
+
+void richTablePasteKeepsHorizontalMerges_data()
+{
+    QTest::addColumn<int>("dialect");
+    QTest::addColumn<bool>("worker");
+    QTest::addColumn<bool>("switchDialect");
+    QTest::newRow("writer") << 0 << false << false;
+    QTest::newRow("standard") << 1 << false << false;
+    QTest::newRow("merges-disabled") << 2 << false << false;
+    QTest::newRow("worker-after-source-edit") << 0 << true << false;
+    QTest::newRow("worker-after-dialect-change") << 0 << true << true;
+}
+
+void richTablePasteKeepsHorizontalMerges()
+{
+    using namespace Qt::StringLiterals;
+    QFETCH(int, dialect);
+    QFETCH(bool, worker);
+    QFETCH(bool, switchDialect);
+    const QString original = u"Intro.\r\n\r\nTail.\r\n"_s;
+    Editor view(original);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    Dialect::Layers layers;
+    if (dialect == 1) layers.document.profile = md::Profile::Standard;
+    if (dialect == 2) layers.document.extensions.append({u"merged-cells"_s, false});
+    view.document->setSavedDialect(layers);
+    Attachments attachments(AppPaths::under(view.root.path()));
+    if (worker) view.binding->setAttachments(&attachments);
+    QString html = u"<table><caption>Schedule</caption><thead>"
+                   "<tr><th colspan=2 align=center>Slot</th><th>Room</th></tr></thead><tbody>"
+                   "<tr><td colspan=2><strong>Holiday | free</strong><br>All day</td><td>Annex</td></tr>"
+                   "<tr><td rowspan=2>Block</td><td>AM</td><td>A</td></tr>"
+                   "<tr><td>PM</td><td>B</td></tr></tbody></table>"
+                   "<p>Between</p><table><tr><td>Other</td><td>table</td></tr></table>"_s;
+    if (worker) html += u"<!--"_s + QString(65536, u' ') + u"-->"_s;
+    auto *mime = new QMimeData;
+    mime->setHtml(html);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    const int tail = int(original.indexOf(u"Tail."));
+    view.select(tail, tail);
+    view.binding->paste();
+    QString beforePaste = original;
+    if (worker) {
+        QCOMPARE(view.text(), original);
+        const QString prefix = u"Preface.\r\n\r\n"_s;
+        view.document->buffer()->replace({0, 0}, prefix);
+        beforePaste.prepend(prefix);
+        if (switchDialect) {
+            layers.document.profile = md::Profile::Standard;
+            view.document->setSavedDialect(layers);
+        }
+    }
+    QTRY_VERIFY(view.text().contains(u"| Other | table |"));
+    QVERIFY(view.text().startsWith(beforePaste.left(beforePaste.indexOf(u"Tail."))));
+    QVERIFY(view.text().endsWith(u"Tail.\r\n"));
+    const bool merged = dialect == 0 && !switchDialect;
+    QCOMPARE(view.text().contains(u"||"), merged);
+    const md::Document parsed = md::parse(view.text(), view.document->markdownOptions());
+    const md::Node *table = nullptr;
+    int tables = 0;
+    for (const md::Node &node : parsed.root.children) {
+        if (node.type != md::NodeType::Table) continue;
+        if (!table) table = &node;
+        ++tables;
+    }
+    QCOMPARE(tables, 2);
+    QCOMPARE(table->children.size(), 4u);
+    const auto &header = table->children[0].children;
+    const auto &holiday = table->children[1].children;
+    QCOMPARE(header.front().span, merged ? 2 : 1);
+    QCOMPARE(header.front().align, md::Align::Center);
+    QCOMPARE(header.back().column, 2);
+    QCOMPARE(holiday.front().span, merged ? 2 : 1);
+    QCOMPARE(holiday.back().column, 2);
+    const auto &last = table->children[3].children;
+    QCOMPARE(last.size(), 3u);
+    QCOMPARE(md::plainText(last[0]), QString());
+    QCOMPARE(md::plainText(last[1]), u"PM"_s);
+    QCOMPARE(md::plainText(last[2]), u"B"_s);
+    const QString rendered = md::toHtml(parsed);
+    QVERIFY(rendered.contains(u"<strong>Holiday | free</strong><br"));
+    QVERIFY(rendered.contains(u"<p>Schedule</p>"));
+    QVERIFY(rendered.contains(u"<p>Between</p>"));
+    const QString pasted = view.text();
+    view.store->save(view.document);
+    QTRY_VERIFY(!view.document->differsFromFile());
+    QCOMPARE(readFile(view.document->path()), pasted.toUtf8());
+    view.binding->undo();
+    QCOMPARE(view.text(), beforePaste);
+    view.store->save(view.document);
+    QTRY_VERIFY(!view.document->differsFromFile());
+    QCOMPARE(readFile(view.document->path()), beforePaste.toUtf8());
+    view.binding->setAttachments(nullptr);
 }
 
 } // namespace EditingTests

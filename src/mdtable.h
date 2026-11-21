@@ -200,7 +200,8 @@ QString setAlignment(Model &model, int first, int count, Align align);
 // Puts the body rows in the order of their text in a column: numbers as
 // numbers and before text, text in the order of its letters, empty cells
 // last; rows whose text is the same keep their order.
-QString sortRows(Model &model, int column, bool descending);
+// A view can supply the body rows' visible keys from its parsed document.
+QString sortRows(Model &model, int column, bool descending, const QStringList &keys = {});
 // Joins the cells of a row from column `first` to `last` into one, their
 // texts joined with a space; splits a joined cell into its columns again,
 // its text in the first.
@@ -208,10 +209,12 @@ QString mergeCells(Model &model, int row, int first, int last, const Dialect &di
 QString splitCell(Model &model, int row, int column);
 // Empties the cells over rows [firstRow, lastRow] and columns [firstColumn, lastColumn].
 QString clearCells(Model &model, int firstRow, int lastRow, int firstColumn, int lastColumn);
+QString fillCells(Model &model, int firstRow, int lastRow, int firstColumn, int lastColumn, const QString &markdown);
 // Writes values into the cells from a row and column on, adding rows and
-// columns where they reach past the table. The values are plain text.
+// columns where they reach past the table. With markdown, the values are
+// already encoded as cell source.
 QString pasteCells(Model &model, int row, int column, const QList<QStringList> &values, const Dialect &dialect = {},
-                   const QString &newline = QStringLiteral("\n"));
+                   const QString &newline = QStringLiteral("\n"), bool markdown = false);
 // The text of a key for sorting: a cell's Markdown without its markers.
 QString plainText(const QString &markdown);
 // A new table of empty cells: `rows` counts the header.

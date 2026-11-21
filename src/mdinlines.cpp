@@ -2050,3 +2050,21 @@ void InlineParser::parse(const std::vector<Piece> &pieces, const InlineContext &
 }
 
 } // namespace md::detail
+
+md::Document md::parseTableCell(const QString &text, const Options &options)
+{
+    Document document;
+    document.options = options;
+    document.files.emplace_back().text = text;
+    const Source source;
+    detail::ParseState state;
+    state.source = &source;
+    state.options = options;
+    state.document = &document;
+    state.files.emplace_back().text = text;
+    state.runs.emplace_back();
+    document.root.type = NodeType::TableCell;
+    document.root.range = {0, int(text.size())};
+    detail::InlineParser(state).parse(detail::tableCellPieces(text, 0, int(text.size()), 1), {}, document.root.children);
+    return document;
+}

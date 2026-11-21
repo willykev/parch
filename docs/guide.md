@@ -279,13 +279,16 @@ paragraph and reaches into a table takes the whole table, as does one that
 starts in a cell and goes on out of the table. Selecting prose up to the
 start of a table keeps the selection in the prose in either direction.
 
-**Copy and paste.** A block of cells copies as cells, which paste into a
-spreadsheet as cells; **Cut** copies them and empties them. Cells copied from
-a spreadsheet, a web page or another table paste from the caret's cell on,
-over what is there, and add rows and columns where they reach past the
-table. One value pasted over a block fills each of its cells, and text with
-tabs between its values pastes over a block as cells. Any other text pastes
-into the cell at the caret, its tabs and line breaks made spaces.
+**Copy and paste.** A block of cells copies as readable text and line breaks
+for a spreadsheet and keeps its Markdown when pasted into another parch
+grid. **Cut** copies the cells and empties them. Spreadsheet data keeps its
+rows and columns, including when it has only one column. Grid paste from a
+web page takes the first table and keeps values in their columns across
+spans. Pasted cells overwrite from the caret's cell on, adding rows and
+columns when needed. One value pasted over a selection fills each selected
+cell. Text with tabs between values pastes over a block as cells. At a
+single caret, ordinary text goes into the current cell with tabs and line
+breaks made spaces.
 
 **Add, move and delete rows and columns.** Pointing at a table, or having the
 caret in it, shows a handle beside the row and above the column, a **+** on
@@ -301,10 +304,10 @@ or delete them together.
 - A column's menu: **Insert column left** and **right**, **Move left** and
   **right**, **Align as written**, **Align left**, **center** and **right**,
   **Sort ascending**, **Sort descending** and **Delete column**. A table keeps
-  at least one column. Sorting orders the rows under the header by the
-  column: numbers as numbers and before text, empty cells last, Markdown
-  marks left out of the comparison, and rows that compare the same in the
-  order they were.
+  at least one column. Sorting uses the text each cell shows, including
+  punctuation such as the underscore in `1_0`. Numbers sort before text and
+  empty cells come last. Rows that compare the same stay in their original
+  order.
 - A right click in a cell, or the `Menu` key there, offers all of these with
   **Merge cells**, **Split cell**, **Show as Markdown** and **Delete table**.
   On a misspelled word it offers its spellings first, and the table's
@@ -395,6 +398,9 @@ plain text; turning it on again styles it at once.
   quotes, code and tables. Scripts, styles and hidden text are left out, and
   characters that would otherwise turn into Markdown are escaped. One undo
   takes the whole paste back. `Ctrl+Shift+V` always pastes plain text.
+  Web tables pasted into prose keep values aligned across spanning rows
+  and columns. Horizontal spans become merged cells in the Writer dialect
+  with merged cells enabled.
 - A pasted image, such as a screenshot, is saved in the `assets` folder beside
   the document, named after the day as in `pasted-2026-11-16-1.png`, and
   linked where you pasted it. Pasting the same image again reuses its file.

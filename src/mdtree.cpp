@@ -68,7 +68,7 @@ Range contentOf(const Node &node)
             node.close.isEmpty() ? node.range.end : node.close.start};
 }
 
-void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
+void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr, QChar inlineBreak = {})
 {
     if (clip && clip->excludes(node)) return;
     switch (node.type) {
@@ -87,7 +87,20 @@ void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
         return;
     case NodeType::SoftBreak:
     case NodeType::HardBreak:
-        out.append(u' ');
+        out.append(inlineBreak.isNull() ? QChar(u' ') : inlineBreak);
+        return;
+    case NodeType::HtmlElement:
+        if (!inlineBreak.isNull() && node.label == u"br") {
+            out.append(inlineBreak);
+            return;
+        }
+        if (!inlineBreak.isNull() && node.label == u"img") {
+            out.append(node.attribute(QLatin1StringView("alt")));
+            return;
+        }
+        break;
+    case NodeType::HtmlInline:
+        if (!inlineBreak.isNull()) out.append(node.text);
         return;
     case NodeType::Variable:
         if (node.resolved) out.append(node.text);
@@ -96,7 +109,6 @@ void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
     case NodeType::FootnoteReference:
     case NodeType::InlineNote:
     case NodeType::Citation:
-    case NodeType::HtmlInline:
     case NodeType::HtmlComment:
     case NodeType::CommentLine:
     case NodeType::HeadingLabel:
@@ -105,7 +117,7 @@ void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr)
     default:
         break;
     }
-    for (const Node &child : node.children) appendPlain(child, out, clip);
+    for (const Node &child : node.children) appendPlain(child, out, clip, inlineBreak);
 }
 
 // The text of the blocks of a document, one block per line.
@@ -459,6 +471,13 @@ QString Document::plainText(const PlainTextOptions &options) const
         appendBlocks(root, options, out);
     }
     if (out.endsWith(u'\n')) out.chop(1);
+    return out;
+}
+
+QString inlineText(const Node &node, QChar lineBreak)
+{
+    QString out;
+    appendPlain(node, out, nullptr, lineBreak);
     return out;
 }
 

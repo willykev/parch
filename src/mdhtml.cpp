@@ -27,10 +27,11 @@ void appendEscaped(QString &out, QStringView text)
 
 class Writer {
 public:
-    Writer(const Document &document, const HtmlOptions &options)
+    Writer(const Document &document, const HtmlOptions &options, bool inlineFragment = false)
         : doc(document), opt(options), safe(options.rawHtml == HtmlOptions::RawHtml::Safe),
-          referencesSeen(document.footnotes.size(), 0)
+          fragment(inlineFragment), referencesSeen(fragment ? 0 : document.footnotes.size(), 0)
     {
+        if (fragment) return;
         if (!document.footnotes.empty())
             for (const Heading &heading : document.headings) headingIds.insert(heading.slug);
         // In a note style, a citation of the running text is a note.
@@ -46,6 +47,12 @@ public:
             bibliography();
         }
         cr();
+        return out;
+    }
+
+    QString runCell(const Node &cell)
+    {
+        inlines(cell.children);
         return out;
     }
 
@@ -97,6 +104,7 @@ private:
     const Document &doc;
     const HtmlOptions &opt;
     const bool safe;
+    const bool fragment;
     QString out;
     QSet<QString> headingIds;
     QHash<QString, QString> noteIds;
@@ -559,7 +567,7 @@ void Writer::inl(const Node &node)
         break;
     case NodeType::FootnoteReference:
     case NodeType::InlineNote:
-        noteReference(node);
+        if (!fragment) noteReference(node);
         break;
     case NodeType::Citation:
         citation(node);
@@ -684,6 +692,19 @@ HtmlOptions HtmlOptions::commonMark()
 QString toHtml(const Document &document, const HtmlOptions &options)
 {
     return Writer(document, options).run();
+}
+
+QString cellHtml(const Document &document, const Node &cell)
+{
+    HtmlOptions options;
+    options.picture = [](const Node &node) {
+        if (node.type == NodeType::Image || (node.type == NodeType::HtmlElement && node.label == u"img")) {
+            const QString alt = node.type == NodeType::Image ? plainText(node) : node.attribute(QLatin1StringView("alt"));
+            return QStringLiteral("<span>%1</span>").arg(escapeHtml(alt));
+        }
+        return QString();
+    };
+    return Writer(document, options, true).runCell(cell);
 }
 
 QString escapeHtml(QStringView text)

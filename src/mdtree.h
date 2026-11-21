@@ -402,9 +402,14 @@ public:
 // The text of a node and everything in it, without markup: what an image's
 // alternative text and a heading's outline entry are.
 QString plainText(const Node &node);
+// Text as a cell displays it, with the requested separator at every inline
+// line break, including HTML br elements.
+QString inlineText(const Node &node, QChar lineBreak);
 
 // Parses one text. Includes are recognised and left unexpanded.
 Document parse(const QString &text, const Options &options = Options());
+// Reads just the inline source of a table cell, with the cell as the root.
+Document parseTableCell(const QString &text, const Options &options);
 // Parses a document and assembles the files it includes into its tree.
 Document parse(const QString &text, const Options &options, const Source &source);
 // How many texts parse() has read since the program started, on any

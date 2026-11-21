@@ -90,6 +90,8 @@ struct HtmlOptions {
 };
 
 QString toHtml(const Document &document, const HtmlOptions &options = HtmlOptions());
+// Safe HTML for the contents of a cell, suitable for the clipboard.
+QString cellHtml(const Document &document, const Node &cell);
 
 QString escapeHtml(QStringView text);
 // A URL as an href carries it: characters outside the URL syntax

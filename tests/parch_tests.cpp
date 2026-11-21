@@ -942,6 +942,19 @@ private slots:
     void backtickRunsCloseInsideTheirOwnCell() { TableGridTests::backtickRunsCloseInsideTheirOwnCell(); }
     void writingBelowAGridKeepsTheNextParagraphSeparate_data() { TableGridTests::writingBelowAGridKeepsTheNextParagraphSeparate_data(); }
     void writingBelowAGridKeepsTheNextParagraphSeparate() { TableGridTests::writingBelowAGridKeepsTheNextParagraphSeparate(); }
+    void plainPasteFillsEverySelectedCell_data() { TableGridTests::plainPasteFillsEverySelectedCell_data(); }
+    void plainPasteFillsEverySelectedCell() { TableGridTests::plainPasteFillsEverySelectedCell(); }
+    void typedTsvPastesItsRowsAndColumns_data() { TableGridTests::typedTsvPastesItsRowsAndColumns_data(); }
+    void typedTsvPastesItsRowsAndColumns() { TableGridTests::typedTsvPastesItsRowsAndColumns(); }
+    void htmlRowspanKeepsTheNextCellInItsColumn_data() { TableGridTests::htmlRowspanKeepsTheNextCellInItsColumn_data(); }
+    void htmlRowspanKeepsTheNextCellInItsColumn() { TableGridTests::htmlRowspanKeepsTheNextCellInItsColumn(); }
+    void gridPasteUsesTheFirstHtmlTable_data() { TableGridTests::gridPasteUsesTheFirstHtmlTable_data(); }
+    void gridPasteUsesTheFirstHtmlTable() { TableGridTests::gridPasteUsesTheFirstHtmlTable(); }
+    void sortUsesTheVisibleCellText() { TableGridTests::sortUsesTheVisibleCellText(); }
+    void richTablePasteKeepsHorizontalMerges_data() { EditingTests::richTablePasteKeepsHorizontalMerges_data(); }
+    void richTablePasteKeepsHorizontalMerges() { EditingTests::richTablePasteKeepsHorizontalMerges(); }
+    void copiedCellsReadWellAndPasteBackAsMarkdown_data() { TableGridTests::copiedCellsReadWellAndPasteBackAsMarkdown_data(); }
+    void copiedCellsReadWellAndPasteBackAsMarkdown() { TableGridTests::copiedCellsReadWellAndPasteBackAsMarkdown(); }
     void slowPastesLeaveTablesShownAsMarkdownAsWritten() { TableGridTests::slowPastesLeaveTablesShownAsMarkdownAsWritten(); }
     void aTableGrowsNoLargerThanAGridHolds() { TableGridTests::aTableGrowsNoLargerThanAGridHolds(); }
     void escapeWithTextSelectedInACellIsTheViews() { TableGridTests::escapeWithTextSelectedInACellIsTheViews(); }

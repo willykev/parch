@@ -20,6 +20,14 @@
   and any refusal.
 - Matching backtick runs make code inside a cell. Text typed below a table
   starts its own paragraph.
+- Pasting one value fills the selected cells. Spreadsheet data keeps its
+  rows and columns, including one-column sheets.
+- Web tables paste with their columns aligned. Grid paste uses the first
+  table. Pasting into prose keeps horizontal merges in the Writer dialect
+  when merged cells are enabled.
+- Copied cells show readable text and line breaks in spreadsheets and keep
+  their Markdown when pasted into another parch grid. Sorting uses the
+  text each cell shows.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

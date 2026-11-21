@@ -1,5 +1,6 @@
 #include "htmlmarkdown.h"
 
+#include "mdtable.h"
 #include "mdtree.h"
 
 #include <QHash>
@@ -8,6 +9,7 @@
 #include <QStringList>
 #include <QUrl>
 #include <algorithm>
+#include <array>
 #include <deque>
 #include <utility>
 #include <vector>
@@ -17,8 +19,7 @@ namespace {
 // Elements deeper than this are not made: their content joins the deepest
 // element made, so that hostile nesting costs no more than its text.
 constexpr int maxDepth = 256;
-// The most columns a table keeps, and the most a cell spans.
-constexpr int maxColumns = 64;
+// The most columns or rows one positive span claims.
 constexpr int maxSpan = 64;
 
 bool isSpace(QChar c)
@@ -897,19 +898,24 @@ QString collapsed(const QString &text)
 }
 
 // The text an element shows, with whitespace collapsed.
-void textContent(const Node *node, QString &out)
+void textContent(const Node *node, QString &out, bool spaceBlocks = false)
 {
     for (const Node *child : node->children) {
         if (child->isText()) out += child->text;
         else if (child->tag == u"br") out += u' ';
-        else if (!isDropped(child)) textContent(child, out);
+        else if (!isDropped(child)) {
+            const bool space = spaceBlocks && (isBlock(child->tag) || child->tag == u"td" || child->tag == u"th");
+            if (space) out += u' ';
+            textContent(child, out, spaceBlocks);
+            if (space) out += u' ';
+        }
     }
 }
 
-QString textOf(const Node *node)
+QString textOf(const Node *node, bool spaceBlocks = false)
 {
     QString text;
-    textContent(node, text);
+    textContent(node, text, spaceBlocks);
     QString cleaned;
     cleaned.reserve(text.size());
     for (QChar c : std::as_const(text)) cleaned += isSpace(c) ? QChar(u' ') : c;
@@ -1038,9 +1044,105 @@ QString cleanUrl(const QString &url)
     return cleaned;
 }
 
+struct TableLayout {
+    struct Cell {
+        const Node *node;
+        int column;
+        int span;
+    };
+    std::vector<std::vector<Cell>> rows;
+    const Node *caption = nullptr;
+    int columns = 0;
+    bool spans = false;
+    bool tooLarge = false;
+};
+
+int cellSpan(const Node *cell, QStringView attribute, bool throughGroup)
+{
+    const QString digits = cell->attribute(attribute).trimmed();
+    if (digits.isEmpty()) return 1;
+    int value = 0;
+    for (QChar digit : digits) {
+        if (digit < u'0' || digit > u'9') return 1;
+        value = qMin(maxSpan, value * 10 + digit.unicode() - u'0');
+    }
+    return value == 0 && !throughGroup ? 1 : value;
+}
+
+TableLayout layoutTable(const Node *table)
+{
+    struct Group {
+        std::vector<const Node *> rows;
+        bool header = false;
+    };
+    TableLayout layout;
+    std::vector<Group> groups;
+    size_t rowCount = 0;
+    bool directRows = false;
+    const auto addRow = [&](const Node *row) {
+        if (++rowCount > size_t(MdTable::MaxCells)) return false;
+        groups.back().rows.push_back(row);
+        return true;
+    };
+    for (const Node *child : table->children) {
+        if (child->isText() || isDropped(child)) continue;
+        const QString &tag = child->tag;
+        if (tag == u"tr") {
+            if (!directRows) groups.emplace_back();
+            directRows = true;
+            if (!addRow(child)) { layout.tooLarge = true; return layout; }
+        } else {
+            directRows = false;
+            if (tag == u"caption" && !layout.caption) layout.caption = child;
+            if (tag != u"thead" && tag != u"tbody" && tag != u"tfoot") continue;
+            groups.push_back({{}, tag == u"thead"});
+            for (const Node *row : child->children)
+                if (row->tag == u"tr" && !isDropped(row) && !addRow(row)) {
+                    layout.tooLarge = true;
+                    return layout;
+                }
+            if (groups.back().rows.empty()) groups.pop_back();
+        }
+    }
+    // A header section supplies the Markdown header, even when the HTML
+    // put it later. Rowspans are confined to their own group.
+    std::stable_partition(groups.begin(), groups.end(), [](const Group &group) { return group.header; });
+    for (const Group &group : groups) {
+        std::array<int, MdTable::MaxColumns> occupiedUntil{};
+        const int rows = int(group.rows.size());
+        for (int r = 0; r < rows; ++r) {
+            auto &placed = layout.rows.emplace_back();
+            int column = 0;
+            for (const Node *child : group.rows[size_t(r)]->children) {
+                if ((child->tag != u"td" && child->tag != u"th") || isDropped(child)) continue;
+                while (column < MdTable::MaxColumns && occupiedUntil[size_t(column)] > r) ++column;
+                if (column == MdTable::MaxColumns) { layout.tooLarge = true; return layout; }
+                const int across = cellSpan(child, u"colspan", false);
+                const int down = cellSpan(child, u"rowspan", true);
+                layout.spans |= across != 1 || down != 1;
+                const int limit = qMin(MdTable::MaxColumns, column + across);
+                const int until = down == 0 ? rows : qMin(rows, r + down);
+                // An earlier rowspan owns its columns. Clip a conflicting
+                // colspan at that boundary and skip it for the next cell.
+                const int first = column;
+                while (column < limit && occupiedUntil[size_t(column)] <= r)
+                    occupiedUntil[size_t(column++)] = until;
+                layout.columns = qMax(layout.columns, column);
+                if (rowCount * size_t(layout.columns) > size_t(MdTable::MaxCells)) {
+                    layout.tooLarge = true;
+                    return layout;
+                }
+                placed.push_back({child, first, column - first});
+            }
+        }
+    }
+    return layout;
+}
+
 class Converter {
 public:
-    explicit Converter(const HtmlMarkdown::ImageSink &images) : m_images(images) {}
+    Converter(const HtmlMarkdown::ImageSink &images, bool mergedCells)
+        : m_images(images), m_mergedCells(mergedCells) {}
 
     Blocks flow(const Node *container, Styles styles)
     {
@@ -1436,79 +1538,54 @@ private:
 
     void table(const Node *node, Blocks &out, Styles styles)
     {
-        std::vector<const Node *> rows;
-        std::vector<const Node *> headRows, bodyRows;
-        const Node *caption = nullptr;
-        for (const Node *child : node->children) {
-            if (child->isText() || isDropped(child)) continue;
-            if (child->tag == u"tr") bodyRows.push_back(child);
-            else if (child->tag == u"caption" && !caption) caption = child;
-            else if (child->tag == u"thead" || child->tag == u"tbody" || child->tag == u"tfoot")
-                for (const Node *row : child->children)
-                    if (!row->isText() && row->tag == u"tr" && !isDropped(row))
-                        (child->tag == u"thead" ? headRows : bodyRows).push_back(row);
-        }
-        rows = headRows;
-        rows.insert(rows.end(), bodyRows.begin(), bodyRows.end());
-        if (caption) append(out, flow(caption, styles));
-        // Every cell in its place, spans taken into account.
-        std::vector<std::vector<const Node *>> grid(rows.size());
-        std::vector<std::vector<bool>> taken(rows.size());
-        int columns = 0;
-        for (size_t r = 0; r < rows.size(); ++r) {
-            int column = 0;
-            for (const Node *child : rows[r]->children) {
-                if (child->isText() || (child->tag != u"td" && child->tag != u"th") || isDropped(child)) continue;
-                while (column < int(taken[r].size()) && taken[r][size_t(column)]) ++column;
-                if (column >= maxColumns) break;
-                const int across = std::clamp(child->attribute(u"colspan").trimmed().toInt(), 1, maxSpan);
-                const int down = std::clamp(child->attribute(u"rowspan").trimmed().toInt(), 1, maxSpan);
-                const int width = std::min(across, maxColumns - column);
-                for (size_t d = r; d < std::min(rows.size(), r + size_t(down)); ++d) {
-                    if (int(taken[d].size()) < column + width) {
-                        taken[d].resize(size_t(column + width), false);
-                        grid[d].resize(size_t(column + width), nullptr);
-                    }
-                    for (int c = column; c < column + width; ++c) taken[d][size_t(c)] = true;
-                }
-                grid[r][size_t(column)] = child;
-                column += width;
-                columns = std::max(columns, column);
-            }
-        }
-        if (columns == 0) return;
-        // A table of one column is laid out, not tabulated: its cells are shown as they are.
-        if (columns == 1) {
-            for (const auto &row : grid)
-                for (const Node *cell : row)
-                    if (cell) append(out, flow(cell, styles));
+        const TableLayout layout = layoutTable(node);
+        if (layout.tooLarge) {
+            // Keep the contents of an oversized table as ordinary blocks.
+            append(out, flow(node, styles));
             return;
         }
-        const auto line = [](const QStringList &cells) {
-            return QStringLiteral("| ") + cells.join(QStringLiteral(" | ")) + QStringLiteral(" |");
-        };
+        if (layout.caption) append(out, flow(layout.caption, styles));
+        if (layout.columns == 0) return;
+        // A table of one column lays out its contents as ordinary blocks.
+        if (layout.columns == 1) {
+            for (const auto &row : layout.rows)
+                if (!row.empty()) append(out, flow(row.front().node, styles));
+            return;
+        }
         QStringList lines;
-        QStringList alignments;
-        for (size_t r = 0; r < grid.size(); ++r) {
-            QStringList cells;
-            for (int c = 0; c < columns; ++c) {
-                const Node *at = size_t(c) < grid[r].size() ? grid[r][size_t(c)] : nullptr;
-                cells << (at ? cell(at, styles) : QString());
-                if (r != 0) continue;
-                QString align = at ? at->attribute(u"align").trimmed().toLower() : QString();
-                if (at && align.isEmpty()) align = declarations(at).value(QStringLiteral("text-align"));
-                alignments << (align == u"center" ? QStringLiteral(":---:")
-                               : align == u"right" ? QStringLiteral("---:")
-                               : align == u"left" ? QStringLiteral(":---")
-                                                  : QStringLiteral("---"));
+        QStringList alignments(layout.columns, QStringLiteral("---"));
+        for (size_t r = 0; r < layout.rows.size(); ++r) {
+            const auto &row = layout.rows[r];
+            size_t at = 0;
+            QString line = QStringLiteral("|");
+            for (int c = 0; c < layout.columns;) {
+                const TableLayout::Cell *origin = at < row.size() && row[at].column == c ? &row[at++] : nullptr;
+                const int span = origin && m_mergedCells ? origin->span : 1;
+                line += u' ';
+                if (origin) {
+                    line += cell(origin->node, styles);
+                    if (r == 0) {
+                        QString align = origin->node->attribute(u"align").trimmed().toLower();
+                        if (align.isEmpty()) align = declarations(origin->node).value(QStringLiteral("text-align"));
+                        const QString marker = align == u"center" ? QStringLiteral(":---:")
+                                             : align == u"right" ? QStringLiteral("---:")
+                                             : align == u"left" ? QStringLiteral(":---") : QStringLiteral("---");
+                        for (int column = c; column < c + origin->span; ++column) alignments[column] = marker;
+                    }
+                }
+                line += u' ';
+                line += QString(span, u'|');
+                c += span;
             }
-            lines << line(cells);
-            if (r == 0) lines << line(alignments);
+            lines << line;
+            if (r == 0)
+                lines << QStringLiteral("| ") + alignments.join(QStringLiteral(" | ")) + QStringLiteral(" |");
         }
         append(out, Block{Block::Table, lines.join(u'\n')});
     }
 
     const HtmlMarkdown::ImageSink &m_images;
+    const bool m_mergedCells;
 };
 
 // Text before the first tag, as the clipboard of some Windows programs
@@ -1522,14 +1599,45 @@ QStringView withoutHeader(QStringView html)
 
 } // namespace
 
-QString HtmlMarkdown::convert(const QString &html, const ImageSink &images, bool *inlineOnly)
+QString HtmlMarkdown::convert(const QString &html, const ImageSink &images, bool *inlineOnly, bool mergedCells)
 {
     Parser parser(withoutHeader(html));
     const Node *root = parser.parse();
-    Converter converter(images);
+    Converter converter(images, mergedCells);
     const Blocks blocks = converter.flow(root, 0);
     if (inlineOnly) *inlineOnly = blocks.size() == 1 && blocks.first().kind == Block::Paragraph;
     return joined(blocks);
+}
+
+std::optional<HtmlMarkdown::TableCells> HtmlMarkdown::firstTableCells(const QString &html)
+{
+    if (!html.contains(u"<table", Qt::CaseInsensitive)) return std::nullopt;
+    Parser parser(withoutHeader(html));
+    const Node *first = nullptr;
+    bool more = false;
+    std::vector<const Node *> pending{parser.parse()};
+    while (!pending.empty() && !more) {
+        const Node *node = pending.back();
+        pending.pop_back();
+        if (node->isText() || isDropped(node)) continue;
+        if (node->tag == u"table") {
+            if (first) more = true;
+            else first = node;
+        }
+        pending.insert(pending.end(), node->children.rbegin(), node->children.rend());
+    }
+    if (!first) return std::nullopt;
+    const TableLayout layout = layoutTable(first);
+    TableCells result;
+    result.hasGeometry = more || layout.spans;
+    result.tooLarge = layout.tooLarge;
+    if (layout.columns == 0 || layout.tooLarge) return result;
+    for (const auto &row : layout.rows) {
+        QStringList cells(layout.columns, QString());
+        for (const TableLayout::Cell &cell : row) cells[cell.column] = textOf(cell.node, true);
+        result.rows.append(std::move(cells));
+    }
+    return result;
 }
 
 bool HtmlMarkdown::mayEmbedImages(const QString &html)

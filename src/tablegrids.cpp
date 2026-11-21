@@ -1,9 +1,12 @@
 #include "tablegrids.h"
 
+#include "diskfile.h"
 #include "document.h"
 #include "documentparse.h"
 #include "editorbinding.h"
 #include "editordecorations.h"
+#include "htmlmarkdown.h"
+#include "mdhtml.h"
 #include "mdtree.h"
 #include "sourceboundaries.h"
 #include "sourcebuffer.h"
@@ -14,7 +17,7 @@
 #include <QStyleHints>
 #include <QMimeData>
 #include <QRegularExpression>
-#include <QTextDocumentFragment>
+#include <QStringDecoder>
 #include <QCoreApplication>
 #include <QFontMetricsF>
 #include <QKeyEvent>
@@ -73,6 +76,23 @@ void collectTables(const md::Node &node, QList<const md::Node *> &tables)
     }
     if (node.type == md::NodeType::Include) return;
     for (const md::Node &child : node.children) collectTables(child, tables);
+}
+
+template<typename Read>
+void readCellInlines(const ParsedTextPtr &parsed, const MdTable::Cell &cell, const QString &markdown,
+                     const md::Options &options, Read read)
+{
+    if (parsed && !markdown.isEmpty()) {
+        const md::Document &document = parsed->document();
+        for (const md::Node *node : document.pathAt(cell.start)) {
+            if (node->type != md::NodeType::TableCell || node->range.start != cell.start || node->range.end != cell.end)
+                continue;
+            read(document, *node);
+            return;
+        }
+    }
+    const md::Document inlineCell = md::parseTableCell(markdown, options);
+    read(inlineCell, inlineCell.root);
 }
 
 int breakBefore(QStringView text, int position)
@@ -1217,6 +1237,7 @@ void TableGrids::cursorMoved()
 {
     if (!m_binding->m_loaded) return;
     const int cursor = this->cursor(), anchor = this->anchor();
+    if (m_picked.anchor != anchor || m_picked.cursor != cursor) m_picked = {};
     // A table being written becomes a grid once the caret leaves it.
     if (!m_waiting.isEmpty() && !m_settling) {
         QList<std::pair<int, int>> waiting;
@@ -2591,9 +2612,11 @@ bool TableGrids::isCommand(const QString &id) { return commands().contains(id); 
 std::optional<TableGrids::Span> TableGrids::span(const TableGrid *grid) const
 {
     Span out;
-    // The columns a handle picked, while its selection stays.
-    if (m_picked.grid.data() == grid && grid && m_picked.anchor == anchor() && m_picked.cursor == cursor())
+    if (grid && m_picked.grid == grid && m_picked.anchor == anchor() && m_picked.cursor == cursor()) {
+        if (m_picked.firstRow >= 0)
+            return Span{m_picked.firstRow, m_picked.lastRow, 0, grid->columnCount() - 1};
         return Span{0, grid->rowCount() - 1, m_picked.firstColumn, m_picked.lastColumn};
+    }
     if (block(grid, &out.firstRow, &out.lastRow, &out.firstColumn, &out.lastColumn)) return out;
     const TableGrid::Place place = grid->placeOf(cursor());
     if (!place.valid()) return std::nullopt;
@@ -2602,6 +2625,17 @@ std::optional<TableGrids::Span> TableGrids::span(const TableGrid *grid) const
     out.firstColumn = cell.column;
     out.lastColumn = cell.column + cell.span - 1;
     return out;
+}
+
+std::optional<TableGrids::Span> TableGrids::selectedCells(const TableGrid *grid) const
+{
+    if (m_selectAll.level == 2 && m_selectAll.anchor == anchor() && m_selectAll.cursor == cursor())
+        return Span{0, grid->rowCount() - 1, 0, grid->columnCount() - 1};
+    Span out;
+    if (block(grid, &out.firstRow, &out.lastRow, &out.firstColumn, &out.lastColumn)) return out;
+    // A handle can select a row or column made of a single logical cell.
+    if (m_picked.grid == grid && m_picked.anchor == anchor() && m_picked.cursor == cursor()) return span(grid);
+    return std::nullopt;
 }
 
 std::optional<bool>
@@ -2827,7 +2861,8 @@ bool TableGrids::runCommand(const QString &command)
     if (command == u"insertTableColumnRight")
         return run(change(grid, [&](Model &m) { return MdTable::insertColumns(m, c1 + 1, 1); }, r0, c1 + 1));
     // Columns a handle picked stay picked where they go.
-    const bool picked = m_picked.grid.data() == grid && m_picked.anchor == anchor() && m_picked.cursor == cursor();
+    const bool picked = m_picked.firstRow < 0 && m_picked.grid == grid
+                        && m_picked.anchor == anchor() && m_picked.cursor == cursor();
     const auto moveColumns = [&](int to, int by) {
         if (!run(changeBlock(grid, [&](Model &m) { return MdTable::moveColumns(m, c0, columnCount, to); },
                              shifted(0, by))))
@@ -2854,7 +2889,21 @@ bool TableGrids::runCommand(const QString &command)
     if (command == u"alignTableColumnRight") return align(MdTable::Align::Right);
     if (command == u"sortTableAscending" || command == u"sortTableDescending") {
         const bool descending = command == u"sortTableDescending";
-        return run(change(grid, [&](Model &m) { return MdTable::sortRows(m, c0, descending); }, 0, c0));
+        Document *document = m_binding->m_document;
+        const ParsedTextPtr parsed = document->parse()->current();
+        const md::Options options = document->markdownOptions();
+        return run(change(grid, [&](Model &m) {
+            QStringList keys;
+            for (int row = 1; row < m.rows.size(); ++row) {
+                const int item = MdTable::itemAt(m.rows[row], c0);
+                QString key;
+                if (item >= 0 && !m.rows[row][item].text.isEmpty())
+                    readCellInlines(parsed, grid->cellAt({row, item}), m.rows[row][item].text, options,
+                                    [&](const md::Document &, const md::Node &node) { key = md::inlineText(node, u' '); });
+                keys.append(std::move(key));
+            }
+            return MdTable::sortRows(m, c0, descending, keys);
+        }, 0, c0));
     }
     if (command == u"mergeTableCells") {
         const int last = c1 > c0 ? c1 : c1 + 1;
@@ -2887,6 +2936,7 @@ void TableGrids::selectRow(TableGrid *grid, int row, bool extend)
     const MdTable::Cell &from = grid->cellAt({first, 0});
     const MdTable::Cell &to = grid->cellAt({last, grid->cellCount(last) - 1});
     select(from.start, to.end);
+    m_picked = {grid, anchor(), cursor(), 0, grid->columnCount() - 1, first, last};
 }
 
 void TableGrids::selectColumn(TableGrid *grid, int column, bool extend)
@@ -2895,7 +2945,8 @@ void TableGrids::selectColumn(TableGrid *grid, int column, bool extend)
     int firstColumn = column, lastColumn = column;
     if (extend) {
         // From the columns picked before, or the anchor's.
-        if (const auto picked = span(grid); picked && m_picked.grid.data() == grid && m_picked.anchor == anchor()) {
+        if (const auto picked = span(grid);
+            picked && m_picked.firstRow < 0 && m_picked.grid == grid && m_picked.anchor == anchor()) {
             firstColumn = qMin(picked->firstColumn, column);
             lastColumn = qMax(picked->lastColumn, column);
         } else if (const TableGrid::Place anchorPlace = grid->placeOf(anchor()); anchorPlace.valid()) {
@@ -2981,21 +3032,40 @@ void TableGrids::adoptAt(int position)
 
 namespace {
 
-// A cell's Markdown as plain text for the clipboard: its escaped pipes are pipes.
-QString plainCell(const QString &markdown)
-{
-    QString text = markdown;
-    return text.replace(QStringLiteral("\\|"), QStringLiteral("|"));
-}
+const QString tsvMime = QStringLiteral("text/tab-separated-values");
+const QString libreOfficeMime = QStringLiteral("application/x-libreoffice-tsvc");
+const QString cellsMime = QStringLiteral("application/x-parch-table-cells");
+const QByteArray cellsHeader = QByteArrayLiteral("parch-table-cells 1\n");
 
-// Rows of tab-separated fields, as spreadsheets copy them: a field in quotes
-// can hold tabs, line breaks and doubled quotes.
-QList<QStringList> splitSeparated(const QString &text)
-{
+struct ClipboardCells {
     QList<QStringList> rows;
+    bool markdown = false;
+    bool tooLarge = false;
+    bool plainFallback = false;
+};
+
+// Quoted fields keep tabs, newlines and doubled quotes. Each record
+// terminator finishes one row, including an actual empty row.
+std::optional<ClipboardCells> splitSeparated(QStringView text)
+{
+    if (text.isEmpty() || text.contains(QChar::Null)) return std::nullopt;
+    const ClipboardCells tooLarge{{}, false, true};
+    ClipboardCells out;
     QStringList row;
     QString field;
-    bool quoted = false, started = false;
+    bool quoted = false, started = false, closed = false;
+    qsizetype columns = 0;
+    const auto finishField = [&] {
+        row.append(std::exchange(field, {}));
+        started = closed = false;
+        return row.size() <= MdTable::MaxColumns;
+    };
+    const auto finishRow = [&] {
+        columns = qMax(columns, row.size());
+        if ((out.rows.size() + 1) * columns > MdTable::MaxCells) return false;
+        out.rows.append(std::exchange(row, {}));
+        return true;
+    };
     for (qsizetype i = 0; i < text.size(); ++i) {
         const QChar c = text[i];
         if (quoted) {
@@ -3004,125 +3074,151 @@ QList<QStringList> splitSeparated(const QString &text)
                 ++i;
             } else if (c == u'"') {
                 quoted = false;
+                closed = true;
             } else {
                 field += c;
             }
-            continue;
-        }
-        if (c == u'"' && !started) {
-            quoted = started = true;
         } else if (c == u'\t') {
-            row.append(field);
-            field.clear();
-            started = false;
-        } else if (c == u'\r' || c == u'\n') {
+            if (!finishField()) return tooLarge;
+        } else if (isBreak(c)) {
             if (c == u'\r' && i + 1 < text.size() && text[i + 1] == u'\n') ++i;
-            row.append(field);
-            rows.append(row);
-            row.clear();
-            field.clear();
-            started = false;
+            if (!finishField() || !finishRow()) return tooLarge;
+        } else if (closed) {
+            return std::nullopt;
+        } else if (c == u'"' && !started) {
+            quoted = started = true;
         } else {
             field += c;
             started = true;
         }
     }
-    if (started || !field.isEmpty() || !row.isEmpty()) {
-        row.append(field);
-        rows.append(row);
-    }
-    return rows;
+    if (quoted) return std::nullopt;
+    if ((started || !row.isEmpty()) && (!finishField() || !finishRow())) return tooLarge;
+    return out;
 }
 
-// The cells of the first table in a page of HTML, as plain text.
-std::optional<QList<QStringList>> htmlCells(const QString &html)
+std::optional<ClipboardCells> typedSheet(QByteArrayView payload, bool keepBom = false)
 {
-    static const QRegularExpression tableStart(QStringLiteral("<table[\\s>]"), QRegularExpression::CaseInsensitiveOption);
-    const auto start = tableStart.match(html);
-    if (!start.hasMatch()) return std::nullopt;
-    static const QRegularExpression row(QStringLiteral("<tr[\\s>](.*?)</tr>"),
-                                        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
-    static const QRegularExpression cell(QStringLiteral("<t([dh])([^>]*)>(.*?)</t\\1>"),
-                                         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
-    static const QRegularExpression span(QStringLiteral("colspan\\s*=\\s*[\"']?(\\d+)"), QRegularExpression::CaseInsensitiveOption);
-    QList<QStringList> rows;
-    for (auto rows_ = row.globalMatch(html, start.capturedStart()); rows_.hasNext();) {
-        const QString inside = rows_.next().captured(1);
-        QStringList cells;
-        for (auto cells_ = cell.globalMatch(inside); cells_.hasNext();) {
-            const QRegularExpressionMatch found = cells_.next();
-            cells.append(QTextDocumentFragment::fromHtml(found.captured(3)).toPlainText());
-            // A cell over several columns leaves the others empty.
-            const auto spanned = span.match(found.captured(2));
-            for (int extra = spanned.hasMatch() ? spanned.captured(1).toInt() - 1 : 0; extra > 0; --extra) cells.append(QString());
+    if (payload.size() > DiskFile::MaxLoadBytes) return ClipboardCells{{}, false, true};
+    QStringConverter::Flags flags = QStringConverter::Flag::Stateless;
+    if (keepBom) flags |= QStringConverter::Flag::ConvertInitialBom;
+    QStringDecoder decode(QStringDecoder::Utf8, flags);
+    const QString text = decode(payload);
+    if (decode.hasError()) return std::nullopt;
+    return splitSeparated(text);
+}
+
+std::optional<ClipboardCells> readCellSource(const QByteArray &payload, const MdTable::Dialect &dialect)
+{
+    if (!payload.startsWith(cellsHeader)) return std::nullopt;
+    // The version line identifies a rectangle of quoted Markdown fields.
+    // Read it with the same bounds as a spreadsheet, then validate the rows.
+    auto cells = typedSheet(QByteArrayView(payload).sliced(cellsHeader.size()), true);
+    if (!cells || cells->tooLarge || cells->rows.isEmpty()) return std::nullopt;
+    const qsizetype columns = cells->rows.first().size();
+    for (const QStringList &row : std::as_const(cells->rows)) {
+        if (row.size() != columns) return std::nullopt;
+        QList<MdTable::Item> items;
+        for (const QString &text : row) {
+            if (std::any_of(text.cbegin(), text.cend(), [](QChar c) {
+                    return isBreak(c) || c == QChar::LineSeparator || c == QChar::ParagraphSeparator;
+                })) return std::nullopt;
+            items.append(MdTable::Item{text});
         }
-        if (!cells.isEmpty()) rows.append(cells);
+        if (!MdTable::readsBack(items, int(columns), dialect)) return std::nullopt;
     }
-    if (rows.isEmpty()) return std::nullopt;
-    return rows;
+    cells->markdown = true;
+    return cells;
+}
+
+std::optional<ClipboardCells> cellsOf(const QMimeData *mime, bool block, bool allowPlain,
+                                     const MdTable::Dialect &dialect)
+{
+    if (mime->hasFormat(cellsMime))
+        if (auto cells = readCellSource(mime->data(cellsMime), dialect)) return cells;
+    if (mime->hasFormat(tsvMime))
+        if (auto sheet = typedSheet(mime->data(tsvMime))) return sheet;
+    if (mime->hasFormat(libreOfficeMime)) {
+        if (auto sheet = typedSheet(mime->data(libreOfficeMime))) return sheet;
+        if (auto sheet = splitSeparated(mime->text())) return sheet;
+    }
+    const auto html = mime->hasHtml() ? HtmlMarkdown::firstTableCells(mime->html()) : std::nullopt;
+    if (html && html->tooLarge) return ClipboardCells{{}, false, true};
+    if (html && !html->rows.isEmpty()) {
+        // A simple HTML table may be the companion to spreadsheet values.
+        // Spans and additional tables make the HTML's boundaries decisive.
+        if (!html->hasGeometry && mime->hasText()) {
+            const QString text = mime->text();
+            if (text.contains(u'\t'))
+                if (auto sheet = splitSeparated(text)) return sheet;
+        }
+        return ClipboardCells{html->rows};
+    }
+    if (allowPlain && (!mime->hasHtml() || html)) {
+        const QString text = mime->text();
+        if (block && !text.isEmpty()) {
+            if (text.contains(u'\t'))
+                if (auto sheet = splitSeparated(text)) return sheet;
+            return ClipboardCells{{{text}}};
+        }
+        if (html) return ClipboardCells{{}, false, false, true};
+    }
+    return std::nullopt;
+}
+
+QString quotedField(const QString &text)
+{
+    if (!text.contains(u'\t') && !text.contains(u'\n') && !text.contains(u'\r') && !text.contains(u'"')) return text;
+    return u'"' + QString(text).replace(QStringLiteral("\""), QStringLiteral("\"\"")) + u'"';
 }
 
 } // namespace
 
-std::optional<QList<QStringList>> TableGrids::cellsOf(const QMimeData *mime, bool separated)
-{
-    if (!mime) return std::nullopt;
-    // Spreadsheets give tab-separated text beside an HTML table, or a type
-    // of their own; either will do. Other text with tabs in it, as a line of
-    // code or of a log, is cells only where it is pasted over a block of them.
-    const std::optional<QList<QStringList>> table = mime->hasHtml() ? htmlCells(mime->html()) : std::nullopt;
-    static const QStringList sheetTypes{QStringLiteral("application/x-libreoffice-tsvc"),
-                                        QStringLiteral("text/tab-separated-values")};
-    const bool sheet = table || std::any_of(sheetTypes.cbegin(), sheetTypes.cend(),
-                                            [&](const QString &type) { return mime->hasFormat(type); });
-    if (mime->hasText() && (sheet || separated)) {
-        QString text = mime->text();
-        if (text.contains(u'\t')) {
-            while (text.endsWith(u'\n') || text.endsWith(u'\r')) text.chop(1);
-            return splitSeparated(text);
-        }
-    }
-    return table;
-}
-
 bool TableGrids::copyBlock()
 {
-    TableGrid *grid = gridAt(cursor());
-    int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
+    const TableGrid *grid = gridAt(cursor());
     if (!grid) return false;
-    // Every cell, as Ctrl+A selects them, are cells to copy, the one cell of a table of one too.
-    const bool everyCell = m_selectAll.level == 2 && m_selectAll.anchor == anchor() && m_selectAll.cursor == cursor();
-    if (everyCell) {
-        r1 = grid->rowCount() - 1;
-        c1 = grid->columnCount() - 1;
-    } else if (!block(grid, &r0, &r1, &c0, &c1)) {
-        return false;
-    }
+    const auto selected = selectedCells(grid);
+    if (!selected) return false;
+
     const QString source = text();
-    const MdTable::Model model = MdTable::model(source, grid->table());
-    QStringList lines;
+    Document *document = m_binding->m_document;
+    const ParsedTextPtr parsed = document->parse()->current();
+    const md::Options options = document->markdownOptions();
+    QStringList lines, sourceLines;
     QString html = QStringLiteral("<table>");
-    for (int r = r0; r <= r1; ++r) {
-        QStringList fields;
+    for (int r = selected->firstRow; r <= selected->lastRow; ++r) {
+        QStringList fields, markdownFields;
         html += QStringLiteral("<tr>");
-        for (int c = c0; c <= c1; ++c) {
-            int first = 0;
-            const int item = MdTable::itemAt(model.rows[r], c, &first);
-            // A merged cell gives its text once, at its first column.
-            const QString value = item >= 0 && (first == c || c == c0) ? plainCell(model.rows[r][item].text) : QString();
-            // A field with a tab, a line break or a quote is quoted, its quotes doubled.
-            const bool quoted = value.contains(u'\t') || value.contains(u'\n') || value.contains(u'\r') || value.contains(u'"');
-            fields.append(quoted ? u'"' + QString(value).replace(QStringLiteral("\""), QStringLiteral("\"\"")) + u'"' : value);
+        int item = 0;
+        for (int c = selected->firstColumn; c <= selected->lastColumn; ++c) {
+            while (item + 1 < grid->cellCount(r) && grid->cellAt({r, item + 1}).column <= c) ++item;
+            const MdTable::Cell &cell = grid->cellAt({r, item});
+            // A merged cell contributes one value to the rectangle.
+            const QString markdown = cell.column == c || c == selected->firstColumn
+                ? source.mid(cell.start, cell.end - cell.start) : QString();
+            QString plain, rich;
+            if (!markdown.isEmpty())
+                readCellInlines(parsed, cell, markdown, options, [&](const md::Document &tree, const md::Node &node) {
+                    plain = md::inlineText(node, u'\n');
+                    rich = md::cellHtml(tree, node);
+                });
+            fields.append(quotedField(plain));
             const char *tag = r == 0 ? "th" : "td";
-            html += QStringLiteral("<%1>%2</%1>").arg(QLatin1String(tag), value.toHtmlEscaped());
+            html += QStringLiteral("<%1>%2</%1>").arg(QLatin1String(tag), rich);
+            markdownFields.append(quotedField(markdown));
         }
         html += QStringLiteral("</tr>");
         lines.append(fields.join(u'\t'));
+        sourceLines.append(markdownFields.join(u'\t'));
     }
     html += QStringLiteral("</table>");
+    const QString tsv = lines.join(u'\n') + u'\n';
     auto *mime = new QMimeData;
-    mime->setText(lines.join(u'\n') + u'\n');
+    mime->setText(tsv);
+    mime->setData(tsvMime, tsv.toUtf8());
     mime->setHtml(html);
+    mime->setData(cellsMime, cellsHeader + (sourceLines.join(u'\n') + u'\n').toUtf8());
     QGuiApplication::clipboard()->setMimeData(mime);
     return true;
 }
@@ -3130,45 +3226,55 @@ bool TableGrids::copyBlock()
 bool TableGrids::cutBlock()
 {
     TableGrid *grid = gridAt(cursor());
-    int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
-    if (!grid || !block(grid, &r0, &r1, &c0, &c1) || !m_binding->editable()) return false;
+    if (!grid || !m_binding->editable()) return false;
+    const auto selected = selectedCells(grid);
+    if (!selected) return false;
     copyBlock();
+    const auto [r0, r1, c0, c1] = *selected;
     run(change(grid, [&](MdTable::Model &m) { return MdTable::clearCells(m, r0, r1, c0, c1); }, r0, c0));
     return true;
 }
 
-TableGrids::Paste TableGrids::pasteCells(const QMimeData *mime)
+TableGrids::Paste TableGrids::pasteCells(const QMimeData *mime, bool allowPlain)
 {
     TableGrid *grid = gridAt(cursor());
     if (!grid) return Paste::NotCells;
-    int r0 = 0, r1 = 0, c0 = 0, c1 = 0;
-    const bool inBlock = block(grid, &r0, &r1, &c0, &c1);
-    const auto values = cellsOf(mime, inBlock);
-    if (!values || values->isEmpty()) return Paste::NotCells;
+    const auto selected = selectedCells(grid);
+    const MdTable::Dialect dialect = this->dialect();
+    const auto input = cellsOf(mime, selected.has_value(), allowPlain, dialect);
+    if (!input) return Paste::NotCells;
+    if (input->plainFallback) return Paste::PlainText;
+    const auto tooBig = [&] {
+        emit refused(tooLarge());
+        return Paste::Refused;
+    };
+    if (input->tooLarge) return tooBig();
+    if (input->rows.isEmpty()) return Paste::NotCells;
     if (!m_binding->editable()) return Paste::Refused;
     const auto done = [](bool pasted) { return pasted ? Paste::Pasted : Paste::Refused; };
-    const MdTable::Dialect dialect = this->dialect();
-    const QString newline = m_binding->m_document ? m_binding->m_document->newline() : QStringLiteral("\n");
-    if (!inBlock) {
-        const TableGrid::Place place = grid->placeOf(cursor());
-        if (!place.valid()) return Paste::NotCells;
-        r0 = r1 = place.row;
-        c0 = c1 = grid->cellAt(place).column;
+    const auto &cells = input->rows;
+    if (selected && cells.size() == 1 && cells.first().size() == 1 && !cells.first().first().isEmpty()) {
+        const auto [r0, r1, c0, c1] = *selected;
+        const QString value = input->markdown ? cells.first().first() : MdTable::encodeCell(cells.first().first(), dialect);
+        return done(run(changeBlock(grid, [&](MdTable::Model &model) {
+            return MdTable::fillCells(model, r0, r1, c0, c1, value);
+        }, *selected)));
     }
-    const QList<QStringList> cells = *values;
-    // One value over a block fills every cell of it.
-    if (inBlock && cells.size() == 1 && cells.first().size() == 1) {
-        QList<QStringList> filled;
-        for (int r = r0; r <= r1; ++r) filled.append(QStringList(QList<QString>(c1 - c0 + 1, cells.first().first())));
-        return done(run(changeBlock(
-            grid, [&](MdTable::Model &m) { return MdTable::pasteCells(m, r0, c0, filled, dialect, newline); },
-            {r0, r1, c0, c1})));
-    }
+
+    const TableGrid::Place place = grid->placeOf(cursor());
+    if (!selected && !place.valid()) return Paste::NotCells;
+    const int row = selected ? selected->firstRow : place.row;
+    const int column = selected ? selected->firstColumn : grid->cellAt(place).column;
     int width = 0;
-    for (const QStringList &row : cells) width = qMax(width, int(row.size()));
-    const Span pasted{r0, r0 + int(cells.size()) - 1, c0, c0 + width - 1};
-    return done(run(changeBlock(
-        grid, [&](MdTable::Model &m) { return MdTable::pasteCells(m, r0, c0, cells, dialect, newline); }, pasted)));
+    for (const QStringList &line : cells) width = qMax(width, int(line.size()));
+    const int columns = qMax(grid->columnCount(), column + width);
+    const int rows = qMax(grid->rowCount(), row + int(cells.size()));
+    if (columns > MdTable::MaxColumns || qsizetype(columns) * rows > MdTable::MaxCells) return tooBig();
+    const QString newline = m_binding->m_document->newline();
+    const Span pasted{row, row + int(cells.size()) - 1, column, column + width - 1};
+    return done(run(changeBlock(grid, [&](MdTable::Model &model) {
+        return MdTable::pasteCells(model, row, column, cells, dialect, newline, input->markdown);
+    }, pasted)));
 }
 
 void TableGrids::selectWordAt(int position)

@@ -138,6 +138,10 @@ struct Piece {
     bool comment = false; // a `//` line inside a paragraph
 };
 
+// A table cell's inline pieces, with the backslashes that protect its
+// pipes left out before inline parsing.
+std::vector<Piece> tableCellPieces(QStringView text, int start, int end, int line);
+
 struct Block {
     NodeType type = NodeType::Document;
     Block *parent = nullptr;

@@ -28,5 +28,7 @@ void undefinedNotesBecomeInlineOrDefined();
 void noteMenuFindsItsReferenceAgain();
 void assistiveTechnologyEditsTheSource();
 void wordCountsFollowTextAndSelection();
+void richTablePasteKeepsHorizontalMerges_data();
+void richTablePasteKeepsHorizontalMerges();
 
 } // namespace EditingTests

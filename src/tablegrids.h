@@ -374,11 +374,11 @@ public:
     bool cutBlock();
     // Cells from a spreadsheet pasted at the caret's cell, or over a block
     // of them: they fill it and grow the table where they reach past it. A
-    // single value fills every cell of a block, and over a block any text
-    // with tabs is cells. NotCells for anything else, which the view pastes
-    // as text; Refused when they cannot go there.
-    enum class Paste { NotCells, Pasted, Refused };
-    Paste pasteCells(const QMimeData *mime);
+    // single value fills every cell of a block. An unusable HTML table can
+    // fall back to its plain text. NotCells leaves the ordinary paste route
+    // in charge.
+    enum class Paste { NotCells, PlainText, Pasted, Refused };
+    Paste pasteCells(const QMimeData *mime, bool allowPlain);
     // A double click selects the word at a position in a cell, a triple
     // click the cell's text.
     Q_INVOKABLE void selectWordAt(int position);
@@ -386,11 +386,6 @@ public:
     // What an input method shows changed: the cell it is in is laid out
     // again with it.
     void compositionChanged();
-    // The cells a clipboard holds, row by row: from an HTML table, or the
-    // text with tabs between them that a spreadsheet gives beside one; with
-    // `separated`, from any text with tabs; none for anything else.
-    static std::optional<QList<QStringList>> cellsOf(const QMimeData *mime, bool separated = false);
-
     // The binding's projection: shown anew, a change followed, laid out anew.
     void loaded();
     void sourceChanged(SourceRange range, int inserted);
@@ -449,6 +444,7 @@ private:
     struct Span {
         int firstRow = 0, lastRow = 0, firstColumn = 0, lastColumn = 0;
     };
+    std::optional<Span> selectedCells(const TableGrid *grid) const;
     std::optional<Span> span(const TableGrid *grid) const;
     // A change that leaves a block selected, from one cell to another.
     Adapted changeBlock(const TableGrid *grid, const std::function<QString(MdTable::Model &)> &operation,
@@ -477,12 +473,13 @@ private:
     // that move left the caret: a caret moved from there drops it.
     qreal m_goalX = -1;
     int m_goalAt = -1;
-    // The columns a column's handle selected, while the selection it made
-    // stays: the commands act on them, though the block shown takes in the
-    // merged cells that reach into them.
+    // The rows or columns a handle picked while its selection stays.
+    // A column command acts on the picked columns, even if a merge
+    // reaches outside them.
     struct Picked {
         QPointer<TableGrid> grid;
         int anchor = -1, cursor = -1, firstColumn = 0, lastColumn = 0;
+        int firstRow = -1, lastRow = -1; // -1 for a column handle
     };
     Picked m_picked;
     // The selection Ctrl+A made last in a grid, and how far it went: a

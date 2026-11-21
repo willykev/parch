@@ -2584,6 +2584,361 @@ void writingBelowAGridKeepsTheNextParagraphSeparate()
     }
 }
 
+namespace {
+
+const QString clipboardTable = u"| Color | Name |\n| --- | --- |\n| Blue | First |\n| Gold | Second |\n\nAfter."_s;
+const QString tsvMime = u"text/tab-separated-values"_s;
+const QString parchCellsMime = u"application/x-parch-table-cells"_s;
+
+void pasteUndo(GridEditor &view, const QString &original)
+{
+    compareSaved(view, view.text());
+    QCOMPARE(view.document->buffer()->undoDepth(), 1);
+    view.binding->undo();
+    QCOMPARE(view.text(), original);
+    compareSaved(view, original);
+}
+
+} // namespace
+
+void plainPasteFillsEverySelectedCell_data()
+{
+    QTest::addColumn<QString>("selection");
+    QTest::addColumn<QString>("header");
+    QTest::addColumn<QString>("first");
+    QTest::addColumn<QString>("second");
+    QTest::newRow("row-handle") << u"row"_s << u"Color|Name"_s << u"Done|Done"_s << u"Gold|Second"_s;
+    QTest::newRow("keyboard-rectangle") << u"keyboard"_s << u"Color|Name"_s << u"Done|Done"_s << u"Done|Done"_s;
+    QTest::newRow("column-handle") << u"column"_s << u"Done|Name"_s << u"Done|First"_s << u"Done|Second"_s;
+    QTest::newRow("paste-plain-text") << u"plain"_s << u"Color|Name"_s << u"Done|Done"_s << u"Gold|Second"_s;
+    QTest::newRow("merged-row") << u"merged"_s << u"Color|Name"_s << u"Done"_s << u"Gold|Second"_s;
+    QTest::newRow("typing") << u"typing"_s << u"Color|Name"_s << u"Done|"_s << u"Gold|Second"_s;
+    QTest::newRow("one-caret") << u"caret"_s << u"Color|Name"_s << u"BlDoneue|First"_s << u"Gold|Second"_s;
+    QTest::newRow("empty-clipboard") << u"empty"_s << u"Color|Name"_s << u"Blue|First"_s << u"Gold|Second"_s;
+    QTest::newRow("rich-prose") << u"rich"_s << u"Color|Name"_s << u"**Done**|"_s << u"Gold|Second"_s;
+}
+
+void plainPasteFillsEverySelectedCell()
+{
+    QFETCH(QString, selection);
+    QFETCH(QString, header);
+    QFETCH(QString, first);
+    QFETCH(QString, second);
+    QString original = clipboardTable;
+    const bool merged = selection == u"merged";
+    if (merged) original.replace(u"| Blue | First |"_s, u"| Blue ||"_s);
+    GridEditor view(original);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const MdTable::Cell blue = view.grid()->cellAt({1, 0});
+    if (selection == u"caret") view.select(blue.start + 2, blue.start + 2);
+    else if (selection == u"keyboard") {
+        view.select(blue.end, blue.end);
+        view.key(Qt::Key_Right, Qt::ShiftModifier);
+        view.key(Qt::Key_Down, Qt::ShiftModifier);
+    } else if (selection == u"column") view.binding->tables()->selectColumn(view.grid(), 0, false);
+    else view.binding->tables()->selectRow(view.grid(), 1, false);
+
+    if (selection == u"typing") view.type(u"Done"_s);
+    else if (selection == u"rich") pasteText(view, u"Done\tOther"_s, u"<b>Done</b>"_s);
+    else if (selection == u"empty") {
+        auto *mime = new QMimeData;
+        mime->setData(u"application/octet-stream"_s, "data");
+        QGuiApplication::clipboard()->setMimeData(mime);
+        view.binding->paste();
+    } else {
+        QGuiApplication::clipboard()->setText(u"Done"_s);
+        if (selection == u"plain") view.key(Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+        else view.key(Qt::Key_V, Qt::ControlModifier);
+    }
+    QCOMPARE(view.grid()->rowTexts(0).join(u'|'), header);
+    QCOMPARE(view.grid()->rowTexts(1).join(u'|'), first);
+    QCOMPARE(view.grid()->rowTexts(2).join(u'|'), second);
+    if (merged) QCOMPARE(view.grid()->cellAt({1, 0}).span, 2);
+    if (selection == u"empty") {
+        QCOMPARE(view.text(), original);
+        QVERIFY(!view.document->buffer()->canUndo());
+    } else {
+        pasteUndo(view, original);
+    }
+}
+
+void typedTsvPastesItsRowsAndColumns_data()
+{
+    QTest::addColumn<QString>("format");
+    QTest::addColumn<QByteArray>("payload");
+    QTest::addColumn<QString>("plain");
+    QTest::addColumn<QStringList>("rows");
+    QTest::addColumn<int>("column");
+    QTest::newRow("single-column-with-plain") << tsvMime << QByteArray("11\n22") << u"11\n22"_s
+        << QStringList{u"11|First"_s, u"22|Second"_s} << 0;
+    QTest::newRow("single-column") << tsvMime << QByteArray("11\n22\n") << QString()
+        << QStringList{u"11|First"_s, u"22|Second"_s} << 0;
+    QTest::newRow("two-by-two") << tsvMime << QByteArray("11\t12\n21\t22\n") << QString()
+        << QStringList{u"11|12"_s, u"21|22"_s} << 0;
+    QTest::newRow("explicit-sheet-beats-plain") << tsvMime << QByteArray("11\t12\n21\t22\n") << u"ignore\tme"_s
+        << QStringList{u"11|12"_s, u"21|22"_s} << 0;
+    QTest::newRow("utf8-crlf-quoted-fields")
+        << tsvMime << u"\uFEFF\"é\t一\"\t\"two\r\nlines\"\r\n\t\"He said \"\"Hi\"\"\"\r\n"_s.toUtf8() << QString()
+        << QStringList{u"é\t一|two lines"_s, u"|He said \"Hi\""_s} << 0;
+    QTest::newRow("libreoffice-companion") << u"application/x-libreoffice-tsvc"_s << QByteArray("\xff") << u"11\n22"_s
+        << QStringList{u"11|First"_s, u"22|Second"_s} << 0;
+    QTest::newRow("actual-empty-last-row") << tsvMime << QByteArray("11\n\n") << QString()
+        << QStringList{u"11|First"_s, u"|Second"_s} << 0;
+    QTest::newRow("invalid-payload") << tsvMime << QByteArray("\xff") << u"X"_s
+        << QStringList{u"XBlue|First"_s, u"Gold|Second"_s} << 0;
+    QTest::newRow("truncated-utf8") << tsvMime << QByteArray("12\xd0") << u"X"_s
+        << QStringList{u"XBlue|First"_s, u"Gold|Second"_s} << 0;
+    QTest::newRow("unclosed-quote") << tsvMime << QByteArray("\"open") << u"X"_s
+        << QStringList{u"XBlue|First"_s, u"Gold|Second"_s} << 0;
+    const QStringList wide(MdTable::MaxColumns + 1, u"value"_s);
+    QTest::newRow("too-many-columns") << tsvMime << wide.join(u'\t').toUtf8() << QString() << QStringList() << 0;
+    const QStringList atLimit(MdTable::MaxColumns, u"value"_s);
+    QTest::newRow("would-grow-past-column-limit") << tsvMime << atLimit.join(u'\t').toUtf8()
+        << QString() << QStringList() << 1;
+}
+
+void typedTsvPastesItsRowsAndColumns()
+{
+    QFETCH(QString, format);
+    QFETCH(QByteArray, payload);
+    QFETCH(QString, plain);
+    QFETCH(QStringList, rows);
+    QFETCH(int, column);
+    GridEditor view(clipboardTable);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int start = view.grid()->cellAt({1, column}).start;
+    view.select(start, start);
+    auto *mime = new QMimeData;
+    mime->setData(format, payload);
+    if (!plain.isNull()) mime->setText(plain);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    view.binding->paste();
+    if (rows.isEmpty()) {
+        QCOMPARE(refused.count(), 1);
+        QCOMPARE(view.text(), clipboardTable);
+        QVERIFY(!view.document->buffer()->canUndo());
+        compareSaved(view, clipboardTable);
+        return;
+    }
+    QCOMPARE(view.grid()->rowCount(), 3);
+    QCOMPARE(view.grid()->rowTexts(0), (QStringList{u"Color"_s, u"Name"_s}));
+    QCOMPARE(view.grid()->rowTexts(1).join(u'|'), rows[0]);
+    QCOMPARE(view.grid()->rowTexts(2).join(u'|'), rows[1]);
+    pasteUndo(view, clipboardTable);
+}
+
+void htmlRowspanKeepsTheNextCellInItsColumn_data()
+{
+    QTest::addColumn<QString>("html");
+    QTest::addColumn<QString>("rows");
+    QTest::addColumn<bool>("mergedDestination");
+    QTest::newRow("rowspan")
+        << u"<table><tr><td rowspan=2>Day</td><td>Mon</td></tr><tr><td>Tue</td></tr></table>"_s
+        << u"Color|Name / Day|Mon / |Tue"_s << false;
+    QTest::newRow("both-spans")
+        << u"<table><tr><td rowspan=2 colspan=2>Day</td><td>Mon</td></tr><tr><td>Tue</td></tr></table>"_s
+        << u"Color|Name| / Day||Mon / ||Tue"_s << false;
+    QTest::newRow("zero-through-row-group")
+        << u"<table><tbody><tr><td rowspan=0>Day</td><td>Mon</td></tr><tr><td>Tue</td></tr></tbody>"
+           "<tbody><tr><td>Wed</td><td>Thu</td></tr></tbody></table>"_s
+        << u"Color|Name / Day|Mon / |Tue / Wed|Thu"_s << false;
+    QTest::newRow("invalid-spans")
+        << u"<table><tr><td rowspan='oops' colspan=-2>Day</td><td>Mon</td></tr>"
+           "<tr><td>Tue</td><td>Wed</td></tr></table>"_s
+        << u"Color|Name / Day|Mon / Tue|Wed"_s << false;
+    QTest::newRow("overlapping-spans")
+        << u"<table><tr><td>A</td><td rowspan=2>B</td><td>C</td></tr>"
+           "<tr><td colspan=2>D</td><td>E</td></tr></table>"_s
+        << u"Color|Name| / A|B|C / D||E"_s << false;
+    QTest::newRow("partial-merge-refused")
+        << u"<table><tr><td rowspan=2>Day</td></tr><tr></tr></table>"_s
+        << QString() << true;
+}
+
+void htmlRowspanKeepsTheNextCellInItsColumn()
+{
+    QFETCH(QString, html);
+    QFETCH(QString, rows);
+    QFETCH(bool, mergedDestination);
+    QString original = clipboardTable;
+    if (mergedDestination) original.replace(u"| Blue | First |"_s, u"| Blue ||"_s);
+    GridEditor view(original);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int blue = view.grid()->cellAt({1, 0}).start;
+    view.select(blue, blue);
+    auto *mime = new QMimeData;
+    mime->setHtml(html);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    QSignalSpy refused(view.binding->tables(), &TableGrids::refused);
+    view.binding->paste();
+    if (mergedDestination) {
+        QCOMPARE(refused.count(), 1);
+        QCOMPARE(view.text(), original);
+        QVERIFY(!view.document->buffer()->canUndo());
+        compareSaved(view, original);
+    } else {
+        QCOMPARE(refused.count(), 0);
+        QCOMPARE(cells(view), rows);
+        pasteUndo(view, original);
+    }
+}
+
+void gridPasteUsesTheFirstHtmlTable_data()
+{
+    QTest::addColumn<QString>("html");
+    QTest::addColumn<QString>("plain");
+    QTest::addColumn<QString>("value");
+    const QString first = u"<table><tr><td>First</td></tr></table>"_s;
+    const QString other = u"<p>Between</p><table><tr><td>Other table</td></tr></table>"_s;
+    QTest::newRow("two-tables") << first + other << QString() << u"First"_s;
+    QTest::newRow("with-tabbed-companion") << first + other << u"First\tWrong\nOther table\tWrong"_s << u"First"_s;
+    QTest::newRow("uppercase-and-omitted-tags")
+        << u"<TABLE><TBODY><TR><TD>First</TBODY></TABLE>"_s + other << QString() << u"First"_s;
+    QTest::newRow("nested")
+        << u"<table><tr><td>First <table><tr><td>inner</td></tr></table></td></tr></table>"_s
+        << u"First\tWrong\ninner\tWrong"_s << u"First inner"_s;
+    QTest::newRow("comment")
+        << u"<!-- <table><tr><td>Hidden</td></tr></table> -->"_s + first << QString() << u"First"_s;
+    QTest::newRow("empty-first-table")
+        << u"<table><tbody><tr></tr></tbody></table>"_s + other << u"X"_s << u"XBlue"_s;
+    QTest::newRow("single") << first << QString() << u"First"_s;
+}
+
+void gridPasteUsesTheFirstHtmlTable()
+{
+    QFETCH(QString, html);
+    QFETCH(QString, plain);
+    QFETCH(QString, value);
+    GridEditor view(clipboardTable);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int blue = view.grid()->cellAt({1, 0}).start;
+    view.select(blue, blue);
+    auto *mime = new QMimeData;
+    mime->setHtml(html);
+    if (!plain.isNull()) mime->setText(plain);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    view.binding->paste();
+    QCOMPARE(cells(view), u"Color|Name / %1|First / Gold|Second"_s.arg(value));
+    pasteUndo(view, clipboardTable);
+}
+
+void sortUsesTheVisibleCellText()
+{
+    const QString original = u"| Key | Extra | Row |\n| --- | --- | --- |\n"
+                             "| 20 | | twenty |\n| 1_0 | | underscore |\n| 3 | | three |\n"
+                             "| _10_ | | emphasis |\n| [10](https://example.org) | | link |\n"
+                             "| `10` | | code |\n| \\_ | | escaped |\n| _ | | marker |\n"
+                             "| 1e999 | | overflow |\n| | | blank |\n|  || merged-blank |\n\nAfter."_s;
+    GridEditor view(original);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(1));
+    const int rows = view.grid()->rowCount();
+    QCOMPARE(rows, 12);
+    QHash<QString, QStringList> byId;
+    for (int r = 1; r < rows; ++r) {
+        const QStringList cells = view.grid()->rowTexts(r);
+        byId.insert(cells.last(), cells);
+    }
+    for (const bool descending : {false, true}) {
+        view.binding->tables()->selectColumn(view.grid(), 0, false);
+        QObject *menu = view.pane->findChild<QObject *>(u"tableMenu"_s);
+        QVERIFY(menu);
+        QVERIFY(menu->setProperty("kind", u"column"_s));
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        auto *item = menu->findChild<QQuickItem *>(descending ? u"sortDescendingEntry"_s : u"sortAscendingEntry"_s);
+        QVERIFY(item && item->isVisible() && item->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(item, "triggered"));
+        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        QStringList order;
+        for (int r = 1; r < rows; ++r) {
+            const QStringList cells = view.grid()->rowTexts(r);
+            QCOMPARE(cells, byId.value(cells.last()));
+            order.append(cells.last());
+        }
+        QStringList numbers{u"emphasis"_s, u"link"_s, u"code"_s};
+        numbers.prepend(descending ? u"twenty"_s : u"three"_s);
+        numbers.append(descending ? u"three"_s : u"twenty"_s);
+        QCOMPARE(order.first(5), numbers);
+        QCOMPARE(order.last(2), (QStringList{u"blank"_s, u"merged-blank"_s}));
+        QVERIFY(order.indexOf(u"escaped"_s) < order.indexOf(u"marker"_s));
+        QCOMPARE(view.grid()->cellAt({rows - 1, 0}).span, 2);
+
+        const auto scanned = MdTable::scan(original, 0, int(original.size()));
+        QVERIFY(scanned);
+        MdTable::Model model = MdTable::model(original, *scanned);
+        QVERIFY(MdTable::sortRows(model, 0, descending).isEmpty());
+        QCOMPARE(view.text(), MdTable::write(model).text + original.mid(scanned->end));
+        pasteUndo(view, original);
+    }
+}
+
+void copiedCellsReadWellAndPasteBackAsMarkdown_data()
+{
+    QTest::addColumn<QString>("transfer");
+    QTest::newRow("private") << u"copy"_s;
+    QTest::newRow("cut") << u"cut"_s;
+    QTest::newRow("only-public") << u"public"_s;
+    QTest::newRow("corrupt-private") << u"corrupt"_s;
+    QTest::newRow("unknown-private-version") << u"version"_s;
+    QTest::newRow("unsafe-private-cell") << u"unsafe"_s;
+}
+
+void copiedCellsReadWellAndPasteBackAsMarkdown()
+{
+    QFETCH(QString, transfer);
+    const QString original = u"| A | B | C |\n| --- | --- | --- |\n"
+                             "| Pear<br>two | **big** [x](https://e.com) | E\\|W \"q\" 1_0 |\n\n"
+                             "| A | B | C |\n| --- | --- | --- |\n| first | second | third |\n\nAfter."_s;
+    GridEditor view(original);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.grids(2));
+    view.binding->tables()->selectRow(view.grid(), 1, false);
+    if (transfer == u"cut") {
+        view.binding->cut();
+        QCOMPARE(view.grid()->rowTexts(1), (QStringList{QString(), QString(), QString()}));
+        pasteUndo(view, original);
+    } else {
+        view.binding->copy();
+    }
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    QVERIFY(mime);
+    const QString tsv = u"\"Pear\ntwo\"\tbig x\t\"E|W \"\"q\"\" 1_0\"\n"_s;
+    QCOMPARE(mime->text(), tsv);
+    QCOMPARE(mime->data(tsvMime), tsv.toUtf8());
+    QVERIFY(mime->hasFormat(parchCellsMime));
+    QVERIFY(mime->html().contains(u"Pear<br"));
+    QVERIFY(mime->html().contains(u"<strong>big</strong>"));
+    QVERIFY(mime->html().contains(u"<a href=\"https://e.com\">x</a>"));
+    const bool privateCells = transfer == u"copy" || transfer == u"cut";
+    if (!privateCells) {
+        auto *publicCells = new QMimeData;
+        publicCells->setText(mime->text());
+        publicCells->setData(tsvMime, mime->data(tsvMime));
+        publicCells->setHtml(mime->html());
+        if (transfer == u"corrupt") publicCells->setData(parchCellsMime, "not a rectangle");
+        if (transfer == u"version")
+            publicCells->setData(parchCellsMime, "parch-table-cells 2\nWrong\tX\tY\n");
+        if (transfer == u"unsafe")
+            publicCells->setData(parchCellsMime, "parch-table-cells 1\nbad | cell\tx\ty\n");
+        QGuiApplication::clipboard()->setMimeData(publicCells);
+    }
+    const int first = view.grid(1)->cellAt({1, 0}).start;
+    view.select(first, first);
+    view.binding->paste();
+    const QStringList expected = privateCells
+        ? QStringList{u"Pear<br>two"_s, u"**big** [x](https://e.com)"_s, u"E\\|W \"q\" 1_0"_s}
+        : QStringList{u"Pear two"_s, u"big x"_s, u"E\\|W \"q\" 1_0"_s};
+    QCOMPARE(view.grid(1)->rowTexts(1), expected);
+    pasteUndo(view, original);
+}
+
 void slowPastesLeaveTablesShownAsMarkdownAsWritten()
 {
     const QString html = u"<p>First.</p><!--"_s + QString(65536, u' ') + u"-->"_s;

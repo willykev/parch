@@ -24,6 +24,12 @@
 - Pasted numbered lists continue past 2,147,483,647. Vim percentage jumps
   and citation year labels also work at the ends of their numeric ranges.
 
+- Wide tables and rows past the cell limit stay readable as text in the
+  preview and formatted exports. **Check document** also points out omitted
+  tables of contents and citation formatting that reached a limit.
+- Rich paste falls back to the clipboard’s plain text when the HTML exceeds
+  16 MiB or its formatting would produce too much Markdown.
+
 - Tables show as grids in the text, between the paragraphs, and you write in
   their cells as anywhere else. `Tab`, `Enter` and the arrows go from cell to
   cell, and `Tab` or `Enter` on the last row adds one. Handles beside each row

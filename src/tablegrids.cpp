@@ -3196,7 +3196,16 @@ std::optional<ClipboardCells> cellsOf(const QMimeData *mime, bool block, bool al
         if (auto sheet = typedSheet(mime->data(libreOfficeMime))) return sheet;
         if (auto sheet = splitSeparated(mime->text())) return sheet;
     }
-    const auto html = mime->hasHtml() ? HtmlMarkdown::firstTableCells(mime->html()) : std::nullopt;
+    const QString markup = mime->hasHtml() ? mime->html() : QString();
+    if (markup.size() > HtmlMarkdown::SynchronousChars) {
+        if (!markup.contains(u"<table", Qt::CaseInsensitive)) return std::nullopt;
+        const QString text = mime->text();
+        if (text.contains(u'\t'))
+            if (auto sheet = splitSeparated(text)) return sheet;
+        if (allowPlain && !text.isEmpty()) return ClipboardCells{{}, false, false, true};
+        return std::nullopt;
+    }
+    const auto html = markup.isEmpty() ? std::nullopt : HtmlMarkdown::firstTableCells(markup);
     if (html && html->tooLarge) return ClipboardCells{{}, false, true};
     if (html && !html->rows.isEmpty()) {
         // A simple HTML table may be the companion to spreadsheet values.

@@ -52,8 +52,9 @@ QList<ParsedTable> parsedTables(const QString &text, const md::Options &options)
         for (const md::Node &row : table->children) {
             if (row.type != md::NodeType::TableRow) continue;
             QList<ParsedCell> cells;
-            for (const md::Node &cell : row.children)
+            md::forEachTableCell(*table, row, [&](const md::Node &cell) {
                 cells.append({text.mid(cell.range.start, cell.range.length()), cell.column, cell.span, cell.align});
+            });
             rows.append(cells);
         }
         tables.append(rows);
@@ -105,6 +106,7 @@ const QStringList &fixtures()
         QStringLiteral("| A | B | C |\n|---|---|---|\n| Writing || Reading |\n| x | y | z |"),
         QStringLiteral("| `a|b` | c |\n|---|---|\n| x | `y|z` |"),
         QStringLiteral("| a | b | c |\n|---|---|---|\n| `x|y` | z |"),
+        QStringLiteral("| A | B | C | D |\n|:--|---|:-:|--:|\n| span ||  |"),
         QStringLiteral("a | b\n--|--\nc | d"),
         QStringLiteral("| a | b |\n|---|---|\n| x |\n| 1 | 2 | 3 |"),
         QStringLiteral("| a \\| b | c |\n|---|---|\n| x | y \\| z |"),
@@ -206,17 +208,21 @@ void scannerAgreesWithTheParser()
                     const MdTable::Row &row = table->rows[r == 0 ? 0 : r + 1];
                     const md::Node *parsed = rows[r];
                     int cells = 0;
-                    for (const MdTable::Cell &cell : row.cells) {
-                        if (cell.column >= table->columns) continue;
-                        QVERIFY2(cells < int(parsed->children.size()), qPrintable(text));
-                        const md::Node &expected = parsed->children[size_t(cells++)];
-                        const QString context = text + QStringLiteral(" row %1 cell %2").arg(r).arg(cells);
+                    md::forEachTableCell(*node, *parsed, [&](const md::Node &expected) {
+                        const QString context = text + QStringLiteral(" row %1 cell %2").arg(r).arg(cells + 1);
+                        QVERIFY2(cells < row.cells.size(), qPrintable(context));
+                        const bool omitted = size_t(cells) >= parsed->children.size();
+                        const MdTable::Cell &cell = row.cells[cells++];
+                        QVERIFY2(cell.missing == omitted, qPrintable(context));
                         QVERIFY2(cell.start == expected.range.start && cell.end == expected.range.end, qPrintable(context));
+                        if (omitted)
+                            QVERIFY2(cell.rawStart == parsed->range.end && cell.rawEnd == parsed->range.end, qPrintable(context));
                         QVERIFY2(cell.column == expected.column, qPrintable(context));
                         if (table->unfit == MdTable::Unfit::None)
                             QVERIFY2(cell.span == expected.span, qPrintable(context));
-                    }
-                    QCOMPARE(cells, int(parsed->children.size()));
+                    });
+                    for (; cells < row.cells.size(); ++cells)
+                        QVERIFY2(row.cells[cells].column >= table->columns, qPrintable(text));
                 }
             }
             // Written tidy, every table says what it said.

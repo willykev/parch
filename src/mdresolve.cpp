@@ -5,12 +5,14 @@
 // the table of contents.
 #include "mdinclude.h"
 #include "mdparser_p.h"
+#include "mdtable.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QUrl>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 
 namespace md {
@@ -47,7 +49,7 @@ QString sizeText(qint64 bytes)
 class Assembler {
 public:
     Assembler(ParseState &state, Document &document, const Source &source)
-        : st(state), doc(document), source(source), inlines(state)
+        : st(state), doc(document), source(source), inlines(state), tableCellsLeft(std::clamp(source.maxTableCells, 0, 100000))
     {
     }
 
@@ -77,6 +79,7 @@ private:
     Document &doc;
     const Source &source;
     InlineParser inlines;
+    int tableCellsLeft;
 
     struct Loaded {
         int file = -1;
@@ -402,6 +405,7 @@ void Assembler::convert(Block *block, Node &node)
         break;
     case NodeType::Table:
         node.columns = block->columns;
+        node.columnAlignments = std::move(block->aligns);
         break;
     case NodeType::TableRow:
         node.header = block->header;
@@ -448,8 +452,48 @@ void Assembler::convert(Block *block, Node &node)
 
 // --- Resolution ------------------------------------------------------------------
 
-// The first pass over the finished tree: everything that does not depend
-// on the order in which notes are read.
+// Determine the occupied rectangle before a renderer allocates a table.
+// A column stays occupied through the last row of a vertical span.
+bool sizeHtmlTable(Node &table, int &remaining)
+{
+    std::array<int, MdTable::MaxColumns> occupiedUntil{};
+    int rows = 0, width = 0;
+    const auto section = [&](auto &&self, Node &part) -> bool {
+        for (Node &row : part.children) {
+            if (row.type != NodeType::HtmlElement) continue;
+            if (row.label == u"thead" || row.label == u"tbody" || row.label == u"tfoot") {
+                if (!self(self, row)) return false;
+                continue;
+            }
+            if (row.label != u"tr") continue;
+            if (++rows > MdTable::MaxCells) return false;
+            int column = 0;
+            for (Node &cell : row.children) {
+                if (cell.type != NodeType::HtmlElement || (cell.label != u"td" && cell.label != u"th")) continue;
+                while (column < MdTable::MaxColumns && occupiedUntil[size_t(column)] >= rows) ++column;
+                const int span = std::clamp(cell.attribute(QLatin1StringView("colspan")).toInt(), 1, 1000);
+                if (span > MdTable::MaxColumns - column) return false;
+                const int down = std::clamp(cell.attribute(QLatin1StringView("rowspan")).toInt(), 1, int(MdTable::MaxCells));
+                cell.column = column;
+                cell.span = span;
+                for (int i = column; i < column + span; ++i) {
+                    if (occupiedUntil[size_t(i)] >= rows) return false;
+                    occupiedUntil[size_t(i)] = rows + down - 1;
+                }
+                column += span;
+            }
+            width = std::max(width, column);
+            if (rows * width > std::min<qsizetype>(remaining, MdTable::MaxCells)) return false;
+        }
+        return true;
+    };
+    if (!section(section, table)) return false;
+    table.columns = width;
+    remaining -= rows * width;
+    return true;
+}
+
+// The first pass over the finished tree resolves what is independent of note order.
 void Assembler::structure(Node &node)
 {
     switch (node.type) {
@@ -464,7 +508,61 @@ void Assembler::structure(Node &node)
             }
         }
         break;
+    case NodeType::Table: {
+        const int rows = int(std::count_if(node.children.begin(), node.children.end(), [](const Node &row) {
+            return row.type == NodeType::TableRow;
+        }));
+        const int cells = rows * node.columns;
+        if (cells <= tableCellsLeft) {
+            tableCellsLeft -= cells;
+            break;
+        }
+        st.diagnose(node.file, node.range, Severity::Warning, DiagnosticCode::TableLimit,
+                    QStringLiteral("The document’s tables exceed the cell limit. This table is shown as text."));
+        Node text;
+        text.type = NodeType::Text;
+        text.file = node.file;
+        text.range = node.range;
+        text.text = doc.source(node).toString();
+        node.type = NodeType::Paragraph;
+        node.columns = 0;
+        node.columnAlignments.clear();
+        node.open = {node.range.start, node.range.start};
+        node.close = {node.range.end, node.range.end};
+        node.children.clear();
+        node.children.push_back(std::move(text));
+        break;
+    }
     case NodeType::HtmlElement:
+        if (node.label == u"table" && !sizeHtmlTable(node, tableCellsLeft)) {
+            st.diagnose(node.file, node.range, Severity::Warning, DiagnosticCode::TableLimit,
+                        QStringLiteral("The table exceeds the supported grid. Its text is shown instead."));
+            QString text;
+            const auto space = [&] { if (!text.isEmpty() && !text.back().isSpace()) text += u' '; };
+            const auto read = [&](auto &&self, const Node &part) -> void {
+                if (part.isTextual()) {
+                    text += part.text;
+                    return;
+                }
+                const bool block = part.type == NodeType::HtmlElement && htmlTagInfo(part.label).block;
+                if (block) space();
+                if (part.type == NodeType::HtmlElement && part.label == u"img")
+                    text += part.attribute(QLatin1StringView("alt"));
+                else
+                    for (const Node &child : part.children) self(self, child);
+                if (block || part.label == u"br") space();
+            };
+            read(read, node);
+            Node words;
+            words.type = NodeType::Text;
+            words.text = text.trimmed();
+            words.file = node.file;
+            words.range = node.range;
+            words.generated = true;
+            node.label = QStringLiteral("p");
+            node.children.clear();
+            node.children.push_back(std::move(words));
+        }
         if (node.label == u"a") {
             for (Attribute &attribute : node.attributes)
                 if (attribute.name == u"href" && attribute.value.size() > 1 && attribute.value.startsWith(u'#'))
@@ -719,9 +817,30 @@ void Assembler::resolve()
         st.diagnose(link->file, link->range, Severity::Warning, DiagnosticCode::UnresolvedAnchor,
                     QStringLiteral("No heading has the anchor \"#%1\"").arg(slug));
     }
-    for (Node *toc : tocs) {
-        size_t index = 0;
-        if (!doc.headings.empty()) toc->children.push_back(tocList(index, 1, *toc));
+    if (!tocs.empty() && !doc.headings.empty()) {
+        // Budget every appearance, including each link and its visible text.
+        qint64 nodes = 0, characters = 0;
+        int previous = 0;
+        for (const Heading &h : doc.headings) {
+            nodes += 4 + (h.level > previous ? 1 : 0);
+            characters += h.text.size() + h.slug.size();
+            previous = h.level;
+        }
+        const qint64 copies = std::min<qint64>(std::clamp(source.maxContentsNodes, 0, 100000) / nodes, (4 << 20) / std::max<qint64>(1, characters));
+        for (size_t n = 0; n < tocs.size(); ++n) {
+            Node *toc = tocs[n];
+            if (n >= size_t(copies)) {
+                st.diagnose(toc->file, toc->range, Severity::Warning, DiagnosticCode::ContentsLimit,
+                            QStringLiteral("Further tables of contents exceed the document limit and are omitted."));
+                break;
+            }
+            if (n == 0) {
+                size_t index = 0;
+                toc->children.push_back(tocList(index, 1, *toc));
+            } else {
+                toc->contentsOwner = tocs.front();
+            }
+        }
     }
 
     std::stable_sort(doc.diagnostics.begin(), doc.diagnostics.end(), [](const Diagnostic &a, const Diagnostic &b) {

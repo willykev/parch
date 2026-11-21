@@ -1,4 +1,5 @@
 #include "previewbuilder.h"
+#include "mdtable.h"
 
 #include "codehighlight.h"
 #include "documentcitations.h"
@@ -122,8 +123,10 @@ void hashNode(const Node &node, Hasher &h, const Citations *citations, const pre
             h.add(quint64(words->note) << 1 | quint64(citations->linkCitations));
         }
     }
-    h.add(quint64(node.children.size()));
-    for (const Node &child : node.children) hashNode(child, h, citations, unresolved);
+    for (md::Align align : node.columnAlignments) h.add(quint64(align));
+    const auto &children = node.contentsChildren();
+    h.add(quint64(children.size()));
+    for (const Node &child : children) hashNode(child, h, citations, unresolved);
 }
 
 // A node's own source too, so that equal keys mean equal offsets inside it.
@@ -932,7 +935,7 @@ void Builder::definitionList(const Node &node, const Flow &flow)
 // stepped in by its depth, without bullets.
 void Builder::contents(const Node &node, const Flow &flow, int depth)
 {
-    for (const Node &child : node.children) {
+    for (const Node &child : node.contentsChildren()) {
         if (child.type == NodeType::List || child.type == NodeType::ListItem) {
             contents(child, flow, child.type == NodeType::List ? depth + 1 : depth);
         } else if (child.type == NodeType::Paragraph) {
@@ -1167,9 +1170,8 @@ void Builder::table(const Node &node, const Flow &flow)
     }
     if (rows.empty()) return;
     // A table too large to lay out is shown as it is written, and says why.
-    qsizetype cells = 0;
-    for (const std::vector<Cell> &cellsOfRow : rows) cells += qsizetype(cellsOfRow.size());
-    if (node.columns > MaxTableColumns || cells > MaxTableCells) {
+    const qsizetype cells = qsizetype(rows.size()) * node.columns;
+    if (node.columns > MdTable::MaxColumns || cells > MdTable::MaxCells) {
         const QString source = node.file >= 0 && size_t(node.file) < m_document.files.size()
                                    ? m_document.source(node).toString()
                                    : QString();
@@ -1427,15 +1429,11 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
         }
     };
     collect(node);
-    // Cells take the first free columns of their row; a cell that spans
-    // rows keeps its columns in the rows below.
     std::vector<std::vector<Cell>> rows;
-    std::vector<std::vector<bool>> taken(rowNodes.size());
-    int columns = 0;
+    const int columns = node.columns;
     int headers = 0;
     for (size_t r = 0; r < rowNodes.size(); ++r) {
         std::vector<Cell> cells;
-        int column = 0;
         bool allHeaders = true;
         for (const Node &child : rowNodes[r]->children) {
             if (child.type != NodeType::HtmlElement) continue;
@@ -1445,9 +1443,10 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
             Cell cell;
             cell.node = &child;
             cell.header = header;
+            cell.column = child.column;
+            cell.span = child.span;
             for (const md::Attribute &attribute : child.attributes) {
-                if (attribute.name == QLatin1StringView("colspan")) cell.span = std::clamp(attribute.value.toInt(), 1, 1000);
-                else if (attribute.name == QLatin1StringView("rowspan"))
+                if (attribute.name == QLatin1StringView("rowspan"))
                     cell.rows = std::clamp(attribute.value.toInt(), 1, int(rowNodes.size() - r));
                 else if (attribute.name == QLatin1StringView("align")) {
                     const QString value = attribute.value.toLower();
@@ -1456,15 +1455,6 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
                                                                        : md::Align::Left;
                 }
             }
-            while (column < int(taken[r].size()) && taken[r][size_t(column)]) ++column;
-            cell.column = column;
-            for (int down = 0; down < cell.rows; ++down) {
-                std::vector<bool> &line = taken[r + size_t(down)];
-                if (int(line.size()) < column + cell.span) line.resize(size_t(column + cell.span), false);
-                std::fill(line.begin() + column, line.begin() + column + cell.span, true);
-            }
-            column += cell.span;
-            columns = std::max(columns, column);
             cells.push_back(cell);
         }
         if (allHeaders && !cells.empty() && headers == int(r)) ++headers;
@@ -1477,7 +1467,6 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
         inlines(caption->children, state);
     }
     if (rows.empty() || columns == 0) return;
-    if (columns > 1000) columns = 1000;
     if (!m_options.islands || m_out->island >= 0) {
         QTextCursor &cursor = m_out->cursor;
         if (!m_out->reuse) cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());

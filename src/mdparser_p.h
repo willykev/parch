@@ -191,6 +191,7 @@ struct Block {
     int lastTextEnd = 0;
     int literalTextLength = 0;   // indented CodeBlock: length of `literal` up to that line
     int columns = 0;
+    int tableRows = 0;
     int column = 0;
     int span = 1;
     Align align = Align::None;

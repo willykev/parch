@@ -308,6 +308,14 @@ CitationOutput CitationFormatter::format(const QList<CitationClusterSpec> &clust
     CslEngine::Result result;
     if (engine) {
         result = engine->process(citations);
+        if (result.nestingLimited)
+            out.diagnostics.append({Code::FormattingLimit, Severity::Warning,
+                                    QStringLiteral("Citation formatting nested past 32 levels is shown as plain text."),
+                                    {}, -1, -1, {}, 0});
+        if (result.renderLimited)
+            out.diagnostics.append({Code::FormattingLimit, Severity::Warning,
+                                    QStringLiteral("Citation formatting reached its limit. Further output was omitted."),
+                                    {}, -1, -1, {}, 0});
     } else {
         for (const CslCitation &citation : citations) {
             CslText text;

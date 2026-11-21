@@ -7,6 +7,10 @@
 // stand-in for the desktop's print portal. ParchTests runs each of them as a
 // test function of its own.
 namespace ExportTests {
+void aHugeHtmlTableIsShownAsText();
+void aDeeplyQuotedHtmlPasteFallsBackToText();
+void aTagWithManyAttributesPastesQuickly();
+
 void aBibliographyThatIsNotOneStaysBehind();
 void copiedCitationFilesAreListed();
 void checkReportsABibliographyThatCannotBeRead();

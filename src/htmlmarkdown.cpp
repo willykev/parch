@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <deque>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -22,6 +23,14 @@ namespace {
 constexpr int maxDepth = 256;
 // The most columns or rows one positive span claims.
 constexpr int maxSpan = 64;
+constexpr int maxAttributes = 64;
+
+struct OutputLimitReached {};
+
+void checkSize(qsizetype size, qsizetype limit)
+{
+    if (size > limit) throw OutputLimitReached{};
+}
 
 bool isSpace(QChar c)
 {
@@ -388,6 +397,7 @@ private:
         while (k < n && !isSpace(m_html[k]) && m_html[k] != u'/' && m_html[k] != u'>') ++k;
         const QString name = m_html.mid(m_at + 1, k - m_at - 1).toString().toLower();
         std::vector<std::pair<QString, QString>> attributes;
+        int attributeCount = 0;
         bool selfClosing = false;
         for (;;) {
             while (k < n && (isSpace(m_html[k]) || m_html[k] == u'/')) {
@@ -405,7 +415,8 @@ private:
             }
             const qsizetype nameStart = k++;
             while (k < n && !isSpace(m_html[k]) && m_html[k] != u'/' && m_html[k] != u'>' && m_html[k] != u'=') ++k;
-            const QString key = m_html.mid(nameStart, k - nameStart).toString().toLower();
+            const bool keep = attributeCount++ < maxAttributes;
+            const QString key = keep ? m_html.mid(nameStart, k - nameStart).toString().toLower() : QString();
             while (k < n && isSpace(m_html[k])) ++k;
             QString value;
             if (k < n && m_html[k] == u'=') {
@@ -414,14 +425,15 @@ private:
                 if (k < n && (m_html[k] == u'"' || m_html[k] == u'\'')) {
                     qsizetype close = m_html.indexOf(m_html[k], k + 1);
                     if (close < 0) close = n;
-                    value = decodeText(m_html.mid(k + 1, close - k - 1));
+                    if (keep) value = decodeText(m_html.mid(k + 1, close - k - 1));
                     k = close < n ? close + 1 : n;
                 } else {
                     const qsizetype valueStart = k;
                     while (k < n && !isSpace(m_html[k]) && m_html[k] != u'>') ++k;
-                    value = decodeText(m_html.mid(valueStart, k - valueStart));
+                    if (keep) value = decodeText(m_html.mid(valueStart, k - valueStart));
                 }
             }
+            if (!keep) continue;
             const bool known = std::any_of(attributes.cbegin(), attributes.cend(),
                                            [&](const auto &entry) { return entry.first == key; });
             if (!known) attributes.emplace_back(key, value);
@@ -672,6 +684,8 @@ void escapeInto(QString &out, QStringView word, qsizetype i, QChar before, QChar
 // link's, as segments that collapse whitespace as a browser does.
 class Run {
 public:
+    explicit Run(qsizetype limit = std::numeric_limits<qsizetype>::max()) : m_limit(limit) {}
+
     void text(QStringView text, Styles styles)
     {
         qsizetype i = 0;
@@ -690,6 +704,7 @@ public:
 
     void word(QStringView text, Styles styles)
     {
+        count(text.size());
         if (!m_segments.empty() && m_segments.back().kind == Segment::Word && m_segments.back().styles == styles) {
             m_segments.back().text += text;
             return;
@@ -706,6 +721,7 @@ public:
 
     void raw(const QString &markdown, Styles styles)
     {
+        count(markdown.size());
         if (!markdown.isEmpty()) m_segments.push_back({Segment::Raw, styles, markdown});
     }
 
@@ -738,7 +754,7 @@ public:
         });
     }
 
-    void clear() { m_segments.clear(); }
+    void clear() { m_segments.clear(); m_characters = 0; }
 
     // The Markdown, without whitespace at either end. A run that starts a
     // line escapes what would start a block there.
@@ -790,6 +806,7 @@ public:
                 open.emplace_back(wanted[s], opening);
             }
             if (segment.kind == Segment::Raw) {
+                checkSize(out.size() + segment.text.size(), m_limit);
                 out += segment.text;
                 continue;
             }
@@ -806,12 +823,13 @@ public:
             appendWord(out, segment.text, before, after, atLineStart);
         }
         close(0);
+        checkSize(out.size(), m_limit);
         return out;
     }
 
     // Escapes a word into `out`; at the start of a line, what would make a
     // block there is escaped too.
-    static void appendWord(QString &out, QStringView word, QChar before, QChar after, bool lineStart)
+    void appendWord(QString &out, QStringView word, QChar before, QChar after, bool lineStart) const
     {
         // An ordered list marker: up to nine digits, then . or ), then a space or nothing.
         qsizetype listDelimiter = -1;
@@ -823,10 +841,22 @@ public:
                 && (word[digits] == u'.' || word[digits] == u')') && after.isSpace())
                 listDelimiter = digits;
         }
-        for (qsizetype i = 0; i < word.size(); ++i) escapeInto(out, word, i, before, after, lineStart, listDelimiter);
+        checkSize(out.size() + word.size(), m_limit);
+        for (qsizetype i = 0; i < word.size(); ++i) {
+            escapeInto(out, word, i, before, after, lineStart, listDelimiter);
+            checkSize(out.size(), m_limit);
+        }
     }
 
 private:
+    void count(qsizetype size)
+    {
+        m_characters += size;
+        checkSize(m_characters, m_limit);
+    }
+
+    qsizetype m_characters = 0;
+    qsizetype m_limit;
     std::vector<Segment> m_segments;
 };
 
@@ -840,57 +870,38 @@ struct Block {
     bool ordered = false;
     QChar marker = QChar();
 };
-using Blocks = QList<Block>;
+struct Blocks : QList<Block> {
+    qsizetype characters = 0; // Includes the breaks between blocks.
+};
 
 QString joined(const Blocks &blocks)
 {
-    QStringList texts;
-    for (const Block &block : blocks) texts << block.text;
-    return texts.join(QStringLiteral("\n\n"));
-}
-
-QString prefixed(const QString &text, const QString &first, const QString &rest, const QString &blank)
-{
-    QStringList lines = text.split(u'\n');
-    for (qsizetype i = 0; i < lines.size(); ++i) {
-        if (i == 0) lines[i] = first + lines[i];
-        else lines[i] = lines[i].isEmpty() ? blank : rest + lines[i];
+    QString text;
+    text.reserve(blocks.characters);
+    for (const Block &block : blocks) {
+        if (!text.isEmpty()) text += QStringLiteral("\n\n");
+        text += block.text;
     }
-    return lines.join(u'\n');
+    return text;
 }
 
 // Two lists in a row with the same markers would read as one, so the second
 // takes the other marker: * for -, ) for .
 void takeOtherMarker(Block &list)
 {
-    QStringList lines = list.text.split(u'\n');
     const QChar other = list.ordered ? (list.marker == u'.' ? u')' : u'.') : (list.marker == u'-' ? u'*' : u'-');
-    for (QString &line : lines) {
-        if (line.isEmpty() || line.front().isSpace()) continue;
-        if (!list.ordered) {
-            line[0] = other;
-            continue;
+    for (qsizetype at = 0; at < list.text.size();) {
+        if (!list.text[at].isSpace()) {
+            qsizetype marker = at;
+            if (list.ordered)
+                while (marker < list.text.size() && list.text[marker].isDigit()) ++marker;
+            if (marker < list.text.size() && list.text[marker] != u'\n') list.text[marker] = other;
         }
-        qsizetype digits = 0;
-        while (digits < line.size() && line[digits].isDigit()) ++digits;
-        if (digits < line.size()) line[digits] = other;
+        const qsizetype end = list.text.indexOf(u'\n', at);
+        if (end < 0) break;
+        at = end + 1;
     }
-    list.text = lines.join(u'\n');
     list.marker = other;
-}
-
-void append(Blocks &out, Block block)
-{
-    if (block.text.isEmpty()) return;
-    if (block.kind == Block::List && !out.isEmpty() && out.last().kind == Block::List
-        && out.last().ordered == block.ordered && out.last().marker == block.marker)
-        takeOtherMarker(block);
-    out.append(std::move(block));
-}
-
-void append(Blocks &out, const Blocks &more)
-{
-    for (const Block &block : more) append(out, block);
 }
 
 QString collapsed(const QString &text)
@@ -990,24 +1001,28 @@ bool showsAsCode(const Node *node)
            || family.contains(QStringLiteral("consolas")) || family.contains(QStringLiteral("menlo"));
 }
 
-QString codeSpan(const QString &code)
+QString encodedUrl(const QString &url, qsizetype limit);
+
+QString codeSpan(const QString &code, qsizetype limit)
 {
     int longest = 0, run = 0;
     for (QChar c : code) {
         run = c == u'`' ? run + 1 : 0;
         longest = std::max(longest, run);
     }
-    const QString fence(longest + 1, u'`');
     const bool pad = code.startsWith(u'`') || code.endsWith(u'`')
                      || (code.startsWith(u' ') && code.endsWith(u' ') && !code.trimmed().isEmpty());
+    checkSize(code.size() + 2 * (qsizetype(longest) + 1 + int(pad)), limit);
+    const QString fence(longest + 1, u'`');
     const QString space = pad ? QStringLiteral(" ") : QString();
     return fence + space + code + space + fence;
 }
 
-QString quotedTitle(const QString &title)
+QString quotedTitle(const QString &title, qsizetype limit)
 {
     const QString cleaned = collapsed(title);
     if (cleaned.isEmpty()) return {};
+    checkSize(3 + cleaned.size() + cleaned.count(u'"') + cleaned.count(u'\\'), limit);
     QString escaped;
     for (QChar c : cleaned) {
         if (c == u'"' || c == u'\\') escaped += u'\\';
@@ -1142,19 +1157,53 @@ TableLayout layoutTable(const Node *table)
 
 class Converter {
 public:
-    Converter(const HtmlMarkdown::ImageSink &images, bool mergedCells, QStringList *imageErrors = nullptr)
-        : m_images(images), m_mergedCells(mergedCells), m_imageErrors(imageErrors) {}
+    Converter(qsizetype limit, const HtmlMarkdown::ImageSink &images, bool mergedCells, QStringList *imageErrors)
+        : m_limit(limit), m_images(images), m_mergedCells(mergedCells), m_imageErrors(imageErrors) {}
 
     Blocks flow(const Node *container, Styles styles)
     {
         Blocks out;
-        Run run;
+        Run run(m_limit);
         walkChildren(container, run, &out, styles);
         flush(run, out);
         return out;
     }
 
 private:
+    void append(Blocks &out, Block block)
+    {
+        if (block.text.isEmpty()) return;
+        out.characters += block.text.size() + (out.isEmpty() ? 0 : 2);
+        checkSize(out.characters, m_limit);
+        if (block.kind == Block::List && !out.isEmpty() && out.last().kind == Block::List
+            && out.last().ordered == block.ordered && out.last().marker == block.marker)
+            takeOtherMarker(block);
+        out.append(std::move(block));
+    }
+
+    void append(Blocks &out, const Blocks &more)
+    {
+        for (const Block &block : more) append(out, block);
+    }
+
+    QString prefixed(const QString &text, QStringView first, QStringView rest, QStringView blank) const
+    {
+        QString out;
+        qsizetype start = 0;
+        do {
+            const qsizetype end = text.indexOf(u'\n', start);
+            const QStringView line = QStringView(text).sliced(start, (end < 0 ? text.size() : end) - start);
+            const QStringView prefix = start == 0 ? first : line.isEmpty() ? blank : rest;
+            checkSize(out.size() + prefix.size() + line.size() + (start ? 1 : 0), m_limit);
+            if (start) out += u'\n';
+            out += prefix;
+            out += line;
+            if (end < 0) break;
+            start = end + 1;
+        } while (start <= text.size());
+        return out;
+    }
+
     void flush(Run &run, Blocks &out)
     {
         if (run.hasContent()) append(out, Block{Block::Paragraph, run.render(Breaks::Hard, true)});
@@ -1208,7 +1257,7 @@ private:
                 return;
             }
             if (tag == u"sup" || tag == u"sub") {
-                Run inner;
+                Run inner(m_limit);
                 walkChildren(node, inner, nullptr, 0);
                 const QString text = inner.render(Breaks::Space, false);
                 if (!text.isEmpty()) run.raw(u'<' + tag + u'>' + text + QStringLiteral("</") + tag + u'>', styles);
@@ -1261,7 +1310,7 @@ private:
             return;
         }
         if (leading) run.space();
-        run.raw(codeSpan(cleaned), styles);
+        run.raw(codeSpan(cleaned, m_limit), styles);
         if (trailing) run.space();
     }
 
@@ -1271,7 +1320,7 @@ private:
         // A link to nowhere, a script, or a place in the page it came from
         // keeps only its text.
         if (href.isEmpty() || href.startsWith(u'#') || isUnsafeUrl(href)) return false;
-        Run inner;
+        Run inner(m_limit);
         walkChildren(node, inner, nullptr, 0);
         const QString text = inner.render(Breaks::Space, false);
         const QString shown = textOf(node);
@@ -1288,9 +1337,10 @@ private:
             if (plain) run.raw(u'<' + href + u'>', styles);
             return true;
         }
-        run.raw(u'[' + text + QStringLiteral("](") + HtmlMarkdown::encodeUrl(href) + quotedTitle(node->attribute(u"title"))
-                    + u')',
-                styles);
+        const QString destination = encodedUrl(href, m_limit);
+        const QString title = quotedTitle(node->attribute(u"title"), m_limit);
+        checkSize(4 + text.size() + destination.size() + title.size(), m_limit);
+        run.raw(u'[' + text + QStringLiteral("](") + destination + title + u')', styles);
         return true;
     }
 
@@ -1332,13 +1382,14 @@ private:
             return;
         } else {
             if (source.startsWith(QStringLiteral("//"))) source.prepend(QStringLiteral("https:"));
-            destination = HtmlMarkdown::encodeUrl(source);
+            destination = encodedUrl(source, m_limit);
         }
-        Run altRun;
+        Run altRun(m_limit);
         altRun.text(alt, 0);
-        run.raw(QStringLiteral("![") + altRun.render(Breaks::Space, false) + QStringLiteral("](") + destination
-                    + quotedTitle(node->attribute(u"title")) + u')',
-                styles);
+        const QString label = altRun.render(Breaks::Space, false);
+        const QString title = quotedTitle(node->attribute(u"title"), m_limit);
+        checkSize(5 + label.size() + destination.size() + title.size(), m_limit);
+        run.raw(QStringLiteral("![") + label + QStringLiteral("](") + destination + title + u')', styles);
     }
 
     // Saves a data: image through the sink; nothing when it is no image or none is kept.
@@ -1400,13 +1451,15 @@ private:
             run = c == u'`' ? run + 1 : 0;
             longest = std::max(longest, run);
         }
+        const QString language = languageOf(node);
+        checkSize(2 * qsizetype(std::max(3, longest + 1)) + 2 + language.size() + text.size(), m_limit);
         const QString fence(std::max(3, longest + 1), u'`');
-        append(out, Block{Block::Code, fence + languageOf(node) + u'\n' + text + u'\n' + fence});
+        append(out, Block{Block::Code, fence + language + u'\n' + text + u'\n' + fence});
     }
 
     void heading(const Node *node, Blocks &out, Styles styles)
     {
-        Run run;
+        Run run(m_limit);
         walkChildren(node, run, nullptr, styles);
         QString text = run.render(Breaks::Space, false);
         if (text.isEmpty()) return;
@@ -1458,6 +1511,7 @@ private:
     void listOf(const std::vector<const Node *> &children, bool ordered, qint64 number, Blocks &out, Styles styles)
     {
         QList<Item> items;
+        qsizetype itemChars = 0;
         for (const Node *child : children) {
             if (!child->isText() && child->tag == u"li") {
                 Item item;
@@ -1474,6 +1528,8 @@ private:
                     item.checked = first->has(u"checked");
                 }
                 item.blocks = flow(child, styles);
+                itemChars += item.blocks.characters;
+                checkSize(itemChars, m_limit);
                 items.append(std::move(item));
                 continue;
             }
@@ -1481,13 +1537,13 @@ private:
             // belongs to the item before it.
             Blocks content;
             if (child->isText()) {
-                Run run;
+                Run run(m_limit);
                 run.text(child->text, styles);
-                if (run.hasContent()) content.append({Block::Paragraph, run.render(Breaks::Hard, true)});
+                if (run.hasContent()) append(content, Block{Block::Paragraph, run.render(Breaks::Hard, true)});
             } else if (isBlock(child->tag)) {
                 block(child, content, styles);
             } else {
-                Run run;
+                Run run(m_limit);
                 walk(child, run, &content, styles);
                 flush(run, content);
             }
@@ -1497,12 +1553,15 @@ private:
                 item.number = number++;
                 items.append(item);
             }
+            itemChars += content.characters;
+            checkSize(itemChars, m_limit);
             append(items.last().blocks, content);
         }
         if (items.isEmpty()) return;
         const QChar delimiter = ordered ? u'.' : u'-';
         QStringList texts;
         bool loose = false;
+        qsizetype chars = 0;
         for (const Item &item : std::as_const(items)) {
             const QString marker = ordered ? QString::number(item.number) + delimiter + u' ' : QStringLiteral("- ");
             const QString indent(marker.size(), u' ');
@@ -1518,11 +1577,17 @@ private:
                 // after something needs a blank line between.
                 const bool tight = block.kind == Block::List && item.blocks[b - 1].kind == Block::Paragraph;
                 if (!tight) loose = true;
-                text += (tight ? QStringLiteral("\n") : QStringLiteral("\n\n")) + prefixed(block.text, indent, indent, QString());
+                const QString part = prefixed(block.text, indent, indent, QString());
+                checkSize(text.size() + (tight ? 1 : 2) + part.size(), m_limit);
+                text += tight ? QStringLiteral("\n") : QStringLiteral("\n\n");
+                text += part;
             }
             if (item.blocks.isEmpty()) text = (marker + box).trimmed();
+            chars += text.size() + (texts.isEmpty() ? 0 : 1);
+            checkSize(chars, m_limit);
             texts << text;
         }
+        if (loose) checkSize(chars + texts.size() - 1, m_limit);
         Block list{Block::List, texts.join(loose ? QStringLiteral("\n\n") : QStringLiteral("\n"))};
         list.ordered = ordered;
         list.marker = delimiter;
@@ -1532,9 +1597,10 @@ private:
     // A cell's Markdown: one line, its breaks as <br>, its pipes escaped.
     QString cell(const Node *node, Styles styles)
     {
-        Run run;
+        Run run(m_limit);
         walkChildren(node, run, nullptr, styled(node, styles));
         QString text = run.render(Breaks::Html, false);
+        checkSize(text.size() + text.count(u'|'), m_limit);
         text.replace(u'|', QStringLiteral("\\|"));
         return text;
     }
@@ -1555,6 +1621,7 @@ private:
                 if (!row.empty()) append(out, flow(row.front().node, styles));
             return;
         }
+        qsizetype chars = 0;
         QStringList lines;
         QStringList alignments(layout.columns, QStringLiteral("---"));
         for (size_t r = 0; r < layout.rows.size(); ++r) {
@@ -1566,7 +1633,9 @@ private:
                 const int span = origin && m_mergedCells ? origin->span : 1;
                 line += u' ';
                 if (origin) {
-                    line += cell(origin->node, styles);
+                    const QString content = cell(origin->node, styles);
+                    checkSize(chars + line.size() + content.size(), m_limit);
+                    line += content;
                     if (r == 0) {
                         QString align = origin->node->attribute(u"align").trimmed().toLower();
                         if (align.isEmpty()) align = declarations(origin->node).value(QStringLiteral("text-align"));
@@ -1578,15 +1647,21 @@ private:
                 }
                 line += u' ';
                 line += QString(span, u'|');
+                checkSize(chars + line.size(), m_limit);
                 c += span;
             }
+            chars += line.size() + (r == 0 ? 0 : 1);
             lines << line;
-            if (r == 0)
+            if (r == 0) {
                 lines << QStringLiteral("| ") + alignments.join(QStringLiteral(" | ")) + QStringLiteral(" |");
+                chars += 1 + lines.last().size();
+            }
+            checkSize(chars, m_limit);
         }
         append(out, Block{Block::Table, lines.join(u'\n')});
     }
 
+    const qsizetype m_limit;
     const HtmlMarkdown::ImageSink &m_images;
     const bool m_mergedCells;
     QStringList *m_imageErrors;
@@ -1603,19 +1678,44 @@ QStringView withoutHeader(QStringView html)
 
 } // namespace
 
-QString HtmlMarkdown::convert(const QString &html, const ImageSink &images, bool *inlineOnly, bool mergedCells, QStringList *imageErrors)
+bool HtmlMarkdown::fitsInput(QStringView html)
 {
-    Parser parser(withoutHeader(html));
-    const Node *root = parser.parse();
-    Converter converter(images, mergedCells, imageErrors);
-    const Blocks blocks = converter.flow(root, 0);
-    if (inlineOnly) *inlineOnly = blocks.size() == 1 && blocks.first().kind == Block::Paragraph;
-    return joined(blocks);
+    if (html.size() <= MaxInputBytes / 3) return true;
+    if (html.size() > MaxInputBytes) return false;
+    qsizetype bytes = 0;
+    for (qsizetype i = 0; i < html.size(); ++i) {
+        const QChar c = html[i];
+        if (c.isHighSurrogate() && i + 1 < html.size() && html[i + 1].isLowSurrogate()) {
+            bytes += 4;
+            ++i;
+        } else {
+            bytes += c.unicode() < 0x80 ? 1 : c.unicode() < 0x800 ? 2 : 3;
+        }
+        if (bytes > MaxInputBytes) return false;
+    }
+    return true;
+}
+
+QString HtmlMarkdown::convert(const QString &html, const ImageSink &images, bool *inlineOnly, bool mergedCells,
+                              QStringList *imageErrors, qsizetype maxOutput)
+{
+    if (inlineOnly) *inlineOnly = false;
+    if (!fitsInput(html)) return {};
+    const qsizetype limit = std::min({maxOutput, MaxInputBytes, std::max<qsizetype>(1024 * 1024, 4 * html.size())});
+    try {
+        Parser parser(withoutHeader(html));
+        Converter converter(limit, images, mergedCells, imageErrors);
+        const Blocks blocks = converter.flow(parser.parse(), 0);
+        if (inlineOnly) *inlineOnly = blocks.size() == 1 && blocks.first().kind == Block::Paragraph;
+        return joined(blocks);
+    } catch (const OutputLimitReached &) {
+        return {};
+    }
 }
 
 std::optional<HtmlMarkdown::TableCells> HtmlMarkdown::firstTableCells(const QString &html)
 {
-    if (!html.contains(u"<table", Qt::CaseInsensitive)) return std::nullopt;
+    if (html.size() > SynchronousChars || !html.contains(u"<table", Qt::CaseInsensitive)) return std::nullopt;
     Parser parser(withoutHeader(html));
     const Node *first = nullptr;
     bool more = false;
@@ -1651,6 +1751,7 @@ bool HtmlMarkdown::mayEmbedImages(const QString &html)
 
 bool HtmlMarkdown::isLoneImage(const QString &html, QString *alt)
 {
+    if (html.size() > SynchronousChars) return false;
     Parser parser(withoutHeader(html));
     const Node *image = nullptr;
     bool more = false;
@@ -1684,7 +1785,8 @@ QString HtmlMarkdown::escapeText(const QString &text)
     return run.render(Breaks::Space, false);
 }
 
-QString HtmlMarkdown::encodeUrl(const QString &url)
+namespace {
+QString encodedUrl(const QString &url, qsizetype limit)
 {
     // Parentheses nest in a destination; one without its pair is escaped.
     std::vector<bool> unpaired(size_t(url.size()), false);
@@ -1708,6 +1810,14 @@ QString HtmlMarkdown::encodeUrl(const QString &url)
         else if (c.unicode() < 0x20 || c.unicode() == 0x7f) continue;
         else if (unpaired[size_t(i)]) encoded += QStringLiteral("\\") + c;
         else encoded += c;
+        checkSize(encoded.size(), limit);
     }
     return encoded;
+}
+
+} // namespace
+
+QString HtmlMarkdown::encodeUrl(const QString &url)
+{
+    return encodedUrl(url, std::numeric_limits<qsizetype>::max());
 }

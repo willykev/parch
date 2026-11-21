@@ -65,10 +65,6 @@ enum Property {
 // every so many of them: Qt finds where to break a word that has none in
 // time that grows with the square of its length.
 inline constexpr qsizetype LongWord = 512;
-// A table with more columns or cells than these is not laid out as a table,
-// which would take minutes, but shown as it is written, in a code island.
-inline constexpr int MaxTableColumns = 128;
-inline constexpr qsizetype MaxTableCells = 20000;
 
 // Where a piece of built text came from. `position` counts from the start
 // of the section or island the anchor belongs to, and `source` from the

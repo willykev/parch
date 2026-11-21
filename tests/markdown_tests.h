@@ -5,6 +5,13 @@
 // each is run by a slot of the same name, prefixed `markdown`, in
 // parch_tests.cpp.
 namespace MarkdownTests {
+void aWideTableWithShortRowsStaysSmall();
+void aTablePastItsCellLimitBecomesText();
+void manyTableOfContentsShareOneList();
+void manyAnchorsBeforeAValueDoNotRecurse();
+void anUnclosedFlowListInFrontMatterIsAnError();
+void aLongUnclosedFrontMatterScalarParsesQuickly();
+
 
 void commonMarkSpec();
 void gfmExtensions();

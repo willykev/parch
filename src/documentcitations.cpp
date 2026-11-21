@@ -482,6 +482,9 @@ Formatted format(const md::Document &document, const Setup &setup)
             problem.range = part->range;
         }
         switch (d.code) {
+        case Code::FormattingLimit:
+            problem.code = QStringLiteral("citation-format-limit");
+            break;
         case Code::MissingKey:
             // The engine reports a key it could not resolve; this is a key a
             // bibliography has, but not the one this part of the document uses.

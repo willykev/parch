@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QStringView>
 #include <optional>
+#include <limits>
 
 // Markdown pipe tables as text. The reader splits rows exactly as the
 // Markdown parser does (the parser calls splitRow and delimiterRow), so a
@@ -45,9 +46,10 @@ struct Field {
 // belongs to the code. A leading pipe opens the first field and a trailing
 // one closes the last. `pipes`, when given, receives each splitting pipe.
 bool splitRow(QStringView text, int from, int to, bool protectCode, QList<Field> &fields,
-              QList<int> *pipes = nullptr);
+              QList<int> *pipes = nullptr, int maxFields = std::numeric_limits<int>::max());
 // The alignments of a delimiter row in [from, to), or nothing when it is no
 // delimiter row: each field dashes, with a colon at either end or both.
+// One column beyond the grid limit suffices to identify an oversized row.
 std::optional<QList<Align>> delimiterRow(QStringView text, int from, int to);
 
 // The columns a text takes in a monospace font: two for a wide or fullwidth

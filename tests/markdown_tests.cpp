@@ -4,7 +4,9 @@
 #include "frontmatter.h"
 #include "mdhtml.h"
 #include "mdinclude.h"
+#include "mdtable.h"
 #include "mdtree.h"
+#include "treejson.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -185,6 +187,91 @@ QString proseDocument(int words)
 } // namespace
 
 namespace MarkdownTests {
+
+void aWideTableWithShortRowsStaysSmall()
+{
+    const auto doc = md::parse(QStringLiteral("| A | B | C | D |\n| - | - | - | - |\n| North |\n| South |"));
+    QCOMPARE(all(doc, NodeType::TableCell).size(), size_t(6));
+    QCOMPARE(md::toHtml(doc).count(QStringLiteral("<td></td>")), 6);
+}
+
+void aTablePastItsCellLimitBecomesText()
+{
+    const int columns = MdTable::MaxColumns;
+    const int rows = int(MdTable::MaxCells) / columns;
+    const QString source = QStringLiteral("| Month").repeated(columns) + QStringLiteral("|\n")
+        + QStringLiteral("|---").repeated(columns) + QStringLiteral("|\n")
+        + QStringLiteral("| Monday |\n").repeated(rows - 1) + QStringLiteral("| Last day |");
+    const auto doc = md::parse(source);
+    QCOMPARE(all(doc, NodeType::TableRow).size(), size_t(rows));
+    QVERIFY(md::toHtml(doc).contains(QStringLiteral("<p>| Last day |</p>")));
+    QVERIFY(!doc.diagnostics.empty());
+    const auto grid = MdTable::scan(source, 0, int(source.size()));
+    QVERIFY(grid && grid->unfit == MdTable::Unfit::TooLarge);
+    QVERIFY(grid->rows.size() <= rows + 1);
+
+    md::Source limits;
+    limits.maxTableCells = 4;
+    const auto together = md::parse(QStringLiteral("<table><tr><td>A</td></tr></table>\n\n"
+                                                   "| East | West |\n|---|---|\n| Coast |\n"),
+                                    md::Options::writer(), limits);
+    QVERIFY(all(together, NodeType::Table).empty());
+    QCOMPARE(together.diagnostics.size(), size_t(1));
+    QCOMPARE(together.diagnostics.front().code, md::DiagnosticCode::TableLimit);
+    QVERIFY(md::toHtml(together).contains(QStringLiteral("| Coast |")));
+}
+
+void manyTableOfContentsShareOneList()
+{
+    const QString source = QStringLiteral("{{TOC}}\n\n# Spring\n\n{{TOC}}\n\n# Autumn\n\n{{TOC}}");
+    const auto doc = md::parse(source);
+    QCOMPARE(all(doc, NodeType::ListItem).size(), size_t(2));
+    QCOMPARE(md::toHtml(doc).count(QStringLiteral("href=\"#autumn\"")), 3);
+    for (const auto *marker : all(doc, NodeType::TableOfContents))
+        QVERIFY(md::plainText(*marker).contains(QStringLiteral("Autumn")));
+    const auto tree = TreeJson::document(doc).value(QStringLiteral("root")).toObject();
+    for (const auto &node : tree.value(QStringLiteral("children")).toArray()) {
+        const auto marker = node.toObject();
+        if (marker.value(QStringLiteral("type")).toString() != u"table-of-contents") continue;
+        const auto lists = marker.value(QStringLiteral("children")).toArray();
+        QCOMPARE(lists.size(), 1);
+        QCOMPARE(lists.first().toObject().value(QStringLiteral("range")), marker.value(QStringLiteral("range")));
+    }
+    md::Source limits;
+    limits.maxContentsNodes = 9;
+    const auto limited = md::parse(source, md::Options::writer(), limits);
+    QCOMPARE(md::toHtml(limited).count(QStringLiteral("href=\"#autumn\"")), 1);
+    QCOMPARE(limited.diagnostics.size(), size_t(1));
+    QCOMPARE(limited.diagnostics.front().code, md::DiagnosticCode::ContentsLimit);
+}
+
+void manyAnchorsBeforeAValueDoNotRecurse()
+{
+    const auto data = md::parseFrontMatter(QStringLiteral("---\ntitle: ") + QStringLiteral("&draft ").repeated(72)
+                                           + QStringLiteral("Notes\n---"));
+    QCOMPARE(data.scalar(u"title").value_or(QString()), QStringLiteral("Notes"));
+    QCOMPARE(data.issues.size(), size_t(1));
+}
+
+void anUnclosedFlowListInFrontMatterIsAnError()
+{
+    const auto data = md::parseFrontMatter(QStringLiteral("---\nchapters: [Spring, Summer\n---"));
+    QVERIFY(data.present && !data.issues.empty());
+    const auto mismatched = md::parseFrontMatter(QStringLiteral("---\nchapters: [Spring, }\n---"));
+    QVERIFY(mismatched.present && !mismatched.issues.empty());
+}
+
+void aLongUnclosedFrontMatterScalarParsesQuickly()
+{
+    const QString source = QStringLiteral("---\ntitle: \"Annual notes\n")
+        + QStringLiteral("  More notes from the library.\n").repeated(1500) + QStringLiteral("---\nBody");
+    QElapsedTimer timer;
+    timer.start();
+    const auto data = md::parseFrontMatter(source);
+    QVERIFY(!data.issues.empty());
+    QVERIFY(data.scalar(u"title")->endsWith(QStringLiteral("More notes from the library.")));
+    QVERIFY(timer.elapsed() < timeLimit(300));
+}
 
 void commonMarkSpec()
 {

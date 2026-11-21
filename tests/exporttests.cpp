@@ -2777,6 +2777,58 @@ void picturesPastTheBudgetAreLeftOutWithANote()
     QVERIFY(paper.document()->toPlainText().contains("Second"));
 }
 
+void aHugeHtmlTableIsShownAsText()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("calendar.md"), "<table><tr><td colspan='128'>Spring</td><td>Summer</td></tr></table>\n");
+    const auto loaded = load(dir.filePath("calendar.md"));
+    const auto problems = DocumentCheck::problems(loaded);
+    QVERIFY(std::any_of(problems.begin(), problems.end(), [](const auto &p) { return p.kind == u"table"; }));
+    const QString output = dir.filePath("calendar.docx");
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto body = entry(entriesOf(output), "word/document.xml");
+    QVERIFY(body.contains("Spring") && body.contains("Summer") && !body.contains("<w:tbl>"));
+    PaperDocument paper(loaded.document, nullptr, nullptr, {});
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    QPdfWriter pdf(&buffer);
+    QVERIFY(paper.layOut(&pdf));
+    QVERIFY(paper.document()->toPlainText().contains("Summer"));
+    QVERIFY(paper.document()->rootFrame()->childFrames().isEmpty());
+}
+
+void aDeeplyQuotedHtmlPasteFallsBackToText()
+{
+    const QString html = QStringLiteral("<blockquote><blockquote><p>Garden</p><p>Notes</p></blockquote></blockquote>");
+    QVERIFY(!HtmlMarkdown::convert(html).isEmpty());
+    const QString withImage = html + QStringLiteral("<img src='data:image/png;base64,' alt='Notes'>");
+    QVERIFY(HtmlMarkdown::mayEmbedImages(withImage));
+    for (const QString &markup : {html, withImage}) {
+        bool inlineOnly = true;
+        QVERIFY(HtmlMarkdown::convert(markup, {}, &inlineOnly, false, nullptr, 14).isEmpty());
+        QVERIFY(!inlineOnly);
+    }
+    QString accents(HtmlMarkdown::MaxInputBytes / 2, QChar(0x00e9));
+    QVERIFY(HtmlMarkdown::fitsInput(accents));
+    accents += u'.';
+    QVERIFY(!HtmlMarkdown::fitsInput(accents));
+    QVERIFY(HtmlMarkdown::convert(accents).isEmpty());
+}
+
+void aTagWithManyAttributesPastesQuickly()
+{
+    QString html = QStringLiteral("<a");
+    for (int i = 0; i < 70; ++i) html += QStringLiteral(" data-note%1='field'").arg(i);
+    html += QStringLiteral(" href='https://example.org/notes'>Notes</a>");
+    QCOMPARE(HtmlMarkdown::convert(QStringLiteral("<a href='https://example.org/notes'>Notes</a>")),
+             QStringLiteral("[Notes](https://example.org/notes)"));
+    QElapsedTimer timer;
+    timer.start();
+    QCOMPARE(HtmlMarkdown::convert(html), QStringLiteral("Notes"));
+    QVERIFY(timer.elapsed() < timeLimit(300));
+}
+
 void aBibliographyThatIsNotOneStaysBehind()
 {
     QTemporaryDir dir;

@@ -4,6 +4,7 @@
 #include "exportweb.h"
 #include "htmlexport.h"
 #include "mdparser_p.h"
+#include "mdtable.h"
 #include "paperdocument.h"
 #include "picturedata.h"
 #include "saferead.h"
@@ -703,7 +704,7 @@ private:
         case NodeType::TableOfContents: {
             Flow inner = flow;
             inner.toc = true;
-            for (const Node &child : node.children)
+            for (const Node &child : node.contentsChildren())
                 if (child.type == NodeType::List) list(child, inner);
             break;
         }
@@ -1038,7 +1039,6 @@ private:
     void htmlTable(const Node &node, const Flow &flow)
     {
         std::vector<std::vector<Cell>> rows;
-        int columns = 0;
         std::function<void(const Node &)> collect = [&](const Node &n) {
             for (const Node &child : n.children) {
                 if (child.type != NodeType::HtmlElement) continue;
@@ -1047,30 +1047,20 @@ private:
                     for (const Node &cell : child.children) {
                         if (cell.type != NodeType::HtmlElement || (cell.label != u"td" && cell.label != u"th")) continue;
                         Cell c{&cell, cell.label == u"th", md::Align::None, 1, 1, true};
-                        c.span = std::clamp(attributeOf(cell, "colspan").toInt(), 1, 64);
-                        c.rowSpan = std::clamp(attributeOf(cell, "rowspan").toInt(), 1, 1000);
+                        c.span = cell.span;
+                        c.rowSpan = std::clamp(attributeOf(cell, "rowspan").toInt(), 1, int(MdTable::MaxCells));
                         const QString align = attributeOf(cell, "align");
                         c.align = align == u"center" ? md::Align::Center : align == u"right" ? md::Align::Right : md::Align::None;
                         cells.push_back(c);
                     }
                     rows.push_back(std::move(cells));
-                } else if (child.label != u"caption") {
+                } else if (child.label == u"thead" || child.label == u"tbody" || child.label == u"tfoot") {
                     collect(child);
                 }
             }
         };
         collect(node);
-        // The widest row, counting the cells rows above reach into.
-        std::vector<int> reaching;
-        for (size_t r = 0; r < rows.size(); ++r) {
-            int width = 0;
-            for (const Cell &cell : rows[r]) width += cell.span;
-            for (size_t above = 0; above < r; ++above)
-                for (const Cell &cell : rows[above])
-                    if (above + size_t(cell.rowSpan) > r) width += cell.span;
-            columns = std::max(columns, width);
-        }
-        writeTable(rows, std::max(1, columns), flow);
+        writeTable(rows, std::max(1, node.columns), flow);
     }
 
     // --- The bibliography --------------------------------------------------------

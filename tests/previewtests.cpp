@@ -2834,8 +2834,7 @@ void pathologicalBlocksStayCheapToLayOut()
     const auto prose = build(QStringLiteral("Some ordinary words in a line.\n"));
     QVERIFY(!prose->lines().join(u' ').contains(QChar(0x200B)));
 
-    // A table too wide or too large to lay out is shown as it is written,
-    // in a code island that scrolls sideways, and says why.
+    // A table past the column limit reads as paragraphs and has a diagnostic.
     QString wide = QStringLiteral("|");
     QString rule = QStringLiteral("|");
     QString row = QStringLiteral("|");
@@ -2846,11 +2845,17 @@ void pathologicalBlocksStayCheapToLayOut()
     }
     const auto table = build(wide + u'\n' + rule + u'\n' + row + u'\n' + row + QStringLiteral("\n\nAfter.\n"));
     QVERIFY(!table->island(Island::Table));
-    const Island *shown = table->island(Island::Code);
-    QVERIFY(shown && shown->document);
-    QVERIFY(shown->document->toPlainText().startsWith(QStringLiteral("| h0 | h1 |")));
-    QCOMPARE(shown->document->defaultTextOption().wrapMode(), QTextOption::NoWrap);
-    QVERIFY(shown->document->toPlainText().contains(QStringLiteral("too large to lay out as a table (300 columns, 3 rows)")));
+    const QString tableText = table->document.toPlainText();
+    QVERIFY(tableText.contains(wide));
+    QVERIFY(tableText.contains(rule));
+    QCOMPARE(tableText.count(row), 2);
+    QVERIFY(tableText.contains(QStringLiteral("After.")));
+    QVERIFY(std::any_of(table->tree.diagnostics.begin(), table->tree.diagnostics.end(), [](const auto &d) {
+        return d.code == md::DiagnosticCode::TableLimit && d.severity == md::Severity::Warning;
+    }));
+    const auto spans = build(QStringLiteral("<table><tr><td colspan='128'>East</td><td>West</td></tr></table>"));
+    QVERIFY(!spans->island(Island::Table));
+    QVERIFY(spans->document.toPlainText().contains(QStringLiteral("East West")));
     // An ordinary table is still a table.
     const auto ordinary = build(QStringLiteral("| a | b |\n|---|---|\n| 1 | 2 |\n"));
     QVERIFY(ordinary->island(Island::Table));

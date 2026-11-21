@@ -4,6 +4,7 @@
 #include "citations.h"
 #include "cslengine.h"
 #include "cslfixture.h"
+#include "testfiles.h"
 
 #include <QDir>
 #include <QFile>
@@ -189,6 +190,105 @@ QString suiteListFolder()
 }
 
 } // namespace
+
+namespace {
+Formatted titleCitation(const QString &title, const QString &prefix = {})
+{
+    const QByteArray xml("<style class='in-text'><citation><layout><text variable='title'/></layout></citation></style>");
+    QString error;
+    const auto style = CslStyle::fromXml(xml, &error);
+    const auto json = QJsonDocument(QJsonArray{QJsonObject{{"id", "book"}, {"type", "book"}, {"title", title}}}).toJson();
+    CitationItemSpec item = cite("book");
+    item.prefix = prefix;
+    return format(style, {database(json)}, {cluster({item})});
+}
+} // namespace
+
+void CitationTests::deeplyNestedCitationQuotesAreText()
+{
+    const auto rendered = titleCitation(QString(36, QChar(0x201c)) + QStringLiteral("Letters"));
+    QVERIFY(rendered.citations.join(u' ').contains(QStringLiteral("Letters")));
+    QVERIFY(std::any_of(rendered.output.diagnostics.begin(), rendered.output.diagnostics.end(), [](const auto &d) {
+        return d.code == CitationDiagnostic::Code::FormattingLimit && d.severity == CitationDiagnostic::Severity::Warning;
+    }));
+    const auto prefix = titleCitation(QStringLiteral("Letters"), QStringLiteral("<i>").repeated(33) + QStringLiteral("See"));
+    QVERIFY(prefix.citations.join(u' ').contains(QStringLiteral("See")));
+    QVERIFY(std::any_of(prefix.output.diagnostics.begin(), prefix.output.diagnostics.end(), [](const auto &d) {
+        return d.code == CitationDiagnostic::Code::FormattingLimit;
+    }));
+}
+
+void CitationTests::aTitleOfManyTagsFormatsQuickly()
+{
+    QElapsedTimer timer;
+    timer.start();
+    const auto rendered = titleCitation(QStringLiteral("<i>").repeated(40) + QStringLiteral("Letters")
+                                        + QStringLiteral("</i>").repeated(40));
+    QVERIFY(rendered.citations.join(u' ').contains(QStringLiteral("<i>")));
+    QVERIFY(std::any_of(rendered.output.diagnostics.begin(), rendered.output.diagnostics.end(), [](const auto &d) {
+        return d.code == CitationDiagnostic::Code::FormattingLimit && d.severity == CitationDiagnostic::Severity::Warning;
+    }));
+    QVERIFY(timer.elapsed() < timeLimit(500));
+}
+
+void CitationTests::aStyleThatExpandsTooFarIsRefused()
+{
+    const QByteArray style("<style class='in-text'><macro name='work'><text variable='title'/></macro>"
+        "<citation><layout><text macro='work'/><text macro='work'/></layout></citation></style>");
+    QString error;
+    const auto accepted = CslStyle::fromXml(style, &error, 32);
+    QVERIFY(accepted);
+    QVERIFY(!CslStyle::fromXml(style, &error, 4));
+    QVERIFY(error.contains("expand", Qt::CaseInsensitive));
+
+    const QByteArray unused("<style class='in-text'><macro name='extra'><text value='A'/><text value='B'/></macro>"
+                            "<citation><layout><text variable='title'/></layout></citation></style>");
+    QVERIFY(CslStyle::fromXml(unused, &error, 2));
+    const QByteArray alternatives("<style class='in-text'><macro name='work'><text variable='title'/></macro>"
+        "<citation><layout><choose><if type='book'><text macro='work'/></if>"
+        "<else><text macro='work'/></else></choose></layout></citation></style>");
+    QVERIFY(CslStyle::fromXml(alternatives, &error, 7));
+
+    const CslEngine engine(accepted, CslLocale{});
+    CslReference book;
+    book.id = QStringLiteral("spring");
+    book.fields.insert(QStringLiteral("title"), QStringLiteral("Spring"));
+    CslCite item;
+    item.reference = &book;
+    const QList<CslCitation> cites{{{item}}};
+    QVERIFY(!engine.process(cites).renderLimited);
+    QVERIFY(engine.process(cites, {}, 4).renderLimited);
+}
+
+void CitationTests::crossrefInheritanceCountsAgainstTheBudget()
+{
+    const QString source = QStringLiteral("@book{guide, title={The complete guide to the gardens}, publisher={Garden Society}}\n"
+        "@inbook{spring, crossref={guide}}\n@inbook{summer, crossref={guide}}");
+    QCOMPARE(BibTeX::parse(source).entries.size(), 3);
+    const auto result = BibTeX::parse(source, 90);
+    QVERIFY(result.entries.isEmpty());
+    QVERIFY(!result.diagnostics.isEmpty());
+    QCOMPARE(result.diagnostics.last().kind, BibliographyDiagnostic::Kind::Unreadable);
+    QVERIFY(result.diagnostics.last().message.contains(QStringLiteral("inherited")));
+    QString xdata = source;
+    xdata.replace(QStringLiteral("crossref="), QStringLiteral("xdata="));
+    QCOMPARE(BibTeX::parse(xdata).entries.size(), 3);
+    QVERIFY(BibTeX::parse(xdata, 70).entries.isEmpty());
+}
+
+void CitationTests::manyFieldsAndChildrenParseQuickly()
+{
+    QString source = QStringLiteral("@book{guide, title={Garden Guide}, publisher={Society}");
+    for (int i = 0; i < 96; ++i) source += QStringLiteral(", field%1={page}").arg(i);
+    source += QStringLiteral("}\n");
+    for (int i = 0; i < 6; ++i) source += QStringLiteral("@inbook{part%1, crossref={guide}, title={Section}}\n").arg(i);
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = BibTeX::parse(source);
+    QCOMPARE(result.entries.size(), 7);
+    QCOMPARE(result.entries.last().reference.field("container-title"), QStringLiteral("Garden guide"));
+    QVERIFY(timer.elapsed() < timeLimit(300));
+}
 
 void CitationTests::richTextOutput()
 {

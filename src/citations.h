@@ -50,6 +50,7 @@ struct CitationDiagnostic {
         NoStyle,
         SeparateNumbering,
         Locale,
+        FormattingLimit,
     };
     enum class Severity { Warning, Error };
     Code code = Code::MissingKey;

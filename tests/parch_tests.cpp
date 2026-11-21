@@ -302,6 +302,20 @@ private slots:
     void markdownCodeBlocks() { MarkdownTests::codeBlocks(); }
     void markdownLinksAndImages() { MarkdownTests::linksAndImages(); }
     void markdownHeadingLabelsAndSlugs() { MarkdownTests::headingLabelsAndSlugs(); }
+    void aWideTableWithShortRowsStaysSmall() { MarkdownTests::aWideTableWithShortRowsStaysSmall(); }
+    void aTablePastItsCellLimitBecomesText() { MarkdownTests::aTablePastItsCellLimitBecomesText(); }
+    void manyTableOfContentsShareOneList() { MarkdownTests::manyTableOfContentsShareOneList(); }
+    void manyAnchorsBeforeAValueDoNotRecurse() { MarkdownTests::manyAnchorsBeforeAValueDoNotRecurse(); }
+    void anUnclosedFlowListInFrontMatterIsAnError() { MarkdownTests::anUnclosedFlowListInFrontMatterIsAnError(); }
+    void aLongUnclosedFrontMatterScalarParsesQuickly() { MarkdownTests::aLongUnclosedFrontMatterScalarParsesQuickly(); }
+    void deeplyNestedCitationQuotesAreText() { CitationTests::deeplyNestedCitationQuotesAreText(); }
+    void aTitleOfManyTagsFormatsQuickly() { CitationTests::aTitleOfManyTagsFormatsQuickly(); }
+    void aStyleThatExpandsTooFarIsRefused() { CitationTests::aStyleThatExpandsTooFarIsRefused(); }
+    void crossrefInheritanceCountsAgainstTheBudget() { CitationTests::crossrefInheritanceCountsAgainstTheBudget(); }
+    void manyFieldsAndChildrenParseQuickly() { CitationTests::manyFieldsAndChildrenParseQuickly(); }
+    void aHugeHtmlTableIsShownAsText() { ExportTests::aHugeHtmlTableIsShownAsText(); }
+    void aDeeplyQuotedHtmlPasteFallsBackToText() { ExportTests::aDeeplyQuotedHtmlPasteFallsBackToText(); }
+    void aTagWithManyAttributesPastesQuickly() { ExportTests::aTagWithManyAttributesPastesQuickly(); }
     void markdownTableOfContents() { MarkdownTests::tableOfContents(); }
     void markdownTables() { MarkdownTests::tables(); }
     void markdownDefinitionLists() { MarkdownTests::definitionLists(); }
@@ -23053,6 +23067,13 @@ void ParchTests::richPasteIsOneUndoStep()
     view.cursor(0);
     copyRichText(QStringLiteral("<p> </p>"), QStringLiteral("plain"));
     QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QVERIFY(buffer->text().startsWith(QStringLiteral("plainIntro")));
+    // The offered plain text also survives an HTML part over its byte limit.
+    view.cursor(0);
+    copyRichText(QString(HtmlMarkdown::MaxInputBytes / 2 + 1, QChar(0x00e9)), QStringLiteral("Summary "));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QVERIFY(buffer->text().startsWith(QStringLiteral("Summary plainIntro")));
+    buffer->undo();
     QVERIFY(buffer->text().startsWith(QStringLiteral("plainIntro")));
 }
 

@@ -485,7 +485,16 @@ void BlockParser::processLine()
             addParagraphLine(container);
             break;
         case NodeType::Table:
-            if (!blank) addTableRow(container, nns, trimmedLineEnd(), false, lineNumber);
+            if (!blank) {
+                if (container->tableRows < MdTable::MaxCells / container->columns) {
+                    addTableRow(container, nns, trimmedLineEnd(), false, lineNumber);
+                } else {
+                    st.diagnose(fileId, {nns, trimmedLineEnd()}, Severity::Warning, DiagnosticCode::TableLimit,
+                                QStringLiteral("The table reaches its cell limit. The remaining rows are shown as text."));
+                    finalize(container, lineNumber - 1);
+                    addParagraphLine(addChild(NodeType::Paragraph, nns));
+                }
+            }
             break;
         default:
             if (!blank) {
@@ -1196,7 +1205,7 @@ bool BlockParser::splitRow(int from, int to, bool protectCode, std::vector<Cell>
     thread_local QList<MdTable::Field> fields;
     thread_local QList<int> at;
     at.clear();
-    MdTable::splitRow(QStringView(s, n), from, to, protectCode, fields, pipes ? &at : nullptr);
+    MdTable::splitRow(QStringView(s, n), from, to, protectCode, fields, pipes ? &at : nullptr, MdTable::MaxColumns + 1);
     cells.clear();
     cells.reserve(fields.size());
     for (const MdTable::Field &field : fields) {
@@ -1260,6 +1269,11 @@ bool BlockParser::tableStart(Block *container)
     if (!splitRow(header.src, headerEnd, writer, cells, nullptr)) return false;
     // A merged cell covers a column for itself and one for each marker after it.
     if (cells.size() != aligns.size()) return false;
+    if (aligns.size() > size_t(MdTable::MaxColumns)) {
+        st.diagnose(fileId, {nns, to}, Severity::Warning, DiagnosticCode::TableLimit,
+                    QStringLiteral("Tables with more than %1 columns are shown as text.").arg(MdTable::MaxColumns));
+        return false;
+    }
 
     closeUnmatchedBlocks();
     const std::vector<Piece> comments(pieces.begin() + headerIndex + 1, pieces.end());
@@ -1292,6 +1306,7 @@ bool BlockParser::tableStart(Block *container)
 
 void BlockParser::addTableRow(Block *table, int from, int to, bool header, int line)
 {
+    ++table->tableRows;
     const bool writer = st.writer();
     const bool merge = writer && opt.mergedCells;
     Block *row = st.newBlock(NodeType::TableRow, fileId, runId);
@@ -1345,18 +1360,6 @@ void BlockParser::addTableRow(Block *table, int from, int to, bool header, int l
         block->pieces = tableCellPieces(QStringView(s, n), cell.start, cell.end, line);
         appendChild(row, block);
         column += cell.span;
-    }
-    while (column < table->columns) {
-        Block *block = st.newBlock(NodeType::TableCell, fileId, runId);
-        block->open = false;
-        block->header = header;
-        block->start = block->end = to;
-        block->startLine = block->endLine = line;
-        block->depth = row->depth + 1;
-        block->column = column;
-        block->align = table->aligns[column];
-        appendChild(row, block);
-        ++column;
     }
     if (merge && (overflow || malformed)) {
         st.diagnose(fileId, {from, to}, Severity::Warning, DiagnosticCode::MalformedTableRow,

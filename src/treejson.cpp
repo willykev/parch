@@ -35,12 +35,13 @@ public:
         return index->at(offset).line;
     }
 
-    QJsonObject node(const md::Node &node)
+    QJsonObject node(const md::Node &node, const md::Node *contentsAt = nullptr)
     {
+        const md::Node &place = contentsAt ? *contentsAt : node;
         QJsonObject out{{QStringLiteral("type"), QString::fromLatin1(md::typeName(node.type))},
-                        {QStringLiteral("file"), node.file},
-                        {QStringLiteral("range"), range(node.range)}};
-        if (node.isBlock()) out.insert(QStringLiteral("line"), lineOf(node.file, node.range.start));
+                        {QStringLiteral("file"), place.file},
+                        {QStringLiteral("range"), range(place.range)}};
+        if (node.isBlock()) out.insert(QStringLiteral("line"), lineOf(place.file, place.range.start));
         if (!node.open.isEmpty()) out.insert(QStringLiteral("open"), range(node.open));
         if (!node.close.isEmpty()) out.insert(QStringLiteral("close"), range(node.close));
         if (!node.target.isEmpty()) out.insert(QStringLiteral("target"), range(node.target));
@@ -77,9 +78,10 @@ public:
             for (const md::Range &marker : node.markers) markers.append(range(marker));
             out.insert(QStringLiteral("markers"), markers);
         }
-        if (!node.children.empty()) {
+        if (!node.contentsChildren().empty()) {
             QJsonArray children;
-            for (const md::Node &child : node.children) children.append(this->node(child));
+            for (const md::Node &child : node.contentsChildren())
+                children.append(this->node(child, node.contentsOwner ? &node : contentsAt));
             out.insert(QStringLiteral("children"), children);
         }
         return out;

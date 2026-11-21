@@ -298,13 +298,35 @@ public:
         return error.isEmpty();
     }
 
-    // Finds a macro that calls itself, directly or through others, or
-    // macros that, with what they hold, go deeper than MaxMacroDepth.
-    bool macroCycle(const CslStyle &style)
+    bool macroLimit(const CslStyle &style, int limit)
     {
         QHash<QString, int> state;
         // How deep each macro read through goes, below itself.
         QHash<QString, int> height;
+        QHash<QString, int> sizes;
+        const auto add = [&](int &used, int amount) {
+            used = std::min(limit + 1, used + amount);
+        };
+        // Called once a macro's callees have been measured. Each reference
+        // contributes its full size, including references in layouts and sort keys.
+        std::function<int(const CslNode &)> expandedSize = [&](const CslNode &node) {
+            int size = 1;
+            if (node.element == CslElement::Text && node.has(QStringLiteral("macro")))
+                add(size, sizes.value(node.attribute(QStringLiteral("macro"))));
+            int largestBranch = 0;
+            for (const CslNode &child : node.children) {
+                const int childSize = expandedSize(child);
+                if (node.element == CslElement::Choose) {
+                    // Every condition can be tested, but only one body is rendered.
+                    add(size, 1);
+                    largestBranch = std::max(largestBranch, childSize - 1);
+                } else {
+                    add(size, childSize);
+                }
+            }
+            add(size, largestBranch);
+            return size;
+        };
         const auto tooDeep = [&](const QString &name) {
             return fail(QStringLiteral("The macro “%1” calls other macros more than %2 deep, which no style needs")
                             .arg(name, QString::number(MaxMacroDepth)));
@@ -312,7 +334,7 @@ public:
         // Each returns the deepest level reached, or -1 when the style is refused.
         std::function<int(const QString &, int)> visit;
         std::function<int(const CslNode &, int, const QString &)> walk = [&](const CslNode &n, int depth,
-                                                                               const QString &macro) {
+                                                                             const QString &macro) {
             if (depth > MaxMacroDepth) {
                 tooDeep(macro);
                 return -1;
@@ -343,8 +365,11 @@ public:
             }
             state.insert(name, 1);
             int reached = depth;
-            if (const CslNode *m = style.macro(name)) reached = walk(*m, depth, name);
-            if (reached < 0) return -1;
+            if (const CslNode *m = style.macro(name)) {
+                reached = walk(*m, depth, name);
+                if (reached < 0) return -1;
+                sizes.insert(name, expandedSize(*m));
+            }
             height.insert(name, reached - depth);
             state.insert(name, 2);
             return reached;
@@ -354,10 +379,22 @@ public:
         names.sort();
         for (const QString &name : std::as_const(names))
             if (visit(name, 0) < 0) return true;
+        int used = 0;
+        const auto countSection = [&](const CslStyle::Section &section) {
+            add(used, expandedSize(section.layout));
+            for (const auto &key : section.sort)
+                if (!key.macro.isEmpty()) add(used, sizes.value(key.macro));
+        };
+        countSection(style.m_citation);
+        if (style.m_hasBibliography) countSection(style.m_bibliography);
+        if (used > limit) {
+            fail(QStringLiteral("The style expands to more than %1 elements").arg(limit));
+            return true;
+        }
         return false;
     }
 
-    std::shared_ptr<const CslStyle> style(const QByteArray &xml)
+    std::shared_ptr<const CslStyle> style(const QByteArray &xml, int maxExpandedNodes)
     {
         XmlElement root;
         if (!readXml(xml, root, &error)) return nullptr;
@@ -431,7 +468,7 @@ public:
                 return nullptr;
             }
         }
-        if (macroCycle(*style)) return nullptr;
+        if (macroLimit(*style, std::clamp(maxExpandedNodes, 0, 100000))) return nullptr;
         style->m_rendersYearSuffix = m_yearSuffix;
         style->m_usesCitationNumber = m_citationNumber;
         return style;
@@ -569,10 +606,10 @@ void CslLocale::merge(const CslLocale &overrides)
     }
 }
 
-std::shared_ptr<const CslStyle> CslStyle::fromXml(const QByteArray &xml, QString *error)
+std::shared_ptr<const CslStyle> CslStyle::fromXml(const QByteArray &xml, QString *error, int maxExpandedNodes)
 {
     CslReader reader;
-    std::shared_ptr<const CslStyle> style = reader.style(xml);
+    std::shared_ptr<const CslStyle> style = reader.style(xml, maxExpandedNodes);
     if (!style && error) *error = QStringLiteral("The citation style cannot be used. ") + reader.error + u'.';
     if (error && style) error->clear();
     return style;

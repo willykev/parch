@@ -360,8 +360,9 @@ shows every table as Markdown. **Format table** lines up one shown that way.
 A table stays as Markdown, as it is written, when it could not be written as
 a grid without losing something: a row with more cells than the header, a
 row that starts with `||`, a `//` comment line between its rows, lines
-indented or quoted differently from each other, or more than 128 columns or
-20,000 cells.
+indented or quoted differently from each other, or more than 128 columns.
+A grid holds up to 20,000 cells, including blank positions in short rows.
+Rows beyond that limit stay as Markdown.
 
 With Vim keys, in Normal mode the block caret sits in a cell's text. `h`,
 `l`, `w`, `b`, `0` and `$` go from cell to cell along the row, and `j` and
@@ -404,7 +405,9 @@ plain text; turning it on again styles it at once.
   processor into Markdown: headings, emphasis, links, lists and task lists,
   quotes, code and tables. Scripts, styles and hidden text are left out, and
   characters that would otherwise turn into Markdown are escaped. One undo
-  takes the whole paste back. `Ctrl+Shift+V` always pastes plain text.
+  takes the whole paste back. When the copied HTML exceeds 16 MiB or its
+  formatting would produce too much Markdown, parch pastes the clipboard’s
+  plain text. `Ctrl+Shift+V` always pastes plain text.
   Web tables pasted into prose keep values aligned across spanning rows
   and columns. Horizontal spans become merged cells in the Writer dialect
   with merged cells enabled.
@@ -506,7 +509,8 @@ What it shows:
   reason is shown in its place.
 - Footnotes as numbered notes after the text, a table of contents for
   `{{TOC}}`, the text of included files, and `[%key]` values from the front
-  matter.
+  matter. Repeated contents markers use the same heading list. If the lists
+  together grow too large, **Check document** points to the first one omitted.
 - Citations and the bibliography in the selected style. See
   [Citations and bibliographies](#citations-and-bibliographies).
 - Not comments or front matter. Raw HTML that parch supports is formatted;
@@ -700,6 +704,11 @@ changes.
 defines, a key given to two entries of one file or found in two files, a
 bibliography that cannot be read or has errors, with their lines, a style
 that cannot be used, and citations of a bibliography with no style chosen.
+It also reports when a style expands beyond 100,000 elements, when formatting
+exceeds a citation’s rendering limit, or when the fields inherited through
+BibTeX `crossref` or `xdata` exceed the bibliography’s expansion limit. A
+citation field with more than 32 nested quotes or formatting marks reads as
+plain text.
 A newly created bibliography can be empty. The warning in **Check document**
 and `parch check` reads “The bibliography holds no entries yet.”
 
@@ -1784,10 +1793,13 @@ report each of these as a note.
   words takes Qt time that grows with the square of its length; the
   document wraps between words again once it is opened afresh without it.
   The preview and PDF give such a word a place to break every 512
-  characters, which copying leaves out. A table of more than 128 columns or
-  20,000 cells is shown in the preview and printed as it is written, in a
-  code block, rather than laid out as a table. A PDF that takes long to set
-  shows how far it has come and stops when cancelled.
+  characters, which copying leaves out. A Markdown table over 128 columns
+  reads as text. When a table reaches 20,000 cells, including empty positions,
+  the remaining rows read as text. An HTML table over either limit shows its
+  cell text in the preview and formatted exports. Together the tables can
+  occupy 100,000 cells in one document, including its chapters. **Check
+  document** reports a table shown as text when it would pass that limit.
+  A PDF that takes long to set shows how far it has come and stops when cancelled.
 
 ## Getting help
 

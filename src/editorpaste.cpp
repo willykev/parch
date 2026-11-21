@@ -53,20 +53,6 @@ struct Converted {
     QStringList errors;
 };
 
-// HTML up to this many characters is converted at once; more goes to a
-// worker, so that the window never waits on it, and comes in when ready.
-constexpr qsizetype ConvertAtOnceChars = 64 * 1024;
-// Markdown that grows past this many times its HTML, and past
-// MaxGrowthFloor characters, as deeply nested lists do, is not pasted:
-// the plain text the clipboard holds is pasted in its place.
-constexpr qsizetype MaxGrowth = 4;
-constexpr qsizetype MaxGrowthFloor = 1024 * 1024;
-
-bool overgrown(const QString &markdown, const QString &html)
-{
-    return markdown.size() > MaxGrowthFloor && markdown.size() > MaxGrowth * html.size();
-}
-
 bool mergesIn(const Document *document)
 {
     return TableGrids::dialectOf(document->markdownOptions()).mergedCells;
@@ -110,7 +96,6 @@ void convertPaste(Attachments *attachments, Insertion *insertion, const QString 
                 };
             }
             converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly, mergedCells, &converted.errors);
-            if (!images && overgrown(converted.markdown, html)) converted.markdown.clear();
             return converted;
         },
         [insertion, attachments, html, plain, folder, date, images, mergedCells](Converted converted) {
@@ -212,6 +197,13 @@ void EditorBinding::pastePlainText()
 
 void EditorBinding::pasteFrom(const QMimeData *mime)
 {
+    const QString html = mime->hasHtml() ? mime->html() : QString();
+    if (!HtmlMarkdown::fitsInput(html)) {
+        cancelComposition();
+        const QString text = mime->text();
+        if (!text.isEmpty()) insertText(withDocumentBreaks(text), EditKind::Other);
+        return;
+    }
     // Cells from a spreadsheet, or another grid, fill a grid's cells from the caret's.
     const bool hasImage = holdsImage(mime);
     const auto pasted = m_tables->pasteCells(mime, !mime->hasUrls() && !hasImage);
@@ -229,8 +221,7 @@ void EditorBinding::pasteFrom(const QMimeData *mime)
         return;
     }
     const bool image = m_attachments && hasImage;
-    if (mime->hasHtml()) {
-        const QString html = mime->html();
+    if (!html.isEmpty()) {
         QString alt;
         // A copied image brings the HTML of that image too: the image itself
         // is kept, with the alt text the HTML gives it.
@@ -250,12 +241,14 @@ void EditorBinding::pasteFrom(const QMimeData *mime)
 
 bool EditorBinding::insertHtml(const QString &html, SourceRange range, const QString &plain)
 {
-    if (!editable() || m_blocked || !m_document) return false;
+    if (!editable() || m_blocked || !m_document || !HtmlMarkdown::fitsInput(html)) return false;
     // Images the HTML carries are saved first, off the UI thread, and the
     // text goes in once they are in place; so does the text of a large page,
     // whose conversion would hold up the window.
+    const bool large = html.size() > HtmlMarkdown::SynchronousChars;
+    if (large && !m_attachments) return false;
     const bool images = HtmlMarkdown::mayEmbedImages(html);
-    if (m_attachments && (images || html.size() > ConvertAtOnceChars)) {
+    if (m_attachments && (images || large)) {
         auto *insertion = new Insertion(m_document, range);
         writeThrough(insertion);
         const QString folder = m_attachments->documentFolder(m_document);
@@ -265,7 +258,7 @@ bool EditorBinding::insertHtml(const QString &html, SourceRange range, const QSt
     }
     bool inlineOnly = true;
     const QString markdown = HtmlMarkdown::convert(html, {}, &inlineOnly, mergesIn(m_document));
-    if (markdown.isEmpty() || overgrown(markdown, html)) return false;
+    if (markdown.isEmpty()) return false;
     cancelComposition();
     // One edit, so that one undo takes the whole paste back.
     replace(range, withDocumentBreaks(Insertion::fitted(m_buffer->text(), range, markdown, !inlineOnly)),

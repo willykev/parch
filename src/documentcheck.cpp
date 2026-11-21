@@ -23,6 +23,7 @@ QString kindOf(md::DiagnosticCode code)
 {
     using C = md::DiagnosticCode;
     switch (code) {
+    case C::ContentsLimit:
     case C::UnresolvedReference:
     case C::AmbiguousHeadingReference: return QStringLiteral("reference");
     case C::UnresolvedAnchor: return QStringLiteral("link");
@@ -32,7 +33,8 @@ QString kindOf(md::DiagnosticCode code)
     case C::MissingCitation:
     case C::DuplicateCitation: return QStringLiteral("citation");
     case C::UnresolvedVariable: return QStringLiteral("variable");
-    case C::MalformedTableRow: return QStringLiteral("table");
+    case C::MalformedTableRow:
+    case C::TableLimit: return QStringLiteral("table");
     case C::UnclosedMath: return QStringLiteral("math");
     case C::FrontMatter: return QStringLiteral("front-matter");
     case C::UnsupportedHtml: return QStringLiteral("html");

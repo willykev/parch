@@ -260,10 +260,10 @@ void Writer::block(const Node &node, bool tight)
         cr();
         break;
     case NodeType::TableOfContents:
-        if (node.children.empty()) break;
+        if (node.contentsChildren().empty()) break;
         cr();
         lit(QLatin1StringView("<nav class=\"toc\">"));
-        blocks(node.children, false);
+        blocks(node.contentsChildren(), false);
         lit(QLatin1StringView("</nav>"));
         cr();
         break;
@@ -309,8 +309,7 @@ void Writer::table(const Node &node)
         }
         lit(QLatin1StringView("<tr>"));
         cr();
-        for (const Node &cell : row.children) {
-            if (cell.type != NodeType::TableCell) continue;
+        forEachTableCell(node, row, [&](const Node &cell) {
             lit(row.header ? QLatin1StringView("<th") : QLatin1StringView("<td"));
             if (cell.span > 1) attribute(QLatin1StringView("colspan"), QString::number(cell.span));
             switch (cell.align) {
@@ -323,7 +322,7 @@ void Writer::table(const Node &node)
             inlines(cell.children);
             lit(row.header ? QLatin1StringView("</th>") : QLatin1StringView("</td>"));
             cr();
-        }
+        });
         lit(QLatin1StringView("</tr>"));
         cr();
         if (row.header) {

@@ -67,6 +67,7 @@ private:
 QString bibliographyLink(const QString &address);
 
 namespace CslMarkup {
+inline constexpr int MaxNesting = 32;
 // One piece of a run of HTML-like markup: text, an opening tag or a closing tag.
 struct Token {
     enum class Type { Text, Open, Close };

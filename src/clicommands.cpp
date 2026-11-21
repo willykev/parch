@@ -4,6 +4,7 @@
 #include "cli.h"
 #include "dialectchoice.h"
 #include "documentcheck.h"
+#include "documentcitations.h"
 #include "documentsettings.h"
 #include "exporter.h"
 #include "mdhtml.h"
@@ -678,7 +679,7 @@ int render(const QStringList &arguments, const Context &context)
         text = md::toHtml(document, loaded.htmlOptions(options));
         result = text;
     } else if (to == u"text") {
-        text = document.plainText();
+        text = DocumentCitations::plainText(document, loaded.formatted);
         result = text;
     } else if (to == u"outline") {
         for (const md::Heading &heading : document.headings)

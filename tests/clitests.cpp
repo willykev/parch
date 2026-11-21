@@ -1871,6 +1871,167 @@ void statsCountVisibleCodeOnce()
     QCOMPARE(ran.json().value(QStringLiteral("words")).toInt(), 2);
 }
 
+void plainTextAndStatsRespectHtmlBreaks_data()
+{
+    QTest::addColumn<QString>("source");
+    QTest::addColumn<QString>("reading");
+    QTest::addColumn<int>("words");
+    const auto row = [](const char *name, const char *source, const char *reading, int words) {
+        QTest::newRow(name) << QString::fromLatin1(source) << QString::fromLatin1(reading) << words;
+    };
+    row("prose", "left<br>right\n", "left right", 2);
+    row("table", "| Topic |\n| --- |\n| left<br>right |\n", "Topic\nleft right", 3);
+    row("uppercase", "left<BR />right\n", "left right", 2);
+    row("raw-block", "<p>left<br/>right</p>\n", "left right", 2);
+    row("markdown", "left\\\nright\n", "left right", 2);
+    row("literal-code", "`left<br>right`\n", "left<br>right", 3);
+    row("escaped-tag", "left\\<br>right\n", "left<br>right", 3);
+}
+
+void plainTextAndStatsRespectHtmlBreaks()
+{
+    QFETCH(QString, source);
+    QFETCH(QString, reading);
+    QFETCH(int, words);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), source);
+    const Ran rendered = box.run({"render", "doc.md", "--to", "text"});
+    QCOMPARE(rendered.code, Cli::Ok);
+    const Ran counted = box.run({"stats", "doc.md", "--json"});
+    QCOMPARE(counted.code, Cli::Ok);
+    const auto observed = std::pair{rendered.out, counted.json().value(QStringLiteral("words")).toInt()};
+    QCOMPARE(observed, (std::pair{reading, words}));
+}
+
+void plainTextAndStatsIncludeCellInlineNotes_data()
+{
+    QTest::addColumn<QString>("source");
+    QTest::addColumn<QString>("reading");
+    QTest::addColumn<int>("words");
+    const auto row = [](const char *name, const char *source, const char *reading, int words) {
+        QTest::newRow(name) << QString::fromLatin1(source) << QString::fromLatin1(reading) << words;
+    };
+    row("cell", "| Topic |\n| --- |\n| News[^A short note.] |\n", "Topic\nNews A short note.", 5);
+    row("two-cells", "| Topic | Place |\n| --- | --- |\n"
+                     "| *News[^First *note*.]* today[^Next note.] | Town[^Another note.] |\n",
+        "Topic\tPlace\nNews today First note. Next note.\tTown Another note.", 11);
+    row("paragraph", "News[^A short note.]\n", "News A short note.", 4);
+}
+
+void plainTextAndStatsIncludeCellInlineNotes()
+{
+    QFETCH(QString, source);
+    QFETCH(QString, reading);
+    QFETCH(int, words);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), source);
+    const Ran rendered = box.run({"render", "doc.md", "--to", "text"});
+    QCOMPARE(rendered.code, Cli::Ok);
+    const Ran counted = box.run({"stats", "doc.md", "--json"});
+    QCOMPARE(counted.code, Cli::Ok);
+    const auto observed = std::pair{rendered.out, counted.json().value(QStringLiteral("words")).toInt()};
+    QCOMPARE(observed, (std::pair{reading, words}));
+}
+
+void plainTextRendersCitationsAndBibliography_data()
+{
+    using namespace Qt::StringLiterals;
+    QTest::addColumn<QString>("source");
+    QTest::addColumn<QString>("opening");
+    QTest::addColumn<QString>("entry");
+    QTest::addColumn<QString>("note");
+    QTest::addColumn<int>("words");
+    const QString bibliography = u"---\nbibliography: works.bib\n"_s;
+    QTest::newRow("ieee") << bibliography + u"csl: ieee\n---\n\nTesting [@smith].\n\n## References\n"_s
+                          << u"Testing [1]."_s << u"[1] K. Smith"_s << QString() << 2;
+    QTest::newRow("writer") << u"Testing [p. 23][#Doe:2006].\n\n## References\n\n[#Doe:2006]: Jane Doe. *A study*.\n"_s
+                            << u"Testing [1, p. 23]."_s << u"Jane Doe. A study."_s << QString() << 2;
+    QTest::newRow("grouped") << u"Testing [see @doe, p. 23; @roe] and [@missing].\n\n## References\n\n"
+                               "[#doe]: Jane Doe. *A study*.\n[#roe]: Pat Roe. *A reply*.\n"_s
+                             << u"Testing [see 1, p. 23; 2] and [@missing]."_s << u"Jane Doe. A study."_s << QString() << 3;
+    QTest::newRow("note-style") << bibliography + u"csl: chicago-notes-bibliography\n---\n\nTesting [@smith].\n\n"
+             "| Topic |\n| --- |\n| News[^Read [@jones, p. 22].] |\n\n## References\n"_s
+                                << u"Testing [1]."_s << u"Smith, Kim."_s << u"Kim Smith,"_s << 5;
+}
+
+void plainTextRendersCitationsAndBibliography()
+{
+    using namespace Qt::StringLiterals;
+    QFETCH(QString, source);
+    QFETCH(QString, opening);
+    QFETCH(QString, entry);
+    QFETCH(QString, note);
+    QFETCH(int, words);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(u"works.bib"_s, u"@book{smith, author={Smith, Kim}, title={Portable Articles}, "
+                               "publisher={Small Press}, year={2020}}\n"
+                               "@book{jones, author={Jones, Alex}, title={Another Study}, publisher={North Press}, year={2019}}\n"_s);
+    box.write(u"doc.md"_s, source);
+    const Ran text = box.run({"render", "doc.md", "--to", "text"});
+    QCOMPARE(text.code, Cli::Ok);
+    QVERIFY2(text.out.startsWith(opening + u'\n'), qPrintable(text.out));
+    const qsizetype references = text.out.indexOf(u"\nReferences\n");
+    QVERIFY(references >= opening.size());
+    QVERIFY2(text.out.indexOf(entry) > references, qPrintable(text.out));
+    QCOMPARE(text.out.count(entry), 1);
+    if (source.contains(u"@roe")) {
+        QVERIFY(text.out.indexOf(u"Pat Roe. A reply.") > text.out.indexOf(entry));
+        QCOMPARE(text.out.count(u"Pat Roe. A reply."), 1);
+    }
+    if (!note.isEmpty()) {
+        const qsizetype collected = text.out.indexOf(u"\n[1] "_s + note);
+        QVERIFY2(collected > references && collected < text.out.indexOf(entry), qPrintable(text.out));
+        QCOMPARE(text.out.count(note), 1);
+        const qsizetype inCell = text.out.indexOf(u"News Read Alex Jones,");
+        QVERIFY2(inCell >= 0 && inCell < references, qPrintable(text.out));
+        QVERIFY(text.out.sliced(inCell, references - inCell).contains(u"22"));
+        QCOMPARE(text.out.count(u"Alex Jones,"), 1);
+    }
+    const Ran json = box.run({"render", "doc.md", "--to", "text", "--json"});
+    QCOMPARE(json.code, Cli::Ok);
+    QCOMPARE(json.json().value(u"result"_s).toString(), text.out);
+    const Ran saved = box.run({"render", "doc.md", "--to", "text", "-o", "reading.txt"});
+    QCOMPARE(saved.code, Cli::Ok);
+    QCOMPARE(box.read(u"reading.txt"_s), text.out.toUtf8());
+    const Ran stats = box.run({"stats", "doc.md", "--json"});
+    QCOMPARE(stats.code, Cli::Ok);
+    QCOMPARE(stats.json().value(u"words"_s).toInt(), words);
+}
+
+void plainTextKeepsCodeIndentation_data()
+{
+    QTest::addColumn<QByteArray>("source");
+    QTest::addColumn<QString>("reading");
+    QTest::addColumn<int>("words");
+    QTest::newRow("fence") << QByteArray("```\n    one\n    two\n```\n")
+                          << QStringLiteral("    one\n    two") << 2;
+    QTest::newRow("with-heading") << QByteArray("# Code\n\n```\n    one\n    two\n```\n")
+                                 << QStringLiteral("Code\n    one\n    two") << 3;
+    QTest::newRow("literal-crlf") << QByteArray("```\r\n\r\n\tone  \r\n  two \r\n```\r\n\r\nAfter.\r\n")
+                                  << QStringLiteral("\n\tone  \n  two \nAfter.") << 3;
+    QTest::newRow("indented") << QByteArray("        one\n        two  \n\nAfter.\n")
+                             << QStringLiteral("    one\n    two  \nAfter.") << 3;
+}
+
+void plainTextKeepsCodeIndentation()
+{
+    QFETCH(QByteArray, source);
+    QFETCH(QString, reading);
+    QFETCH(int, words);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    writeFile(box.path(QStringLiteral("doc.md")), source);
+    const Ran rendered = box.run({"render", "doc.md", "--to", "text"});
+    QCOMPARE(rendered.code, Cli::Ok);
+    QCOMPARE(rendered.out, reading);
+    const Ran counted = box.run({"stats", "doc.md", "--json"});
+    QCOMPARE(counted.code, Cli::Ok);
+    QCOMPARE(counted.json().value(QStringLiteral("words")).toInt(), words);
+}
+
 void readingTextOmitsUnusedNotes()
 {
     Sandbox box;

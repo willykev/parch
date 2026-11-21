@@ -43,8 +43,10 @@ public:
     {
         block(doc.root, false);
         if (opt.endnotes) {
-            footnotes();
+            const bool notesFirst = opt.citations && opt.citations->noteStyle;
+            if (notesFirst) footnotes();
             bibliography();
+            if (!notesFirst) footnotes();
         }
         cr();
         return out;

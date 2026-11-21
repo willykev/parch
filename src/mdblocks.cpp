@@ -861,6 +861,8 @@ void BlockParser::addLiteralLine(Block *block)
     }
     if (block->type == NodeType::HtmlBlock)
         block->pieces.push_back({offset, lineEnd - offset, lineNumber, true, false, quint8(padding)});
+    else if (block->type == NodeType::CodeBlock)
+        block->markers.push_back({offset - (padding > 0), lineEnd});
     block->literal.append(QStringView(s + offset, lineEnd - offset));
     block->literal.append(u'\n');
     if (!blank || (block->type == NodeType::CodeBlock && block->fenced)) {
@@ -1544,6 +1546,8 @@ void BlockParser::finalize(Block *block, int line)
             }
         } else {
             block->literal.truncate(block->literalTextLength);
+            while (!block->markers.empty() && block->markers.back().end > block->lastTextEnd)
+                block->markers.pop_back();
             block->end = block->lastTextEnd;
             block->endLine = block->lastTextLine;
         }

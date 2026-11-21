@@ -1705,6 +1705,18 @@ void wordCountsFollowTextAndSelection()
     QCOMPARE(WordCounter::count(linked, int(linked.indexOf(u"eight")), int(linked.size())), 1);
     QCOMPARE(WordCounter::count(u"café naïve été"), 3);
 
+    const QString table = QStringLiteral("| Topic |\n| --- |\n| left<br>right[^A short note.] |\n");
+    const int left = int(table.indexOf(u"left"));
+    const int right = int(table.indexOf(u"right"));
+    const int end = int(table.indexOf(u']')) + 1;
+    QCOMPARE(WordCounter::count(table, left, right + 5), 2);
+    QCOMPARE(WordCounter::count(table, left, end), 5);
+    QCOMPARE(WordCounter::count(table, int(table.indexOf(u"short")), int(table.indexOf(u']'))), 2);
+    const QString code = QStringLiteral("```\n    one\n    two\n```\n");
+    md::PlainTextOptions clipped;
+    clipped.range = md::Range{int(code.indexOf(u"    one")), int(code.indexOf(u"two")) + 2};
+    QCOMPARE(md::parse(code).plainText(clipped), QStringLiteral("    one\n    tw"));
+
     ShellFixture shell;
     QVERIFY2(shell.ok(), qPrintable(shell.error));
     QQuickWindow *window = shell.window.get();

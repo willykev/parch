@@ -37,6 +37,14 @@
   separate blocks, local link definitions and shared notes.
 - Relative links in PDFs work from the export folder. EPUB export names the
   local link destinations it leaves out of the book.
+- Plain-text rendering keeps code indentation and includes formatted
+  citations and the bibliography. Word counts include inline table notes
+  and treat HTML line breaks as word boundaries.
+- Preview, HTML, PDF and EPUB put the bibliography before collected notes
+  for author-date, numeric and Writer citations. Note styles put collected
+  notes first, including citation notes in plain text.
+- Word exports use fixed-width code and store the front-matter title in
+  document metadata.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

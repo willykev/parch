@@ -217,6 +217,42 @@ QString attribute(const QString &value)
     return md::escapeHtml(value);
 }
 
+QString citationText(const md::Document &document, const md::Node &node, const Formatted &formatted)
+{
+    if (formatted.active) {
+        const auto *citation = formatted.find(node);
+        if (citation && !citation->text.isEmpty()) return citation->text.toPlainText();
+    }
+    const auto itemText = [&](const md::Node &item) {
+        if (item.number <= 0) return document.source(item).toString();
+        QString text;
+        if (!item.title.isEmpty()) text = item.title + u' ';
+        text += QString::number(item.number);
+        if (!item.text.isEmpty()) text += QStringLiteral(", ") + item.text;
+        return text;
+    };
+    if (node.children.empty()) {
+        const QString only = itemText(node);
+        return node.number > 0 ? u'[' + only + u']' : only;
+    }
+    QStringList items;
+    for (const md::Node &child : node.children) items.append(itemText(child));
+    return u'[' + items.join(QStringLiteral("; ")) + u']';
+}
+
+QString bibliographyText(const CslText &words)
+{
+    QString text;
+    auto display = CslFormat::Display::Inline;
+    for (const CslSpan &span : words.spans()) {
+        if (display != span.format.display && !text.isEmpty() && !text.back().isSpace() && !span.text.front().isSpace())
+            text += u' ';
+        text += span.text;
+        display = span.format.display;
+    }
+    return text.trimmed();
+}
+
 } // namespace
 
 Reach Reach::of(const QString &library, const QString &folder)
@@ -506,6 +542,7 @@ std::optional<md::CitationHtml> html(const Formatted &formatted)
                                         .arg(attribute(citation.keys.join(u' ')), inner));
     }
     md::CitationHtml html;
+    html.noteStyle = formatted.noteStyle;
     html.citation = [texts](const md::Node &node) { return texts.value(&node); };
     if (!formatted.bibliography.isEmpty()) {
         QString section = QStringLiteral("<section class=\"bibliography csl-bib-body%1\" role=\"doc-bibliography\">\n")
@@ -517,6 +554,38 @@ std::optional<md::CitationHtml> html(const Formatted &formatted)
         html.bibliography = section;
     }
     return html;
+}
+
+QString plainText(const md::Document &document, const Formatted &formatted)
+{
+    QHash<const md::Node *, int> citationNotes;
+    for (const md::Footnote &note : document.footnotes)
+        if (note.content && note.content->type == md::NodeType::Citation) citationNotes.insert(note.content, note.number);
+
+    md::PlainTextOptions options;
+    options.citation = [&](const md::Node &node) {
+        const int note = citationNotes.value(&node);
+        return note > 0 ? QStringLiteral("[%1]").arg(note) : citationText(document, node, formatted);
+    };
+    QString text = document.plainText(options);
+    const auto append = [&](const QString &line) {
+        if (line.isEmpty()) return;
+        if (!text.isEmpty()) text += u'\n';
+        text += line;
+    };
+    // The separate citation notes of a note style come before its bibliography.
+    for (const md::Footnote &note : document.footnotes)
+        if (note.content && note.content->type == md::NodeType::Citation)
+            append(QStringLiteral("[%1] %2").arg(note.number).arg(citationText(document, *note.content, formatted)));
+    if (formatted.active) {
+        for (const CitationBibliographyEntry &entry : formatted.bibliography) append(bibliographyText(entry.text));
+    } else {
+        for (const md::BibliographyEntry &entry : document.bibliography) {
+            const QString words = entry.definition ? md::plainText(*entry.definition) : entry.key;
+            append(QStringLiteral("[%1] %2").arg(entry.number).arg(words));
+        }
+    }
+    return text;
 }
 
 CslText definitionText(const md::Node &definition)

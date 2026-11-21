@@ -366,6 +366,7 @@ void Assembler::convert(Block *block, Node &node)
         node.label = block->label;
         node.fenced = block->fenced;
         node.marker = block->listChar;
+        if (node.type == NodeType::CodeBlock) node.markers = std::move(block->markers);
         if (st.files[block->file].hasNul) node.text.replace(QChar(0), QChar(0xfffd));
         return;
     case NodeType::MathBlock:

@@ -56,9 +56,10 @@ struct CitationHtml {
     // The HTML of one citation: a Citation node that stands alone or holds
     // a group. It must be safe, as the renderer writes it as it is.
     std::function<QString(const Node &citation)> citation;
-    // The whole bibliography, safe HTML, written after the notes; empty
-    // for none.
+    // The whole bibliography as safe HTML. Empty when there is none.
     QString bibliography;
+    // A note style puts collected notes before the bibliography.
+    bool noteStyle = false;
 };
 
 struct HtmlOptions {

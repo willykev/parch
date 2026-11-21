@@ -3006,7 +3006,7 @@ void htmlRenderer()
     QVERIFY(full.startsWith(QLatin1StringView("<h1 id=\"title\">Title</h1>\n")));
     QVERIFY(full.contains(QLatin1StringView("<section class=\"footnotes\">")));
     QVERIFY(full.contains(QLatin1StringView("<section class=\"bibliography\">")));
-    QVERIFY(full.indexOf(QLatin1StringView("footnotes")) < full.indexOf(QLatin1StringView("bibliography")));
+    QVERIFY(full.indexOf(QLatin1StringView("bibliography")) < full.indexOf(QLatin1StringView("footnotes")));
     md::HtmlOptions bare;
     bare.headingIds = false;
     bare.endnotes = false;

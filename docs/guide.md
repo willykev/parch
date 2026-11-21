@@ -491,8 +491,7 @@ What it shows:
 - Footnotes as numbered notes after the text, a table of contents for
   `{{TOC}}`, the text of included files, and `[%key]` values from the front
   matter.
-- Citations and the bibliography as the document's citation style writes
-  them, with a note style's citations among the notes; see
+- Citations and the bibliography in the selected style. See
   [Citations and bibliographies](#citations-and-bibliographies).
 - Not comments or front matter. Raw HTML that parch supports is formatted;
   anything else is shown as the text it is and never run (see
@@ -660,14 +659,20 @@ style** in **Document settings…**, or with `--bibliography` and `--csl`.
 Whatever the file, parch reads it only if it is a regular file of at most
 32 MiB, never a device, a pipe or a file of `/proc`, `/sys` or `/dev`.
 
-With a style, the preview, `parch render` and the HTML export write each
-citation as the style has it, `(Doe, 2006, p. 23)` or `[1, p. 23]`, and the
-bibliography after the text: the style's entries, then the document's own
-Writer entries, numbered as they are first cited. A note style, such as
-Chicago notes and bibliography, puts each citation of the text in a footnote
-of its own, numbered with your other notes; a citation inside a footnote
-stays in it. Without a style or a bibliography file, Writer citations are
-numbered as they are first cited: `[1, p. 23]`.
+With a style, the preview, `parch render` and formatted exports write each
+citation as the style has it, such as `(Doe, 2006, p. 23)` or `[1, p. 23]`.
+The bibliography lists the style's entries first, followed by the
+document's own Writer entries in order of first citation. In the preview,
+HTML, PDF and EPUB, author-date and numeric styles put the bibliography
+before collected notes, directly after a closing References heading when
+present. Writer citations use the same order. Note styles put the
+collected notes before the bibliography.
+
+A note style such as Chicago notes and bibliography gives each citation
+in the main text a footnote numbered with the other notes. A citation
+inside a footnote stays in it. Without a style or a bibliography file,
+Writer citations are numbered in the order you first cite them, as in
+`[1, p. 23]`.
 
 In the preview a key that nothing defines stays where it is cited, in the
 theme's colour for what is wrong, and says which key it is when the pointer
@@ -760,6 +765,9 @@ page to page.
 Markdown, HTML, PDF and DOCX preserve the query and fragment when writing a
 relative link from the export folder.
 
+A front-matter title supplies document metadata in HTML, PDF, DOCX and
+EPUB. Write a heading in the Markdown body to put a title on the page.
+
 What each format holds:
 
 - **Markdown** assembles the document and its includes into one file. Lists,
@@ -792,12 +800,14 @@ What each format holds:
   `+++` starts a new page, and a heading never stays
   at the foot of a page without its text. Formulas and diagrams are vectors;
   a diagram that cannot be drawn as one is printed as a picture at four times
-  its size, and the notice says so. Notes and the bibliography follow the
-  text.
-- **DOCX**: a Word document with real styles (Title, Heading 1 to 6, Quote,
-  Code), bulleted, numbered and task lists, tables with merged cells, links,
-  notes as footnotes or endnotes, pictures with their descriptions, and the
-  title, author, subject, keywords and language from the front matter.
+  its size, and the notice says so. The citation style determines the
+  order of the bibliography and collected notes.
+- **DOCX**: a Word document with styles for headings, quotes and code,
+  bulleted, numbered and task lists, tables with merged cells, links, and
+  pictures with their descriptions. Block code and inline code use a
+  fixed-width font. Word places notes as footnotes or endnotes, according
+  to the export setting. The title, author, subject, keywords and language
+  from the front matter are document properties.
   Formulas and diagrams are pictures, not Word equations.
 - **EPUB**: an EPUB 3 book with a file for each chapter (each heading of
   level 1, or of level 2 when the document has a single title), a table of
@@ -1338,8 +1348,10 @@ parch stats book.md                  # Words, characters, reading time, headings
 - **render** writes the HTML fragment the preview and exports are made from
   (`html`, the default), the text a reader sees (`text`), the headings
   indented by level (`outline`), or the whole semantic tree with source ranges
-  (`json-tree`). Relative links and images lead from the folder the HTML is
-  written to, or from the document's.
+  (`json-tree`). Reader text keeps code indentation and includes formatted
+  citations and the bibliography. In a note style, collected citation notes
+  come before the bibliography. Relative links and images lead from the
+  folder the HTML is written to, or from the document's.
 - **export** writes the document in any of the formats the window's
   [Export](#export-and-print) writes, in the same way: `md`, the document
   as one file with each include in place (an included file's front matter
@@ -1357,7 +1369,9 @@ parch stats book.md                  # Words, characters, reading time, headings
   is printed as a note. The format follows `-o`'s name unless `--to` gives
   one.
 - **stats** counts the words, characters (with and without spaces) and
-  headings a reader reads, and the reading time at 200 words a minute.
+  headings in the written text and its notes, and the reading time at 200
+  words a minute. Inline notes in tables count with their cell, and HTML
+  line breaks separate words.
 
 An export never writes over the document or a file it includes, never
 writes through a symbolic link, even with `--force`, replaces a file that

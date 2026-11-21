@@ -69,8 +69,15 @@ Range contentOf(const Node &node)
             node.close.isEmpty() ? node.range.end : node.close.start};
 }
 
-void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr, QChar inlineBreak = {})
+struct InlineReading {
+    const Clip *clip = nullptr;
+    QChar clipboardBreak;
+    const PlainTextOptions *options = nullptr;
+};
+
+void appendPlain(const Node &node, QString &out, const InlineReading &reading = {}, QString *notes = nullptr)
 {
+    const Clip *clip = reading.clip;
     if (clip && clip->excludes(node)) return;
     switch (node.type) {
     case NodeType::Text:
@@ -88,28 +95,36 @@ void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr, QCh
         return;
     case NodeType::SoftBreak:
     case NodeType::HardBreak:
-        out.append(inlineBreak.isNull() ? QChar(u' ') : inlineBreak);
+        out.append(reading.clipboardBreak.isNull() ? QChar(u' ') : reading.clipboardBreak);
         return;
     case NodeType::HtmlElement:
-        if (!inlineBreak.isNull() && node.label == u"br") {
-            out.append(inlineBreak);
+        if (node.label == u"br") {
+            out.append(reading.clipboardBreak.isNull() ? QChar(u' ') : reading.clipboardBreak);
             return;
         }
-        if (!inlineBreak.isNull() && node.label == u"img") {
+        if (!reading.clipboardBreak.isNull() && node.label == u"img") {
             out.append(node.attribute(QLatin1StringView("alt")));
             return;
         }
         break;
     case NodeType::HtmlInline:
-        if (!inlineBreak.isNull()) out.append(node.text);
+        if (!reading.clipboardBreak.isNull()) out.append(node.text);
         return;
     case NodeType::Variable:
         if (node.resolved) out.append(node.text);
         else out.append(QStringLiteral("[%%1]").arg(node.label));
         return;
-    case NodeType::FootnoteReference:
     case NodeType::InlineNote:
+        if (notes) {
+            QString body;
+            for (const Node &child : node.children) appendPlain(child, body, reading);
+            if (!body.isEmpty()) notes->append(u' ').append(body);
+        }
+        return;
     case NodeType::Citation:
+        if (reading.options && reading.options->citation) out.append(reading.options->citation(node));
+        return;
+    case NodeType::FootnoteReference:
     case NodeType::HtmlComment:
     case NodeType::CommentLine:
     case NodeType::HeadingLabel:
@@ -118,14 +133,47 @@ void appendPlain(const Node &node, QString &out, const Clip *clip = nullptr, QCh
     default:
         break;
     }
-    for (const Node &child : node.children) appendPlain(child, out, clip, inlineBreak);
+    for (const Node &child : node.children) appendPlain(child, out, reading, notes);
+}
+
+QString inlineBlock(const Node &node, const PlainTextOptions &options, const Clip *clip)
+{
+    QString text, notes;
+    appendPlain(node, text, {clip, {}, &options}, options.notes ? &notes : nullptr);
+    text += notes;
+    return text.trimmed();
+}
+
+QString clippedCode(const Node &node, const Clip &clip)
+{
+    QString out;
+    QStringView code(node.text);
+    for (const Range line : node.markers) {
+        const qsizetype newline = code.indexOf(u'\n');
+        const QStringView text = newline < 0 ? code : code.first(newline);
+        const int first = std::max(clip.range.start, line.start);
+        const int last = std::min(clip.range.end, line.end);
+        if (first < last) {
+            // A tab partly consumed by indentation becomes spaces in the literal.
+            const int extra = int(text.size()) - line.length();
+            const int start = first == line.start ? 0 : first - line.start + extra;
+            out.append(text.sliced(start, last - line.start + extra - start));
+        }
+        if (line.end < clip.text.size()) {
+            const int ending = clip.text.sliced(line.end).startsWith(u"\r\n") ? 2 : 1;
+            if (clip.range.start < line.end + ending && clip.range.end > line.end) out += u'\n';
+        }
+        if (newline < 0) break;
+        code = code.sliced(newline + 1);
+    }
+    return out;
 }
 
 // The text of the blocks of a document, one block per line.
 void appendBlocks(const Node &node, const PlainTextOptions &options, QString &out, const Clip *clip = nullptr)
 {
     if (clip && clip->excludes(node)) return;
-    auto line = [&](const QString &text) {
+    auto line = [&](QStringView text) {
         if (text.isEmpty()) return;
         out.append(text);
         out.append(u'\n');
@@ -133,41 +181,19 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
     switch (node.type) {
     case NodeType::Paragraph:
     case NodeType::Heading:
-    case NodeType::DefinitionTerm: {
-        QString text;
-        appendPlain(node, text, clip);
-        if (options.notes) {
-            // Inline notes are read where they are written.
-            std::vector<const Node *> pending{&node};
-            while (!pending.empty()) {
-                const Node *current = pending.back();
-                pending.pop_back();
-                for (const Node &child : current->children) {
-                    if (child.type == NodeType::InlineNote) {
-                        if (clip && clip->excludes(child)) continue;
-                        text.append(u' ');
-                        for (const Node &inner : child.children) appendPlain(inner, text, clip);
-                    } else if (!child.children.empty()) {
-                        pending.push_back(&child);
-                    }
-                }
-            }
-        }
-        line(text.trimmed());
+    case NodeType::DefinitionTerm:
+        line(inlineBlock(node, options, clip));
+        return;
+    case NodeType::CodeBlock: {
+        if (!options.code) return;
+        const QString text = clip && !clip->holds(node) ? clippedCode(node, *clip) : node.text;
+        if (text.endsWith(u'\n')) out.append(text);
+        else line(text);
         return;
     }
-    case NodeType::CodeBlock:
-        if (!options.code) return;
-        if (clip && !clip->holds(node)) line(clip->cut(contentOf(node)).trimmed().toString());
-        else line(node.text.trimmed());
-        return;
     case NodeType::TableRow: {
         QStringList cells;
-        for (const Node &cell : node.children) {
-            QString text;
-            appendPlain(cell, text, clip);
-            cells.append(text.trimmed());
-        }
+        for (const Node &cell : node.children) cells.append(inlineBlock(cell, options, clip));
         line(cells.join(u'\t').trimmed());
         return;
     }
@@ -176,7 +202,7 @@ void appendBlocks(const Node &node, const PlainTextOptions &options, QString &ou
         break;
     case NodeType::HtmlBlock: {
         QString text;
-        appendPlain(node, text, clip);
+        appendPlain(node, text, {clip, {}, &options});
         line(text.simplified());
         return;
     }
@@ -478,7 +504,7 @@ QString Document::plainText(const PlainTextOptions &options) const
 QString inlineText(const Node &node, QChar lineBreak)
 {
     QString out;
-    appendPlain(node, out, nullptr, lineBreak);
+    appendPlain(node, out, {nullptr, lineBreak, nullptr});
     return out;
 }
 

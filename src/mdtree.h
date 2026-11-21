@@ -226,7 +226,7 @@ struct Node {
     QString label;
 
     std::vector<Attribute> attributes; // HtmlElement: the attributes the HTML policy allows
-    std::vector<Range> markers;        // BlockQuote, TableRow, InlineNote: syntax outside the note's text
+    std::vector<Range> markers;        // BlockQuote, TableRow, InlineNote; CodeBlock: literal source lines
     std::vector<Node> children;
 
     QString attribute(QLatin1StringView name) const
@@ -355,6 +355,8 @@ struct PlainTextOptions {
     // (file 0), as for a selection; the whole document when unset. Of a
     // construct the range cuts through, the part of its source inside it.
     std::optional<Range> range;
+    // When set, the reading text of a citation. Counts leave it unset.
+    std::function<QString(const Node &)> citation;
 };
 
 class Document {

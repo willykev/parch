@@ -395,6 +395,14 @@ private slots:
     void cliExportFormatsPlugInThroughOneInterface() { CliTests::exportFormatsPlugInThroughOneInterface(); }
     void cliStatsCountWhatAReaderReads() { CliTests::statsCountWhatAReaderReads(); }
     void cliStatsCountVisibleCodeOnce() { CliTests::statsCountVisibleCodeOnce(); }
+    void cliPlainTextAndStatsRespectHtmlBreaks_data() { CliTests::plainTextAndStatsRespectHtmlBreaks_data(); }
+    void cliPlainTextAndStatsRespectHtmlBreaks() { CliTests::plainTextAndStatsRespectHtmlBreaks(); }
+    void cliPlainTextAndStatsIncludeCellInlineNotes_data() { CliTests::plainTextAndStatsIncludeCellInlineNotes_data(); }
+    void cliPlainTextAndStatsIncludeCellInlineNotes() { CliTests::plainTextAndStatsIncludeCellInlineNotes(); }
+    void cliPlainTextRendersCitationsAndBibliography_data() { CliTests::plainTextRendersCitationsAndBibliography_data(); }
+    void cliPlainTextRendersCitationsAndBibliography() { CliTests::plainTextRendersCitationsAndBibliography(); }
+    void cliPlainTextKeepsCodeIndentation_data() { CliTests::plainTextKeepsCodeIndentation_data(); }
+    void cliPlainTextKeepsCodeIndentation() { CliTests::plainTextKeepsCodeIndentation(); }
     void cliReadingTextOmitsUnusedNotes() { CliTests::readingTextOmitsUnusedNotes(); }
     void cliSkillPrintsAndInstalls() { CliTests::skillPrintsAndInstalls(); }
     void cliSkillLeavesOtherFilesAlone() { CliTests::skillLeavesOtherFilesAlone(); }
@@ -425,6 +433,11 @@ private slots:
     void exportPaperFormulasSitOnTheBaseline() { ExportTests::paperFormulasSitOnTheBaseline(); }
     void exportPaperDiagramsAreVectorsWhereQtDrawsThem() { ExportTests::paperDiagramsAreVectorsWhereQtDrawsThem(); }
     void exportDocxIsWordprocessingMarkup() { ExportTests::docxIsWordprocessingMarkup(); }
+    void bibliographyPrecedesCollectedNotes_data() { ExportTests::bibliographyPrecedesCollectedNotes_data(); }
+    void bibliographyPrecedesCollectedNotes() { ExportTests::bibliographyPrecedesCollectedNotes(); }
+    void docxDeclaresFixedWidthCodeFonts() { ExportTests::docxDeclaresFixedWidthCodeFonts(); }
+    void frontMatterTitleIsMetadataAcrossFormats_data() { ExportTests::frontMatterTitleIsMetadataAcrossFormats_data(); }
+    void frontMatterTitleIsMetadataAcrossFormats() { ExportTests::frontMatterTitleIsMetadataAcrossFormats(); }
     void exportLinksKeepQueryAndFragment() { ExportTests::exportLinksKeepQueryAndFragment(); }
     void exportDocxOpensInLibreOffice() { ExportTests::docxOpensInLibreOffice(); }
     void exportEpubFollowsTheContainerRules() { ExportTests::epubFollowsTheContainerRules(); }

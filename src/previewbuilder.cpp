@@ -277,7 +277,8 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
         part.key = h.value;
         list.push_back(part);
     }
-    if (!document.footnotes.empty()) {
+    const auto appendNotes = [&] {
+        if (document.footnotes.empty()) return;
         list.push_back({Part::NotesRule, nullptr, 0, 0x6e6f7465ULL});
         for (size_t i = 0; i < document.footnotes.size(); ++i) {
             const md::Footnote &note = document.footnotes[i];
@@ -289,7 +290,9 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
             if (note.content) hashWithSource(document, *note.content, h, citations, &unresolved);
             list.push_back({Part::Note, nullptr, int(i), h.value});
         }
-    }
+    };
+    const bool notesFirst = citations && citations->noteStyle;
+    if (notesFirst) appendNotes();
     if (citations) {
         // The style's bibliography, in the style's order, in place of the
         // works the text defines.
@@ -312,9 +315,7 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
                 list.push_back({Part::Entry, nullptr, int(i), h.value});
             }
         }
-        return list;
-    }
-    if (!document.bibliography.empty()) {
+    } else if (!document.bibliography.empty()) {
         list.push_back({Part::BibliographyRule, nullptr, 0, 0x62696262ULL});
         for (size_t i = 0; i < document.bibliography.size(); ++i) {
             const md::BibliographyEntry &entry = document.bibliography[i];
@@ -327,6 +328,7 @@ std::vector<Part> parts(const md::Document &document, const DocumentCitations::F
             list.push_back({Part::Entry, nullptr, int(i), h.value});
         }
     }
+    if (!notesFirst) appendNotes();
     return list;
 }
 

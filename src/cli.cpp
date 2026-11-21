@@ -95,9 +95,13 @@ QStringList withoutQtOptions(const QStringList &arguments)
     if (!arguments.isEmpty()) kept.append(arguments.first());
     for (qsizetype i = 1; i < arguments.size(); ++i) {
         const QString &argument = arguments.at(i);
+        if (argument == u"--") {
+            kept.append(arguments.sliced(i));
+            break;
+        }
         const QString option = argument.startsWith(QLatin1String("--")) ? argument.mid(1) : argument;
         if (takingValue.contains(option)) {
-            ++i;
+            if (i + 1 < arguments.size() && arguments.at(i + 1) != u"--") ++i;
             continue;
         }
         if (alone.contains(option)) continue;
@@ -164,7 +168,7 @@ Launch parseLaunch(const QStringList &given)
         launch.error = error;
         return launch;
     };
-    // Qt's own options are Qt's, whichever place they have.
+    // Qt handles its own options up to the positional separator.
     const QStringList arguments = withoutQtOptions(given);
     // The options that take a value, and those that stand alone.
     static const QStringList valued = {

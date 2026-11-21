@@ -25,6 +25,7 @@
 #include <QTextBoundaryFinder>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <optional>
 
@@ -59,9 +60,47 @@ QByteArray printableJson(const QJsonDocument &document)
     return safe.toUtf8();
 }
 
-void write(QIODevice *device, const QString &text)
+QString writeAll(QIODevice *device, QByteArrayView bytes)
 {
-    device->write(printable(text).toUtf8());
+    if (bytes.isEmpty()) return {};
+    if (!device || !device->isWritable()) return QStringLiteral("the stream is unavailable");
+    while (!bytes.isEmpty()) {
+        const qint64 count = device->write(bytes.data(), bytes.size());
+        if (count <= 0) {
+            const QString error = device->errorString();
+            return error.isEmpty() ? QStringLiteral("the stream stopped accepting bytes") : error;
+        }
+        bytes = bytes.sliced(count);
+    }
+    return {};
+}
+
+// Keep the first failure from every part of the command's result.
+class ResultOutput final : public QIODevice {
+public:
+    explicit ResultOutput(QIODevice *device) : m_device(device) { open(QIODevice::WriteOnly | QIODevice::Unbuffered); }
+    bool isSequential() const override { return true; }
+    const QString &failure() const { return m_failure; }
+
+protected:
+    qint64 readData(char *, qint64) override { return -1; }
+    qint64 writeData(const char *data, qint64 size) override
+    {
+        if (!m_failure.isEmpty()) return -1;
+        m_failure = writeAll(m_device, QByteArrayView(data, size));
+        if (m_failure.isEmpty()) return size;
+        setErrorString(m_failure);
+        return -1;
+    }
+
+private:
+    QIODevice *const m_device;
+    QString m_failure;
+};
+
+QString write(QIODevice *device, const QString &text)
+{
+    return writeAll(device, printable(text).toUtf8());
 }
 void line(QIODevice *device, const QString &text)
 {
@@ -69,7 +108,7 @@ void line(QIODevice *device, const QString &text)
 }
 void json(QIODevice *device, const QJsonObject &object)
 {
-    device->write(printableJson(QJsonDocument(object)));
+    writeAll(device, printableJson(QJsonDocument(object)));
 }
 
 // What every JSON result starts with.
@@ -470,7 +509,8 @@ int check(const QStringList &arguments, const Context &context)
                                    "as the preview draws them. When one cannot be found, or with --no-render, what it\n"
                                    "draws is not checked, and check says so without counting it as a problem.\n\n"
                                    "Exit status: 0 nothing wrong (notes of severity info alone are not problems),\n"
-                                   "1 a wrong command line, 2 problems found, 3 a document could not be read.");
+                                   "1 a wrong command line, 2 problems found, 3 a document could not be read\n"
+                                   "or the result could not be written.");
     if (const auto done = command.parse(arguments, context)) return *done;
     const QStringList files = command.parser.positionalArguments();
     if (files.isEmpty()) return command.usage(QStringLiteral("say which files: parch check FILE..."), context);
@@ -644,8 +684,7 @@ int render(const QStringList &arguments, const Context &context)
                                    "A render to a file refuses a document with an unreadable include. A render to stdout "
                                    "can preview it.\n\n"
                                    "Exit status: 0 written, 1 a wrong command line, 2 the document is incomplete "
-                                   "for file output, 3 a file could not be read or "
-                                   "written.");
+                                   "for file output, 3 an input could not be read or the output could not be written.");
     if (const auto done = command.parse(arguments, context)) return *done;
     const QStringList files = command.parser.positionalArguments();
     if (files.size() != 1) return command.usage(QStringLiteral("say which one file: parch render FILE"), context);
@@ -776,7 +815,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
                        "what a format cannot hold as the document has it is said as a note.\n"
                        "A document that includes a file that cannot be read is not exported.\n\n"
                        "Exit status: 0 written, 1 a wrong command line, 2 the document is incomplete,\n"
-                       "3 a file could not be read or written, or OUT is there without --force,\n"
+                       "3 an input could not be read, an output or report could not be written, or OUT needs --force,\n"
                        "4 the export could not be made.");
     if (const auto done = command.parse(arguments, context)) return *done;
     const QCommandLineParser &parser = command.parser;
@@ -811,7 +850,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
                                  context);
         }
         const ExportOption option = *optionOf(exporter, it.key());
-        QString value = parser.value(it.key());
+        QString value = option.valueName.isEmpty() ? QString() : parser.value(it.key());
         if (!option.choices.isEmpty()) {
             const auto chosen = std::find_if(option.choices.cbegin(), option.choices.cend(), [&](const QString &choice) {
                 return choice.compare(value, Qt::CaseInsensitive) == 0;
@@ -824,7 +863,7 @@ int exportDocument(const QStringList &arguments, const Context &context)
         } else if (option.number) {
             bool ok = false;
             const double number = value.toDouble(&ok);
-            if (!ok || number < option.minimum || number > option.maximum)
+            if (!ok || !std::isfinite(number) || number < option.minimum || number > option.maximum)
                 return command.usage(QStringLiteral("--%1 takes a number from %2 to %3, not \"%4\"")
                                          .arg(it.key())
                                          .arg(option.minimum)
@@ -899,7 +938,8 @@ int stats(const QStringList &arguments, const Context &context)
         QStringLiteral("\n\nWords are found by the window's rules, in the text a reader sees: without front\n"
                        "matter, comments, link addresses or Markdown punctuation. Reading time is at %1\n"
                        "words a minute. Characters do not count line breaks.\n\n"
-                       "Exit status: 0 counted, 1 a wrong command line, 3 the document could not be read.")
+                       "Exit status: 0 counted, 1 a wrong command line, 3 the document could not be read\n"
+                       "or the result could not be written.")
             .arg(WordCounter::WordsPerMinute);
     if (const auto done = command.parse(arguments, context)) return *done;
     const QStringList files = command.parser.positionalArguments();
@@ -975,7 +1015,7 @@ int skill(const QStringList &arguments, const Context &context)
                                    "no other skill is touched, and a file or link there that is not parch's\n"
                                    "is left alone."));
     command.add({QStringLiteral("json"), jsonDescription});
-    command.notes = QStringLiteral("Exit status: 0 done, 1 a wrong command line, 3 the skill could not be installed.");
+    command.notes = QStringLiteral("Exit status: 0 done, 1 a wrong command line, 3 the skill could not be read, installed or printed.");
     if (const auto done = command.parse(arguments, context)) return *done;
     QFile bundled(QStringLiteral(":/skill.md"));
     if (!bundled.open(QIODevice::ReadOnly)) return command.fail(Io, QStringLiteral("the skill is missing from this build"), context);
@@ -988,7 +1028,7 @@ int skill(const QStringList &arguments, const Context &context)
             report.insert(QStringLiteral("skill"), QString::fromUtf8(text));
             json(context.out, report);
         } else {
-            context.out->write(text);
+            writeAll(context.out, text);
         }
         return Ok;
     }
@@ -1045,6 +1085,8 @@ int skill(const QStringList &arguments, const Context &context)
     return Ok;
 }
 
+int runCommand(const QStringList &arguments, const Context &context);
+
 int help(const QStringList &arguments, const Context &context)
 {
     const QStringList topics = arguments.mid(2);
@@ -1058,13 +1100,24 @@ int help(const QStringList &arguments, const Context &context)
         return Ok;
     }
     if (topics.size() == 1 && isCommand(topic) && topic != u"help")
-        return run({arguments.value(0), topic, QStringLiteral("--help")}, context);
+        return runCommand({arguments.value(0), topic, QStringLiteral("--help")}, context);
     line(context.err, QStringLiteral("parch help: there is no command \"%1\"; the commands are open, %2")
                           .arg(topics.join(u' '), QStringList{QStringLiteral("check"), QStringLiteral("render"),
                                                               QStringLiteral("export"), QStringLiteral("stats"),
                                                               QStringLiteral("skill")}
                                                       .join(QStringLiteral(", "))));
     return Usage;
+}
+
+int runCommand(const QStringList &arguments, const Context &context)
+{
+    const QString command = arguments.value(1);
+    if (command == u"check") return check(arguments, context);
+    if (command == u"render") return render(arguments, context);
+    if (command == u"export") return exportDocument(arguments, context);
+    if (command == u"stats") return stats(arguments, context);
+    if (command == u"skill") return skill(arguments, context);
+    return help(arguments, context);
 }
 
 } // namespace
@@ -1089,13 +1142,23 @@ QString summary()
 
 int run(const QStringList &arguments, const Context &context)
 {
-    const QString command = arguments.value(1);
-    if (command == u"check") return check(arguments, context);
-    if (command == u"render") return render(arguments, context);
-    if (command == u"export") return exportDocument(arguments, context);
-    if (command == u"stats") return stats(arguments, context);
-    if (command == u"skill") return skill(arguments, context);
-    return help(arguments, context);
+    ResultOutput out(context.out);
+    Context checked = context;
+    checked.out = &out;
+    const int status = runCommand(arguments, checked);
+    return out.failure().isEmpty() ? status : outputError(context.err, out.failure());
+}
+
+int outputError(QIODevice *err, const QString &error)
+{
+    line(err, QStringLiteral("parch: cannot write to standard output: %1").arg(error));
+    return Io;
+}
+
+int printResult(const QString &text, QIODevice *out, QIODevice *err)
+{
+    const QString error = write(out, text);
+    return error.isEmpty() ? Ok : outputError(err, error);
 }
 
 } // namespace Cli

@@ -409,6 +409,17 @@ private slots:
     void cliJsonAndTextAreSafeToPrint() { CliTests::jsonAndTextAreSafeToPrint(); }
     void cliHtmlDestinationsCanBeRewritten() { CliTests::htmlDestinationsCanBeRewritten(); }
     void cliCommandsNeedNoDisplay() { CliTests::commandsNeedNoDisplay(); }
+    void cliReportsWhenStdoutCannotBeWritten_data() { CliTests::reportsWhenStdoutCannotBeWritten_data(); }
+    void cliReportsWhenStdoutCannotBeWritten() { CliTests::reportsWhenStdoutCannotBeWritten(); }
+    void cliWritesThroughShortWrites() { CliTests::writesThroughShortWrites(); }
+    void cliKeepsQtNamedFilesAfterDoubleDash_data() { CliTests::keepsQtNamedFilesAfterDoubleDash_data(); }
+    void cliKeepsQtNamedFilesAfterDoubleDash() { CliTests::keepsQtNamedFilesAfterDoubleDash(); }
+    void cliQtOptionsBeforeDoubleDash() { CliTests::qtOptionsBeforeDoubleDash(); }
+    void cliQuietExportSwitchesDoNotLogWarnings_data() { CliTests::quietExportSwitchesDoNotLogWarnings_data(); }
+    void cliQuietExportSwitchesDoNotLogWarnings() { CliTests::quietExportSwitchesDoNotLogWarnings(); }
+    void cliQuietExportsKeepUsageAndErrors() { CliTests::quietExportsKeepUsageAndErrors(); }
+    void cliNonfiniteExportNumbersAreUsageErrors_data() { CliTests::nonfiniteExportNumbersAreUsageErrors_data(); }
+    void cliNonfiniteExportNumbersAreUsageErrors() { CliTests::nonfiniteExportNumbersAreUsageErrors(); }
     void cliBibliographyLinksAreOnlyWebMailOrDoi() { CliTests::bibliographyLinksAreOnlyWebMailOrDoi(); }
     void cliExportNeverWritesThroughALink() { CliTests::exportNeverWritesThroughALink(); }
     void cliCheckSaysWhetherHelpersAreIsolated() { CliTests::checkSaysWhetherHelpersAreIsolated(); }

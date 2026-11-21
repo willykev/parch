@@ -45,6 +45,9 @@
   notes first, including citation notes in plain text.
 - Word exports use fixed-width code and store the front-matter title in
   document metadata.
+- The command line reports standard-output write failures and invalid
+  numeric export options with the documented exit codes. Filenames after
+  `--` are kept, and valid quiet exports with switches run silently.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

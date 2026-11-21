@@ -18,7 +18,8 @@ class QIODevice;
 //   0  done, and nothing wrong
 //   1  the command line is wrong
 //   2  the document has problems (check), or is incomplete (export)
-//   3  a file could not be read or written, or would be replaced unasked
+//   3  a file or result could not be written, a file could not be read, or
+//      a file would be replaced unasked
 //   4  the export could not be made
 namespace Cli {
 
@@ -47,6 +48,11 @@ bool isCommand(const QString &word);
 // Runs a command. `arguments` are the program's name, the command, and
 // what follows it.
 int run(const QStringList &arguments, const Context &context);
+
+// Writes a result before any Qt application exists.
+int printResult(const QString &text, QIODevice *out, QIODevice *err);
+// Best-effort diagnostic for failure to write or flush standard output.
+int outputError(QIODevice *err, const QString &error);
 
 // The commands, a line each, for parch --help.
 QString summary();

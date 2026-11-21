@@ -28,11 +28,15 @@
 #include <QImage>
 #include <QScopeGuard>
 #include <QSet>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
 #include <QUrl>
+#include <cerrno>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace CliTests {
 namespace {
@@ -295,7 +299,10 @@ Meaning meaningOf(const md::Document &document)
 // parch run as a process, with nothing of a desktop to reach.
 const QString parchBinary = QStringLiteral(PARCH_SOURCE_DIR "/build/parch");
 
-Ran runProcess(const Sandbox &box, const QStringList &arguments, const QString &program = parchBinary)
+enum class StdoutMode { Capture, Full, Closed, BrokenPipe };
+
+Ran runProcess(const Sandbox &box, const QStringList &arguments, const QString &program = parchBinary,
+               StdoutMode output = StdoutMode::Capture)
 {
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     for (const char *name : {"HYPRLAND_INSTANCE_SIGNATURE", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "DISPLAY",
@@ -315,11 +322,33 @@ Ran runProcess(const Sandbox &box, const QStringList &arguments, const QString &
     // and an export makes one on Qt's offscreen platform.
     environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("no-such-platform"));
     environment.insert(QStringLiteral("QT_QPA_PLATFORMTHEME"), QStringLiteral("gtk3"));
+    environment.insert(QStringLiteral("QT_FORCE_STDERR_LOGGING"), QStringLiteral("1"));
     QProcess process;
     process.setProcessEnvironment(environment);
     process.setWorkingDirectory(box.root());
-    process.start(program, arguments);
     Ran ran;
+    int pipeWriter = -1;
+    const auto closePipe = qScopeGuard([&] {
+        if (pipeWriter >= 0) ::close(pipeWriter);
+    });
+    if (output == StdoutMode::Full) {
+        process.setStandardOutputFile(QStringLiteral("/dev/full"));
+    } else if (output == StdoutMode::Closed) {
+        process.setChildProcessModifier([] { ::close(STDOUT_FILENO); });
+    } else if (output == StdoutMode::BrokenPipe) {
+        int pipe[2];
+        if (::pipe2(pipe, O_CLOEXEC) < 0) {
+            ran.err = QStringLiteral("could not create the pipe");
+            return ran;
+        }
+        ::close(pipe[0]);
+        pipeWriter = pipe[1];
+        process.setChildProcessModifier([&process, pipeWriter] {
+            if (::dup2(pipeWriter, STDOUT_FILENO) < 0) process.failChildProcessModifier("dup2", errno);
+            ::close(pipeWriter);
+        });
+    }
+    process.start(program, arguments);
     if (!process.waitForFinished(30000)) {
         process.kill();
         process.waitForFinished();
@@ -331,6 +360,34 @@ Ran runProcess(const Sandbox &box, const QStringList &arguments, const QString &
     ran.err = QString::fromUtf8(process.readAllStandardError());
     return ran;
 }
+
+class LimitedOutput : public QIODevice {
+public:
+    explicit LimitedOutput(int limit, qint64 failure) : m_limit(limit), m_failure(failure)
+    {
+        open(QIODevice::WriteOnly | QIODevice::Unbuffered);
+    }
+
+    QByteArray bytes;
+
+protected:
+    qint64 readData(char *, qint64) override { return -1; }
+    qint64 writeData(const char *data, qint64 size) override
+    {
+        qint64 count = qMin<qint64>(size, 3);
+        if (m_limit >= 0) count = qMin(count, m_limit - qint64(bytes.size()));
+        if (count == 0 && size > 0) {
+            setErrorString(QStringLiteral("test stream stopped accepting bytes"));
+            return m_failure;
+        }
+        bytes.append(data, count);
+        return count;
+    }
+
+private:
+    const int m_limit;
+    const qint64 m_failure;
+};
 
 } // namespace
 
@@ -2239,6 +2296,285 @@ void commandsNeedNoDisplay()
     }
     QVERIFY(box.read(QStringLiteral("clean.html")).startsWith("<!DOCTYPE html>"));
     QCOMPARE(readFile(box.home() + QStringLiteral("/.claude/skills/parch/SKILL.md")).left(16), QByteArray("---\nname: parch\n"));
+}
+
+void reportsWhenStdoutCannotBeWritten_data()
+{
+    QTest::addColumn<QStringList>("arguments");
+    QTest::addColumn<int>("mode");
+    QTest::addColumn<QString>("file");
+    const auto row = [](const char *name, const QStringList &args, StdoutMode mode, const QString &file = {}) {
+        QTest::newRow(name) << args << int(mode) << file;
+    };
+    row("render-full", {"render", "doc.md", "--to", "text"}, StdoutMode::Full);
+    row("render-json-full", {"render", "doc.md", "--json"}, StdoutMode::Full);
+    row("stats-full", {"stats", "doc.md"}, StdoutMode::Full);
+    row("stats-json-full", {"stats", "doc.md", "--json"}, StdoutMode::Full);
+    row("render-closed", {"render", "doc.md", "--to", "text"}, StdoutMode::Closed);
+    row("render-json-closed", {"render", "doc.md", "--json"}, StdoutMode::Closed);
+    row("stats-closed", {"stats", "doc.md"}, StdoutMode::Closed);
+    row("stats-json-closed", {"stats", "doc.md", "--json"}, StdoutMode::Closed);
+    row("render-broken-pipe", {"render", "doc.md", "--to", "text"}, StdoutMode::BrokenPipe);
+    row("version-broken-pipe", {"--version"}, StdoutMode::BrokenPipe);
+    row("early-help-full", {"--help"}, StdoutMode::Full);
+    row("command-help-full", {"help", "render"}, StdoutMode::Full);
+    row("skill-full", {"skill"}, StdoutMode::Full);
+    row("saved-render-full", {"render", "doc.md", "--to", "text", "-o", "reader.txt", "--json"},
+        StdoutMode::Full, QStringLiteral("reader.txt"));
+    row("saved-export-closed", {"export", "doc.md", "-o", "copy.md", "--json"},
+        StdoutMode::Closed, QStringLiteral("copy.md"));
+}
+
+void reportsWhenStdoutCannotBeWritten()
+{
+    QFETCH(QStringList, arguments);
+    QFETCH(int, mode);
+    QFETCH(QString, file);
+    if (StdoutMode(mode) == StdoutMode::Full && !QFileInfo::exists(QStringLiteral("/dev/full"))) QSKIP("/dev/full is unavailable");
+    const QString source = QStringLiteral("# Heading\n\nCafé.\n");
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), source);
+    const Ran ran = runProcess(box, arguments, parchBinary, StdoutMode(mode));
+    if (file == u"reader.txt") QCOMPARE(box.read(file), QStringLiteral("Heading\nCafé.").toUtf8());
+    if (file == u"copy.md") QCOMPARE(box.read(file), source.toUtf8());
+    QVERIFY2(ran.code == Cli::Io, qPrintable(ran.said()));
+    QCOMPARE(ran.err.count(QStringLiteral("standard output")), 1);
+    QVERIFY2(ran.err.contains(QStringLiteral("cannot write")), qPrintable(ran.said()));
+}
+
+void writesThroughShortWrites()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), QStringLiteral("# Heading\n\nCafé.\n"));
+    for (const QStringList &arguments : {QStringList{"render", "doc.md", "--to", "text"},
+                                        QStringList{"stats", "doc.md", "--json"}}) {
+        const Ran expected = box.run(arguments);
+        QCOMPARE(expected.code, Cli::Ok);
+        const Ran piped = runProcess(box, arguments);
+        QCOMPARE(piped.code, Cli::Ok);
+        QCOMPARE(piped.out, expected.out);
+        QVERIFY(piped.err.isEmpty());
+        if (arguments.first() == u"render") QCOMPARE(piped.out, QStringLiteral("Heading\nCafé."));
+
+        for (const auto &[limit, failure] : {std::pair{-1, 0}, std::pair{10, 0}, std::pair{10, -1}}) {
+            LimitedOutput out(limit, failure);
+            QBuffer err;
+            QVERIFY(err.open(QIODevice::WriteOnly));
+            const Cli::Context context{box.root(), box.home(), box.paths(), &out, &err};
+            const QStringList argv = QStringList{QStringLiteral("parch")} + arguments;
+            QCOMPARE(Cli::run(argv, context), limit < 0 ? Cli::Ok : Cli::Io);
+            const QByteArray bytes = expected.out.toUtf8();
+            QCOMPARE(out.bytes, limit < 0 ? bytes : bytes.left(limit));
+            if (limit < 0) QVERIFY(err.data().isEmpty());
+            else QVERIFY(err.data().contains("test stream stopped accepting bytes"));
+        }
+    }
+    // Stderr is best effort when both output streams fail.
+    LimitedOutput failedOut(0, -1), failedErr(0, -1);
+    const Cli::Context context{box.root(), box.home(), box.paths(), &failedOut, &failedErr};
+    QCOMPARE(Cli::run({"parch", "stats", "doc.md"}, context), Cli::Io);
+    QCOMPARE(Cli::run({"parch", "stats"}, context), Cli::Usage);
+}
+
+void keepsQtNamedFilesAfterDoubleDash_data()
+{
+    QTest::addColumn<QString>("file");
+    QTest::addColumn<int>("words");
+    const QList<QByteArray> names{"-reverse", "-style", "-platform", "-style=fusion", "--help"};
+    for (int i = 0; i < names.size(); ++i)
+        QTest::newRow(names.at(i).constData()) << QString::fromLatin1(names.at(i)) << (i + 1);
+}
+
+void keepsQtNamedFilesAfterDoubleDash()
+{
+    QFETCH(QString, file);
+    QFETCH(int, words);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(file, QStringLiteral("word ").repeated(words));
+    const Ran stats = runProcess(box, {"stats", "--json", "--", file});
+    QVERIFY2(stats.code == Cli::Ok, qPrintable(stats.said()));
+    QCOMPARE(stats.json().value(QStringLiteral("words")).toInt(), words);
+    QCOMPARE(stats.json().value(QStringLiteral("file")).toString(), box.path(file));
+}
+
+void qtOptionsBeforeDoubleDash()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("-reverse"), QStringLiteral("# One\n"));
+    box.write(QStringLiteral("-platform"), QStringLiteral("# Two\n"));
+    const Ran checked = runProcess(box, {"-style", "Basic", "check", "--json", "--", "-reverse", "-platform"});
+    QVERIFY2(checked.code == Cli::Ok, qPrintable(checked.said()));
+    const QJsonArray documents = checked.json().value(QStringLiteral("documents")).toArray();
+    QCOMPARE(documents.size(), 2);
+    for (int i = 0; i < documents.size(); ++i)
+        QCOMPARE(documents.at(i).toObject().value(QStringLiteral("file")).toString(),
+                 box.path(i == 0 ? QStringLiteral("-reverse") : QStringLiteral("-platform")));
+    const Ran pdf = runProcess(box, {"-platform", "offscreen", "export", "--quiet", "-o", "book.pdf", "--", "-platform"});
+    QVERIFY2(pdf.code == Cli::Ok, qPrintable(pdf.said()));
+    QVERIFY(box.read(QStringLiteral("book.pdf")).startsWith("%PDF-"));
+    QVERIFY(pdf.err.isEmpty());
+    const Launch gui = parseLaunch({"parch", "open", "-style", "Basic", "--", "-platform", "offscreen", "-reverse", "--help", "--"});
+    QCOMPARE(gui.kind, Launch::Gui);
+    QCOMPARE(gui.files, (QStringList{"-platform", "offscreen", "-reverse", "--help", "--"}));
+    const Launch missingQtValue = parseLaunch({"parch", "stats", "-style", "--", "-platform"});
+    QCOMPARE(missingQtValue.commandArguments, (QStringList{"parch", "stats", "--", "-platform"}));
+    const Ran kept = runProcess(box, {"stats", "--json", "-style", "--", "-platform"});
+    QVERIFY2(kept.code == Cli::Ok, qPrintable(kept.said()));
+    QCOMPARE(kept.json().value(QStringLiteral("words")).toInt(), 1);
+}
+
+void quietExportSwitchesDoNotLogWarnings_data()
+{
+    QTest::addColumn<QString>("option");
+    QTest::addColumn<bool>("report");
+    QTest::newRow("as-is") << QStringLiteral("as-is") << false;
+    QTest::newRow("landscape") << QStringLiteral("landscape") << false;
+    QTest::newRow("no-page-numbers") << QStringLiteral("no-page-numbers") << false;
+    QTest::newRow("quiet-json") << QStringLiteral("no-page-numbers") << true;
+}
+
+void quietExportSwitchesDoNotLogWarnings()
+{
+    QFETCH(QString, option);
+    QFETCH(bool, report);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    const QString source = QStringLiteral("# First page\n\nAlpha paragraph.\n\n+++\n\n# Second page\n\nchapter.md\n");
+    box.write(QStringLiteral("book.md"), source);
+    box.write(QStringLiteral("chapter.md"), QStringLiteral("Beta paragraph.\n"));
+    const QString output = option == u"as-is" ? QStringLiteral("copy.md") : QStringLiteral("book.pdf");
+    QStringList arguments{"export", "book.md", "-o", output, "--quiet", QStringLiteral("--") + option};
+    if (report) arguments.append(QStringLiteral("--json"));
+    const Ran ran = runProcess(box, arguments);
+    QVERIFY2(ran.code == Cli::Ok, qPrintable(ran.said()));
+    if (report) {
+        QCOMPARE(ran.json().value(QStringLiteral("ok")), QJsonValue(true));
+        QCOMPARE(ran.json().value(QStringLiteral("recipe")).toObject().value(QStringLiteral("options")).toObject().value(option),
+                 QJsonValue(true));
+    } else {
+        QVERIFY2(ran.out.isEmpty(), qPrintable(ran.said()));
+    }
+    QVERIFY2(ran.err.isEmpty(), qPrintable(ran.said()));
+    if (option == u"as-is") {
+        QCOMPARE(box.read(output), source.toUtf8());
+        return;
+    }
+    const QByteArray bytes = box.read(output);
+    QVERIFY(bytes.startsWith("%PDF-"));
+    if (option == u"landscape") {
+        const QRegularExpression media(QStringLiteral("/MediaBox\\s*\\[\\s*0\\s+0\\s+([\\d.]+)\\s+([\\d.]+)\\s*\\]"));
+        const auto box = media.match(QString::fromLatin1(bytes));
+        QVERIFY(box.hasMatch());
+        QVERIFY(box.captured(1).toDouble() > box.captured(2).toDouble());
+    } else if (const QString pdftotext = QStandardPaths::findExecutable(QStringLiteral("pdftotext")); !pdftotext.isEmpty()) {
+        const auto pdfText = [&](const QString &name) {
+            QProcess read;
+            read.start(pdftotext, {QStringLiteral("-layout"), box.path(name), QStringLiteral("-")});
+            if (!read.waitForFinished() || read.exitCode() != 0) return QString();
+            return QString::fromUtf8(read.readAllStandardOutput());
+        };
+        const QString unnumbered = pdfText(output);
+        QVERIFY(unnumbered.contains(u"First page") && unnumbered.contains(u"Second page"));
+        const QRegularExpression pageNumber(QStringLiteral("(?m)^[ \\t]*[12][ \\t]*$"));
+        QVERIFY(!pageNumber.match(unnumbered).hasMatch());
+        const Ran comparison = runProcess(box, {"export", "book.md", "-o", "numbered.pdf", "--quiet"});
+        QCOMPARE(comparison.code, Cli::Ok);
+        QCOMPARE(pdfText(QStringLiteral("numbered.pdf")).count(pageNumber), 2);
+    }
+}
+
+void quietExportsKeepUsageAndErrors()
+{
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), QStringLiteral("# Heading\n\nText.\n"));
+    for (const auto &[arguments, option] : {
+             std::pair{QStringList{"-o", "bad.pdf", "--margins"}, QStringLiteral("margins")},
+             std::pair{QStringList{"-o", "bad.pdf", "--no-page-numbers=yes"}, QStringLiteral("no-page-numbers")},
+             std::pair{QStringList{"-o", "bad.md", "--no-page-numbers"}, QStringLiteral("no-page-numbers")}}) {
+        const Ran ran = runProcess(box, QStringList{"export", "doc.md", "--quiet"} + arguments);
+        QVERIFY2(ran.code == Cli::Usage, qPrintable(ran.said()));
+        QVERIFY(ran.out.isEmpty() && ran.err.contains(option));
+    }
+    QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("bad.pdf"))));
+    QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("bad.md"))));
+    const Ran missing = runProcess(box, {"export", "missing.md", "-o", "missing.pdf", "--quiet"});
+    QVERIFY2(missing.code == Cli::Io, qPrintable(missing.said()));
+    QVERIFY(missing.out.isEmpty() && missing.err.contains(u"missing.md"));
+    const Ran quiet = runProcess(box, {"export", "doc.md", "-o", "quiet.md", "--quiet"}, parchBinary, StdoutMode::Closed);
+    QVERIFY2(quiet.code == Cli::Ok, qPrintable(quiet.said()));
+    QVERIFY(quiet.out.isEmpty() && quiet.err.isEmpty());
+    QCOMPARE(box.read(QStringLiteral("quiet.md")), box.read(QStringLiteral("doc.md")));
+}
+
+void nonfiniteExportNumbersAreUsageErrors_data()
+{
+    QTest::addColumn<QString>("option");
+    QTest::addColumn<QString>("number");
+    QTest::addColumn<QString>("range");
+    QTest::addColumn<bool>("valid");
+    const auto options = [](const char *name, const char *min, const char *max, const char *small, const char *large) {
+        const QString option = QString::fromLatin1(name);
+        const QString range = QString::fromLatin1(min) + QStringLiteral(" to ") + QString::fromLatin1(max);
+        for (const char *invalid : {"nan", "inf", "-inf", "word", small, large})
+            QTest::newRow(qPrintable(option + u'-' + QLatin1StringView(invalid))) << option << QString::fromLatin1(invalid) << range << false;
+        for (const char *valid : {min, max})
+            QTest::newRow(qPrintable(option + u'-' + QLatin1StringView(valid))) << option << QString::fromLatin1(valid) << range << true;
+    };
+    options("margins", "5", "60", "4.99", "60.01");
+    options("font-size", "6", "36", "5.99", "36.01");
+}
+
+void nonfiniteExportNumbersAreUsageErrors()
+{
+    QFETCH(QString, option);
+    QFETCH(QString, number);
+    QFETCH(QString, range);
+    QFETCH(bool, valid);
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(QStringLiteral("doc.md"), QStringLiteral("# Heading\n\nText.\n"));
+    const QString flag = QStringLiteral("--") + option;
+    const QStringList arguments{"export", "doc.md", "-o", "book.pdf", flag, number, "--quiet", "--json"};
+    const Ran fresh = runProcess(box, arguments);
+    if (valid) {
+        QVERIFY2(fresh.code == Cli::Ok, qPrintable(fresh.said()));
+        QVERIFY(fresh.err.isEmpty());
+        QCOMPARE(fresh.json().value(QStringLiteral("recipe")).toObject().value(QStringLiteral("options")).toObject().value(option),
+                 QJsonValue(number));
+        QVERIFY(box.read(QStringLiteral("book.pdf")).startsWith("%PDF-"));
+        return;
+    }
+    QVERIFY(!QFileInfo::exists(box.path(QStringLiteral("book.pdf"))));
+    const QString sentinel = QStringLiteral("Old file, kept exactly.\n");
+    box.write(QStringLiteral("book.pdf"), sentinel);
+    const Ran kept = runProcess(box, arguments + QStringList{QStringLiteral("--force")});
+    QCOMPARE(box.read(QStringLiteral("book.pdf")), sentinel.toUtf8());
+    for (const Ran &ran : {fresh, kept}) {
+        QVERIFY2(ran.code == Cli::Usage, qPrintable(ran.said()));
+        QVERIFY(ran.out.isEmpty() && ran.err.contains(flag) && ran.err.contains(range));
+    }
+    if (number == u"nan") {
+        QStringList missing = arguments;
+        missing[1] = QStringLiteral("absent.md");
+        const Ran beforeOpen = runProcess(box, missing + QStringList{QStringLiteral("--force")});
+        QVERIFY2(beforeOpen.code == Cli::Usage, qPrintable(beforeOpen.said()));
+        QCOMPARE(box.read(QStringLiteral("book.pdf")), sentinel.toUtf8());
+
+        // Recipes from outside the CLI still have the PDF writer's validation.
+        const auto loaded = loadedFrom(box.path(QStringLiteral("doc.md")));
+        ExportRecipe recipe;
+        recipe.output = box.path(QStringLiteral("invalid.pdf"));
+        recipe.options.insert(option, number);
+        const ExportResult backend = Exporters::find(QStringLiteral("pdf"))->write(loaded.document, recipe);
+        QVERIFY(!backend.ok && !backend.ioFailure);
+        QVERIFY(backend.error.contains(flag) && backend.error.contains(range));
+        QVERIFY(!QFileInfo::exists(recipe.output));
+    }
 }
 
 void bibliographyLinksAreOnlyWebMailOrDoi()

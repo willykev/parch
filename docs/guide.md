@@ -1329,7 +1329,10 @@ parch export book.md -o book.pdf --page-size Letter
 parch export book.md -o book.docx    # Also .epub for a book
 parch export book.md -o whole.md     # One Markdown file with its includes in place
 parch stats book.md                  # Words, characters, reading time, headings
+parch stats -- -style                # Count a file named -style
 ```
+
+Put `--` before filenames that start with a dash.
 
 - **check** reports each problem as `file:line:column: severity: message
   [code]`: includes that cannot be read, references, footnotes, citations and
@@ -1376,7 +1379,9 @@ parch stats book.md                  # Words, characters, reading time, headings
 An export never writes over the document or a file it includes, never
 writes through a symbolic link, even with `--force`, replaces a file that
 is there only with `--force`, and is not made at all when a file the
-document includes cannot be read. `--quiet` prints nothing but errors.
+document includes cannot be read. With `--quiet`, export prints errors if
+there are any. Add `--json` to request its report. Numeric export options must
+be finite and within the ranges shown by `parch help export`.
 `render -o` follows the same file rules. `render` to standard output can
 preview an incomplete document and reports that an include could not be read.
 
@@ -1413,8 +1418,11 @@ dialect version, and the version of what drew the result.
 | 0 | Done, and nothing wrong |
 | 1 | The command line is wrong |
 | 2 | `check` found problems, or `export` or `render -o` could not read an include |
-| 3 | A file could not be read or written, an argument was invalid UTF-8, or an output needs `--force` |
+| 3 | A file could not be read or written, a result could not be written to standard output, an argument was invalid UTF-8, or an output needs `--force` |
 | 4 | The export could not be made |
+
+If a command has written a file and its report to standard output fails,
+exit 3 describes the report failure. The file is available at its output path.
 
 ### Pictures of the window
 

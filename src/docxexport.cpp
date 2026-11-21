@@ -102,13 +102,14 @@ const QString kImageType = QStringLiteral("http://schemas.openxmlformats.org/off
 struct Part {
     QString xml;
     QList<Relationship> relationships;
-    int next = 1;
+    QHash<std::pair<QString, QString>, QString> relationshipIds;
 
     QString relate(const QString &type, const QString &target, bool external)
     {
-        for (const Relationship &r : std::as_const(relationships))
-            if (r.type == type && r.target == target) return r.id;
-        const QString id = QStringLiteral("rId%1").arg(next++);
+        const auto key = std::pair{type, target};
+        if (const auto it = relationshipIds.constFind(key); it != relationshipIds.cend()) return *it;
+        const QString id = QStringLiteral("rId%1").arg(relationships.size() + 1);
+        relationshipIds.insert(key, id);
         relationships.append({id, type, target, external});
         return id;
     }
@@ -139,7 +140,6 @@ public:
           m_destinations(Exporters::destinationsFrom(document, QFileInfo(recipe.output).absolutePath()))
     {
         // Relationships the document part always has, first.
-        m_body.next = 1;
         m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"),
                       QStringLiteral("styles.xml"), false);
         m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable"),
@@ -179,11 +179,17 @@ private:
     {
         if (const auto known = m_bookmarks.constFind(anchor); known != m_bookmarks.cend()) return *known;
         QString name;
-        for (const QChar c : anchor)
+        for (const QChar c : QStringView(anchor).left(30))
             name += (c.isLetterOrNumber() && c.unicode() < 128) ? c : u'_';
-        name = QStringLiteral("h_") + name.left(30);
+        name.prepend(QStringLiteral("h_"));
         QString unique = name;
-        for (int n = 2; m_bookmarkNames.contains(unique); ++n) unique = name.left(34) + u'_' + QString::number(n);
+        if (m_bookmarkNames.contains(name)) {
+            int suffix = m_nextBookmarkSuffix.value(name, 2);
+            do {
+                unique = name + u'_' + QString::number(suffix++);
+            } while (m_bookmarkNames.contains(unique));
+            m_nextBookmarkSuffix.insert(name, suffix);
+        }
         m_bookmarkNames.insert(unique);
         m_bookmarks.insert(anchor, unique);
         return unique;
@@ -1144,6 +1150,7 @@ private:
     QHash<const Node *, int> m_citationNotes;
     QHash<QString, QString> m_bookmarks;
     QSet<QString> m_bookmarkNames;
+    QHash<QString, int> m_nextBookmarkSuffix;
     int m_bookmarkId = 0;
     int m_drawings = 0;
     QList<Media> m_media;
@@ -1310,9 +1317,7 @@ QByteArray Writer::package(QString *error)
                                             "<w:body>%2<w:sectPr><w:pgSz w:w=\"%3\" w:h=\"%4\"/><w:pgMar w:top=\"1440\" "
                                             "w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"708\" "
                                             "w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>")
-                                 .arg(namespaces, m_body.xml)
-                                 .arg(width)
-                                 .arg(height);
+                                 .arg(namespaces, m_body.xml, QString::number(width), QString::number(height));
     const QString kind = m_endnotes ? QStringLiteral("endnote") : QStringLiteral("footnote");
     const auto notesPart = [&](const QString &which, const QString &content) {
         return QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:%1s %2>"

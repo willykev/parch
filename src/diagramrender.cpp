@@ -160,7 +160,8 @@ Fonts chooseFonts(const QString &requested)
         }
         fonts.files << file;
         fonts.bytes += info.size();
-        identity << QStringLiteral("%1:%2:%3").arg(file).arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
+        identity << QStringLiteral("%1:%2:%3").arg(file, QString::number(info.size()),
+                                                   QString::number(info.lastModified().toMSecsSinceEpoch()));
         FcCharSet *characters = nullptr;
         if (FcPatternGetCharSet(pattern, FC_CHARSET, 0, &characters) == FcResultMatch)
             covered << FcCharSetCopy(characters);

@@ -896,11 +896,10 @@ private:
         const auto finish = [&] {
             if (cut)
                 warn(at,
-                     (key.isEmpty() ? QStringLiteral("The string “%1” is longer than %2 characters, so it is cut short.")
-                                    : QStringLiteral("The field “%1” of “%3” is longer than %2 characters, so it is cut short."))
-                         .arg(field)
-                         .arg(MaxValueChars)
-                         .arg(key),
+                     key.isEmpty() ? QStringLiteral("The string “%1” is longer than %2 characters, so it is cut short.")
+                                         .arg(field, QString::number(MaxValueChars))
+                                   : QStringLiteral("The field “%1” of “%2” is longer than %3 characters, so it is cut short.")
+                                         .arg(field, key, QString::number(MaxValueChars)),
                      key);
             m_expanded += out.size();
             if (m_expanded <= m_budget) return true;
@@ -1591,8 +1590,7 @@ BibTeX::Result BibTeX::parse(const QString &text)
         result.diagnostics.append({Severity::Error,
                                    QStringLiteral("The entry “%1” nests braces or commands more than %2 deep, which no "
                                                   "bibliography needs, so the file is not read.")
-                                       .arg(entry.key)
-                                       .arg(MaxLatexNesting),
+                                       .arg(entry.key, QString::number(MaxLatexNesting)),
                                    entry.key, entry.line, BibliographyDiagnostic::Kind::Unreadable});
         break;
     }

@@ -213,6 +213,19 @@ QString Assets::copy(const QByteArray &data, const QString &name)
     return place(data, QString(), name);
 }
 
+void Assets::listCopies(ExportResult &result) const
+{
+    if (m_mode != Mode::Copy && m_mode != Mode::Markdown) return;
+    QStringList copied;
+    for (const Asset &asset : m_assets) {
+        const QString relative = m_folder + asset.name;
+        copied.append(relative);
+        result.written.append(QDir(m_outputFolder).filePath(relative));
+    }
+    if (!copied.isEmpty())
+        result.limitations.append(QStringLiteral("Files copied beside the export: %1").arg(copied.join(QStringLiteral(", "))));
+}
+
 QString Assets::place(const QByteArray &data, const QString &mediaType, const QString &suggested)
 {
     if (m_mode == Mode::Embed || m_mode == Mode::Link)

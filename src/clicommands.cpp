@@ -459,10 +459,8 @@ QString problemLine(const DocumentCheck::Problem &problem, const md::Document &d
     if (problem.position.line <= 0)
         return QStringLiteral("%1: %2: %3 [%4]").arg(file, severity, problem.message, problem.code);
     return QStringLiteral("%1:%2:%3: %4: %5 [%6]")
-        .arg(file)
-        .arg(problem.position.line)
-        .arg(problem.position.column)
-        .arg(severity, problem.message, problem.code);
+        .arg(file, QString::number(problem.position.line), QString::number(problem.position.column),
+             severity, problem.message, problem.code);
 }
 
 QString plural(int count, const char *one, const char *many)

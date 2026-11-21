@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <memory>
+#include <set>
+#include <tuple>
 
 namespace DocumentCheck {
 namespace {
@@ -320,19 +322,12 @@ std::vector<Problem> problems(const Checked &loaded, std::vector<Problem> more)
 
     // A file included twice is in the tree twice; its problems are once.
     order(found);
-    QSet<QString> seen;
+    std::set<std::tuple<int, int, int, QString, int, QString, QString>> seen;
     std::vector<Problem> unique;
     std::vector<std::unique_ptr<LineIndex>> lines(document.files.size());
     for (Problem &problem : found) {
-        const QString key = QStringLiteral("%1:%2:%3:%4:%5:%6")
-                                .arg(problem.file)
-                                .arg(problem.range.start)
-                                .arg(problem.range.end)
-                                .arg(problem.path)
-                                .arg(problem.position.line)
-                                .arg(problem.code + problem.message);
-        if (seen.contains(key)) continue;
-        seen.insert(key);
+        if (!seen.emplace(problem.file, problem.range.start, problem.range.end, problem.path,
+                          problem.position.line, problem.code, problem.message).second) continue;
         if (problem.file >= 0 && size_t(problem.file) < lines.size()) {
             std::unique_ptr<LineIndex> &index = lines[size_t(problem.file)];
             if (!index) index = std::make_unique<LineIndex>(document.files[size_t(problem.file)].text);

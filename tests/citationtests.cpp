@@ -445,6 +445,39 @@ void CitationTests::bibtexDatesTypesAndFields()
     QCOMPARE(child.dates.value(QStringLiteral("issued")).start.year, 2015);
 }
 
+void CitationTests::diagnosticsKeepPercentNumbers()
+{
+    const auto parsed = BibTeX::parse(QStringLiteral("@book{Shelf%1, xdata={missing}}"));
+    QVERIFY(std::any_of(parsed.diagnostics.begin(), parsed.diagnostics.end(), [](const auto &d) {
+        return d.key == u"Shelf%1" && d.message.contains("Shelf%1") && d.message.contains("missing");
+    }));
+    const auto longField = BibTeX::parse(QStringLiteral("@book{Shelf%1, note%1={") + QString(65537, u'x') + QStringLiteral("}}"));
+    QVERIFY(std::any_of(longField.diagnostics.begin(), longField.diagnostics.end(), [](const auto &d) {
+        return d.key == u"Shelf%1" && d.message.contains("note%1") && d.message.contains("Shelf%1") && d.message.contains("65536");
+    }));
+    QString error;
+    QVERIFY(!CslStyle::fromXml("<style xmlns='http://purl.org/net/xbiblio/csl' version='1.0' class='in-text'>\n"
+                              "<citation><layout><text macro='label%1'/></layout></citation></style>", &error));
+    QVERIFY2(error.contains("label%1") && error.contains("line 2"), qPrintable(error));
+}
+
+void CitationTests::citationYearsSortAndLabelAtTheirLimits()
+{
+    const auto db = database(R"([{"id":"early","type":"book","author":[{"family":"Elms"}],"issued":{"date-parts":[[-2147483648]]}},
+                                 {"id":"mid","type":"book","author":[{"family":"Reed"}],"issued":{"date-parts":[[2000]]}},
+                                 {"id":"late","type":"book","author":[{"family":"Pine"}],"issued":{"date-parts":[[2147483647]]}}])");
+    QString error;
+    const auto style = CslStyle::fromXml("<style xmlns='http://purl.org/net/xbiblio/csl' version='1.0' class='in-text'>"
+        "<citation><layout><text variable='title'/></layout></citation><bibliography><sort><key variable='issued'/></sort>"
+        "<layout><text variable='citation-label'/></layout></bibliography></style>", &error);
+    QVERIFY2(style, qPrintable(error));
+    const auto rendered = format(style, {db}, {cluster({cite("late"), cite("mid"), cite("early")})});
+    QStringList keys;
+    for (const auto &item : rendered.output.bibliography) keys << item.key;
+    QCOMPARE(keys, QStringList({"early", "mid", "late"}));
+    QCOMPARE(rendered.bibliography.first(), QStringLiteral("Elms48"));
+}
+
 void CitationTests::bibliographyDiagnostics()
 {
     using Severity = BibliographyDiagnostic::Severity;

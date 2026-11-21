@@ -62,9 +62,7 @@ bool readXml(const QByteArray &xml, XmlElement &root, QString *error)
     if (reader.hasError()) {
         if (error)
             *error = QStringLiteral("The file is not well-formed XML: %1 (line %2, column %3)")
-                         .arg(reader.errorString())
-                         .arg(reader.lineNumber())
-                         .arg(reader.columnNumber());
+                         .arg(reader.errorString(), QString::number(reader.lineNumber()), QString::number(reader.columnNumber()));
         return false;
     }
     if (!haveRoot) {
@@ -95,7 +93,7 @@ public:
 
     bool fail(const QString &message, int line = 0)
     {
-        if (error.isEmpty()) error = line > 0 ? QStringLiteral("%1 (line %2)").arg(message).arg(line) : message;
+        if (error.isEmpty()) error = line > 0 ? QStringLiteral("%1 (line %2)").arg(message, QString::number(line)) : message;
         return false;
     }
 
@@ -309,8 +307,7 @@ public:
         QHash<QString, int> height;
         const auto tooDeep = [&](const QString &name) {
             return fail(QStringLiteral("The macro “%1” calls other macros more than %2 deep, which no style needs")
-                            .arg(name)
-                            .arg(MaxMacroDepth));
+                            .arg(name, QString::number(MaxMacroDepth)));
         };
         // Each returns the deepest level reached, or -1 when the style is refused.
         std::function<int(const QString &, int)> visit;
@@ -503,7 +500,7 @@ QString CslLocale::termText(const QString &name, const QString &form, bool plura
 
 QString CslLocale::ordinal(int number, const QString &gender) const
 {
-    const int value = qAbs(number);
+    const qint64 value = qAbs(qint64(number));
     auto matches = [value](int n, const QString &match, bool twoDigits) {
         const QString m = match.isEmpty() ? (twoDigits ? QStringLiteral("last-two-digits") : QStringLiteral("last-digit"))
                                           : match;

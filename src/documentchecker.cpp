@@ -240,7 +240,8 @@ QVariantMap DocumentChecker::row(const DocumentCheck::Problem &problem) const
         shown = QFileInfo(path).fileName();
     }
     const QString place = problem.position.line > 0
-                              ? QStringLiteral("%1:%2:%3").arg(shown).arg(problem.position.line).arg(problem.position.column)
+                              ? QStringLiteral("%1:%2:%3").arg(shown, QString::number(problem.position.line),
+                                                                QString::number(problem.position.column))
                               : shown;
     return {
         {QStringLiteral("text"), place + QStringLiteral(": ") + problem.message},

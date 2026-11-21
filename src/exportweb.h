@@ -48,6 +48,7 @@ public:
     // `suggested`.
     QString bytes(const QByteArray &data, const QString &mediaType, const QString &suggested);
     const QList<Asset> &assets() const { return m_assets; }
+    void listCopies(ExportResult &result) const;
 
     // The media type of a picture file, from its bytes; empty for an unknown format.
     static QString mediaType(const QByteArray &data, const QString &name);

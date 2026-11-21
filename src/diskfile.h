@@ -123,6 +123,9 @@ class QThreadPool;
 // cut short to fit.
 namespace DiskFile {
 
+// Whether a replacement may inherit this owner's access permissions.
+bool ownedBySavingUser(uid_t owner);
+
 // Take an identity and time stamp before comparing a file's contents.
 bool stampDescriptor(int descriptor, struct stat &state, FileStamp &stamp);
 // Keeps the bytes a file holds before a save writes over them in place, as

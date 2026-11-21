@@ -14,6 +14,7 @@
 #include "windowtesting.h"
 
 #include <QClipboard>
+#include <limits>
 #include <QGuiApplication>
 #include <QHash>
 #include <QInputMethodEvent>
@@ -303,6 +304,15 @@ void undoStepsJoinIntoOneChange()
     redoable.undo();
     redoable.undo();
     QCOMPARE(redoable.text(), QString());
+}
+
+void percentageMotionsCanCountEveryLine()
+{
+    constexpr int lines = std::numeric_limits<int>::max();
+    QCOMPARE(VimMode::percentageLine(100, lines), lines - 1);
+    QCOMPARE(VimMode::percentageLine(50, lines), 1073741823);
+    QCOMPARE(VimMode::percentageLine(1, 101), 1);
+    QCOMPARE(VimMode::percentageLine(101, 7), -1);
 }
 
 void motionsMoveAsVimDoes()

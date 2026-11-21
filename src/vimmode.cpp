@@ -891,6 +891,12 @@ struct VimMode::Region {
 
 VimMode::VimMode(VimHost *host, QObject *parent) : QObject(parent), m_host(host) {}
 
+int VimMode::percentageLine(int percent, int lines)
+{
+    if (percent < 1 || percent > 100 || lines < 1) return -1;
+    return int((qint64(percent) * lines + 99) / 100 - 1);
+}
+
 // The host may be gone by now, so nothing here reaches it.
 VimMode::~VimMode() = default;
 
@@ -1492,7 +1498,7 @@ bool VimMode::motion(const QString &k, const QString &argument, Use use, Motion 
     } else if (k == u"%") {
         if (hasCount()) {
             m.ok = n <= 100;
-            m.target = t.firstNonBlank(t.lineAtNumber((n * t.lineCount() + 99) / 100 - 1));
+            if (m.ok) m.target = t.firstNonBlank(t.lineAtNumber(percentageLine(n, t.lineCount())));
             m.kind = Motion::Linewise;
         } else {
             m.target = matchBracket(t, from);

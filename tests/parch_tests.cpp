@@ -409,6 +409,22 @@ private slots:
     void screenshotWritesNothingOfThePersons() { ScreenshotTests::writesNothingOfThePersons(); }
     void screenshotNamesWhatCannotBeDone() { ScreenshotTests::namesWhatCannotBeDone(); }
     // Exports and printing. The tests themselves are in exporttests.cpp.
+    void aBibliographyThatIsNotOneStaysBehind() { ExportTests::aBibliographyThatIsNotOneStaysBehind(); }
+    void copiedCitationFilesAreListed() { ExportTests::copiedCitationFilesAreListed(); }
+    void checkReportsABibliographyThatCannotBeRead() { ExportTests::checkReportsABibliographyThatCannotBeRead(); }
+    void anEmptyBibliographyIsAWarning_data() { ExportTests::anEmptyBibliographyIsAWarning_data(); }
+    void anEmptyBibliographyIsAWarning() { ExportTests::anEmptyBibliographyIsAWarning(); }
+    void epubMetadataWithControlCharactersIsWellFormed() { ExportTests::epubMetadataWithControlCharactersIsWellFormed(); }
+    void aRepeatedHtmlAttributeIsKeptOnce() { ExportTests::aRepeatedHtmlAttributeIsKeptOnce(); }
+    void docxBodyTextWithPercentNumbersIsKept() { ExportTests::docxBodyTextWithPercentNumbersIsKept(); }
+    void anExportOverSomeoneElsesFileTakesTheUsualMode() { ExportTests::anExportOverSomeoneElsesFileTakesTheUsualMode(); }
+    void anExportNeverCarriesSetIdBits() { ExportTests::anExportNeverCarriesSetIdBits(); }
+    void anOrderedListStartingAtTheLargestNumber() { ExportTests::anOrderedListStartingAtTheLargestNumber(); }
+    void docxBookmarksAndRelationshipsStayUnique_data() { ExportTests::docxBookmarksAndRelationshipsStayUnique_data(); }
+    void docxBookmarksAndRelationshipsStayUnique() { ExportTests::docxBookmarksAndRelationshipsStayUnique(); }
+    void diagnosticsKeepPercentNumbers() { CitationTests::diagnosticsKeepPercentNumbers(); }
+    void citationYearsSortAndLabelAtTheirLimits() { CitationTests::citationYearsSortAndLabelAtTheirLimits(); }
+    void percentageMotionsCanCountEveryLine() { VimTests::percentageMotionsCanCountEveryLine(); }
     void svgPicturesUseTheirDrawingInEveryFormat() { ExportTests::svgPicturesUseTheirDrawingInEveryFormat(); }
     void aPdfIsNotAPicture() { ExportTests::aPdfIsNotAPicture(); }
     void picturesAreReadByTheirOwnFormat_data() { ExportTests::picturesAreReadByTheirOwnFormat_data(); }

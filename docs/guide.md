@@ -700,6 +700,8 @@ changes.
 defines, a key given to two entries of one file or found in two files, a
 bibliography that cannot be read or has errors, with their lines, a style
 that cannot be used, and citations of a bibliography with no style chosen.
+A newly created bibliography can be empty. The warning in **Check document**
+and `parch check` reads “The bibliography holds no entries yet.”
 
 What citations cannot do yet:
 
@@ -760,6 +762,10 @@ page to page.
   nothing was.
 - An export protects the document and its included files. If an export
   fails or you cancel it, an existing output keeps its previous contents.
+  Replacing a file you own keeps its ordinary read, write and execute
+  permissions, its group and the extended attributes the system allows.
+  Special permission bits are cleared. Replacing another account's file
+  uses the same permissions as creating a new export in that folder.
 - When exporting again, parch reuses identical pictures in the folder it
   made beside the output. If a name is taken by different content, the new
   picture gets a number such as `figure-2.png`. After the export succeeds,
@@ -799,7 +805,9 @@ What each format holds:
   Copied pictures keep their original file contents, including editable SVG.
   Assembled Markdown carries the effective bibliography and style when the
   text uses citations. It omits citation files the source's front matter
-  names outside its allowed folders and reports them as omitted.
+  names outside its allowed folders. The export carries a bibliography
+  once it has at least one readable entry. A style file must parse as CSL.
+  The export notice names each omitted file and gives the reason.
 - **HTML**: a page of its own, in typography that does not follow the
   desktop theme. Images are copied into a folder beside it (`NAME_files`),
   written into the page, or linked where they are. If an allowed picture is
@@ -847,6 +855,10 @@ self-contained drawing. It keeps the visible shapes, embedded pictures and
 named views such as `icons.svg#home`. It leaves out scripts, event handlers
 and links to other files. In HTML, **link** points to the original picture.
 Formulas and diagrams also travel as self-contained drawings.
+
+The Markdown and HTML export notices list each file copied beside the
+document, including its folder. EPUB leaves out characters that XML cannot
+represent in the text, headings and book metadata.
 
 Formulas and diagrams are drawn by the same helpers as the preview, dark on
 white whatever the desktop's theme. Without them they are written as their
@@ -1725,8 +1737,9 @@ what they mean:
 - **Text level**: `a`, `b`, `i`, `em`, `strong`, `u`, `s`, `del`, `ins`, `mark`, `code`, `kbd`, `sub`, `sup`, `br`, `img`
 - **Blocks**: `p`, `blockquote`, `pre`, `h1`, `h2`, `h3`, `h4`, `h5`, `h6`, `ul`, `ol`, `li`, `dl`, `dt`, `dd`, `hr`, `table`, `caption`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`
 
-They keep only these attributes; any other is left out, and a link or image
-whose address is a script loses it:
+The table lists the supported attributes. If a tag repeats an attribute,
+parch uses its first occurrence. A link or image whose address is a script
+loses that address.
 
 | Element | Attributes kept |
 | --- | --- |

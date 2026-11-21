@@ -1450,12 +1450,12 @@ private:
 
     struct Item {
         Blocks blocks;
-        int number = 0;
+        qint64 number = 0;
         bool task = false;
         bool checked = false;
     };
 
-    void listOf(const std::vector<const Node *> &children, bool ordered, int number, Blocks &out, Styles styles)
+    void listOf(const std::vector<const Node *> &children, bool ordered, qint64 number, Blocks &out, Styles styles)
     {
         QList<Item> items;
         for (const Node *child : children) {

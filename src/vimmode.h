@@ -78,6 +78,8 @@ public:
 
     explicit VimMode(VimHost *host, QObject *parent = nullptr);
     ~VimMode() override;
+    // Zero-based line reached by a count followed by %, or -1 for an invalid count.
+    static int percentageLine(int percent, int lines);
 
     bool active() const { return m_active; }
     // Turned on, the view starts in Normal mode; turned off, it types again.

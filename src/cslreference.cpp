@@ -13,6 +13,8 @@
 
 #include <yaml.h>
 
+#include <algorithm>
+
 namespace {
 
 const QSet<QString> &nameVariables()
@@ -672,11 +674,21 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
         database.m_diagnostics.append({BibliographyDiagnostic::Severity::Error, message, {}, line});
     };
     if (format == Format::Auto) format = formatForPath(identity);
+    const auto checkEntries = [&] {
+        if (!database.m_references.isEmpty()) return;
+        database.m_valid = std::none_of(database.m_diagnostics.cbegin(), database.m_diagnostics.cend(), [](const auto &d) {
+            return d.severity == BibliographyDiagnostic::Severity::Error;
+        });
+        if (database.m_valid)
+            database.m_diagnostics.append({BibliographyDiagnostic::Severity::Warning,
+                                           QStringLiteral("The bibliography holds no entries yet."), {}, 0});
+    };
     if (format == Format::BibLaTeX) {
         const BibTeX::Result result = BibTeX::parse(QString::fromUtf8(data));
         database.m_valid = true;
         database.m_diagnostics = result.diagnostics;
         for (const BibTeX::Entry &entry : result.entries) database.add(entry.reference, entry.line);
+        checkEntries();
         return database;
     }
     QJsonValue root;
@@ -728,5 +740,6 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
         }
         database.add(CslJson::reference(items[i].toObject()), 0);
     }
+    checkEntries();
     return database;
 }

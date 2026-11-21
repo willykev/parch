@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 
 namespace {
 
@@ -846,7 +847,7 @@ QString dateSortKey(const CslDatePoint &point)
 {
     if (point.parts == 0) return {};
     return QStringLiteral("%1%2%3")
-        .arg(point.year + 50000, 6, 10, QLatin1Char('0'))
+        .arg(qint64(point.year) - std::numeric_limits<int>::min(), 10, 10, QLatin1Char('0'))
         .arg(point.parts >= 2 ? point.month : 0, 2, 10, QLatin1Char('0'))
         .arg(point.parts >= 3 ? point.day : 0, 2, 10, QLatin1Char('0'));
 }
@@ -1051,7 +1052,7 @@ QString Processor::citationLabel(const CslReference &reference)
         for (int i = 0; i < names.size() && i < 4; ++i) label += letters(names[i], 1);
     if (label.isEmpty()) return {};
     const CslDate issued = reference.dates.value(QStringLiteral("issued"));
-    if (issued.start.parts > 0) label += QStringLiteral("%1").arg(qAbs(issued.start.year) % 100, 2, 10, QLatin1Char('0'));
+    if (issued.start.parts > 0) label += QStringLiteral("%1").arg(qAbs(issued.start.year % 100), 2, 10, QLatin1Char('0'));
     return label;
 }
 
@@ -1358,9 +1359,9 @@ Out Processor::datePart(const CslNode &spec, const CslDatePoint &point, const Cs
     if (name == u"year") {
         if (point.parts < 1) return {};
         if (form == u"short") {
-            text = QStringLiteral("%1").arg(qAbs(point.year) % 100, 2, 10, QLatin1Char('0'));
+            text = QStringLiteral("%1").arg(qAbs(point.year % 100), 2, 10, QLatin1Char('0'));
         } else {
-            text = QString::number(qAbs(point.year));
+            text = QString::number(qAbs(qint64(point.year)));
             if (point.year < 0)
                 text += m_locale.termText(QStringLiteral("bc"));
             else if (point.year > 0 && point.year < 1000)

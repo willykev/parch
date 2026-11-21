@@ -11,6 +11,18 @@
   at the total pixel limit.
 - Pasting an oversized picture from a web page keeps its alt text and
   explains why the picture could not be saved.
+- Markdown and HTML exports list the files copied beside them. Assembled
+  Markdown checks bibliographies and citation styles before carrying them,
+  and names any it omits. **Check document** reports an empty bibliography
+  as a warning and unreadable files as errors.
+- EPUB leaves out control characters that a book cannot contain. Raw HTML
+  uses the first occurrence of each attribute.
+- Word exports keep literal text such as `100%1` and finish faster on
+  documents with many links or similarly named headings.
+- An export replacing your file keeps its access permissions. Replacing
+  another account's file uses the usual permissions for a new file.
+- Pasted numbered lists continue past 2,147,483,647. Vim percentage jumps
+  and citation year labels also work at the ends of their numeric ranges.
 
 - Tables show as grids in the text, between the paragraphs, and you write in
   their cells as anywhere else. `Tab`, `Enter` and the arrows go from cell to

@@ -24,12 +24,9 @@ struct Assembled {
 // a path relative to the output's folder, or empty to lead where it is.
 using ImageDestination = std::function<QString(const QString &absolutePath)>;
 
-// Where a file the front matter names (a bibliography, a citation style) is
-// put for the assembled text when the folder written to cannot reach it
-// where it is: its path from that folder, or nothing when it is not copied.
-// For a path supplied by the document, the open file must be within the
-// given folders.
-using FileDestination = std::function<QString(const QString &absolutePath, const QStringList *folders)>;
+// Places the same bytes that were read as a bibliography or a CSL style,
+// returning their path from the assembled document's folder.
+using FileDestination = std::function<QString(const QByteArray &bytes, const QString &name)>;
 Assembled assemble(const md::Document &document, const QString &outputFolder, const Dialect::Choice &dialect,
                    const ImageDestination &image = {},
                    const FileDestination &citationFile = {});

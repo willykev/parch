@@ -1080,7 +1080,8 @@ void exportAssemblesMarkdown()
     QCOMPARE(result.value(QStringLiteral("output")).toString(), box.path(QStringLiteral("out/book.md")));
     QCOMPARE(result.value(QStringLiteral("written")).toArray(),
              (QJsonArray{box.path("out/book.md"), box.path("out/book_files/cover.png"), box.path("out/book_files/fig.png")}));
-    QVERIFY(result.value(QStringLiteral("limitations")).toArray().isEmpty());
+    QCOMPARE(result.value(QStringLiteral("limitations")).toArray(),
+             QJsonArray{QStringLiteral("Files copied beside the export: book_files/cover.png, book_files/fig.png")});
     QVERIFY(result.value(QStringLiteral("warnings")).toArray().isEmpty());
     const QJsonObject recipe = result.value(QStringLiteral("recipe")).toObject();
     QCOMPARE(recipe.value(QStringLiteral("source")).toString(), box.path(QStringLiteral("book/main.md")));
@@ -1547,7 +1548,8 @@ void exportWritesAStandalonePage()
     QCOMPARE(result.value(QStringLiteral("renderers")).toObject().value(QStringLiteral("html")).toString(),
              QStringLiteral("parch " PARCH_VERSION));
     const QJsonArray limitations = result.value(QStringLiteral("limitations")).toArray();
-    QCOMPARE(limitations.size(), 2);
+    QCOMPARE(limitations.size(), 3);
+    QCOMPARE(limitations[2].toString(), QStringLiteral("Files copied beside the export: page_files/a-b.png"));
     QCOMPARE(limitations[0].toString(),
              QStringLiteral("Math is written as its TeX source (2 formulas): the math helper (render-svg) is not installed"));
     QCOMPARE(limitations[1].toString(), QStringLiteral("Mermaid diagrams are written as their source (1 diagram): the "

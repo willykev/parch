@@ -386,6 +386,7 @@ HtmlTag parseHtmlTag(QStringView raw)
     tag.name = raw.sliced(nameStart, i - nameStart).toString().toLower();
     tag.selfClosing = len >= 2 && s[len - 2] == u'/';
     if (tag.closing) return tag;
+    QSet<QString> seen;
     for (;;) {
         while (i < len && isHtmlSpace(s[i].unicode())) ++i;
         if (i >= len || s[i] == u'>' || s[i] == u'/') break;
@@ -416,14 +417,15 @@ HtmlTag parseHtmlTag(QStringView raw)
             if (i == attributeStart) ++i;
             continue;
         }
-        bool keep = attributeAllowed(tag.name, name);
-        QString value;
-        if (keep) {
-            value = decodeEntities(raw.sliced(valueRange.start, valueRange.length()));
-            if (name == u"href" || name == u"src") keep = isSafeUrl(value, name == u"src");
+        if (!attributeAllowed(tag.name, name)) {
+            tag.droppedAttributes = true;
+            continue;
         }
-        if (keep) tag.attributes.push_back({name, std::move(value), valueRange, quote});
-        else tag.droppedAttributes = true;
+        if (seen.contains(name)) continue;
+        seen.insert(name);
+        QString value = decodeEntities(raw.sliced(valueRange.start, valueRange.length()));
+        if ((name == u"href" || name == u"src") && !isSafeUrl(value, name == u"src")) tag.droppedAttributes = true;
+        else tag.attributes.push_back({name, std::move(value), valueRange, quote});
     }
     return tag;
 }

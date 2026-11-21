@@ -17,6 +17,7 @@
 #include "exports.h"
 #include "exportweb.h"
 #include "filepicker.h"
+#include "htmlmarkdown.h"
 #include "paperdocument.h"
 #include "picturedata.h"
 #include "pdfexport.h"
@@ -36,6 +37,7 @@
 #include <QBuffer>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
@@ -56,6 +58,8 @@
 #include <QTimer>
 #include <QXmlStreamReader>
 #include <sys/xattr.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <thread>
@@ -1156,7 +1160,7 @@ void htmlCarriesItsPictures()
              (QStringList{QStringLiteral(".parch-export"), QStringLiteral("diagram.svg"), QStringLiteral("square.png")}));
     QCOMPARE(readFile(folder.path() + QStringLiteral("/out/page_files/square.png")), readFile(folder.path() + QStringLiteral("/square.png")));
     QVERIFY(copied.written.contains(folder.path() + QStringLiteral("/out/page_files/square.png")));
-    QVERIFY2(copied.limitations.isEmpty(), qPrintable(copied.limitations.join(u'\n')));
+    QCOMPARE(copied.limitations, QStringList{QStringLiteral("Files copied beside the export: page_files/diagram.svg, page_files/square.png")});
     // Other files may have been put alongside the exported pictures.
     writeFile(folder.path() + QStringLiteral("/out/page_files/stale.png"), "stale");
     QVERIFY(html->write(loaded.document, recipeFor(loaded, QStringLiteral("html"), page), fakeRun(work)).ok);
@@ -2771,6 +2775,289 @@ void picturesPastTheBudgetAreLeftOutWithANote()
     QVERIFY2(note.contains("second.png") && note.contains("pixel", Qt::CaseInsensitive), qPrintable(note));
     QVERIFY2(note.contains("mounted.svg"), qPrintable(note));
     QVERIFY(paper.document()->toPlainText().contains("Second"));
+}
+
+void aBibliographyThatIsNotOneStaysBehind()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("notes.bib"), "Shopping list\n");
+    writeFile(dir.filePath("empty.bib"), "");
+    writeFile(dir.filePath("empty.json"), "[]");
+    writeFile(dir.filePath("draft.csl"), "<draft/>");
+    writeFile(dir.filePath("paper.md"), "---\ntitle: Paper\nbibliography: [notes.bib, empty.bib, empty.json]\ncsl: draft.csl\n---\nText.\n");
+    QVERIFY(QDir().mkpath(dir.filePath("print")));
+    const auto loaded = load(dir.filePath("paper.md"));
+    for (const QString &name : {QStringLiteral("print/copy.md"), QStringLiteral("near.md")}) {
+        const QString output = dir.filePath(name);
+        const auto result = Exporters::find("md")->write(loaded.document, recipeFor(loaded, "md", output), bareRun());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.written, QStringList{output});
+        const QByteArray content = readFile(output);
+        QVERIFY(content.contains("title: Paper") && !content.contains("bibliography:") && !content.contains("csl:"));
+        const QString notes = result.limitations.join(u'\n');
+        for (const auto file : {"notes.bib", "empty.bib", "empty.json"})
+            QVERIFY2(notes.contains(QStringLiteral("%1 (The bibliography contains no readable entries.)").arg(file)), qPrintable(notes));
+        QVERIFY2(notes.contains("draft.csl (The citation style cannot be used.") && notes.contains("<draft>"), qPrintable(notes));
+    }
+    QVERIFY(!QFileInfo::exists(dir.filePath("print/copy_files")));
+}
+
+void copiedCitationFilesAreListed()
+{
+    QTemporaryDir dir;
+    const QByteArray bib("@book{blue, title={Blue}}\n");
+    const QByteArray json("[{\"id\":\"red\",\"type\":\"book\",\"title\":\"Red\"}]");
+    const QByteArray yaml("references:\n  - id: gold\n    type: book\n    title: Gold\n");
+    const QByteArray style("<style xmlns='http://purl.org/net/xbiblio/csl' version='1.0' class='in-text'>"
+                           "<citation><layout><text variable='title'/></layout></citation></style>");
+    writeFile(dir.filePath("one.bib"), bib);
+    writeFile(dir.filePath("two.json"), json);
+    writeFile(dir.filePath("three.yaml"), yaml);
+    writeFile(dir.filePath("reading.csl"), style);
+    QImage dot(2, 2, QImage::Format_RGB32);
+    dot.fill(Qt::green);
+    QVERIFY(dot.save(dir.filePath("dot.png")));
+    writeFile(dir.filePath("notes.md"), "---\nbibliography: [one.bib, two.json, three.yaml]\ncsl: reading.csl\n---\n"
+                                           "![Green](dot.png)\n");
+    QVERIFY(QDir().mkpath(dir.filePath("print")));
+    const auto loaded = load(dir.filePath("notes.md"));
+    for (const QString &format : {QStringLiteral("md"), QStringLiteral("html")}) {
+        const QString output = dir.filePath("print/book." + format);
+        const auto result = Exporters::find(format)->write(loaded.document, recipeFor(loaded, format, output, {{"images","copy"}}), bareRun());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.written.size(), format == u"md" ? 6 : 2);
+        const QString notes = result.limitations.join(u'\n');
+        for (const QString &file : result.written.sliced(1)) {
+            const QString name = QFileInfo(file).fileName();
+            QCOMPARE(readFile(file), readFile(dir.filePath(name)));
+            QVERIFY2(notes.contains("book_files/" + name), qPrintable(notes));
+        }
+    }
+}
+
+void checkReportsABibliographyThatCannotBeRead()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("broken.json"), "[}]");
+    writeFile(dir.filePath("draft.csl"), "<draft/>");
+    writeFile(dir.filePath("paper.md"), "---\nbibliography: broken.json\ncsl: draft.csl\n---\nText.\n");
+    DocumentCheck::Loaded loaded;
+    QString error;
+    QVERIFY(DocumentCheck::load(dir.filePath("paper.md"), Dialect::Layers{}, &loaded, &error));
+    const auto problems = DocumentCheck::problems(loaded);
+    const auto reported = [&](const QString &file) {
+        return std::any_of(problems.begin(), problems.end(), [&](const auto &problem) {
+            return QFileInfo(problem.path).fileName() == file && problem.severity == md::Severity::Error && !problem.message.isEmpty();
+        });
+    };
+    QVERIFY(reported("broken.json"));
+    QVERIFY(reported("draft.csl"));
+    const Ran checked = runCli(dir.path(), {"check", "paper.md", "--no-render", "--json"});
+    QCOMPARE(checked.code, int(Cli::Problems));
+    QVERIFY(checked.out.contains("broken.json") && checked.out.contains("draft.csl"));
+}
+
+void anEmptyBibliographyIsAWarning_data()
+{
+    QTest::addColumn<QString>("name");
+    QTest::addColumn<QByteArray>("contents");
+    QTest::newRow("new-bibtex") << QStringLiteral("refs.bib") << QByteArray();
+    QTest::newRow("bibtex-comment") << QStringLiteral("refs.bib") << QByteArray("% References to add later\n");
+    QTest::newRow("csl-json") << QStringLiteral("refs.json") << QByteArray("[]");
+    QTest::newRow("csl-yaml") << QStringLiteral("refs.yaml") << QByteArray("references: []\n");
+}
+
+void anEmptyBibliographyIsAWarning()
+{
+    QFETCH(QString, name);
+    QFETCH(QByteArray, contents);
+    QTemporaryDir dir;
+    writeFile(dir.filePath(name), contents);
+    writeFile(dir.filePath("paper.md"), "---\nbibliography: " + name.toUtf8() + "\ncsl: ieee\n---\nText.\n");
+    DocumentCheck::Loaded loaded;
+    QString error;
+    QVERIFY2(DocumentCheck::load(dir.filePath("paper.md"), Dialect::Layers{}, &loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.citations.databases.size(), 1);
+    const auto &database = loaded.citations.databases.first();
+    QVERIFY(database && database->isValid());
+    QVERIFY(database->references().isEmpty());
+    QCOMPARE(loaded.formatted.problems.size(), 1);
+    const auto &warning = loaded.formatted.problems.first();
+    QCOMPARE(warning.source, canonical(dir.filePath(name)));
+    QCOMPARE(warning.severity, md::Severity::Warning);
+    QCOMPARE(warning.code, QStringLiteral("bibliography"));
+    QCOMPARE(warning.message, QStringLiteral("The bibliography holds no entries yet."));
+
+    const Ran checked = runCli(dir.path(), {"check", "paper.md", "--no-render", "--json"});
+    QCOMPARE(checked.code, int(Cli::Problems));
+    const auto documents = QJsonDocument::fromJson(checked.out.toUtf8()).object().value("documents").toArray();
+    QCOMPARE(documents.size(), 1);
+    const auto problems = documents.first().toObject().value("problems").toArray();
+    QCOMPARE(problems.size(), 1);
+    const auto problem = problems.first().toObject();
+    QCOMPARE(QFileInfo(problem.value("file").toString()).fileName(), name);
+    QCOMPARE(problem.value("severity").toString(), QStringLiteral("warning"));
+    QCOMPARE(problem.value("code").toString(), warning.code);
+    QCOMPARE(problem.value("message").toString(), warning.message);
+}
+
+void epubMetadataWithControlCharactersIsWellFormed()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("story.md"), "---\ntitle: \"Ti\1tle\"\nauthor: \"Au\2thor\"\n"
+                                        "description: \"Book & notes\"\nidentifier: \"ref\3id\"\n---\n# Hello&#1;World\n\nEnd.\n");
+    const auto loaded = load(dir.filePath("story.md"));
+    QCOMPARE(Exporters::frontMatterText(loaded.document, "author"), QStringLiteral("Au\2thor"));
+    const QString output = dir.filePath("story.epub");
+    const auto result = Exporters::find("epub")->write(loaded.document, recipeFor(loaded, "epub", output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto entries = entriesOf(output);
+    for (const auto &part : entries) {
+        if (part.name.endsWith(".xml") || part.name.endsWith(".opf") || part.name.endsWith(".xhtml"))
+            QVERIFY2(xmlProblem(part.data).isEmpty(), qPrintable(part.name + u' ' + xmlProblem(part.data)));
+    }
+    const auto opf = entry(entries, "OEBPS/content.opf");
+    QVERIFY(opf.contains(">Title<") && opf.contains(">Author<") && opf.contains(">refid<"));
+    QVERIFY(opf.contains("Book &amp; notes"));
+    QVERIFY(entry(entries, "OEBPS/nav.xhtml").contains("HelloWorld"));
+}
+
+void aRepeatedHtmlAttributeIsKeptOnce()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("story.md"), "<a href=\"https://first.example/\" HREF=\"https://second.example/\" "
+                                        "title=\"one\" TITLE=\"two\">Words</a>\n");
+    const auto loaded = load(dir.filePath("story.md"));
+    const QString html = md::toHtml(loaded.document);
+    QCOMPARE(html.count("href="), 1);
+    QVERIFY(html.contains("first.example") && html.contains("title=\"one\""));
+    QVERIFY(!html.contains("second.example") && !html.contains("title=\"two\""));
+    for (const QString &format : {QStringLiteral("epub"), QStringLiteral("docx")}) {
+        const QString output = dir.filePath("story." + format);
+        const auto exported = Exporters::find(format)->write(loaded.document, recipeFor(loaded, format, output), bareRun());
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        const auto member = entry(entriesOf(output), format == u"epub" ? "OEBPS/text.xhtml" : "word/_rels/document.xml.rels");
+        QVERIFY(xmlProblem(member).isEmpty());
+        QVERIFY(member.contains("first.example") && !member.contains("second.example"));
+    }
+    writeFile(dir.filePath("first.md"), "<a href='data:text/plain,word' href='#later'>Words</a>\n");
+    QVERIFY(!md::toHtml(load(dir.filePath("first.md")).document).contains("href=\"#later\""));
+}
+
+void docxBodyTextWithPercentNumbersIsKept()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("text.md"), "# Progress\n\n100%1 and %2, then %3 and %4.\n");
+    const auto loaded = load(dir.filePath("text.md"));
+    const QString output = dir.filePath("text.docx");
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", output, {{"page-size","Letter"}}), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto body = entry(entriesOf(output), "word/document.xml");
+    QVERIFY(body.contains("100%1 and %2, then %3 and %4."));
+    QVERIFY(body.contains("<w:pgSz w:w=\"12240\" w:h=\"15840\""));
+}
+
+void anExportOverSomeoneElsesFileTakesTheUsualMode()
+{
+    QTemporaryDir dir;
+    const QString old = dir.filePath("old.txt"), fresh = dir.filePath("new.txt");
+    writeFile(old, "Earlier");
+    const auto name = QFile::encodeName(old);
+    QVERIFY(::chmod(name.constData(), 0400) == 0);
+    const bool tagged = ::setxattr(name.constData(), "user.parch.test", "mark", 4, 0) == 0;
+    DiskFile::setSavingUser(qint64(::geteuid()) + 1);
+    const auto restore = qScopeGuard([] { DiskFile::setSavingUser(-1); });
+    QString error;
+    QVERIFY2(Exporters::writeFile(fresh, "New", &error), qPrintable(error));
+    QVERIFY2(Exporters::writeFile(old, "Current", &error), qPrintable(error));
+    struct stat replaced{}, usual{};
+    QVERIFY(::stat(name.constData(), &replaced) == 0 && ::stat(QFile::encodeName(fresh).constData(), &usual) == 0);
+    QCOMPARE(replaced.st_mode & 07777, usual.st_mode & 07777);
+    QCOMPARE(replaced.st_gid, usual.st_gid);
+    if (tagged) QVERIFY(::getxattr(name.constData(), "user.parch.test", nullptr, 0) < 0);
+
+    // The access that matters is that of the file in place at publication.
+    DiskFile::setSavingUser(-1);
+    QVERIFY(::chmod(name.constData(), 0400) == 0);
+    Exporters::PendingFile pending(old);
+    QVERIFY2(pending.write("Later", &error), qPrintable(error));
+    DiskFile::setSavingUser(qint64(::geteuid()) + 1);
+    QVERIFY2(pending.commit(&error), qPrintable(error));
+    QVERIFY(::stat(name.constData(), &replaced) == 0);
+    QCOMPARE(replaced.st_mode & 07777, usual.st_mode & 07777);
+}
+
+void anExportNeverCarriesSetIdBits()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("plain.txt");
+    writeFile(path, "Ordinary text");
+    const auto name = QFile::encodeName(path);
+    QVERIFY(::chmod(name.constData(), 07640) == 0);
+    QString error;
+    QVERIFY2(Exporters::writeFile(path, "Current text", &error), qPrintable(error));
+    struct stat replaced{};
+    QVERIFY(::stat(name.constData(), &replaced) == 0);
+    QCOMPARE(replaced.st_mode & 07777, mode_t(0640));
+}
+
+void anOrderedListStartingAtTheLargestNumber()
+{
+    const auto result = HtmlMarkdown::convert(QStringLiteral("<ol start='2147483647'><li>First</li><li>Second</li>"
+                                                              "<li value='7'>Reset</li><li>Next</li></ol>"));
+    QCOMPARE(result, QStringLiteral("2147483647. First\n2147483648. Second\n7. Reset\n8. Next"));
+}
+
+void docxBookmarksAndRelationshipsStayUnique_data()
+{
+    QTest::addColumn<bool>("headings");
+    QTest::newRow("bookmarks") << true;
+    QTest::newRow("relationships") << false;
+}
+
+void docxBookmarksAndRelationshipsStayUnique()
+{
+    QFETCH(bool, headings);
+    // Time only the writer. Each chapter and reference must keep its own
+    // identifier, and two links to one address must share a relationship.
+    QTemporaryDir dir;
+    const int count = headings ? 3500 : 8000;
+    QByteArray source;
+    for (int i = 0; i < count; ++i) {
+        const QByteArray number = QByteArray::number(i);
+        source += headings ? "## Collected observations from the almanac " + number + "\n\n"
+                           : "[Entry](https://example.org/catalog/" + number + ") [Again](https://example.org/catalog/" + number + ")\n\n";
+    }
+    const QString path = dir.filePath("almanac.md");
+    writeFile(path, source);
+    const auto loaded = load(path);
+    const QString output = dir.filePath("almanac.docx");
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", output), bareRun());
+    const qint64 elapsed = timer.elapsed();
+    QVERIFY2(result.ok, qPrintable(result.error));
+    qInfo("DOCX %s: %d distinct names in %lld ms", headings ? "bookmarks" : "relationships", count, qlonglong(elapsed));
+    const auto entries = entriesOf(output);
+    QXmlStreamReader xml(entry(entries, headings ? "word/document.xml" : "word/_rels/document.xml.rels"));
+    QSet<QString> seen;
+    int uses = 0;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement()) continue;
+        const auto attrs = xml.attributes();
+        if (headings && xml.name() == u"bookmarkStart") {
+            ++uses;
+            seen.insert(attrs.value(u"w:name").toString());
+        } else if (!headings && xml.name() == u"Relationship" && attrs.value(u"TargetMode") == u"External") {
+            ++uses;
+            seen.insert(attrs.value(u"Target").toString());
+        }
+    }
+    QVERIFY(!xml.hasError());
+    QCOMPARE(seen.size(), count);
+    QCOMPARE(uses, count);
+    QVERIFY2(elapsed < timeLimit(headings ? 500 : 750), qPrintable(QStringLiteral("%1 ms").arg(elapsed)));
 }
 
 } // namespace ExportTests

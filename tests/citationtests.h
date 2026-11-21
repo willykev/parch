@@ -10,6 +10,8 @@ void bibtexSyntax();
 void bibtexLatex();
 void bibtexNames();
 void bibtexDatesTypesAndFields();
+void diagnosticsKeepPercentNumbers();
+void citationYearsSortAndLabelAtTheirLimits();
 void bibliographyDiagnostics();
 void cslJsonAndYaml();
 void styleErrors();

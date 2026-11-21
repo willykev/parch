@@ -8,6 +8,7 @@ namespace VimTests {
 
 void undoStepsJoinIntoOneChange();
 void vimKeysAreOffUntilChosenAndKept();
+void percentageMotionsCanCountEveryLine();
 void motionsMoveAsVimDoes();
 void operatorsActOnMotions();
 void commandsEditAsVimDoes();

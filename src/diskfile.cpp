@@ -503,6 +503,11 @@ SaveResult writeInPlace(const QString &path, const DiskVersion &expected, const 
 
 namespace DiskFile {
 
+bool ownedBySavingUser(uid_t owner)
+{
+    return owner == savingUser();
+}
+
 bool stampDescriptor(int descriptor, struct stat &state, FileStamp &stamp)
 {
     return stamped(descriptor, state, stamp);
@@ -912,7 +917,7 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
     if (initial != expected) return changedOnDisk();
     // A file with other names would lose them to a new file, and a file of
     // another account its owner, so such a file is written in place.
-    if (initial.exists && (original.st_nlink > 1 || original.st_uid != savingUser()))
+    if (initial.exists && (original.st_nlink > 1 || !ownedBySavingUser(original.st_uid)))
         return writeInPlace(path, initial, bytes, keep);
     // The canonical path is already resolved by the kernel and is not a link, so
     // a symlink path saves into its target and stays a link.

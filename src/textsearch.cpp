@@ -106,8 +106,7 @@ std::optional<QRegularExpression> TextSearch::compile(const TextQuery &query, QS
             const qsizetype wrapped = prefix.size() + (query.wholeWord ? 10 : 0);
             const qsizetype at = qBound<qsizetype>(0, expression.patternErrorOffset() - wrapped, query.pattern.size());
             *error = QCoreApplication::translate("TextSearch", "Not a valid pattern: %1, at character %2")
-                         .arg(expression.errorString())
-                         .arg(at + 1);
+                         .arg(expression.errorString(), QString::number(at + 1));
         }
         return std::nullopt;
     }

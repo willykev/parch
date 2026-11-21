@@ -285,8 +285,7 @@ ExportResult HtmlExporter::write(const md::Document &document, const ExportRecip
         return result;
     }
     result.written.append(recipe.output);
-    for (const ExportWeb::Assets::Asset &asset : assets.assets())
-        if (assets.mode() == ExportWeb::Assets::Mode::Copy) result.written.append(folder + u'/' + asset.name);
+    assets.listCopies(result);
     result.ok = true;
     return result;
 }

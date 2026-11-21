@@ -9,8 +9,11 @@ void renameUpdatesTextFilesAndHtmlAttributes_data();
 void renameUpdatesTextFilesAndHtmlAttributes();
 void undoRenameRestoresExactReferenceSpelling_data();
 void undoRenameRestoresExactReferenceSpelling();
+void undoMoveWaitsForAnOpenReview();
+void undoNoticeWaitsForAMoveReview();
 void moveKeepsFrontMatterCitationFilesReachable_data();
 void moveKeepsFrontMatterCitationFilesReachable();
+void movingADocumentLeavesUnchangedCitationPathsAlone();
 
 void historyLimitsChangeWhileHistoryRuns();
 void historyRetentionIsAPreference();

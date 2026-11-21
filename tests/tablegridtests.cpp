@@ -1707,6 +1707,76 @@ void handTypedTablesWaitUntilTheCaretLeaves()
     QVERIFY(view.text().contains(u"| a | b |\n|---|---|\n| c | d |"_s));
 }
 
+void handTypedTablesKeepWaitingThroughEdits_data()
+{
+    QTest::addColumn<QString>("edit");
+    QTest::newRow("undo") << u"undo"_s;
+    QTest::newRow("redo") << u"redo"_s;
+    QTest::newRow("another-view") << u"other"_s;
+    QTest::newRow("another-view-before-parse") << u"pending"_s;
+    QTest::newRow("disk-reload") << u"reload"_s;
+}
+
+void handTypedTablesKeepWaitingThroughEdits()
+{
+    QFETCH(QString, edit);
+    const QString before = u"Readings.\n\n"_s;
+    const QString after = u"\n\nAfter."_s;
+    const QString table = u"| a | b |\n|---|---|\n| c | d |"_s;
+    GridEditor view(before + after);
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    TableGrids *tables = view.binding->tables();
+    QTRY_VERIFY(tables->settled());
+    const bool otherView = edit == u"other" || edit == u"pending";
+    const auto second = otherView ? view.secondView() : nullptr;
+    QVERIFY(!otherView || (second && second->binding));
+    view.select(int(before.size()), int(before.size()));
+    view.binding->replaceEditorRange(int(before.size()), int(before.size()), table);
+    if (edit != u"pending") {
+        QTRY_VERIFY(tables->settled());
+        QVERIFY(tables->can(u"showTableGrid"_s));
+    } else {
+        QVERIFY(!tables->settled());
+    }
+
+    QString expected = before + table + after;
+    if (edit == u"undo") {
+        const int delimiter = int(view.text().indexOf(u"---"));
+        view.select(delimiter, delimiter + 3);
+        view.binding->replaceEditorRange(delimiter, delimiter + 3, u"oops"_s);
+        QTRY_VERIFY(tables->settled());
+        QVERIFY(!tables->can(u"showTableGrid"_s));
+        view.key(Qt::Key_Z, Qt::ControlModifier);
+    } else if (edit == u"redo") {
+        view.binding->undo();
+        QTRY_VERIFY(tables->settled());
+        QCOMPARE(view.text(), before + after);
+        view.binding->redo();
+    } else {
+        const QString prefix = u"Earlier "_s;
+        const int caret = view.cursor();
+        expected.prepend(prefix);
+        if (second) {
+            second->binding->replaceEditorRange(0, 0, prefix);
+            QTRY_COMPARE(second->binding->tables()->grids().size(), 1);
+        } else {
+            view.store->save(view.document);
+            QTRY_VERIFY(!view.document->differsFromFile());
+            writeFile(view.document->path(), expected.toUtf8());
+            QTRY_COMPARE(view.text(), expected);
+        }
+        QCOMPARE(view.cursor(), caret + int(prefix.size()));
+    }
+    QCOMPARE(view.text(), expected);
+    QTRY_VERIFY(tables->settled());
+    QCOMPARE(tables->grids().size(), 0);
+    QVERIFY(tables->can(u"showTableGrid"_s));
+    const int prose = int(view.text().indexOf(u"After."));
+    view.select(prose, prose);
+    QVERIFY(view.grids(1));
+    QCOMPARE(view.text(), expected);
+}
+
 void everyGeometryQuestionHasAnAnswerInATable()
 {
     GridEditor view(weather);
@@ -2617,6 +2687,8 @@ void replaceAllKeepsItsQueryWhenItRetries_data()
     QTest::newRow("grid-appears") << false << QString() << u"project"_s;
     QTest::newRow("switch-through-read-only-view") << false << QString() << u"switch"_s;
     QTest::newRow("reopen-find-bar") << false << QString() << u"reopen"_s;
+    QTest::newRow("another-view-of-the-same-document") << false << QString() << u"split"_s;
+    QTest::newRow("view-rebound-to-the-same-document") << false << QString() << u"reattach"_s;
 }
 
 void replaceAllKeepsItsQueryWhenItRetries()
@@ -2629,6 +2701,12 @@ void replaceAllKeepsItsQueryWhenItRetries()
     GridEditor view(text);
     QVERIFY2(view.ok(), qPrintable(view.error));
     QVERIFY(view.grids(1));
+    const auto second = interruption == u"split" ? view.secondView() : nullptr;
+    if (interruption == u"split") {
+        QVERIFY(second && second->binding);
+        QCOMPARE(second->binding->document(), view.document);
+        QTRY_COMPARE(second->binding->tables()->grids().size(), 1);
+    }
     DocumentFind find;
     find.setDocument(view.document);
     find.setBinding(view.binding);
@@ -2644,30 +2722,34 @@ void replaceAllKeepsItsQueryWhenItRetries()
     QTRY_COMPARE(find.count(), project ? 4 : 1);
     QSignalSpy replaced(&find, &DocumentFind::replacedAll);
     const QString replacement = capture ? u"$1-ed"_s : u"Edited"_s;
-    if (interruption == u"switch"_s || interruption == u"reopen"_s) {
+    if (interruption == u"switch") {
         // Start a new command immediately after returning to this document.
         // Only its completion may make an edit.
         find.replaceAll(u"Stale"_s);
-        if (interruption == u"switch"_s) {
-            const QString path = view.root.filePath(u"readonly.md"_s);
-            writeFile(path, QByteArray("Blue \xff\n"));
-            Document *readOnly = view.store->open(path);
-            QVERIFY(readOnly);
-            const QString before = readOnly->buffer()->text();
-            view.pane->setProperty("document", QVariant::fromValue(readOnly));
-            find.setDocument(readOnly);
-            QVERIFY(!find.canReplace());
-            find.replaceAll(u"Refused"_s);
-            QCOMPARE(readOnly->buffer()->text(), before);
-            view.pane->setProperty("document", QVariant::fromValue(view.document));
-            find.setDocument(view.document);
-        } else {
-            find.setActive(false);
-            find.setActive(true);
-        }
+        const QString path = view.root.filePath(u"readonly.md"_s);
+        writeFile(path, QByteArray("Blue \xff\n"));
+        Document *readOnly = view.store->open(path);
+        QVERIFY(readOnly);
+        const QString before = readOnly->buffer()->text();
+        view.pane->setProperty("document", QVariant::fromValue(readOnly));
+        find.setDocument(readOnly);
+        QVERIFY(!find.canReplace());
+        find.replaceAll(u"Refused"_s);
+        QCOMPARE(readOnly->buffer()->text(), before);
+        view.pane->setProperty("document", QVariant::fromValue(view.document));
+        find.setDocument(view.document);
     }
     find.replaceAll(replacement);
     // All changes happen in this event-loop turn, ahead of worker delivery.
+    if (interruption == u"reopen") {
+        find.setActive(false);
+        find.setActive(true);
+    } else if (second) {
+        find.setBinding(second->binding);
+    } else if (interruption == u"reattach") {
+        view.binding->setDocument(nullptr);
+        view.binding->setDocument(view.document);
+    }
     QString newer = text;
     if (append) {
         view.document->buffer()->replace({int(text.size()), 0}, u"!"_s);

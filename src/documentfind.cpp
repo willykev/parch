@@ -60,6 +60,7 @@ void DocumentFind::setDocument(Document *document)
     if (document) {
         m_connections.append(connect(document->buffer(), &SourceBuffer::sourceChanged, this, &DocumentFind::sourceChanged));
         m_connections.append(connect(document, &Document::changed, this, &DocumentFind::refreshCanReplace));
+        m_connections.append(connect(document, &QObject::destroyed, this, &DocumentFind::refreshCanReplace));
     }
     m_anchor = m_cursor = 0;
     m_pending = Pending::None;
@@ -73,7 +74,6 @@ void DocumentFind::setActive(bool active)
 {
     if (active == m_active) return;
     m_active = active;
-    if (!active) cancelReplaceAll();
     emit activeChanged();
     // Closed, the bar keeps nothing and looks for nothing; open, it looks afresh.
     queryEdited();
@@ -186,21 +186,14 @@ void DocumentFind::failed(const QString &reason)
 void DocumentFind::setBinding(EditorBinding *binding)
 {
     if (binding == m_binding) return;
-    cancelReplaceAll();
-    if (m_binding) {
-        disconnect(m_binding->tables(), nullptr, this, nullptr);
-        disconnect(m_binding, nullptr, this, nullptr);
-    }
+    if (m_binding) disconnect(m_binding->tables(), nullptr, this, nullptr);
     m_binding = binding;
     // A table shown as a grid, or as its Markdown again, changes what is to
     // be found in it: the text is looked in again.
-    if (binding) {
-        connect(binding, &EditorBinding::documentChanged, this, &DocumentFind::cancelReplaceAll);
-        connect(binding, &QObject::destroyed, this, &DocumentFind::cancelReplaceAll);
+    if (binding)
         connect(binding->tables(), &TableGrids::gridsChanged, this, [this] {
             if (m_active && m_document && m_expression) queryEdited();
         });
-    }
     emit bindingChanged();
 }
 

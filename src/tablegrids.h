@@ -390,7 +390,7 @@ public:
     void compositionChanged();
     // The binding's projection: shown anew, a change followed, laid out anew.
     void loaded();
-    void sourceChanged(SourceRange range, int inserted, bool localRawEdit);
+    void sourceChanged(SourceRange range, int inserted, bool localRawEdit, bool localUndo);
     void relayout();
     // The binding lets go of its document and editor.
     void clear();
@@ -470,8 +470,10 @@ private:
     TickEscapes m_tickEscapes;
     // Projectable tables left as Markdown, as of the last parse or toggle.
     QList<RawTable> m_rawTables;
+    // The table being written here, even while its syntax is incomplete.
+    std::optional<RawTable> m_waitingTable;
     bool m_canShowGrid = false;
-    // Where the last edit to raw text in this view left new source.
+    // Where this view last edited raw text the parser has yet to see.
     std::optional<SourceRange> m_localRawEdit;
     // Tables this view shows as Markdown, by where they start.
     QList<int> m_markdown;

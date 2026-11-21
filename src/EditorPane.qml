@@ -317,6 +317,7 @@ Rectangle {
             selectionColor: theme.selection
             selectedTextColor: theme.foreground
             renderType: pane.nativeRendering ? TextEdit.NativeRendering : TextEdit.QtRendering
+            cursorDelegate: Item {}
             // The editor's own caret follows the text layout across grid changes.
             Rectangle {
                 id: caret

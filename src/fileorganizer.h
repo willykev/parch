@@ -69,6 +69,8 @@ public:
     ~FileOrganizer() override;
 
     bool busy() const;
+    // Whether a move or its undo can start while the organizer is idle.
+    bool canStartMove() const;
     QVariantMap review() const;
     QVariantMap trashing() const;
     QVariantList folders() const;

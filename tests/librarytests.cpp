@@ -1729,6 +1729,71 @@ void undoRenameRestoresExactReferenceSpelling()
     }));
 }
 
+void undoMoveWaitsForAnOpenReview()
+{
+    LibraryMoves f;
+    const QString first = f.file(u"first.md"_s), movedFirst = f.file(u"renamed.md"_s);
+    const QString second = f.file(u"second.md"_s);
+    writeFile(first, "First.\n");
+    writeFile(second, "Second.\n");
+    writeFile(f.file(u"index.md"_s), "[Second](second.md)\n");
+    QSignalSpy moved(&f.organizer, &FileOrganizer::moved);
+    QSignalSpy problems(&f.organizer, &FileOrganizer::problem);
+    f.organizer.rename(first, u"renamed.md"_s);
+    QTRY_COMPARE(moved.count(), 1);
+    const quint64 undo = moved.first().at(2).toULongLong();
+    QVERIFY(undo > 0);
+    QVERIFY(QFileInfo::exists(movedFirst));
+
+    f.organizer.rename(second, u"new-second.md"_s);
+    QTRY_VERIFY(!f.organizer.review().isEmpty());
+    f.organizer.undoMove(undo);
+    QCOMPARE(problems.count(), 1);
+    QCOMPARE(moved.count(), 1);
+    QVERIFY(QFileInfo::exists(movedFirst));
+
+    f.organizer.cancelMove();
+    f.organizer.undoMove(undo);
+    QTRY_COMPARE(moved.count(), 2);
+    QCOMPARE(readFile(first), QByteArray("First.\n"));
+    QVERIFY(!QFileInfo::exists(movedFirst));
+    QVERIFY(QFileInfo::exists(second));
+}
+
+void undoNoticeWaitsForAMoveReview()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString library = root.filePath(u"library"_s);
+    const QString first = library + u"/first.md"_s, movedFirst = library + u"/renamed.md"_s;
+    const QString second = library + u"/second.md"_s;
+    writeFile(first, "First.\n");
+    writeFile(second, "Second.\n");
+    writeFile(library + u"/index.md"_s, "[Second](second.md)\n");
+    Backend backend(AppPaths::under(root.filePath(u"app"_s)));
+    backend.start({});
+    backend.settings()->setLibraryFolders({library});
+    FileOrganizer *organizer = backend.organizer();
+    organizer->rename(first, u"renamed.md"_s);
+    QTRY_VERIFY(backend.noticeUndoable());
+    QTRY_VERIFY(!organizer->busy());
+
+    organizer->rename(second, u"new-second.md"_s);
+    QVERIFY(organizer->busy());
+    backend.undoNotice();
+    QVERIFY(backend.noticeUndoable());
+    QTRY_VERIFY(!organizer->review().isEmpty());
+    backend.undoNotice();
+    QVERIFY(backend.noticeUndoable());
+    QVERIFY(QFileInfo::exists(movedFirst));
+
+    organizer->cancelMove();
+    backend.undoNotice();
+    QTRY_VERIFY(QFileInfo::exists(first));
+    QVERIFY(!QFileInfo::exists(movedFirst));
+    QVERIFY(QFileInfo::exists(second));
+}
+
 void moveKeepsFrontMatterCitationFilesReachable_data()
 {
     QTest::addColumn<QString>("variation");
@@ -1828,6 +1893,24 @@ void moveKeepsFrontMatterCitationFilesReachable()
     if (open) f.save(open, original.toUtf8());
     QCOMPARE(readFile(paper), original.toUtf8());
     QCOMPARE(f.store.documentIdFor(paper), id);
+}
+
+void movingADocumentLeavesUnchangedCitationPathsAlone()
+{
+    LibraryMoves f;
+    const QString paper = f.file(u"notes/paper.md"_s);
+    const QString destination = f.file(u"archive"_s);
+    const QString bibliography = f.root.filePath(u"resources/refs.bib"_s);
+    const QByteArray original = u"---\nbibliography: ['%1', '~/refs.bib']\ncsl: ~/style.csl\n---\n\nSee [@doe].\n"_s
+                                    .arg(bibliography).toUtf8();
+    writeFile(paper, original);
+    QVERIFY(QDir().mkpath(destination));
+    QSignalSpy moved(&f.organizer, &FileOrganizer::moved);
+    f.organizer.move(paper, destination);
+    QTRY_VERIFY(!f.organizer.busy());
+    QVERIFY(f.organizer.review().isEmpty());
+    QCOMPARE(moved.count(), 1);
+    QCOMPARE(readFile(destination + u"/paper.md"_s), original);
 }
 
 } // namespace LibraryTests

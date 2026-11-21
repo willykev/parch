@@ -931,6 +931,7 @@ void TableGrids::clear()
 {
     disconnect(m_parseConnection);
     m_rawTables.clear();
+    m_waitingTable.reset();
     m_localRawEdit.reset();
     m_markdown.clear();
     m_tickEscapes = {};
@@ -956,9 +957,12 @@ void TableGrids::parsed()
     if (!m_enabled || !m_binding->m_loaded || !m_binding->m_document) return;
     const ParsedTextPtr parse = m_binding->m_document->parse()->current();
     if (!parse || parse->revision != m_binding->m_buffer->revision()) return;
+    const int caret = cursor();
+    const bool waiting = m_waitingTable && m_waitingTable->contains(caret);
+    const auto localEdit = std::exchange(m_localRawEdit, std::nullopt);
     m_rawTables.clear();
     if (!m_binding->m_document->markdownOptions().tables) {
-        m_localRawEdit.reset();
+        m_waitingTable.reset();
         adopt({});
         return;
     }
@@ -967,7 +971,6 @@ void TableGrids::parsed()
     const QString source = text();
     const MdTable::Dialect dialect = this->dialect();
     QList<MdTable::Table> tables;
-    bool waiting = false;
     for (const md::Node *node : std::as_const(nodes)) {
         const auto table = MdTable::scan(source, node->range.start, node->range.end, dialect);
         if (!table || table->unfit != MdTable::Unfit::None) continue;
@@ -978,20 +981,16 @@ void TableGrids::parsed()
             m_rawTables.append({table->start, table->end, false});
             continue;
         }
-        // Only a new table being written in this view waits for the caret.
-        // A file read from disk or text brought in by another view can show
-        // its grids as soon as it has been parsed.
+        // A table being written in this view waits while the caret is in it.
         const RawTable raw{table->start, table->end, true};
-        const bool writing = m_localRawEdit && raw.contains(cursor()) && m_localRawEdit->start <= raw.end
-                             && m_localRawEdit->start + m_localRawEdit->length >= raw.start;
-        if (writing && !gridAt(raw.start)) {
+        const bool writing = localEdit && localEdit->start <= raw.end && localEdit->start + localEdit->length >= raw.start;
+        if (raw.contains(caret) && (waiting || writing) && !gridAt(raw.start)) {
+            m_waitingTable = raw;
             m_rawTables.append(raw);
-            waiting = true;
             continue;
         }
         tables.append(*table);
     }
-    if (!waiting) m_localRawEdit.reset();
     adopt(tables);
 }
 
@@ -1123,15 +1122,43 @@ void TableGrids::placeGrids()
     }
 }
 
-void TableGrids::sourceChanged(SourceRange range, int inserted, bool localRawEdit)
+void TableGrids::sourceChanged(SourceRange range, int inserted, bool localRawEdit, bool localUndo)
 {
     const int delta = inserted - range.length;
     const int oldEnd = range.start + range.length;
+    const int newEnd = range.start + inserted;
     if (m_tickEscapes.grid && range.start <= m_tickEscapes.grid->end() && oldEnd >= m_tickEscapes.grid->start())
         m_tickEscapes = {};
-    m_localRawEdit.reset();
-    if (m_enabled && localRawEdit) m_localRawEdit.emplace(SourceRange{range.start, inserted});
-    // A raw table has to be read again before the command can restore it.
+    // Undo and redo continue an edit to Markdown, including a table whose
+    // syntax it temporarily removed.
+    const auto touches = [&](int start, int end) { return range.start <= end && oldEnd >= start; };
+    const bool replayingRaw = localUndo && ((m_waitingTable && touches(m_waitingTable->start, m_waitingTable->end))
+                                          || (m_localRawEdit && touches(m_localRawEdit->start,
+                                                                       m_localRawEdit->start + m_localRawEdit->length)));
+    // Move the writing range and any edit the parser has yet to see along
+    // with the changed text.
+    const auto follow = [&](int &start, int &end) {
+        if (oldEnd < start) {
+            start += delta;
+            end += delta;
+        } else if (range.start <= end) {
+            start = qMin(start, range.start);
+            end = qMax(end + delta, newEnd);
+        }
+    };
+    if (m_waitingTable) {
+        follow(m_waitingTable->start, m_waitingTable->end);
+        if (!localRawEdit && !replayingRaw && m_waitingTable->start == m_waitingTable->end) m_waitingTable.reset();
+    }
+    if (m_enabled && (localRawEdit || replayingRaw)) {
+        m_localRawEdit.emplace(SourceRange{range.start, inserted});
+    } else if (m_localRawEdit) {
+        auto &[start, length] = *m_localRawEdit;
+        int end = start + length;
+        follow(start, end);
+        length = end - start;
+    }
+    // The next parse checks which tables can be restored as grids.
     m_rawTables.clear();
     updateShowGrid();
     for (int &start : m_markdown)
@@ -1143,7 +1170,6 @@ void TableGrids::sourceChanged(SourceRange range, int inserted, bool localRawEdi
         TableGrid *grid = m_grids[i];
         // Lines put in just before the table, or taken away from just
         // before it, move it, as text before it does.
-        const int newEnd = range.start + inserted;
         const bool linesBefore = oldEnd == grid->start() && (range.length > 0 || inserted > 0)
                                  && (newEnd == 0 || isBreak(source[newEnd - 1]));
         if (oldEnd < grid->start() || linesBefore) {
@@ -1168,6 +1194,8 @@ void TableGrids::sourceChanged(SourceRange range, int inserted, bool localRawEdi
             project(grid);
             continue;
         }
+        // Replacing an entire grid is an edit to the grid as a whole.
+        if (localRawEdit && range.start <= grid->start() && oldEnd >= grid->end()) m_localRawEdit.reset();
         unproject(qMin(range.start, grid->start()), qMax(range.start + inserted, grid->end() + delta));
         if (m_caretGrid == grid) m_caretGrid = nullptr;
         grid->deleteLater();
@@ -1246,9 +1274,9 @@ void TableGrids::cursorMoved()
     const int cursor = this->cursor(), anchor = this->anchor();
     if (m_picked.anchor != anchor || m_picked.cursor != cursor) m_picked = {};
     // A table being written becomes a grid once the caret leaves it.
-    if (!m_settling && m_rawTables.removeIf([cursor](const RawTable &table) {
-            return table.waiting && !table.contains(cursor);
-        }) > 0) {
+    if (!m_settling && m_waitingTable && !m_waitingTable->contains(cursor)) {
+        m_waitingTable.reset();
+        m_rawTables.removeIf([](const RawTable &table) { return table.waiting; });
         m_localRawEdit.reset();
         if (m_binding->m_document) m_binding->m_document->parse()->request();
         QMetaObject::invokeMethod(this, &TableGrids::parsed, Qt::QueuedConnection);
@@ -3041,6 +3069,7 @@ bool TableGrids::adoptOne(const MdTable::Table &table)
 {
     if (table.unfit != MdTable::Unfit::None || gridAt(table.start)) return false;
     m_rawTables.removeIf([&table](const RawTable &raw) { return raw.start == table.start; });
+    if (m_waitingTable && m_waitingTable->start == table.start) m_waitingTable.reset();
     m_markdown.removeAll(table.start);
     auto *grid = new TableGrid(this);
     grid->read(table, text());

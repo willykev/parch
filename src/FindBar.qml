@@ -33,12 +33,14 @@ Rectangle {
     readonly property real rowHeight: Math.round(theme.fontSize * 2.4)
     readonly property real iconSize: Math.round(theme.fontSize * 1.15)
     readonly property real buttonSize: rowHeight
+    readonly property string replacedText: qsTr("%1 replaced").arg(Number(replacedCount).toLocaleString(Qt.locale(), "f", 0))
+    readonly property string statusHint: !visible && replaceSummary.running ? replacedText : ""
 
     // What the count says: where the selection is among the matches, how
     // many there are, or that there are none yet.
     readonly property string countText: {
         if (replaceSummary.running)
-            return qsTr("%1 replaced").arg(Number(replacedCount).toLocaleString(Qt.locale(), "f", 0))
+            return replacedText
         if (find.pattern.length === 0 || find.error.length > 0)
             return ""
         if (find.searching)

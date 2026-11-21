@@ -1055,7 +1055,7 @@ ApplicationWindow {
                 status: window.tabs.activeStatus
                 problem: backend.notice ? "" : backend.problem
                 problemDetail: backend.notice ? "" : backend.shownText(backend.problemDetail)
-                hint: editorPane.editHint
+                hint: editorPane.editHint || findBar.statusHint
                 selectionStart: editorPane.anchorPosition
                 selectionEnd: editorPane.cursorPosition
                 syncShown: window.splitBoth

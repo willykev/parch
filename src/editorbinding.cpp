@@ -567,7 +567,7 @@ void EditorBinding::applySourceChange(Revision revision, SourceRange range, cons
         edit.insertText(written);
     }
     // The grids follow the change, before the selection does.
-    m_tables->sourceChanged(range, inserted, revision == m_rawEditRevision);
+    m_tables->sourceChanged(range, inserted, revision == m_rawEditRevision, m_undoing);
     // Positions before the edit stay, positions after it move by its length,
     // and positions inside what it replaced go to its end; the selection keeps
     // its direction.

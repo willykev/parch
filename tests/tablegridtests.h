@@ -46,6 +46,8 @@ void copyingCellsGivesTabsAndAnHtmlTable();
 void pastingCellsFillsOverwritesAndGrows();
 void wideTablesScrollSidewaysAndTheTextScrollsOver();
 void handTypedTablesWaitUntilTheCaretLeaves();
+void handTypedTablesKeepWaitingThroughEdits_data();
+void handTypedTablesKeepWaitingThroughEdits();
 void everyGeometryQuestionHasAnAnswerInATable();
 void fontAndWidthChangesKeepTheGrid();
 void tablesTheGridCannotHoldStayMarkdown();

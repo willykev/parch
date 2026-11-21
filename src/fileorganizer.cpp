@@ -98,6 +98,7 @@ FileOrganizer::~FileOrganizer()
 }
 
 bool FileOrganizer::busy() const { return m_busy > 0; }
+bool FileOrganizer::canStartMove() const { return !m_review && !busy(); }
 QVariantMap FileOrganizer::trashing() const { return m_trashing; }
 QVariantList FileOrganizer::folders() const { return m_folders; }
 
@@ -271,7 +272,7 @@ void FileOrganizer::startMove(const QString &from, const QString &to)
         refuse(tr("It can only go to a folder of the library."));
         return;
     }
-    if (m_review || busy()) {
+    if (!canStartMove()) {
         refuse(tr("Another move is waiting; finish it first."));
         return;
     }
@@ -751,11 +752,11 @@ FileOrganizer::Rewritten FileOrganizer::rewriteJob(QList<Rewrite> files, Plan pl
 void FileOrganizer::undoMove(quint64 move)
 {
     if (!m_done || m_done->id != move) return;
-    const Done taken = *std::exchange(m_done, std::nullopt);
-    if (m_review || busy()) {
+    if (!canStartMove()) {
         emit problem(tr("Could not undo move"), tr("Another move is waiting; finish it first."));
         return;
     }
+    const Done taken = *std::exchange(m_done, std::nullopt);
     Plan back = taken.plan;
     std::swap(back.from, back.to);
     std::swap(back.library, back.destinationLibrary);

@@ -5,6 +5,7 @@
 #include "commandfilter.h"
 #include "commandregistry.h"
 #include "diskfile.h"
+#include "documentfind.h"
 #include "documentparse.h"
 #include "documentstore.h"
 #include "editorbinding.h"
@@ -182,6 +183,89 @@ struct Editor {
 } // namespace
 
 namespace EditingTests {
+
+void textEditDrawsOnlyTheEditorCaret()
+{
+    QStyleHints *hints = QGuiApplication::styleHints();
+    const int flash = hints->cursorFlashTime();
+    const auto restoreFlash = qScopeGuard([hints, flash] { hints->setCursorFlashTime(flash); });
+    hints->setCursorFlashTime(0);
+
+    Editor view(QStringLiteral("Some\n\nText."));
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    activate(&view.window);
+    view.editor->forceActiveFocus();
+    view.select(5, 5);
+    auto *caret = findItem(view.editor, QStringLiteral("caret"));
+    QVERIFY(caret && caret->isVisible());
+    QTRY_VERIFY(!view.editor->property("cursorVisible").toBool());
+    const QImage lit = view.window.grabWindow();
+    QVERIFY(!lit.isNull());
+
+    view.pane->setProperty("caretLit", false);
+    QVERIFY(!caret->isVisible());
+    const QImage dark = view.window.grabWindow();
+    QVERIFY(!dark.isNull() && dark != lit);
+    // Focus can ask Qt to show its cursor before the binding hides it again.
+    QVERIFY(view.editor->setProperty("cursorVisible", true));
+    QVERIFY(view.editor->property("cursorVisible").toBool());
+    const QImage native = view.window.grabWindow();
+    QVERIFY2(native == dark, "The TextEdit drew a cursor while the editor's caret was hidden.");
+}
+
+void replaceAllFinishesAfterFindCloses_data()
+{
+    QTest::addColumn<bool>("tableRefuses");
+    QTest::newRow("count") << false;
+    QTest::newRow("table-refusal") << true;
+}
+
+void replaceAllFinishesAfterFindCloses()
+{
+    QFETCH(bool, tableRefuses);
+    ShellFixture shell;
+    QVERIFY2(shell.ok(), qPrintable(shell.error));
+    QQuickWindow *window = shell.window.get();
+    activate(window);
+    shell.settings()->setTableGrids(true);
+    const QString original = tableRefuses ? QStringLiteral("| A | B |\n| --- | --- |\n| \\`aaa | bbb` |\n\nSome \\ prose.")
+                                         : QStringLiteral("one and one");
+    SourceBuffer *buffer = shell.document()->buffer();
+    QCOMPARE(buffer->replace({0, 0}, original), SourceBuffer::EditOutcome::Applied);
+    TableGrids *tables = shell.binding()->tables();
+    if (tableRefuses) QTRY_COMPARE(tables->grids().size(), 1);
+
+    auto *find = qobject_cast<DocumentFind *>(shell.object(QStringLiteral("documentFind")));
+    auto *bar = shell.item(QStringLiteral("findBar"));
+    auto *hint = shell.item(QStringLiteral("editHint"));
+    QVERIFY(find && bar && hint);
+    shell.item(QStringLiteral("editor"))->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_H, Qt::ControlModifier);
+    QTRY_VERIFY(bar->isVisible());
+    find->setPattern(tableRefuses ? QStringLiteral("\\") : QStringLiteral("one"));
+    QTRY_COMPARE(find->count(), 2);
+    QSignalSpy replaced(find, &DocumentFind::replacedAll);
+    QSignalSpy refused(tables, &TableGrids::refused);
+    find->replaceAll(tableRefuses ? QString() : QStringLiteral("two"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(!bar->isVisible());
+
+    QTRY_COMPARE(replaced.count(), 1);
+    QCOMPARE(replaced.first().first().toInt(), tableRefuses ? 1 : 2);
+    if (tableRefuses) {
+        QCOMPARE(buffer->text(), QStringLiteral("| A | B |\n| --- | --- |\n| \\`aaa | bbb` |\n\nSome  prose."));
+        QCOMPARE(refused.count(), 1);
+        const QString reason = refused.first().first().toString();
+        QVERIFY(!reason.isEmpty());
+        QTRY_COMPARE(hint->property("text").toString(), reason);
+    } else {
+        QCOMPARE(buffer->text(), QStringLiteral("two and two"));
+        QTRY_COMPARE(hint->property("text").toString(), QStringLiteral("2 replaced"));
+    }
+    QVERIFY(hint->isVisible());
+    buffer->undo();
+    QCOMPARE(buffer->text(), original);
+}
 
 void sourceEditsGroupIntoOneUndoStep()
 {

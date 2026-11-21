@@ -248,16 +248,16 @@ void citationChanges(const md::FrontMatter &front, const QString &text, const QS
         } else {
             const QString normalized = QDir::cleanPath(path);
             const QString target = DocumentLinks::moved(normalized, moves);
-            if (folder == newFolder && target == normalized) return;
+            const bool absolute = QDir::isAbsolutePath(plain);
+            const bool fromHome = plain == u"~" || plain.startsWith(QLatin1StringView("~/"));
+            if (target == normalized && (folder == newFolder || absolute || fromHome)) return;
             const QString canonical = QFileInfo(path).canonicalFilePath();
             if (!before.allows(path) || !after.allows(target)
                 || (!canonical.isEmpty() && !after.allows(DocumentLinks::moved(canonical, moves)))) {
                 problem = QCoreApplication::translate("DocumentLinks", "“%1” is outside the allowed folders.").arg(plain);
-            } else if (QDir::isAbsolutePath(plain)) {
-                if (target == normalized) return;
+            } else if (absolute) {
                 replacement = target;
-            } else if (plain == u"~" || plain.startsWith(QLatin1StringView("~/"))) {
-                if (target == normalized) return;
+            } else if (fromHome) {
                 const QString home = QDir::homePath();
                 replacement = md::isWithin(target, home) ? QStringLiteral("~/") + QDir(home).relativeFilePath(target) : target;
             } else {

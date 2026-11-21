@@ -798,8 +798,11 @@ private slots:
     void renameUpdatesTextFilesAndHtmlAttributes() { LibraryTests::renameUpdatesTextFilesAndHtmlAttributes(); }
     void undoRenameRestoresExactReferenceSpelling_data() { LibraryTests::undoRenameRestoresExactReferenceSpelling_data(); }
     void undoRenameRestoresExactReferenceSpelling() { LibraryTests::undoRenameRestoresExactReferenceSpelling(); }
+    void undoMoveWaitsForAnOpenReview() { LibraryTests::undoMoveWaitsForAnOpenReview(); }
+    void undoNoticeWaitsForAMoveReview() { LibraryTests::undoNoticeWaitsForAMoveReview(); }
     void moveKeepsFrontMatterCitationFilesReachable_data() { LibraryTests::moveKeepsFrontMatterCitationFilesReachable_data(); }
     void moveKeepsFrontMatterCitationFilesReachable() { LibraryTests::moveKeepsFrontMatterCitationFilesReachable(); }
+    void movingADocumentLeavesUnchangedCitationPathsAlone() { LibraryTests::movingADocumentLeavesUnchangedCitationPathsAlone(); }
     void encodingsDecodeWhatUtf8CannotRead() { LibraryTests::encodingsDecodeWhatUtf8CannotRead(); }
     void reopeningInAnotherEncodingSavesOnlyOnceConfirmed() { LibraryTests::reopeningInAnotherEncodingSavesOnlyOnceConfirmed(); }
     void reopeningRefusesAFileThatChanged() { LibraryTests::reopeningRefusesAFileThatChanged(); }
@@ -922,6 +925,8 @@ private slots:
     void pastingCellsFillsOverwritesAndGrows() { TableGridTests::pastingCellsFillsOverwritesAndGrows(); }
     void wideTablesScrollSidewaysAndTheTextScrollsOver() { TableGridTests::wideTablesScrollSidewaysAndTheTextScrollsOver(); }
     void handTypedTablesWaitUntilTheCaretLeaves() { TableGridTests::handTypedTablesWaitUntilTheCaretLeaves(); }
+    void handTypedTablesKeepWaitingThroughEdits_data() { TableGridTests::handTypedTablesKeepWaitingThroughEdits_data(); }
+    void handTypedTablesKeepWaitingThroughEdits() { TableGridTests::handTypedTablesKeepWaitingThroughEdits(); }
     void everyGeometryQuestionHasAnAnswerInATable() { TableGridTests::everyGeometryQuestionHasAnAnswerInATable(); }
     void fontAndWidthChangesKeepTheGrid() { TableGridTests::fontAndWidthChangesKeepTheGrid(); }
     void tablesTheGridCannotHoldStayMarkdown() { TableGridTests::tablesTheGridCannotHoldStayMarkdown(); }
@@ -1036,6 +1041,7 @@ private slots:
     void commandLineSavesAndClosesTabs() { VimTests::commandLineSavesAndClosesTabs(); }
     void windowShowsAndLeavesVimKeys() { VimTests::windowShowsAndLeavesVimKeys(); }
     void editorDrawsFromTheme();
+    void textEditDrawsOnlyTheEditorCaret() { EditingTests::textEditDrawsOnlyTheEditorCaret(); }
     void caretBlinksThenRestsAndDrawsNothing();
     void caretIsSteadyWithoutMotionOrFlash();
     void caretNeverStartsQtQuicksAnimations();
@@ -1195,6 +1201,8 @@ private slots:
     void anInvalidPatternSaysWhy();
     void findStepsRoundTheMatchesAndFollowsEdits();
     void replaceAndReplaceAllAreEachOneUndoStep();
+    void replaceAllFinishesAfterFindCloses_data() { EditingTests::replaceAllFinishesAfterFindCloses_data(); }
+    void replaceAllFinishesAfterFindCloses() { EditingTests::replaceAllFinishesAfterFindCloses(); }
     void findInALargeDocumentRunsOffTheUiThread();
     void headingsAreTheEnginesOutline();
     void outlineFollowsEditsOffTheUiThread();

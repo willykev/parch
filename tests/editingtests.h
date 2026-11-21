@@ -5,6 +5,9 @@
 // each of them as a test function of its own.
 namespace EditingTests {
 
+void textEditDrawsOnlyTheEditorCaret();
+void replaceAllFinishesAfterFindCloses_data();
+void replaceAllFinishesAfterFindCloses();
 void guideDescribesTheConflictChoicesShown_data();
 void guideDescribesTheConflictChoicesShown();
 void keepBothRestoresTheCaretOfTheKeptText_data();

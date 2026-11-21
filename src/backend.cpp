@@ -305,7 +305,8 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     connect(m_organizer.get(), &FileOrganizer::moved, this,
             [this](const QString &title, const QString &detail, quint64 move, bool incomplete) {
                 postUndoable(title, detail, [this, move] { m_organizer->undoMove(move); },
-                             [this, move] { m_organizer->forgetMove(move); }, incomplete ? Warning : News);
+                             [this, move] { m_organizer->forgetMove(move); }, incomplete ? Warning : News,
+                             [this] { return m_organizer->canStartMove(); });
             });
     // A new document opens in the window in front, which asked for it.
     connect(m_organizer.get(), &FileOrganizer::created, this, [this](const QString &path) {
@@ -1733,7 +1734,7 @@ void Backend::setDraftAside(const QString &documentId, const std::optional<QByte
 
 void Backend::undoNotice()
 {
-    if (!noticeUndoable()) return;
+    if (!noticeUndoable() || (m_undoReady && !m_undoReady())) return;
     // Undone, it needs forgetting no more.
     const std::function<void()> undo = std::exchange(m_undo, {});
     m_forgetUndo = {};
@@ -1742,7 +1743,7 @@ void Backend::undoNotice()
 }
 
 void Backend::postUndoable(const QString &news, const QString &detail, std::function<void()> undo,
-                           std::function<void()> forget, NoticeTone tone)
+                           std::function<void()> forget, NoticeTone tone, std::function<bool()> ready)
 {
     post(news, detail, tone);
     // A refused quit holds the notice; the news joins it, without Undo.
@@ -1752,12 +1753,14 @@ void Backend::postUndoable(const QString &news, const QString &detail, std::func
     }
     m_undo = std::move(undo);
     m_forgetUndo = std::move(forget);
+    m_undoReady = std::move(ready);
     emit problemChanged();
 }
 
 void Backend::dropUndo()
 {
     m_undo = {};
+    m_undoReady = {};
     if (const std::function<void()> forget = std::exchange(m_forgetUndo, {})) forget();
 }
 

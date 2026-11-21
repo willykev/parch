@@ -359,6 +359,8 @@ private slots:
     void cliUsageErrorsExitOne() { CliTests::usageErrorsExitOne(); }
     void cliCheckReportsEveryKindOfProblem() { CliTests::checkReportsEveryKindOfProblem(); }
     void cliCheckPassesACleanDocument() { CliTests::checkPassesACleanDocument(); }
+    void cliCheckChecksAnchorsInTextDocuments() { CliTests::checkChecksAnchorsInTextDocuments(); }
+    void cliCheckingRelativeLinksIgnoresTheQueryForFileLookup() { CliTests::checkingRelativeLinksIgnoresTheQueryForFileLookup(); }
     void cliCheckSaysWhatCannotBeRead() { CliTests::checkSaysWhatCannotBeRead(); }
     void cliRejectsNonUtf8FileNames() { CliTests::rejectsNonUtf8FileNames(); }
     void cliDistinguishesNonregularPictures() { CliTests::distinguishesNonregularPictures(); }
@@ -414,6 +416,7 @@ private slots:
     void exportPaperFormulasSitOnTheBaseline() { ExportTests::paperFormulasSitOnTheBaseline(); }
     void exportPaperDiagramsAreVectorsWhereQtDrawsThem() { ExportTests::paperDiagramsAreVectorsWhereQtDrawsThem(); }
     void exportDocxIsWordprocessingMarkup() { ExportTests::docxIsWordprocessingMarkup(); }
+    void exportLinksKeepQueryAndFragment() { ExportTests::exportLinksKeepQueryAndFragment(); }
     void exportDocxOpensInLibreOffice() { ExportTests::docxOpensInLibreOffice(); }
     void exportEpubFollowsTheContainerRules() { ExportTests::epubFollowsTheContainerRules(); }
     void exportEpubSplitsIntoChapters() { ExportTests::epubSplitsIntoChapters(); }
@@ -779,6 +782,12 @@ private slots:
     void userGuideOpensAsReadOnlyHelp() { LibraryTests::userGuideOpensAsReadOnlyHelp(); }
     void eachWindowKeepsItsLibraryWidth() { LibraryTests::eachWindowKeepsItsLibraryWidth(); }
     void renamesByOtherProgramsAreFollowed() { LibraryTests::renamesByOtherProgramsAreFollowed(); }
+    void renameUpdatesTextFilesAndHtmlAttributes_data() { LibraryTests::renameUpdatesTextFilesAndHtmlAttributes_data(); }
+    void renameUpdatesTextFilesAndHtmlAttributes() { LibraryTests::renameUpdatesTextFilesAndHtmlAttributes(); }
+    void undoRenameRestoresExactReferenceSpelling_data() { LibraryTests::undoRenameRestoresExactReferenceSpelling_data(); }
+    void undoRenameRestoresExactReferenceSpelling() { LibraryTests::undoRenameRestoresExactReferenceSpelling(); }
+    void moveKeepsFrontMatterCitationFilesReachable_data() { LibraryTests::moveKeepsFrontMatterCitationFilesReachable_data(); }
+    void moveKeepsFrontMatterCitationFilesReachable() { LibraryTests::moveKeepsFrontMatterCitationFilesReachable(); }
     void encodingsDecodeWhatUtf8CannotRead() { LibraryTests::encodingsDecodeWhatUtf8CannotRead(); }
     void reopeningInAnotherEncodingSavesOnlyOnceConfirmed() { LibraryTests::reopeningInAnotherEncodingSavesOnlyOnceConfirmed(); }
     void reopeningRefusesAFileThatChanged() { LibraryTests::reopeningRefusesAFileThatChanged(); }
@@ -1028,6 +1037,7 @@ private slots:
     void stylingKeepsEveryGlyphWhereItWas() { StylingTests::stylingKeepsEveryGlyphWhereItWas(); }
     void liveFormattingTurnsOff() { StylingTests::liveFormattingTurnsOff(); }
     void liveFormattingIsAPreferenceAndACommand() { StylingTests::liveFormattingIsAPreferenceAndACommand(); }
+    void resettingStylingStatsLeavesAnIdleViewSettled() { StylingTests::resettingStylingStatsLeavesAnIdleViewSettled(); }
     void typingWithLiveFormattingStaysWithinAFrame() { StylingTests::typingWithLiveFormattingStaysWithinAFrame(); }
     void everyViewReadsOneParseOfEachRevision() { ParseTests::everyViewReadsOneParseOfEachRevision(); }
     void staleParsesAreNeverHandedOver() { ParseTests::staleParsesAreNeverHandedOver(); }
@@ -17583,7 +17593,7 @@ void ParchTests::movesRewriteRelativeReferences()
 
     // Links split across lines and in quotes, definitions whose destination
     // is on the next line, `file:` URLs, includes in single quotes and
-    // percent-encoding beyond ASCII are all followed; HTML is left as it is.
+    // percent-encoding beyond ASCII and HTML attributes are all followed.
     const QString split = QStringLiteral(
         "> See [the\n> plan](\n> plan.md\n> \"Plan\") and <img src=\"plan.md\">.\n"
         "\n"
@@ -17602,11 +17612,12 @@ void ParchTests::movesRewriteRelativeReferences()
         listed << QStringLiteral("%1:%2 -> %3").arg(change.line).arg(change.before, change.after);
         edits.append({change.range, change.after});
     }
-    QCOMPARE(listed, (QStringList{"2:plan.md -> archive/plan.md", "6:plan.md -> archive/plan.md",
+    QCOMPARE(listed, (QStringList{"2:plan.md -> archive/plan.md", "3:plan.md -> archive/plan.md",
+                                  "6:plan.md -> archive/plan.md",
                                   "8:file:///lib/plan.md#top -> file:///lib/archive/plan.md#top",
                                   "8:caf%C3%A9/plan.md -> %C3%BCber%20caf%C3%A9/plan.md",
                                   "10:chapters/one.md -> my chapters/one.md"}));
-    // Once changed, every link but the HTML leads where the moves took what it led to.
+    // Once changed, every link leads where the moves took what it led to.
     QString updated = split;
     const TextSearch::Edit edit = TextSearch::combine(split, edits);
     updated.replace(edit.range.start, edit.range.length, edit.text);
@@ -17614,8 +17625,7 @@ void ParchTests::movesRewriteRelativeReferences()
     const QList<DocumentLinks::Link> after = DocumentLinks::find(updated, library, library);
     QCOMPARE(after.size(), before.size());
     for (qsizetype i = 0; i < before.size(); ++i) {
-        const QString expected = before[i].html ? before[i].destination.path
-                                                : DocumentLinks::moved(before[i].destination.path, moves);
+        const QString expected = DocumentLinks::moved(before[i].destination.path, moves);
         QCOMPARE(after[i].destination.path, expected);
     }
 }
@@ -17679,6 +17689,9 @@ void ParchTests::renameRewritesEncodedDestinations_data()
     QTest::newRow("file URL") << QStringLiteral("old.md") << QStringLiteral("What?Now#2.md")
         << QStringLiteral("[Chapter](file://LIBRARY/old.md#point)")
         << QStringLiteral("[Chapter](file://LIBRARY/What%3FNow%232.md#point)");
+    QTest::newRow("question mark in a relative path") << QStringLiteral("old.md") << QStringLiteral("What?Now.md")
+        << QStringLiteral("[Chapter](old.md?view=plain#point)")
+        << QStringLiteral("[Chapter](What%3FNow.md?view=plain#point)");
 }
 
 void ParchTests::renameRewritesEncodedDestinations()
@@ -22838,13 +22851,13 @@ void ParchTests::htmlDataImagesGoToTheSink()
     QList<QPair<QByteArray, QString>> saved;
     const QString markdown = HtmlMarkdown::convert(html, [&](const QByteArray &bytes, const QString &type) {
         saved.append({bytes, type});
-        return QStringLiteral("assets/pasted 1 (ü).png");
+        return QStringLiteral("assets/pasted 1 (ü)?.png");
     });
     // Only the image the HTML carries is saved; a placeholder for one loaded later is not.
     QCOMPARE(saved.size(), 1);
     QCOMPARE(saved.first().first, png);
     QCOMPARE(saved.first().second, QStringLiteral("image/png"));
-    QCOMPARE(markdown, QStringLiteral("See ![chart (v2)](assets/pasted%201%20%28ü%29.png) and "
+    QCOMPARE(markdown, QStringLiteral("See ![chart (v2)](assets/pasted%201%20%28ü%29%3F.png) and "
                                       "![lazy](https://example.org/real.png)"));
     // Kept nowhere, the image leaves its alt text.
     const QString withoutImage = QStringLiteral("See chart (v2) and ![lazy](https://example.org/real.png)");
@@ -22917,7 +22930,7 @@ void ParchTests::markdownPathsAndTextAreEncoded()
     // by it as the same path.
     QCOMPARE(md::encodeDestination(QStringLiteral("assets/my photo (1).png")),
              QStringLiteral("assets/my%20photo%20%281%29.png"));
-    QCOMPARE(md::encodeDestination(QStringLiteral("assets/café #2?.png")), QStringLiteral("assets/café%20%232?.png"));
+    QCOMPARE(md::encodeDestination(QStringLiteral("assets/café #2?.png")), QStringLiteral("assets/café%20%232%3F.png"));
     QCOMPARE(md::encodeDestination(QStringLiteral("../notes/a_b-c.d~e+f.pdf")), QStringLiteral("../notes/a_b-c.d~e+f.pdf"));
     QCOMPARE(md::encodeDestination(QStringLiteral("100%[x]<y>&z:\\.png")),
              QStringLiteral("100%25[x]%3Cy%3E%26z%3A%5C.png"));
@@ -23239,6 +23252,27 @@ void ParchTests::droppedFilesAreCopiedOrLinked()
     // Several files are a paragraph each.
     QCOMPARE(dropped(6, {folders.outside + QStringLiteral("/photo one.png"), folders.outside + QStringLiteral("/café.pdf")}),
              QStringLiteral("Start \n\n![photo one](assets/photo%20one.png)\n\n[café.pdf](assets/café.pdf)\n\nend\n"));
+    // A question mark in a filename stays part of the path for images and links.
+    const QString imageName = QStringLiteral("/diagram?.png");
+    const QString pdfName = QStringLiteral("/plan?.pdf");
+    writeFile(folders.outside + imageName, red);
+    writeFile(folders.notes + QStringLiteral("/img") + imageName, blue);
+    writeFile(folders.outside + pdfName, "pdf");
+    const QString withQuestionMarks = dropped(6, {folders.outside + imageName,
+                                                  folders.notes + QStringLiteral("/img") + imageName,
+                                                  folders.outside + pdfName});
+    QVERIFY2(withQuestionMarks.contains(QStringLiteral("![diagram?](assets/diagram%3F.png)")), qPrintable(withQuestionMarks));
+    QVERIFY(withQuestionMarks.contains(QStringLiteral("![diagram?](img/diagram%3F.png)")));
+    QVERIFY(withQuestionMarks.contains(QStringLiteral("[plan?.pdf](assets/plan%3F.pdf)")));
+    const auto destinations = DocumentLinks::find(withQuestionMarks, folders.notes, folders.library);
+    QCOMPARE(destinations.size(), 3);
+    QCOMPARE(destinations[0].destination.path, assets + imageName);
+    QCOMPARE(destinations[1].destination.path, folders.notes + QStringLiteral("/img") + imageName);
+    QCOMPARE(destinations[2].destination.path, assets + pdfName);
+    for (const auto &link : destinations) QVERIFY(!link.destination.query);
+    QCOMPARE(readFile(destinations[0].destination.path), red);
+    QCOMPARE(readFile(destinations[1].destination.path), blue);
+    QCOMPARE(readFile(destinations[2].destination.path), QByteArray("pdf"));
     // A folder is not attached, and says so.
     QSignalSpy problems(attachments.get(), &Attachments::problem);
     QVERIFY(dropFiles(view, 0, {folders.outside + QStringLiteral("/folder")}));

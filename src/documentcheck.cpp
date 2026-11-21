@@ -1,6 +1,7 @@
 #include "documentcheck.h"
 
 #include "documentreading.h"
+#include "librarywalk.h"
 #include "mdinclude.h"
 #include "saferead.h"
 
@@ -46,10 +47,10 @@ QString kindOf(md::DiagnosticCode code)
     return QStringLiteral("reference");
 }
 
-bool isMarkdownFile(const QString &path)
+bool isHeadingDocument(const QString &path)
 {
     const QString suffix = QFileInfo(path).suffix().toLower();
-    return suffix == u"md" || suffix == u"markdown" || suffix == u"mdown" || suffix == u"mkd";
+    return LibraryWalk::isTextDocument(path) || suffix == u"mdown" || suffix == u"mkd";
 }
 
 // The checks of the links and images in a tree, which the engine leaves to
@@ -127,7 +128,7 @@ private:
                 found);
             return;
         }
-        if (target.fragment.isEmpty() || !info.isFile() || !isMarkdownFile(target.path)) return;
+        if (target.fragment.isEmpty() || !info.isFile() || !isHeadingDocument(target.path)) return;
         const QSet<QString> *slugs = slugsOf(info.canonicalFilePath());
         if (!slugs || slugs->contains(target.fragment)) return;
         add(node, QStringLiteral("broken-link-anchor"), QStringLiteral("link"),

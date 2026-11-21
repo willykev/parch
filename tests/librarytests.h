@@ -5,6 +5,12 @@
 // files and drafts taken out of the library, searching a large library, and
 // the user guide. ParchTests runs each of them as a test function of its own.
 namespace LibraryTests {
+void renameUpdatesTextFilesAndHtmlAttributes_data();
+void renameUpdatesTextFilesAndHtmlAttributes();
+void undoRenameRestoresExactReferenceSpelling_data();
+void undoRenameRestoresExactReferenceSpelling();
+void moveKeepsFrontMatterCitationFilesReachable_data();
+void moveKeepsFrontMatterCitationFilesReachable();
 
 void historyLimitsChangeWhileHistoryRuns();
 void historyRetentionIsAPreference();

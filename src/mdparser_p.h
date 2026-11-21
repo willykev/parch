@@ -121,21 +121,24 @@ HtmlTag parseHtmlTag(QStringView raw);
 bool isSafeUrl(QStringView url, bool image);
 
 struct ParseState;
+struct Piece;
 // Reads the raw text of an HTML block (which starts at `offset` in `file`
 // when its lines are contiguous there, else -1) into nodes under the policy.
 // The first `skip` characters are the block's indentation and make no node.
-void parseHtmlFragment(ParseState &state, const QString &raw, int file, Range blockRange, int offset, int skip,
+void parseHtmlFragment(ParseState &state, const QString &raw, const std::vector<Piece> &pieces,
+                       int file, Range blockRange, int offset, int skip,
                        std::vector<Node> &out);
 
 // --- Blocks ---------------------------------------------------------------
 
-// A run of source that is part of a leaf block's inline content.
+// A run of source retained in a block's content.
 struct Piece {
     int src = 0;          // offset in the file
     int len = 0;
     int line = 0;         // line number, from 1
     bool newline = true;  // a line ending follows it in the content
     bool comment = false; // a `//` line inside a paragraph
+    quint8 padding = 0;   // spaces before this piece from a partly consumed HTML indentation tab
 };
 
 // A table cell's inline pieces, with the backslashes that protect its

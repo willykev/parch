@@ -94,9 +94,9 @@ QString toHtml(const Document &document, const HtmlOptions &options = HtmlOption
 QString cellHtml(const Document &document, const Node &cell);
 
 QString escapeHtml(QStringView text);
-// A URL as an href carries it: characters outside the URL syntax
-// percent-encoded as UTF-8, existing escapes kept.
-QString encodeUrl(QStringView url);
+// Spelling for an existing attribute's value range, excluding its quotes.
+// Add quotes if a value that was unquoted now needs them.
+QString htmlAttributeValue(QStringView value, QChar quote);
 
 // The raw HTML policy above as data, for reports and the user guide: the
 // supported elements, text level and blocks, in the order above, and the

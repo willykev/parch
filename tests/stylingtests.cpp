@@ -31,6 +31,7 @@
 #include <QtTest>
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 namespace {
 
@@ -48,6 +49,7 @@ struct View {
     QTemporaryDir themeFolder;
     std::unique_ptr<Theme> theme;
     std::unique_ptr<DocumentStore> store;
+    std::optional<Revision> styledRevision;
     QQmlEngine engine;
     QQuickWindow window;
     Document *document = nullptr;
@@ -75,6 +77,9 @@ struct View {
         pane->setParentItem(window.contentItem());
         pane->setSize(QSizeF(width, height));
         window.resize(width, height);
+        if (MarkdownStyling *live = styling())
+            QObject::connect(live, &MarkdownStyling::visibleStyled, pane,
+                             [this](Revision revision) { styledRevision = revision; });
         pane->setProperty("document", QVariant::fromValue(document));
         editor = pane->findChild<QQuickItem *>(QStringLiteral("editor"));
         binding = pane->findChild<EditorBinding *>();
@@ -96,7 +101,7 @@ struct View {
     // Waits until the styling has nothing left to do and Qt has every paragraph formatted.
     bool settle() const
     {
-        if (!QTest::qWaitFor([&] { return styling()->stats().passes > 0 && !styling()->busy(); }, 5000)) return false;
+        if (!QTest::qWaitFor([&] { return styledRevision == buffer()->revision() && !styling()->busy(); }, 5000)) return false;
         decorations()->flush();
         return true;
     }
@@ -789,6 +794,22 @@ void liveFormattingIsAPreferenceAndACommand()
     QVERIFY(Settings(damaged).liveFormatting());
 }
 
+void resettingStylingStatsLeavesAnIdleViewSettled()
+{
+    View view(QStringLiteral("# Title\n\nSome **bold** text.\n"));
+    QVERIFY2(view.ok(), qPrintable(view.error));
+    QVERIFY(view.settle());
+    MarkdownStyling *styling = view.styling();
+    QVERIFY(styling->stats().passes > 0);
+    styling->resetStats();
+    view.editor->setProperty("cursorPosition", view.binding->sourceToEditor(view.at(QStringLiteral("bold"))));
+    const QString state = QStringLiteral("Style passes since reset %1, styling busy %2")
+                              .arg(styling->stats().passes).arg(styling->busy());
+    QVERIFY2(view.settle(), qPrintable(state));
+    QCOMPARE(styling->stats().passes, 0);
+    QCOMPARE(view.styledRuns(), markdownStyleRuns(md::parse(view.text())));
+}
+
 void typingWithLiveFormattingStaysWithinAFrame()
 {
     // In a 100,000-word document dense with Markdown, with live formatting
@@ -828,12 +849,12 @@ void typingWithLiveFormattingStaysWithinAFrame()
         // Inside a word, at a word's end, as typing goes on in one.
         const int end = int(view.text().indexOf(u' ', at));
         view.editor->setProperty("cursorPosition", view.binding->sourceToEditor(end));
-        QVERIFY(view.settle());
+        return view.settle();
     };
     // Keys one after another, as fast as they come.
     std::vector<double> keys;
     for (const double where : {0.0, 0.5, 1.0}) {
-        place(where);
+        QVERIFY(place(where));
         for (int i = 0; i < 20; ++i) {
             QElapsedTimer timer;
             timer.start();
@@ -855,9 +876,10 @@ void typingWithLiveFormattingStaysWithinAFrame()
         paused.clear();
         arrivals.clear();
         handovers.clear();
-        styling->resetStats();
         for (const double where : {0.0, 0.5, 1.0}) {
-            place(where);
+            QVERIFY(place(where));
+            // Count only handovers from this set of keys.
+            if (where == 0.0) styling->resetStats();
             for (int i = 0; i < 10; ++i) {
                 arrived = -1;
                 timer.start();

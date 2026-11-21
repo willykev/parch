@@ -4,6 +4,7 @@
 #include "documentcitations.h"
 #include "exportweb.h"
 #include "htmlexport.h"
+#include "mdhtml.h"
 #include "saferead.h"
 
 #include <QDir>
@@ -91,18 +92,6 @@ QString withoutKeys(const md::FrontMatter &frontMatter, const QStringList &keys)
     out.clear();
     for (const auto &[key, value] : frontMatter.data.map)
         if (!keys.contains(key, Qt::CaseInsensitive)) out += yamlQuoted(key) + QStringLiteral(": ") + yamlValue(value) + u'\n';
-    return out;
-}
-
-QString attributeEscaped(QStringView text)
-{
-    QString out;
-    for (const QChar c : text) {
-        if (c == u'&') out += QStringLiteral("&amp;");
-        else if (c == u'"') out += QStringLiteral("&quot;");
-        else if (c == u'<') out += QStringLiteral("&lt;");
-        else out.append(c);
-    }
     return out;
 }
 
@@ -465,16 +454,16 @@ private:
     }
 
     // A relative destination, as the folder written to reaches the same file.
-    QString rebased(int file, const QString &dest) const
+    QString rebased(int file, const QString &dest, md::DestinationSyntax syntax = md::DestinationSyntax::Markdown) const
     {
         if (dest.isEmpty() || dest.startsWith(u'/') || dest.startsWith(u'#')) return {};
         const QString &directory = doc.files[size_t(file)].directory;
         if (directory.isEmpty() || QDir::cleanPath(directory) == folder) return {};
         const md::Destination target = md::classifyDestination(dest, directory);
         if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return {};
-        QString written = md::encodeDestination(Exporters::relativeTo(folder, target.path));
-        if (!target.fragment.isEmpty()) written += u'#' + target.fragment;
-        return written;
+        const QString path = Exporters::relativeTo(folder, target.path);
+        return (syntax == md::DestinationSyntax::Markdown ? md::encodeDestination(path) : md::encodeUrlPath(path))
+            + md::destinationSuffix(target, syntax);
     }
 
     // An image the writer has copied beside the output, at its new place.
@@ -485,8 +474,7 @@ private:
         if (found.kind != md::Destination::Kind::LocalFile || !found.absolute) return false;
         const QString placed = imageDestination(found.path);
         if (placed.isEmpty()) return false;
-        QString dest = md::encodeDestination(placed);
-        if (!found.fragment.isEmpty()) dest += u'#' + found.fragment;
+        QString dest = md::encodeDestination(placed) + md::destinationSuffix(found, md::DestinationSyntax::Markdown);
         if (node.label.isEmpty()) {
             edits.push_back({node.target.start, node.target.end, dest});
         } else {
@@ -511,34 +499,23 @@ private:
     void rebaseAttribute(int file, const md::Node &node, std::vector<Edit> &edits) const
     {
         const QLatin1StringView name(node.label == u"img" ? "src" : "href");
-        QString dest;
-        for (const md::Attribute &attribute : node.attributes)
-            if (attribute.name == name) dest = attribute.value;
-        QString written;
-        if (node.label == u"img" && imageDestination && !dest.isEmpty()) {
-            const md::Destination found = md::classifyDestination(dest, doc.files[size_t(file)].directory);
-            if (found.kind == md::Destination::Kind::LocalFile && found.absolute)
-                if (const QString placed = imageDestination(found.path); !placed.isEmpty()) {
-                    written = QString::fromUtf8(QUrl::toPercentEncoding(placed, "/"));
-                    if (!found.fragment.isEmpty()) written += u'#' + found.fragment;
-                }
-        }
-        if (written.isEmpty() && file != 0 && node.label == u"a" && node.resolved && dest.startsWith(u'#'))
-            written = dest;
-        if (written.isEmpty()) written = rebased(file, dest);
-        if (written.isEmpty()) return;
-        static const QRegularExpression value(
-            QStringLiteral("\\s(src|href)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s\"'=<>`]+)"),
-            QRegularExpression::CaseInsensitiveOption);
-        const QStringView tag = doc.source(node.file, node.open);
-        for (auto match = value.globalMatchView(tag); match.hasNext();) {
-            const QRegularExpressionMatch found = match.next();
-            if (found.captured(1).compare(name, Qt::CaseInsensitive) != 0) continue;
-            const int start = node.open.start + int(found.capturedStart(2));
-            const QString replacement = u'"' + attributeEscaped(written) + u'"';
-            if (found.captured(2) != replacement)
-                edits.push_back({start, start + int(found.capturedLength(2)), replacement});
-            return;
+        for (const md::Attribute &attribute : node.attributes) {
+            const md::Range range = attribute.valueRange;
+            if (attribute.name != name || range.isEmpty()) continue;
+            const QString &dest = attribute.value;
+            QString written;
+            if (node.label == u"img" && imageDestination && !dest.isEmpty()) {
+                const md::Destination found = md::classifyDestination(dest, doc.files[size_t(file)].directory);
+                if (found.kind == md::Destination::Kind::LocalFile && found.absolute)
+                    if (const QString placed = imageDestination(found.path); !placed.isEmpty())
+                        written = md::encodeUrlPath(placed) + md::destinationSuffix(found);
+            }
+            if (written.isEmpty() && file != 0 && node.label == u"a" && node.resolved && dest.startsWith(u'#'))
+                written = dest;
+            if (written.isEmpty()) written = rebased(file, dest, md::DestinationSyntax::Url);
+            if (written.isEmpty()) continue;
+            const QString replacement = md::htmlAttributeValue(written, attribute.quote);
+            if (doc.source(node.file, range) != replacement) edits.push_back({range.start, range.end, replacement});
         }
     }
 

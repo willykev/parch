@@ -16,6 +16,8 @@
 #include "mdhtml.h"
 #include "mdparser_p.h"
 
+#include <algorithm>
+
 namespace md::detail {
 namespace {
 
@@ -85,9 +87,10 @@ bool isHtmlSpace(char16_t c)
 // their closing tag, the end of the fragment, or a tag that implies their end.
 class Fragment {
 public:
-    Fragment(ParseState &state, const QString &raw, int file, Range blockRange, int offset, std::vector<Node> &out)
+    Fragment(ParseState &state, const QString &raw, const std::vector<Piece> &pieces, int file, Range blockRange,
+             int offset, std::vector<Node> &out)
         : st(state), raw(raw), s(raw.constData()), len(int(raw.size())), file(file), blockRange(blockRange),
-          offset(offset), out(out)
+          offset(offset), pieces(pieces), out(out)
     {
     }
 
@@ -143,6 +146,33 @@ private:
 
     Range range(int start, int end) const
     { return offset >= 0 ? Range{offset + start, offset + end} : blockRange; }
+
+    int sourceOffset(int position)
+    {
+        // Attributes are visited in source order. Walk each retained line
+        // once, ignoring indentation that was synthesized from a tab.
+        while (pieceIndex < pieces.size()) {
+            const Piece &piece = pieces[pieceIndex];
+            const int start = pieceOffset + piece.padding;
+            const int end = start + piece.len;
+            if (position < end) return position < start ? -1 : piece.src + position - start;
+            pieceOffset = end + 1;
+            ++pieceIndex;
+        }
+        return -1;
+    }
+
+    Range valueRange(Range value)
+    {
+        if (value.isEmpty()) return {};
+        if (offset >= 0) return range(value.start, value.end);
+        const int start = sourceOffset(value.start);
+        const int end = sourceOffset(value.end - 1) + 1;
+        if (start < 0 || end - start != value.length()) return {};
+        const QStringView source(st.files[file].text);
+        if (source.sliced(start, end - start) != QStringView(raw).sliced(value.start, value.length())) return {};
+        return {start, end};
+    }
 
     Node make(NodeType type, int start, int end) const
     {
@@ -275,6 +305,10 @@ private:
 
         Node node = make(NodeType::HtmlElement, start, end);
         node.label = tag.name;
+        for (Attribute &attribute : tag.attributes) {
+            const Range value = attribute.valueRange;
+            if (!value.isEmpty()) attribute.valueRange = valueRange({start + value.start, start + value.end});
+        }
         node.attributes = std::move(tag.attributes);
         node.open = node.range;
         node.close = {node.range.end, node.range.end};
@@ -296,6 +330,9 @@ private:
     int file;
     Range blockRange;
     int offset;
+    const std::vector<Piece> &pieces;
+    size_t pieceIndex = 0;
+    int pieceOffset = 0;
     std::vector<Node> &out;
     std::vector<Node> stack;
 };
@@ -357,20 +394,21 @@ HtmlTag parseHtmlTag(QStringView raw)
         const QString name = raw.sliced(attributeStart, i - attributeStart).toString().toLower();
         int v = i;
         while (v < len && isHtmlSpace(s[v].unicode())) ++v;
-        QString value;
+        Range valueRange;
+        QChar quote;
         if (v < len && s[v] == u'=') {
             ++v;
             while (v < len && isHtmlSpace(s[v].unicode())) ++v;
             if (v < len && (s[v] == u'"' || s[v] == u'\'')) {
-                const QChar quote = s[v];
+                quote = s[v];
                 int e = v + 1;
                 while (e < len && s[e] != quote) ++e;
-                value = decodeEntities(raw.sliced(v + 1, e - v - 1));
+                valueRange = {v + 1, e};
                 i = qMin(len, e + 1);
             } else {
                 int e = v;
                 while (e < len && !isHtmlSpace(s[e].unicode()) && s[e] != u'>') ++e;
-                value = decodeEntities(raw.sliced(v, e - v));
+                valueRange = {v, e};
                 i = e;
             }
         }
@@ -379,22 +417,47 @@ HtmlTag parseHtmlTag(QStringView raw)
             continue;
         }
         bool keep = attributeAllowed(tag.name, name);
-        if (keep && (name == u"href" || name == u"src")) keep = isSafeUrl(value, name == u"src");
-        if (keep) tag.attributes.push_back({name, value});
+        QString value;
+        if (keep) {
+            value = decodeEntities(raw.sliced(valueRange.start, valueRange.length()));
+            if (name == u"href" || name == u"src") keep = isSafeUrl(value, name == u"src");
+        }
+        if (keep) tag.attributes.push_back({name, std::move(value), valueRange, quote});
         else tag.droppedAttributes = true;
     }
     return tag;
 }
 
-void parseHtmlFragment(ParseState &state, const QString &raw, int file, Range blockRange, int offset, int skip,
+void parseHtmlFragment(ParseState &state, const QString &raw, const std::vector<Piece> &pieces,
+                       int file, Range blockRange, int offset, int skip,
                        std::vector<Node> &out)
 {
-    Fragment(state, raw, file, blockRange, offset, out).run(skip);
+    Fragment(state, raw, pieces, file, blockRange, offset, out).run(skip);
 }
 
 } // namespace md::detail
 
 namespace md {
+
+QString htmlAttributeValue(QStringView value, QChar quote)
+{
+    const bool addQuotes = quote.isNull() && std::any_of(value.begin(), value.end(), [](QChar c) {
+        return detail::isHtmlSpace(c.unicode()) || QStringView(u"\"'\x60=<>").contains(c);
+    });
+    if (addQuotes) quote = u'"';
+    QString written;
+    written.reserve(value.size() + (addQuotes ? 2 : 0));
+    if (addQuotes) written.append(quote);
+    for (const QChar c : value) {
+        if (c == u'&') written += QStringLiteral("&amp;");
+        else if (c == u'<') written += QStringLiteral("&lt;");
+        else if (c == u'"' && c == quote) written += QStringLiteral("&quot;");
+        else if (c == u'\'' && c == quote) written += QStringLiteral("&#39;");
+        else written.append(c);
+    }
+    if (addQuotes) written.append(quote);
+    return written;
+}
 
 HtmlPolicy htmlPolicy()
 {

@@ -511,9 +511,10 @@ In the preview:
 - It scrolls with the text beside it, each showing the same place. **Scroll
   sync** in the status line turns that off and on.
 - A click on a link opens a web or mail address in your browser or mail
-  program and a Markdown file in a tab, at the heading the link names if it
-  names one, and scrolls to a heading in the same document. A footnote's
-  number goes to the note and the arrow after the note comes back.
+  program. A link to a Markdown or `.txt` document opens a tab at the
+  heading if the link names one. A link to a heading in the same document
+  scrolls there. A footnote's number goes to the note and the arrow after
+  the note comes back.
 - A link of any other kind asks first. An address such as `zoommtg:` or
   `steam:` names the program it would go to by its scheme, and shows the
   whole address; **Open** hands it to that program. A link to any other file
@@ -756,6 +757,9 @@ page to page.
   through your desktop's print dialog, which chooses the printer and the
   paper; the dialog before it chooses the margins and the type.
 
+Markdown, HTML and DOCX preserve the query and fragment when writing a
+relative link from the export folder.
+
 What each format holds:
 
 - **Markdown** assembles the document and its includes into one file. The
@@ -813,6 +817,10 @@ bibliography problems, and HTML shown as text. It reads the text as it is
 when you ask, without holding up the window. `Up` and `Down` move through
 the list, and `Enter` opens the place, in the included file when the
 problem is in one.
+
+Heading checks include linked `.txt` files. For `notes.txt?view=plain#opening`,
+the check looks for `notes.txt` and its `opening` heading. The query stays on
+the link.
 
 `parch check` reports the same problems from the terminal, and can check
 several documents at once (see [Command line](#command-line)).
@@ -873,13 +881,19 @@ you chose last.
   The same commands are in the menu (`F10`) and the command palette for the
   document in front, with **New document in folder…**, which makes one
   beside it, when it is in one of the library's folders.
-- When a renamed or moved document has links, images, includes or reference
-  definitions leading to it in other documents of the library, or relative
-  ones of its own, parch lists them and offers to update them. Open documents are updated in their tabs, as one step for `Ctrl+Z`.
-  A moved document keeps its tab, its history and any unsaved text.
-- **Undo**, in the notice a rename or move leaves, puts it back where it
-  was, and the links it updated with it, as long as nothing else has taken
-  its old name and no other rename or move has been made since.
+- When a document or folder moves or gets a new name, parch reviews affected links, images,
+  includes and reference definitions in the library's Markdown and `.txt`
+  documents. This includes supported HTML link and image attributes and
+  front-matter paths to bibliography and citation style files. The review
+  names references that need attention, such as a bibliography outside
+  the destination library. **Update links** applies the offered changes,
+  as one step for `Ctrl+Z` in each open document. **Move only** keeps the source
+  text as written. A moved document keeps its tab, history and unsaved text.
+- **Undo**, in the latest move or rename notice, puts the file or folder
+  back if its old name is free. It restores the exact spelling of the
+  references the move updated and keeps later edits elsewhere. If a later
+  edit makes a reference ambiguous, Undo names the affected document and
+  leaves the move in place.
 
 ## Work in tabs and windows
 

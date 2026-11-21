@@ -303,9 +303,11 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     connect(m_organizer.get(), &FileOrganizer::problem, this, &Backend::notify);
     connect(m_organizer.get(), &FileOrganizer::news, this, &Backend::inform);
     // A move or rename made can be taken back from its notice.
-    connect(m_organizer.get(), &FileOrganizer::moved, this, [this](const QString &title, const QString &detail, quint64 move) {
-        postUndoable(title, detail, [this, move] { m_organizer->undoMove(move); });
-    });
+    connect(m_organizer.get(), &FileOrganizer::moved, this,
+            [this](const QString &title, const QString &detail, quint64 move, bool incomplete) {
+                postUndoable(title, detail, [this, move] { m_organizer->undoMove(move); },
+                             [this, move] { m_organizer->forgetMove(move); }, incomplete ? Warning : News);
+            });
     // A new document opens in the window in front, which asked for it.
     connect(m_organizer.get(), &FileOrganizer::created, this, [this](const QString &path) {
         if (WindowContext *window = activeWindow()) openIn(window, {path}, Absent::NotFound)->raise();
@@ -1741,9 +1743,9 @@ void Backend::undoNotice()
 }
 
 void Backend::postUndoable(const QString &news, const QString &detail, std::function<void()> undo,
-                           std::function<void()> forget)
+                           std::function<void()> forget, NoticeTone tone)
 {
-    post(news, detail, News);
+    post(news, detail, tone);
     // A refused quit holds the notice; the news joins it, without Undo.
     if (!m_unsafe.isEmpty()) {
         if (forget) forget();

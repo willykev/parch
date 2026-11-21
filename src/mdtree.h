@@ -161,6 +161,10 @@ enum class Align : quint8 { None, Left, Center, Right };
 struct Attribute {
     QString name;
     QString value;
+    // The exact source of the value, excluding the quotes. Empty when there
+    // is no value or it cannot be traced to one unbroken source range.
+    Range valueRange;
+    QChar quote;
     bool operator==(const Attribute &) const = default;
 };
 
@@ -426,7 +430,11 @@ struct Destination {
     Kind kind = Kind::Empty;
     QString scheme;   // lower case, for Remote, Mail and OtherScheme
     QString path;     // LocalFile: the absolute path when a base folder is known, else the relative path, percent-decoded
-    QString fragment; // Anchor: the slug; LocalFile: what follows `#`
+    QString localPath; // LocalFile: the decoded path before resolving it against the base folder
+    QString fragment; // Anchor or LocalFile: the decoded fragment for lookup
+    // Spelling before URL decoding, with presence tracked even for an empty component.
+    std::optional<QString> query;
+    std::optional<QString> encodedFragment;
     bool absolute = false; // LocalFile: `path` is absolute
 };
 // `baseDirectory` is the folder of the file the destination was written in
@@ -443,15 +451,20 @@ Destination classifyDestination(const Document &document, const Node &linkOrImag
 // heading's slug in the whole document. Empty when the file is not part of
 // the document, or holds no heading. An export that holds the whole document
 // links there, not to a file its reader does not have.
-QString includedAnchor(const Document &document, const QString &path, const QString &fragment);
+QString includedAnchor(const Document &document, const QString &path, const QString &decodedFragment);
 // The same by the file's index in Document::files, without falling back to
-// its first heading: empty when no heading of the file has that anchor.
-QString anchorInFile(const Document &document, int file, const QString &fragment);
+// its first heading. Takes the fragment as written in the source.
+QString anchorInFile(const Document &document, int file, const QString &encodedFragment);
 
 // A file path as a link or image destination can carry it: spaces,
-// parentheses, angle brackets, `#`, `%`, `&` (which could start an entity),
+// parentheses, angle brackets, `?`, `#`, `%`, `&` (which could start an entity),
 // `:` (which could end a scheme), `\`, `"` and control characters are
 // percent-encoded, so that `[text](destination)` reads back as the path.
 QString encodeDestination(QStringView path);
+QString encodeUrlPath(QStringView path);
+// A URL spelling with its existing percent escapes preserved.
+QString encodeUrl(QStringView url);
+enum class DestinationSyntax { Url, Markdown };
+QString destinationSuffix(const Destination &destination, DestinationSyntax syntax = DestinationSyntax::Url);
 
 } // namespace md

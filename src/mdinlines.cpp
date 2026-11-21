@@ -1785,6 +1785,16 @@ void InlineParserPrivate::pairHtml(int parent)
         if (tag.droppedAttributes)
             unsupported(i, QStringLiteral("Attributes of <%1> that are not supported are left out").arg(tag.name));
         if (!tag.closing) {
+            for (Attribute &attribute : tag.attributes) {
+                const Range value = attribute.valueRange;
+                if (value.isEmpty()) continue;
+                const Range source = sourceRange(nodes[i].start + value.start, nodes[i].start + value.end);
+                attribute.valueRange = {};
+                if (source.length() == value.length() && source.end <= file->text.size()
+                    && QStringView(file->text).sliced(source.start, source.length())
+                           == QStringView(data(i).text).sliced(value.start, value.length()))
+                    attribute.valueRange = source;
+            }
             if (info.isVoid || tag.selfClosing) {
                 INode &x = nodes[i];
                 x.type = NodeType::HtmlElement;

@@ -90,7 +90,7 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
             const bool raw = node.type == md::NodeType::HtmlElement;
             const QString src = raw ? node.attribute(QLatin1StringView("src")) : node.dest;
             const QString alt = raw ? node.attribute(QLatin1StringView("alt")) : md::plainText(node);
-            const md::Destination target = md::classifyDestination(document, node);
+            md::Destination target = md::classifyDestination(document, node);
             const auto description = [&] {
                 return QStringLiteral("<span class=\"image-missing\">%1</span>").arg(md::escapeHtml(alt.isEmpty() ? src : alt));
             };
@@ -117,9 +117,8 @@ Body body(const md::Document &document, const ExportRecipe &recipe, const Export
             // One file shown at several of its views (`icons.svg#home`,
             // `icons.svg#svgView(viewBox(...))`) is copied once, each picture
             // still at its own view.
-            QString shown = url;
-            if (!target.fragment.isEmpty())
-                shown += u'#' + QString::fromUtf8(QUrl::toPercentEncoding(target.fragment, "!$&'()*+,;=:@/?~"));
+            if (assets.mode() == Assets::Mode::Embed) target.query.reset();
+            const QString shown = url + md::destinationSuffix(target);
             QString img = QStringLiteral("<img src=\"%1\" alt=\"%2\"").arg(md::escapeHtml(shown), md::escapeHtml(alt));
             if (!raw && !node.title.isEmpty()) img += QStringLiteral(" title=\"%1\"").arg(md::escapeHtml(node.title));
             for (const md::Attribute &a : node.attributes) {
@@ -205,23 +204,18 @@ std::function<QString(const md::Node &, const QString &)> HtmlExporter::destinat
         if (dest.isEmpty() || dest.startsWith(u'#')) return dest;
         if (node.file < 0 || size_t(node.file) >= document.files.size()) return dest;
         const QString directory = md::destinationDirectory(document, node);
+        const md::Destination target = md::classifyDestination(dest, directory);
+        if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return dest;
         // A link to a file the document includes leads to where that file is
         // in the export, not to the file, which its reader does not have.
         const bool link = node.type == md::NodeType::Link || node.type == md::NodeType::Autolink
                           || (node.type == md::NodeType::HtmlElement && node.label == u"a");
-        if (link) {
-            const md::Destination target = md::classifyDestination(dest, directory);
-            if (target.kind == md::Destination::Kind::LocalFile && target.absolute)
-                if (const QString anchor = md::includedAnchor(document, target.path, target.fragment); !anchor.isEmpty())
-                    return u'#' + anchor;
-        }
+        if (link && !target.query)
+            if (const QString anchor = md::includedAnchor(document, target.path, target.fragment); !anchor.isEmpty())
+                return u'#' + anchor;
         if (dest.startsWith(u'/')) return dest;
         if (directory.isEmpty() || QDir::cleanPath(directory) == folder) return dest;
-        const md::Destination target = md::classifyDestination(dest, directory);
-        if (target.kind != md::Destination::Kind::LocalFile || !target.absolute) return dest;
-        QString url = QString::fromUtf8(QUrl::toPercentEncoding(Exporters::relativeTo(folder, target.path), "/"));
-        if (!target.fragment.isEmpty()) url += u'#' + target.fragment;
-        return url;
+        return md::encodeUrlPath(Exporters::relativeTo(folder, target.path)) + md::destinationSuffix(target);
     };
 }
 

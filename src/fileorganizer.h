@@ -1,10 +1,12 @@
 #pragma once
 
+#include "diskfile.h"
 #include "documentlinks.h"
 
 #include <QHash>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QThreadPool>
 #include <QVariantList>
@@ -18,6 +20,7 @@ class Document;
 class DocumentStore;
 class History;
 class Settings;
+class SourceBuffer;
 
 // Makes, renames, moves and trashes the files and folders of the library,
 // as its menu, keys and drags ask, and keeps what parch knows of them in
@@ -28,9 +31,9 @@ class Settings;
 // said, and nothing changes. An open document whose file moves follows it,
 // with its identity, text, undo, history and recovery, as the store moves
 // it; tabs not read yet, recent files and reading positions follow through
-// relocated(). Before a document or a folder moves, the library's Markdown
-// documents are read off the UI thread for relative links, images and
-// includes that the move would break, the moved documents' own among them,
+// relocated(). Before a document or a folder moves, the library's documents
+// are read off the UI thread for links, images, includes and citation paths
+// that the move would break, the moved documents' own among them,
 // and when there are any the move waits while the writer reviews them: it
 // can update them, leave them, or not move at all. Open documents are
 // updated through their SourceBuffer, as one undo step each; others through
@@ -102,6 +105,7 @@ public:
     // Takes the move that moved() said back, with the links it updated, as
     // a move of its own; nothing once another move has been made since.
     Q_INVOKABLE void undoMove(quint64 move);
+    void forgetMove(quint64 move);
     // Counts what a folder holds and asks, through trashing, to confirm.
     Q_INVOKABLE void askToTrash(const QString &path);
     Q_INVOKABLE void confirmTrash();
@@ -120,7 +124,7 @@ signals:
     void problem(const QString &title, const QString &detail);
     void news(const QString &title, const QString &detail);
     // A move or rename was made, which undoMove(move) can take back.
-    void moved(const QString &title, const QString &detail, quint64 move);
+    void moved(const QString &title, const QString &detail, quint64 move, bool incomplete);
     // A new document is at this path, for the window that asked to open.
     void created(const QString &path);
     // What was at `from` is at `to` now: a file, or a folder with all in it.
@@ -138,6 +142,7 @@ private:
         QString from;
         QString to;
         QString library;
+        QString destinationLibrary;
         bool folder = false;
         // The documents the move takes along.
         int documents = 0;
@@ -150,18 +155,41 @@ private:
         QString oldPath;
         QString documentId;
     };
+    struct InverseEdit {
+        SourceEdit edit;
+        QString expected;
+        QString contextBefore;
+        QString contextAfter;
+        bool uniqueContext = false;
+    };
+    struct OpenRanges;
+    struct Patched {
+        QString path;
+        QString documentId;
+        QByteArray digest;
+        QList<InverseEdit> inverses;
+        int references = 0;
+        std::shared_ptr<OpenRanges> openRanges;
+    };
     struct Rewritten {
-        int files = 0;
         int changes = 0;
         QStringList failed;
-        // Where the documents rewritten are.
-        QStringList paths;
+        QList<Patched> patched;
+    };
+    struct StagedRewrite {
+        QString path;
+        QString documentId;
+        int references = 0;
+        QList<SourceEdit> edits;
+        LoadedFile loaded;
+        Revision revision = 0;
+        QPointer<SourceBuffer> buffer;
     };
     // The move made last, and the documents whose links it updated, where
     // they are now.
     struct Done {
         Plan plan;
-        QStringList updated;
+        QList<Patched> updated;
         quint64 id = 0;
     };
 
@@ -169,14 +197,19 @@ private:
     static Plan planJob(Plan plan, QHash<std::pair<quint64, quint64>, QString> open, std::shared_ptr<std::atomic<bool>> cancel);
     // Moves on disk and lets open documents follow; false, having said why,
     // when it could not.
-    bool perform(const Plan &plan);
+    bool perform(const Plan &plan, std::optional<DiskVersion> *copiedVersion = nullptr);
     void updateReferences(const Plan &plan);
-    static Rewritten rewriteJob(QList<Rewrite> files, QString library, QList<DocumentLinks::Move> moves, History *history,
-                                Dialects dialects);
+    static Rewritten rewriteJob(QList<Rewrite> files, Plan plan, History *history);
+    static std::optional<Patched> inverseFor(const QString &path, const QString &documentId, const QString &text,
+                                            const QList<SourceEdit> &edits, int references, QString *written);
+    static std::optional<QList<SourceEdit>> inverseEdits(const Patched &patch, const QString &text, SourceBuffer *buffer = nullptr);
+    static void rewriteOpen(const StagedRewrite &staged, Document *open, Rewritten &done);
+    static void rewriteClosed(const StagedRewrite &staged, History *history, Rewritten &done);
+    static QList<SourceEdit> referenceEdits(const QList<DocumentLinks::Change> &changes, const QString &path, Rewritten &done);
+    void finishUndo(Plan back, const QList<Patched> &open, QList<StagedRewrite> closed, QStringList failed);
     // Says what a move did: what it took along, and what became of the
     // references to what moved.
-    void finishMove(const Plan &plan, bool updated, int changes, int files, const QStringList &failed = {},
-                    const QStringList &paths = {});
+    void finishMove(const Plan &plan, bool updated, Rewritten done);
     void setBusy(int delta);
     // The open documents a move of this path takes along.
     QList<Document *> documentsUnder(const QString &canonical) const;

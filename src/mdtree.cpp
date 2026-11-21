@@ -7,6 +7,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <cstring>
 
 namespace md {
 namespace {
@@ -533,11 +534,6 @@ Destination classifyDestination(const QString &destination, const QString &baseD
 {
     Destination result;
     if (destination.isEmpty()) return result;
-    if (destination.startsWith(u'#')) {
-        result.kind = Destination::Kind::Anchor;
-        result.fragment = QUrl::fromPercentEncoding(destination.mid(1).toUtf8());
-        return result;
-    }
     if (destination.startsWith(QLatin1StringView("//"))) {
         result.kind = Destination::Kind::Remote;
         return result;
@@ -553,7 +549,6 @@ Destination classifyDestination(const QString &destination, const QString &baseD
         }
         if (!alpha && !(i > 0 && ((c >= u'0' && c <= u'9') || c == u'+' || c == u'-' || c == u'.'))) break;
     }
-    QString local = destination;
     if (colon > 0) {
         result.scheme = destination.first(colon).toLower();
         if (result.scheme == u"http" || result.scheme == u"https") {
@@ -568,29 +563,35 @@ Destination classifyDestination(const QString &destination, const QString &baseD
             result.kind = Destination::Kind::OtherScheme;
             return result;
         }
-        const QUrl url(destination);
-        local = url.toLocalFile();
-        result.fragment = url.fragment();
-        result.kind = Destination::Kind::LocalFile;
-        result.path = local;
-        result.absolute = local.startsWith(u'/');
+    }
+    QStringView local(destination);
+    const qsizetype hash = local.indexOf(u'#');
+    if (hash >= 0) {
+        result.encodedFragment = local.sliced(hash + 1).toString();
+        result.fragment = QUrl::fromPercentEncoding(result.encodedFragment->toUtf8());
+        local = local.first(hash);
+    }
+    if (hash == 0) {
+        result.kind = Destination::Kind::Anchor;
         return result;
     }
     result.kind = Destination::Kind::LocalFile;
-    const qsizetype hash = local.indexOf(u'#');
-    if (hash >= 0) {
-        result.fragment = QUrl::fromPercentEncoding(local.mid(hash + 1).toUtf8());
-        local.truncate(hash);
+    const qsizetype question = local.indexOf(u'?');
+    if (question >= 0) {
+        result.query = local.sliced(question + 1).toString();
+        local = local.first(question);
     }
-    local = QUrl::fromPercentEncoding(local.toUtf8());
-    if (local.startsWith(u'/')) {
-        result.path = QDir::cleanPath(local);
+    result.localPath = result.scheme == u"file" ? QUrl(local.toString()).toLocalFile()
+                                                : QUrl::fromPercentEncoding(local.toUtf8());
+    if (result.localPath.isEmpty()) return result;
+    if (result.localPath.startsWith(u'/')) {
+        result.path = QDir::cleanPath(result.localPath);
         result.absolute = true;
     } else if (!baseDirectory.isEmpty()) {
-        result.path = QDir::cleanPath(baseDirectory + u'/' + local);
+        result.path = QDir::cleanPath(baseDirectory + u'/' + result.localPath);
         result.absolute = true;
     } else {
-        result.path = local;
+        result.path = result.localPath;
     }
     return result;
 }
@@ -602,7 +603,7 @@ QString encodeDestination(QStringView path)
     out.reserve(path.size());
     for (const QChar ch : path) {
         const char16_t c = ch.unicode();
-        const bool encode = c <= 0x20 || c == 0x7f || c == u'(' || c == u')' || c == u'<' || c == u'>' || c == u'#'
+        const bool encode = c <= 0x20 || c == 0x7f || c == u'(' || c == u')' || c == u'<' || c == u'>' || c == u'#' || c == u'?'
             || c == u'%' || c == u'\\' || c == u'"' || c == u'&' || c == u':';
         if (!encode) {
             out.append(ch);
@@ -613,6 +614,45 @@ QString encodeDestination(QStringView path)
         out.append(QLatin1Char(hex[c & 15]));
     }
     return out;
+}
+
+QString encodeUrlPath(QStringView path)
+{
+    return QString::fromUtf8(QUrl::toPercentEncoding(path.toString(), "/"));
+}
+
+QString encodeUrl(QStringView url)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const QByteArray bytes = url.toUtf8();
+    QString out;
+    out.reserve(bytes.size());
+    auto isHex = [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    };
+    for (qsizetype i = 0; i < bytes.size(); ++i) {
+        const uchar c = uchar(bytes[i]);
+        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+            || (c < 128 && c != 0 && strchr(";/?:@&=+$,-_.!~*'()#", c));
+        if (plain || (c == '%' && i + 2 < bytes.size() && isHex(bytes[i + 1]) && isHex(bytes[i + 2]))) {
+            out.append(QLatin1Char(char(c)));
+        } else {
+            out.append(u'%');
+            out.append(QLatin1Char(hex[c >> 4]));
+            out.append(QLatin1Char(hex[c & 15]));
+        }
+    }
+    return out;
+}
+
+QString destinationSuffix(const Destination &destination, DestinationSyntax syntax)
+{
+    QString suffix;
+    if (destination.query) suffix = u'?' + encodeUrl(*destination.query);
+    if (destination.encodedFragment) suffix += u'#' + encodeUrl(*destination.encodedFragment);
+    if (syntax == DestinationSyntax::Markdown)
+        suffix.replace(u'(', QStringLiteral("\\(")).replace(u')', QStringLiteral("\\)")).replace(u'&', QStringLiteral("\\&"));
+    return suffix;
 }
 
 QString destinationDirectory(const Document &document, const Node &linkOrImage)
@@ -667,15 +707,15 @@ QString headingAnchor(const Document &document, int file, const QString &wanted,
 
 } // namespace
 
-QString anchorInFile(const Document &document, int file, const QString &fragment)
+QString anchorInFile(const Document &document, int file, const QString &encodedFragment)
 {
     if (file < 0 || size_t(file) >= document.files.size()) return {};
-    const QString wanted = QUrl::fromPercentEncoding(fragment.toUtf8());
+    const QString wanted = QUrl::fromPercentEncoding(encodedFragment.toUtf8());
     if (wanted.isEmpty()) return {};
     return headingAnchor(document, file, wanted, nullptr);
 }
 
-QString includedAnchor(const Document &document, const QString &path, const QString &fragment)
+QString includedAnchor(const Document &document, const QString &path, const QString &decodedFragment)
 {
     const QFileInfo info(path);
     const QString target = info.exists() ? info.canonicalFilePath() : QDir::cleanPath(info.absoluteFilePath());
@@ -684,7 +724,7 @@ QString includedAnchor(const Document &document, const QString &path, const QStr
         if (!document.files[i].path.isEmpty() && document.files[i].path == target) file = int(i);
     if (file < 0) return {};
     QString first;
-    const QString found = headingAnchor(document, file, QUrl::fromPercentEncoding(fragment.toUtf8()), &first);
+    const QString found = headingAnchor(document, file, decodedFragment, &first);
     return found.isEmpty() ? first : found;
 }
 

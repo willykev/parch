@@ -474,12 +474,11 @@ QString Builder::localHref(const md::Destination &target, const QString &written
 {
     if (!target.absolute) return written;
     if (m_options.portableLinks) {
+        if (target.query) return written;
         const QString anchor = md::includedAnchor(m_document, target.path, target.fragment);
         return anchor.isEmpty() ? written : u'#' + anchor;
     }
-    QUrl url = QUrl::fromLocalFile(target.path);
-    if (!target.fragment.isEmpty()) url.setFragment(target.fragment);
-    return url.toString();
+    return QUrl::fromLocalFile(target.path).toString(QUrl::FullyEncoded) + md::destinationSuffix(target);
 }
 
 QImage Builder::taskImage(const PreviewStyle &style, bool checked, qreal size)

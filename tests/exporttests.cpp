@@ -7,6 +7,7 @@
 #include "commandregistry.h"
 #include "document.h"
 #include "documentcheck.h"
+#include "documentlinks.h"
 #include "diskfile.h"
 #include "exporter.h"
 #include "exportpictures.h"
@@ -50,6 +51,7 @@
 #include <QXmlStreamReader>
 #include <sys/xattr.h>
 
+#include <algorithm>
 #include <thread>
 
 namespace ExportTests {
@@ -2018,6 +2020,89 @@ void cliExportsEveryFormat()
     QVERIFY(help.out.contains(QStringLiteral("PDF, DOCX: The paper, A4, Letter")));
     QVERIFY(!help.out.contains(QStringLiteral("not available yet")));
     QVERIFY(QFileInfo::exists(folder.path() + QStringLiteral("/rich.md")));
+}
+
+void exportLinksKeepQueryAndFragment()
+{
+    using namespace Qt::StringLiterals;
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVERIFY(QDir().mkpath(root.filePath(u"out"_s)));
+    writeFile(root.filePath(u"sub/other.md"_s), "# Actual\n");
+    writeFile(root.filePath(u"sub/odd?#%.md"_s), "# Actual\n");
+    writeFile(root.filePath(u"sub/icons.svg"_s),
+              "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><view id='small' viewBox='0 0 5 5'/>"
+              "<rect width='10' height='10'/></svg>");
+    writeFile(root.filePath(u"chapters/part.md"_s), "# Inside\n\n[Inherited][ref]\n");
+    const QString fileUrl = QUrl::fromLocalFile(root.filePath(u"sub/odd?#%.md"_s)).toString(QUrl::FullyEncoded);
+    const QString source = root.filePath(u"main.md"_s);
+    writeFile(source, u"[Query](sub/other.md?view=plain&mode=1#actual)\n\n"
+                      "<a title=\"href='sub/other.md'\" href='sub/other.md?view=html&amp;mode=1#actual'>HTML</a>\n\n"
+                      "[Odd](sub/odd%3F%23%25.md?x=%23#name%2523part)\n\n"
+                      "[File](%1?view=file#actual)\n\n"
+                      "[Explicit query](chapters/part.md?#inside)\n\n"
+                      "chapters/part.md\n\n[ref]: sub/other.md?view=reference#act%75al\n\n"
+                      "![Icon](sub/icons.svg?contrast=high#small)\n"_s.arg(fileUrl).toUtf8());
+    const auto loaded = load(source);
+    QVERIFY(!loaded.document.incomplete);
+    const QStringList expected{u"../sub/other.md?view=plain&mode=1#actual"_s,
+                               u"../sub/other.md?view=html&mode=1#actual"_s,
+                               u"../sub/odd%3F%23%25.md?x=%23#name%2523part"_s,
+                               u"../sub/odd%3F%23%25.md?view=file#actual"_s,
+                               u"../chapters/part.md?#inside"_s,
+                               u"../sub/other.md?view=reference#act%75al"_s};
+    for (const QString &format : {u"html"_s, u"docx"_s}) {
+        const Exporter *exporter = Exporters::find(format);
+        QVERIFY(exporter);
+        const QString output = root.filePath(u"out/main."_s + format);
+        const auto result = exporter->write(loaded.document, recipeFor(loaded, format, output), bareRun());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QStringList targets;
+        if (format == u"html") {
+            const QString html = QString::fromUtf8(readFile(output));
+            const QRegularExpression links(u"<a\\b[^>]*\\bhref=\"[^\"]*\"[^>]*>"_s);
+            for (auto it = links.globalMatch(html); it.hasNext();) {
+                QXmlStreamReader xml(it.next().captured() + u"</a>"_s);
+                QVERIFY(xml.readNextStartElement());
+                targets.append(xml.attributes().value(u"href"_s).toString());
+            }
+            QVERIFY(html.contains(u"src=\"main_files/icons.svg?contrast=high#small\""));
+        } else {
+            QXmlStreamReader xml(entry(entriesOf(output), u"word/_rels/document.xml.rels"_s));
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (xml.isStartElement() && xml.attributes().value(u"Type"_s).endsWith(u"/hyperlink"))
+                    targets.append(xml.attributes().value(u"Target"_s).toString());
+            }
+            QVERIFY(!xml.hasError());
+        }
+        QCOMPARE(targets, expected);
+    }
+    const QString output = root.filePath(u"out/main?.md"_s);
+    const auto markdown = Exporters::find(u"md"_s)->write(loaded.document, recipeFor(loaded, u"md"_s, output), bareRun());
+    QVERIFY2(markdown.ok, qPrintable(markdown.error));
+    const QString assembled = QString::fromUtf8(readFile(output));
+    QVERIFY2(assembled.contains(u"title=\"href='sub/other.md'\" href='../sub/other.md?view=html&amp;mode=1#actual'"),
+             qPrintable(assembled));
+    QVERIFY(assembled.contains(u"../sub/other.md?view=plain\\&mode=1#actual"));
+    QVERIFY(assembled.contains(u"../sub/odd%3F%23%25.md?x=%23#name%2523part"));
+    QVERIFY(assembled.contains(u"main%3F_files/icons.svg?contrast=high#small"));
+    QVERIFY(assembled.contains(u"../chapters/part.md?#inside"));
+    const auto references = DocumentLinks::find(assembled, QFileInfo(output).absolutePath());
+    const auto picture = std::find_if(references.cbegin(), references.cend(), [](const DocumentLinks::Link &link) {
+        return link.kind == DocumentLinks::Link::Kind::Image;
+    });
+    QVERIFY(picture != references.cend());
+    QCOMPARE(picture->destination.path, root.filePath(u"out/main?_files/icons.svg"_s));
+    QCOMPARE(readFile(picture->destination.path), readFile(root.filePath(u"sub/icons.svg"_s)));
+    QCOMPARE(picture->destination.query, std::optional<QString>(u"contrast=high"_s));
+
+    const QString linkOutput = root.filePath(u"out/links.html"_s);
+    ExportRecipe linkRecipe = recipeFor(loaded, u"html"_s, linkOutput);
+    linkRecipe.options.insert(u"images"_s, u"link"_s);
+    const auto links = Exporters::find(u"html"_s)->write(loaded.document, linkRecipe, bareRun());
+    QVERIFY2(links.ok, qPrintable(links.error));
+    QVERIFY(readFile(linkOutput).contains("src=\"../sub/icons.svg?contrast=high#small\""));
 }
 
 } // namespace ExportTests

@@ -150,6 +150,7 @@ QStringList layerNames();
 // Relative paths are found from `folder`, the document's own; without one
 // they stay as written. Every other key is left alone.
 Layer frontMatterLayer(const md::FrontMatter &frontMatter, const QString &folder);
+QString bibliographyReference(const QString &written, const QString &folder);
 // The front matter's `link-citations: true`: citations link to their
 // entries in the bibliography.
 bool linkCitations(const md::FrontMatter &frontMatter);

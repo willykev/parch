@@ -30,6 +30,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
+#include <QUrl>
 #include <sys/stat.h>
 
 namespace CliTests {
@@ -1985,6 +1986,67 @@ void checkSaysWhetherHelpersAreIsolated()
     const auto restore = qScopeGuard([] { HelperProcess::setIsolationProbe({}); });
     const Ran refused = box.run({"check", "doc.md", "--json"});
     QCOMPARE(refused.json().value(QStringLiteral("helpers")).toObject().value(QStringLiteral("isolated")), QJsonValue(false));
+}
+
+void checkChecksAnchorsInTextDocuments()
+{
+    using namespace Qt::StringLiterals;
+    Sandbox box;
+    QVERIFY(box.isValid());
+    const QStringList paths{u"target.txt"_s, u"target.md"_s, u"upper.TXT"_s, u"target.mkd"_s, u"target.mdown"_s};
+    QString good, bad;
+    for (const QString &path : paths) {
+        box.write(path, u"# Present\n"_s);
+        good += u"[Found](%1#present)\n\n"_s.arg(path);
+        bad += u"[Missing](%1#missing)\n\n"_s.arg(path);
+    }
+    box.write(u"file.pdf"_s, u"%PDF\n"_s);
+    good += u"[Page](file.pdf#page=2)\n\n<a href=\"target.txt#present\">Found</a>\n"_s;
+    bad += u"<a href=\"upper.TXT#absent\">Missing</a>\n\n[File](absent.md#any)\n"_s;
+    box.write(u"good.md"_s, good);
+    box.write(u"bad.md"_s, bad);
+    const Ran valid = box.run({u"check"_s, u"good.md"_s});
+    QVERIFY2(valid.code == 0, qPrintable(valid.said()));
+    const Ran missing = box.run({u"check"_s, u"--json"_s, u"bad.md"_s});
+    QVERIFY2(missing.code == 2, qPrintable(missing.said()));
+    const QJsonObject document = missing.json().value(u"documents"_s).toArray().first().toObject();
+    const QStringList codes = codesOf(document);
+    QCOMPARE(codes.count(u"broken-link-anchor"_s), int(paths.size() + 1));
+    QCOMPARE(codes.count(u"broken-link"_s), 1);
+    const QJsonArray problems = document.value(u"problems"_s).toArray();
+    for (const QString &path : paths) {
+        QVERIFY(std::any_of(problems.begin(), problems.end(), [&](const QJsonValue &value) {
+            const QJsonObject problem = value.toObject();
+            return problem.value(u"code"_s).toString() == u"broken-link-anchor"
+                   && problem.value(u"message"_s).toString().contains(path + u"#missing");
+        }));
+    }
+}
+
+void checkingRelativeLinksIgnoresTheQueryForFileLookup()
+{
+    using namespace Qt::StringLiterals;
+    Sandbox box;
+    QVERIFY(box.isValid());
+    box.write(u"sub/other.md"_s, u"# Actual\n"_s);
+    box.write(u"sub/odd?#%.md"_s, u"# Actual\n"_s);
+    const QString fileUrl = QUrl::fromLocalFile(box.path(u"sub/odd?#%.md"_s)).toString(QUrl::FullyEncoded);
+    const QString valid = u"[Query](sub/other.md?view=plain&mode=1#actual)\n\n"
+                          "[Empty query](sub/other.md?#actual)\n\n"
+                          "[Filename](sub/odd%3F%23%25.md?x=%23%3F#act%75al)\n\n"
+                          "<a href='sub/other.md?view=plain&amp;mode=1#actual'>HTML</a>\n\n"
+                          "[File](%1?view=plain#actual)\n"_s.arg(fileUrl);
+    box.write(u"main.md"_s, valid);
+    const Ran checked = box.run({u"check"_s, u"main.md"_s});
+    QVERIFY2(checked.code == 0, qPrintable(checked.said()));
+    box.write(u"main.md"_s, valid + u"\n[Wrong](sub/other.md?view=plain#wrong)\n\n[Absent](sub/absent.md?x=y#actual)\n"_s);
+    const Ran missing = box.run({u"check"_s, u"--json"_s, u"main.md"_s});
+    QVERIFY2(missing.code == 2, qPrintable(missing.said()));
+    const QJsonObject document = missing.json().value(u"documents"_s).toArray().first().toObject();
+    const QStringList codes = codesOf(document);
+    QCOMPARE(codes.count(u"broken-link-anchor"_s), 1);
+    QCOMPARE(codes.count(u"broken-link"_s), 1);
+    QVERIFY(problemCoded(document, u"broken-link"_s).value(u"message"_s).toString().contains(u"sub/absent.md)"));
 }
 
 } // namespace CliTests

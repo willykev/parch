@@ -11,6 +11,8 @@ void helpExplainsEveryCommand();
 void usageErrorsExitOne();
 void checkReportsEveryKindOfProblem();
 void checkPassesACleanDocument();
+void checkChecksAnchorsInTextDocuments();
+void checkingRelativeLinksIgnoresTheQueryForFileLookup();
 void checkSaysWhatCannotBeRead();
 void rejectsNonUtf8FileNames();
 void distinguishesNonregularPictures();

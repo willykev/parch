@@ -460,7 +460,7 @@ private:
     // A notice whose news can be undone, while it shows: `undo` undoes it,
     // and `forget`, when given, runs once it can no longer be undone.
     void postUndoable(const QString &news, const QString &detail, std::function<void()> undo,
-                      std::function<void()> forget = {});
+                      std::function<void()> forget = {}, NoticeTone tone = News);
     // The notice can no longer be undone.
     void dropUndo();
     void setProblem(const QString &problem, const QString &detail);

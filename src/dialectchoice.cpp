@@ -199,6 +199,11 @@ bool isStyleFile(const QString &style)
     return style.startsWith(u'/');
 }
 
+QString bibliographyReference(const QString &written, const QString &folder)
+{
+    return fromFolder(expandHome(written.trimmed()), folder);
+}
+
 QString styleReference(const QString &written, const QString &folder)
 {
     const QString name = written.trimmed();
@@ -233,8 +238,8 @@ Layer frontMatterLayer(const md::FrontMatter &frontMatter, const QString &folder
         }
         QStringList paths;
         for (const QString &file : std::as_const(files)) {
-            const QString trimmed = file.trimmed();
-            if (!trimmed.isEmpty()) paths.append(fromFolder(expandHome(trimmed), folder));
+            const QString path = bibliographyReference(file, folder);
+            if (!path.isEmpty()) paths.append(path);
         }
         if (!paths.isEmpty()) layer.bibliography = paths;
     }

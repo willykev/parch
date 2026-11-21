@@ -28,6 +28,11 @@
 - Copied cells show readable text and line breaks in spreadsheets and keep
   their Markdown when pasted into another parch grid. Sorting uses the
   text each cell shows.
+- Library moves update references in text files, supported HTML and citation
+  paths in front matter. Undo restores the references' original spelling
+  and keeps later independent edits.
+- Document checks look for headings in linked text files. Relative links
+  keep their queries and fragments when exported to a new folder.
 - **Format table** keeps merged cells (`||`) whole, where it used to split
   them into two cells.
 - Touchpad scrolling moves the text, the preview and every list as far as

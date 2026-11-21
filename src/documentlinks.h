@@ -20,9 +20,9 @@ namespace DocumentLinks {
 struct Link {
     enum class Kind { Link, Image, Definition, Include };
     Kind kind = Kind::Link;
-    // The src or href of an HTML element, whose place is only known as the
-    // element's, so that it is checked but never rewritten.
     bool html = false;
+    bool editable = true;
+    QChar quote; // HTML attribute delimiter, if any
     // The destination as the source writes it, without angle brackets or
     // quotes, before escapes, entities and percent-encoding are read; and
     // where that is, with the line it is on, from 0.
@@ -91,10 +91,11 @@ struct Change {
     int line = 0;
     QString lineBefore;
     QString lineAfter;
+    QString problem; // an identified reference that cannot be updated safely
 };
 
-// The links in a document that a move breaks, each given the destination
-// that leads where it led. `path` is where the document is before the move;
+// The links and front-matter citation files a move would break, each given
+// a replacement or a reason it cannot be updated. `path` is the old path;
 // it may move itself, when the move takes it along, and then its own
 // relative links keep leading where they led. Links to other schemes, to
 // headings of the document itself, and absolute paths to nothing that moved
@@ -102,8 +103,9 @@ struct Change {
 // < >, quotes, `file:`, percent-encoding of characters beyond ASCII, a
 // fragment and a title; otherwise it is written as md::encodeDestination()
 // writes paths, and an include that takes a space is quoted.
-// `options` is the dialect the text is read in.
+// `options` is the dialect the text is read in. If the document changes
+// libraries, `destinationLibrary` supplies the new reading boundary.
 QList<Change> changes(const QString &text, const QString &path, const QString &library, const QList<Move> &moves,
-                      const md::Options &options = {});
+                      const md::Options &options = {}, const QString &destinationLibrary = {});
 
 } // namespace DocumentLinks

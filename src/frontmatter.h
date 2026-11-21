@@ -26,6 +26,11 @@ struct YamlValue {
     QString scalar;                                    // Kind::Scalar
     std::vector<YamlValue> list;                       // Kind::List
     std::vector<std::pair<QString, YamlValue>> map;    // Kind::Map, in source order
+    // Offsets into the input, plus its base offset. A scalar can have a
+    // starting offset without a single exact span, such as a folded value.
+    int sourceOffset = -1;
+    int sourceLength = 0;                              // includes quotes when present
+    bool inFlow = false;
 
     bool isScalar() const { return kind == Kind::Scalar; }
     bool isList() const { return kind == Kind::List; }

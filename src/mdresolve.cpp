@@ -384,7 +384,7 @@ void Assembler::convert(Block *block, Node &node)
         const int rawStart = block->target.start;
         const bool contiguous = rawStart + block->literal.size() <= text.size()
             && QStringView(text).sliced(rawStart, block->literal.size()) == block->literal;
-        parseHtmlFragment(st, block->literal, block->file, node.range, contiguous ? rawStart : -1,
+        parseHtmlFragment(st, block->literal, block->pieces, block->file, node.range, contiguous ? rawStart : -1,
                           qMax(0, block->start - rawStart), node.children);
         return;
     }

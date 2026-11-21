@@ -715,28 +715,4 @@ QString escapeHtml(QStringView text)
     return out;
 }
 
-QString encodeUrl(QStringView url)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    const QByteArray bytes = url.toUtf8();
-    QString out;
-    out.reserve(bytes.size());
-    auto isHex = [](char c) {
-        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-    };
-    for (qsizetype i = 0; i < bytes.size(); ++i) {
-        const uchar c = uchar(bytes[i]);
-        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-            || (c < 128 && c != 0 && strchr(";/?:@&=+$,-_.!~*'()#", c));
-        if (plain || (c == '%' && i + 2 < bytes.size() && isHex(bytes[i + 1]) && isHex(bytes[i + 2]))) {
-            out.append(QLatin1Char(char(c)));
-        } else {
-            out.append(u'%');
-            out.append(QLatin1Char(hex[c >> 4]));
-            out.append(QLatin1Char(hex[c & 15]));
-        }
-    }
-    return out;
-}
-
 } // namespace md

@@ -853,10 +853,14 @@ bool BlockParser::htmlBlockEnds(const Block *block) const
 
 void BlockParser::addLiteralLine(Block *block)
 {
+    int padding = 0;
     if (partialTab) {
         ++offset;
-        block->literal.append(QString(4 - (column % 4), u' '));
+        padding = 4 - (column % 4);
+        block->literal.append(QString(padding, u' '));
     }
+    if (block->type == NodeType::HtmlBlock)
+        block->pieces.push_back({offset, lineEnd - offset, lineNumber, true, false, quint8(padding)});
     block->literal.append(QStringView(s + offset, lineEnd - offset));
     block->literal.append(u'\n');
     if (!blank || (block->type == NodeType::CodeBlock && block->fenced)) {

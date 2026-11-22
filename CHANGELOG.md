@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-11-21
 
 - The install commands check the package's SHA-256 checksum before running
   pacman. Packages built from source use the system's compiler and linker

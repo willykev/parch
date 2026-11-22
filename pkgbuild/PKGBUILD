@@ -4,7 +4,7 @@
 pkgname=parch-writer
 _app=parch
 # The same version as the VERSION file at the top of the source tree.
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc='A native Markdown writing app for the Omarchy desktop'
 arch=('x86_64' 'aarch64')

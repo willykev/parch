@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The install commands check the package's SHA-256 checksum before running
+  pacman. Packages built from source use the system's compiler and linker
+  hardening flags.
 - Link confirmations show the full host and port. Web links with user
   information and mail links that request attachments ask before opening.
 - **Show them** remembers a document’s picture hosts. A new host asks

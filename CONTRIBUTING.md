@@ -17,6 +17,9 @@ bin/test
 build/parch
 ```
 
+`bin/build [OUTPUT_DIR]` builds in the folder you give it or in `build/`.
+The Arch package builds in its own fresh folder with makepkg's flags.
+
 `bin/fetch-helpers` downloads the pinned math and diagram helpers, and
 `bin/fetch-test-fixtures` the CSL test suite's fixtures, into `build/`; the
 tests that need them are skipped until they are there.
@@ -86,7 +89,8 @@ bin/release
 `bin/release` writes the tagged source archive and the standalone `PKGBUILD`
 that downloads it to `dist/v<VERSION>/`, builds the Arch package from that
 `PKGBUILD` and archive, fetches the helpers and test fixtures, runs the tests,
-and writes `SHA256SUMS`. It needs Python 3.12 or newer and Arch's `makepkg`.
+and writes `SHA256SUMS` for the release files and `SHA256SUMS-<arch>` for
+the packages. It needs Python 3.12 or newer and Arch's `makepkg`.
 Packages are built for the current machine's architecture; the build
 workflow adds the x86_64 package and its checksum to the release when the
 tag is pushed. Each package is also published as `parch-writer-<arch>.pkg.tar.zst`,

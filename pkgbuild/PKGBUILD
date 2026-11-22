@@ -55,12 +55,14 @@ sha256sums_x86_64=('81c197c0accd9346ce8722eaf0cba40a10e3b165cef332d78cfcd86fc25c
 
 build() {
   cd "$startdir/.."
-  ./bin/build
+  local out="$srcdir/parch-build"
+  rm -rf -- "$out"
+  ./bin/build "$out"
 }
 
 package() {
   cd "$startdir/.."
-  install -Dm755 build/parch "$pkgdir/usr/bin/parch"
+  install -Dm755 "$srcdir/parch-build/parch" "$pkgdir/usr/bin/parch"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$_app/LICENSE"
   install -Dm644 "$startdir/parch.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/parch.svg"
   install -Dm644 "$startdir/parch.desktop" "$pkgdir/usr/share/applications/parch.desktop"

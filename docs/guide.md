@@ -41,12 +41,18 @@ command is `parch`.
 
 ### From a package
 
-Each release has a package for each architecture, under a name that stays
-the same from one release to the next:
+Download the package and its checksum for your architecture. Once
+`sha256sum` prints `OK` for the package, pacman installs it. For ARM64
+releases 0.1.0 and 0.1.1, set `sums=SHA256SUMS` in the commands below.
 
 ```sh
-curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-writer-$(uname -m).pkg.tar.zst"
-sudo pacman -U "parch-writer-$(uname -m).pkg.tar.zst"
+release=https://github.com/willykev/parch/releases/latest/download
+arch=$(uname -m)
+sums=SHA256SUMS-$arch
+curl -fLO "$release/parch-writer-$arch.pkg.tar.zst" &&
+  curl -fLO "$release/$sums" &&
+  sha256sum -c --ignore-missing "$sums" &&
+  sudo pacman -U "parch-writer-$arch.pkg.tar.zst"
 ```
 
 pacman installs what parch needs from the Arch repositories with it. Then
@@ -63,7 +69,7 @@ cd parch
 bin/install
 ```
 
-`bin/install` builds parch, then builds and installs its Arch package with
+`bin/install` builds and installs the Arch package with
 `makepkg`, asking for any package it still needs, such as `hunspell-en_us`
 and `xdg-desktop-portal`. The package holds the program, the math and
 diagram helpers (in `/usr/lib/parch`), their licences, the launcher entry and
@@ -80,7 +86,7 @@ command: installing one asks to remove the other.
 
 ### Update
 
-Run the two commands under [From a package](#from-a-package) again. Built
+Run the commands under [From a package](#from-a-package) again. Built
 from source, run `git pull` and then `bin/install` in your clone. Your
 documents, drafts, history and settings are kept.
 

@@ -40,9 +40,16 @@ computer, and there is no account.
 parch runs on Omarchy and other Arch Linux systems, on x86_64 and ARM64.
 
 ```sh
-curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-writer-$(uname -m).pkg.tar.zst"
-sudo pacman -U "parch-writer-$(uname -m).pkg.tar.zst"
+release=https://github.com/willykev/parch/releases/latest/download
+arch=$(uname -m)
+sums=SHA256SUMS-$arch
+curl -fLO "$release/parch-writer-$arch.pkg.tar.zst" &&
+  curl -fLO "$release/$sums" &&
+  sha256sum -c --ignore-missing "$sums" &&
+  sudo pacman -U "parch-writer-$arch.pkg.tar.zst"
 ```
+
+For ARM64 releases 0.1.0 and 0.1.1, set `sums=SHA256SUMS`.
 
 Then open **parch** from the app launcher, or run `parch` with the files to
 open. The package is `parch-writer`; the command is `parch`.
@@ -56,7 +63,7 @@ cd parch
 bin/install
 ```
 
-Update by running the two install commands again, or `git pull` and
+Update by running the install commands again, or `git pull` and
 `bin/install` in your clone. Remove parch with `sudo pacman -R parch-writer`; your
 documents stay where they are.
 

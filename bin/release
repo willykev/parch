@@ -58,13 +58,17 @@ def download_recipe(recipe, checksum):
 def prepare(version, tag, commit):
     output = ROOT / "dist" / tag
     output.mkdir(parents=True, exist_ok=True)
+    architecture = os.uname().machine
+    package_sums = output / f"SHA256SUMS-{architecture}"
     manifest = output / "manifest.json"
     if manifest.exists():
         saved = json.loads(manifest.read_text())
-        if saved.get("commit") == commit and saved.get("architecture") == os.uname().machine:
+        if saved.get("commit") == commit and saved.get("architecture") == architecture:
             files = saved.get("assets", {})
-            if files and all(Path(name).name == name and (output / name).is_file()
-                             and digest(output / name) == checksum for name, checksum in files.items()):
+            if package_sums.name in files and all(
+                Path(name).name == name and (output / name).is_file()
+                and digest(output / name) == checksum for name, checksum in files.items()
+            ):
                 print("Verified existing release assets:", output, flush=True)
                 return output, [output / name for name in files]
 
@@ -88,7 +92,7 @@ def prepare(version, tag, commit):
                    PKGEXT=PACKAGE_SUFFIX)
         run("makepkg", "--cleanbuild", "--force", "--nodeps", "--noconfirm", cwd=scratch, env=env)
         checkout = Path(scratch) / "src" / f"{APP}-{version}"
-        reported = run(str(checkout / f"build/{APP}"), "--version", capture=True)
+        reported = run(str(Path(scratch) / "pkg" / PACKAGE / "usr/bin" / APP), "--version", capture=True)
         if reported != f"{APP} {version}":
             raise RuntimeError(f"Unexpected binary version: {reported}")
         # Every test runs: the math and diagram helpers and the CSL suite's
@@ -104,15 +108,17 @@ def prepare(version, tag, commit):
         # releases/latest/download/<package>-<arch>.pkg.tar.zst always finds it.
         if not packages[0].name.endswith(PACKAGE_SUFFIX):
             raise RuntimeError(f"makepkg wrote {packages[0].name}, not a {PACKAGE_SUFFIX} package")
-        stable = output / f"{PACKAGE}-{os.uname().machine}{PACKAGE_SUFFIX}"
+        stable = output / f"{PACKAGE}-{architecture}{PACKAGE_SUFFIX}"
         shutil.copyfile(packages[0], stable)
         packages.append(stable)
 
     assets = [archive, output / "PKGBUILD", *packages]
     checksums = output / "SHA256SUMS"
-    checksums.write_text("".join(f"{digest(path)}  {path.name}\n" for path in assets))
-    assets.append(checksums)
-    manifest.write_text(json.dumps({"commit": commit, "architecture": os.uname().machine,
+    lines = {path: f"{digest(path)}  {path.name}\n" for path in assets}
+    checksums.write_text("".join(lines.values()))
+    package_sums.write_text("".join(lines[path] for path in sorted(packages)))
+    assets.extend([checksums, package_sums])
+    manifest.write_text(json.dumps({"commit": commit, "architecture": architecture,
                                    "assets": {path.name: digest(path) for path in assets}}, indent=2) + "\n")
     return output, assets
 

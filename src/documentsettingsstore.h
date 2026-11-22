@@ -92,7 +92,9 @@ public:
     // kept in its own settings (in memory alone for a document of parch's
     // own); revision changes with it.
     Q_INVOKABLE bool remotePictures(Document *document) const;
-    Q_INVOKABLE bool setRemotePictures(Document *document, bool shown);
+    QSet<QString> pictureHosts(Document *document) const;
+    bool needsPictureHosts(Document *document) const;
+    bool setPictureHosts(Document *document, const QSet<QString> &hosts);
 
     // The library folder that holds the document, the nearest when several
     // do; empty for a draft or a file outside the library.
@@ -124,6 +126,6 @@ private:
     // The own settings of documents of parch's own, by id: kept while parch
     // runs, never written, as nothing of such a document is.
     QHash<QString, Dialect::Layer> m_scratch;
-    QSet<QString> m_scratchPictures;
+    QHash<QString, QSet<QString>> m_scratchPictures;
     int m_revision = 0;
 };

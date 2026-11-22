@@ -132,7 +132,7 @@ public:
 
     // Reads a style. On failure returns null and sets error to a message
     // that names the problem and, where it has one, its line.
-    static std::shared_ptr<const CslStyle> fromXml(const QByteArray &xml, QString *error);
+    static std::shared_ptr<const CslStyle> fromXml(const QByteArray &xml, QString *error, int maxExpandedNodes = 100000);
 
     QString id() const { return m_id; }
     QString title() const { return m_title; }

@@ -11,6 +11,7 @@
 #include <QPageSize>
 #include <QString>
 #include <QStringList>
+#include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
 
@@ -39,6 +40,8 @@ struct PaperOptions {
     // The distance between lines, as a multiple of the text's size.
     qreal lineHeight = 1.5;
     bool pageNumbers = true;
+    // Maximum number of decoded picture pixels kept by one paper document.
+    qint64 picturePixelBudget = 512'000'000;
 
     // The page sizes the options offer, by the names they take.
     static QStringList pageSizes();
@@ -155,13 +158,13 @@ private:
     QList<Rule> m_rules;
     // Heading blocks: where they are, their levels and texts.
     struct HeadingBlock {
-        QTextCursor at;
+        QTextBlock block;
         int level = 1;
         QString text;
     };
     QList<HeadingBlock> m_headingBlocks;
     // The blocks that break the page after them.
-    QList<QTextCursor> m_breaks;
+    QList<QTextBlock> m_breaks;
     QList<Heading> m_headings;
     QSizeF m_page;
     QRectF m_body;

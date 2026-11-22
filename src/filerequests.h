@@ -53,6 +53,7 @@ public:
     // Saves the document under the path and, once that has landed, keeps
     // its folder as the one last used and says named().
     void saveTo(WindowContext *window, Document *document, const QString &path, bool closeAfter);
+    WindowContext *namingWindow(Document *document) const;
     // Names the document again where its last naming failed; false when none did.
     bool retryNaming(WindowContext *window, Document *document, bool closeAfter);
     // Files to read for a purpose of the asker's own, such as a document's

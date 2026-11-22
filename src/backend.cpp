@@ -1,5 +1,7 @@
 #include "backend.h"
 
+#include <QUrlQuery>
+
 #include "attachments.h"
 #include "autosave.h"
 #include "document.h"
@@ -11,6 +13,7 @@
 #include "foldersearch.h"
 #include "history.h"
 #include "librarymodel.h"
+#include "mdtree.h"
 #include "pathtext.h"
 #include "privatefiles.h"
 #include "readingpositions.h"
@@ -124,6 +127,7 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     m_organizer->setDialects([this] { return m_documentSettings->dialectsOfFiles(); });
     // Two workers: enough to list a folder while another is slow, and few
     // enough that a folder that never answers costs little.
+    m_libraryPool->setStackSize(md::WorkerStackBytes);
     m_libraryPool->setMaxThreadCount(2);
     // The guide the package installs beside the program, as <prefix>/share/doc/parch.
     m_installedGuide = QDir::cleanPath(QCoreApplication::applicationDirPath()
@@ -271,6 +275,15 @@ Backend::Backend(const AppPaths &paths, QObject *parent)
     }, Qt::QueuedConnection);
     // The file dialogs' answers, and the dialogs' actions, are actions too:
     // each clears a notice, and what goes wrong is one.
+    connect(m_store.get(), &DocumentStore::saveLinkRequested, this,
+            [this](Document *doc, const QString &name, const QString &target, bool canFollow) {
+        WindowContext *window = m_files->namingWindow(doc);
+        if (!window) {
+            for (auto *holder : std::as_const(m_windows))
+                if (holder->tabs()->viewsOf(doc)) { window = holder; break; }
+        }
+        if (window) emit window->saveLinkRequested(doc, name, target, canFollow);
+    });
     connect(m_files.get(), &FileRequests::answered, this, &Backend::clearNotice);
     connect(m_files.get(), &FileRequests::problem, this, &Backend::notify);
     connect(m_files.get(), &FileRequests::documentsChosen, this, [this](WindowContext *window, const QStringList &files) {
@@ -682,6 +695,13 @@ bool Backend::refuseReadOnlyScratch(Document *document)
     return true;
 }
 
+void Backend::answerSaveLink(Document *document, const QString &name, const QString &target, const QString &choice)
+{
+    using Choice = DocumentStore::SaveLinkChoice;
+    m_store->answerSaveLink(document, name, target, choice == u"replace" ? Choice::Replace
+                                                : choice == u"follow" ? Choice::Follow : Choice::Cancel);
+}
+
 void Backend::saveAs()
 {
     clearNotice();
@@ -875,10 +895,21 @@ void Backend::recordThenGiveUp(WindowContext *window, Document *document, bool k
     });
 }
 
-void Backend::openFromLibrary(const QString &path)
+void Backend::openFromLibrary(const QString &path, bool outsideLink)
 {
     clearNotice();
-    if (WindowContext *window = activeWindow()) openIn(window, {path}, Absent::NotFound)->raise();
+    WindowContext *window = activeWindow();
+    if (!window) return;
+    if (outsideLink) {
+        // Choosing the marked link opens the target as a document in its
+        // own folder, even if the link's name once belonged to another tab.
+        const QFileInfo link(path);
+        const QString target = link.canonicalFilePath();
+        if (!target.isEmpty() && link.isFile()) openIn(window, {target}, Absent::NotFound)->raise();
+        else notify(tr("Cannot open “%1”").arg(path), tr("The link does not lead to a regular file."));
+        return;
+    }
+    openIn(window, {path}, Absent::NotFound)->raise();
 }
 
 void Backend::openDraft(const QString &documentId)
@@ -976,7 +1007,7 @@ void Backend::setRenderService(std::unique_ptr<RenderService> service) { m_rende
 void Backend::setLinkOpener(std::function<bool(const QUrl &url)> opener) { m_linkOpener = std::move(opener); }
 void Backend::setFolderShower(std::function<bool(const QString &path)> shower) { m_folderShower = std::move(shower); }
 
-Backend::LinkWay Backend::linkWay(const QUrl &url)
+Backend::LinkWay Backend::linkWay(const QUrl &url, QStringView written)
 {
     if (!url.isValid()) return LinkWay::Refused;
     const QString scheme = url.scheme().toLower();
@@ -991,7 +1022,32 @@ Backend::LinkWay Backend::linkWay(const QUrl &url)
         const QString host = url.host().toLower();
         return host.isEmpty() || host == u"localhost" ? LinkWay::Local : LinkWay::Refused;
     }
-    if (scheme == u"http" || scheme == u"https" || scheme == u"mailto") return LinkWay::Open;
+    if (scheme == u"http" || scheme == u"https") {
+        if (url.host().isEmpty()) return LinkWay::Refused;
+        const QString authority = url.authority(QUrl::FullyEncoded);
+        if (authority.contains(u'@')) return LinkWay::Ask;
+        if (!written.isEmpty()) {
+            const qsizetype start = written.indexOf(u"://");
+            if (start < 0) return LinkWay::Ask;
+            auto name = written.sliced(start + 3);
+            const auto end = std::find_if(name.begin(), name.end(), [](QChar c) { return c == u'/' || c == u'?' || c == u'#'; });
+            name = name.first(end - name.begin());
+            const qsizetype port = name.indexOf(u':', name.startsWith(u'[') ? name.indexOf(u']') + 1 : 0);
+            if (port >= 0) name = name.first(port);
+            if (std::any_of(name.begin(), name.end(), [](QChar c) { return c.unicode() > 0x7f; }) ||
+                name.compare(url.adjusted(QUrl::RemovePort).authority(QUrl::FullyEncoded), Qt::CaseInsensitive) != 0)
+                return LinkWay::Ask;
+        }
+        return LinkWay::Open;
+    }
+    if (scheme == u"mailto") {
+        static const QStringList fields{QStringLiteral("to"), QStringLiteral("cc"), QStringLiteral("bcc"),
+                                        QStringLiteral("subject"), QStringLiteral("body"), QStringLiteral("in-reply-to")};
+        const auto items = QUrlQuery(url).queryItems(QUrl::FullyDecoded);
+        for (const auto &item : items)
+            if (!fields.contains(item.first, Qt::CaseInsensitive)) return LinkWay::Ask;
+        return LinkWay::Open;
+    }
     return LinkWay::Ask;
 }
 
@@ -1205,6 +1261,14 @@ WindowContext *Backend::openIn(WindowContext *window, const QStringList &files, 
             break;
         }
         if (waiting) continue;
+        if (const auto link = DiskFile::nameLink(path); link && !link->regular) {
+            shown = showDocument(window, m_store->openMissingLink(path));
+            documentShown = true;
+            failures.append(tr("“%1” is a link to “%2”. It opens read-only because its target cannot be opened.")
+                                .arg(path, link->target));
+            ++refused;
+            continue;
+        }
         // Its absence is what the first edit checks before creating the file.
         const DiskVersion none = DiskFile::fingerprint(path);
         if (absent == Absent::NewFile && !path.endsWith(u'/') && !none.exists
@@ -1292,10 +1356,13 @@ void Backend::name(Document *draft, const QString &path, const DiskVersion &abse
     // ends at once; the connection goes with the draft.
     auto finished = std::make_shared<QMetaObject::Connection>();
     *finished = connect(m_store.get(), &DocumentStore::saveFinished, draft,
-                        [this, finished, draft, path](Document *saved, const QString &name) {
+                        [this, finished, draft, path](Document *saved, const QString &name, SaveStatus status) {
         if (saved != draft || name != path) return;
         disconnect(*finished);
-        namingEnded(draft, path);
+        if (status == SaveStatus::Cancelled) {
+            for (auto *window : std::as_const(m_windows)) window->tabs()->forgetNewFile(draft);
+            m_store->save(draft);
+        } else namingEnded(draft, path);
     });
     m_store->saveAs(draft, path, absent);
 }

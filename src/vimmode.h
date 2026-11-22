@@ -78,6 +78,8 @@ public:
 
     explicit VimMode(VimHost *host, QObject *parent = nullptr);
     ~VimMode() override;
+    // Zero-based line reached by a count followed by %, or -1 for an invalid count.
+    static int percentageLine(int percent, int lines);
 
     bool active() const { return m_active; }
     // Turned on, the view starts in Normal mode; turned off, it types again.
@@ -245,6 +247,8 @@ private:
     qsizetype m_keyMark = 0;
     qsizetype m_insertMark = 0;
     QPointer<SourceBuffer> m_insertBuffer;
+    QMetaObject::Connection m_insertEdits;
+    qsizetype m_insertUnits = 0;
     InsertKind m_insertKind = InsertKind::Plain;
     int m_insertCount = 1;
     QList<Key> m_insertKeys;

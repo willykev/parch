@@ -41,12 +41,18 @@ command is `parch`.
 
 ### From a package
 
-Each release has a package for each architecture, under a name that stays
-the same from one release to the next:
+Download the package and its checksum for your architecture. Once
+`sha256sum` prints `OK` for the package, pacman installs it. For ARM64
+releases 0.1.0 and 0.1.1, set `sums=SHA256SUMS` in the commands below.
 
 ```sh
-curl -LO "https://github.com/willykev/parch/releases/latest/download/parch-writer-$(uname -m).pkg.tar.zst"
-sudo pacman -U "parch-writer-$(uname -m).pkg.tar.zst"
+release=https://github.com/willykev/parch/releases/latest/download
+arch=$(uname -m)
+sums=SHA256SUMS-$arch
+curl -fLO "$release/parch-writer-$arch.pkg.tar.zst" &&
+  curl -fLO "$release/$sums" &&
+  sha256sum -c --ignore-missing "$sums" &&
+  sudo pacman -U "parch-writer-$arch.pkg.tar.zst"
 ```
 
 pacman installs what parch needs from the Arch repositories with it. Then
@@ -63,7 +69,7 @@ cd parch
 bin/install
 ```
 
-`bin/install` builds parch, then builds and installs its Arch package with
+`bin/install` builds and installs the Arch package with
 `makepkg`, asking for any package it still needs, such as `hunspell-en_us`
 and `xdg-desktop-portal`. The package holds the program, the math and
 diagram helpers (in `/usr/lib/parch`), their licences, the launcher entry and
@@ -80,7 +86,7 @@ command: installing one asks to remove the other.
 
 ### Update
 
-Run the two commands under [From a package](#from-a-package) again. Built
+Run the commands under [From a package](#from-a-package) again. Built
 from source, run `git pull` and then `bin/install` in your clone. Your
 documents, drafts, history and settings are kept.
 
@@ -155,7 +161,8 @@ parch ~/weather-station/weather-station.md
   UTF-8**, which keeps the file's original bytes in its history first.
 - parch opens files of up to 64 MiB, at paths of up to 4,095 bytes with every
   link followed. A larger file, or a longer path, is not opened, and parch
-  says why.
+  says why. If an open file grows past 64 MiB on disk, parch reports a
+  conflict when you save. **Save as…** lets you keep your edits in another file.
 
 parch keeps each file's line endings and byte-order mark. Text you paste gets
 the document's line endings.
@@ -360,8 +367,9 @@ shows every table as Markdown. **Format table** lines up one shown that way.
 A table stays as Markdown, as it is written, when it could not be written as
 a grid without losing something: a row with more cells than the header, a
 row that starts with `||`, a `//` comment line between its rows, lines
-indented or quoted differently from each other, or more than 128 columns or
-20,000 cells.
+indented or quoted differently from each other, or more than 128 columns.
+A grid holds up to 20,000 cells, including blank positions in short rows.
+Rows beyond that limit stay as Markdown.
 
 With Vim keys, in Normal mode the block caret sits in a cell's text. `h`,
 `l`, `w`, `b`, `0` and `$` go from cell to cell along the row, and `j` and
@@ -404,7 +412,9 @@ plain text; turning it on again styles it at once.
   processor into Markdown: headings, emphasis, links, lists and task lists,
   quotes, code and tables. Scripts, styles and hidden text are left out, and
   characters that would otherwise turn into Markdown are escaped. One undo
-  takes the whole paste back. `Ctrl+Shift+V` always pastes plain text.
+  takes the whole paste back. When the copied HTML exceeds 16 MiB or its
+  formatting would produce too much Markdown, parch pastes the clipboard’s
+  plain text. `Ctrl+Shift+V` always pastes plain text.
   Web tables pasted into prose keep values aligned across spanning rows
   and columns. Horizontal spans become merged cells in the Writer dialect
   with merged cells enabled.
@@ -414,8 +424,10 @@ plain text; turning it on again styles it at once.
   An image pasted without alt text puts the caret between `![` and `]`, so
   that you can describe it for readers who cannot see it; one undo still
   takes the paste back.
-  Images in the web page itself stay links to where they are online; nothing
-  is downloaded.
+  A picture embedded in copied HTML can be up to 64 MiB, 8,192 pixels on
+  its longer side and 64 million pixels in all. If it exceeds a limit,
+  parch shows a notice and pastes its alt text. Online images keep their
+  web addresses.
 - Dropping files on the text, or pasting files copied in a file manager,
   links them where they land. A file already in the document's folder or in
   the library is linked where it is; anything else is copied into `assets`,
@@ -490,14 +502,22 @@ What it shows:
 - Code blocks coloured by their language, and tables with their alignment and
   merged cells. A table, a code block or a formula wider than the column
   scrolls sideways by itself; the text around it never does.
-- Images, scaled to the column. A path is read from the document's folder;
-  a web address is fetched, unless you turn that off in **Preferences**.
+- Images, scaled to the column and up to 4,096 pixels on their longer side.
+  parch recognises the format from the file's contents. Local picture files
+  can be up to 64 MiB. They can be PNG, JPEG, GIF, BMP or SVG. A compressed
+  SVG must also fit the limit when unpacked. Install `qt6-imageformats` for
+  WebP and TIFF, or `kimageformats` for AVIF, HEIF and JPEG XL. Link a PDF
+  as a document. To include another picture in an SVG, embed it in the
+  drawing. An SVG without dimensions or a view box uses a 300 by 150 pixel
+  viewport. For web pictures, choose **Show them** above the preview or
+  enable **Fetch pictures from the web** in **Preferences…**.
 - Math (`$…$`, `$$…$$`) and Mermaid diagrams, drawn in the theme's colours.
   The source stands in until the picture is drawn, and if it cannot be, the
   reason is shown in its place.
 - Footnotes as numbered notes after the text, a table of contents for
   `{{TOC}}`, the text of included files, and `[%key]` values from the front
-  matter.
+  matter. Repeated contents markers use the same heading list. If the lists
+  together grow too large, **Check document** points to the first one omitted.
 - Citations and the bibliography in the selected style. See
   [Citations and bibliographies](#citations-and-bibliographies).
 - Not comments or front matter. Raw HTML that parch supports is formatted;
@@ -516,14 +536,17 @@ In the preview:
 
 - It scrolls with the text beside it, each showing the same place. **Scroll
   sync** in the status line turns that off and on.
-- A click on a link opens a web or mail address in your browser or mail
-  program. A link to a Markdown or `.txt` document opens a tab at the
+- A click on an ordinary web or mail address opens your browser or mail
+  program. A web address with user information before the host, or a host
+  whose spelling changes when read, asks first. A mail link also asks if it
+  requests an attachment or uses fields beyond `to`, `cc`, `bcc`, `subject`,
+  `body` and `in-reply-to`. A link to a Markdown or `.txt` document opens a tab at the
   heading if the link names one. A link to a heading in the same document
   scrolls there. A footnote's number goes to the note and the arrow after
   the note comes back.
 - A link of any other kind asks first. An address such as `zoommtg:` or
-  `steam:` names the program it would go to by its scheme, and shows the
-  whole address; **Open** hands it to that program. A link to any other file
+  `steam:` shows its scheme, host and port on their own line. Long paths and
+  queries are shortened. **Open** hands the address to the registered program. A link to any other file
   on your computer, such as a PDF, a script or a folder, never opens from
   the preview: **Show in folder** shows it in your file manager, where you
   can open it yourself. Resting the pointer on a link always shows where it
@@ -544,7 +567,13 @@ parch draws formulas and diagrams itself, with two programs that come with
 it: RaTeX for TeX math and Merman for Mermaid diagrams. Both run on your
 computer, cut off from the network, and only while they draw. What they
 cannot draw keeps its source in place, with the reason (**Check document**
-and `parch check` list them too).
+and `parch check` list them too). The preview runs up to two helpers at a
+time in the background.
+
+A document, including its chapters, can draw up to 10,000 distinct formulas
+and diagrams in all. Repeating a drawing uses the same slot. Inline and
+display versions of a formula count separately.
+Further drawings appear as source, and Check points to the first one.
 
 ### Math
 
@@ -644,7 +673,7 @@ link-citations: true               # each citation links to its entry
 ---
 ```
 
-parch reads BibTeX and BibLaTeX (`.bib`), CSL JSON (`.json`) and CSL YAML
+parch reads BibTeX and BibLaTeX (`.bib`, `.bibtex`, `.biblatex`), CSL JSON (`.json`) and CSL YAML
 (`.yaml`, `.yml`) files, found from the document's folder when the front
 matter names them, and reads a file again when it changes. The bundled styles
 are APA (`apa`), Chicago author-date (`chicago-author-date`), Chicago notes
@@ -654,6 +683,10 @@ and bibliography (`chicago-notes-bibliography`), IEEE (`ieee`), MLA
 (`nlm-citation-sequence`, or `vancouver`); a `.csl` style file of your own
 works as well. A chapter you include can name a bibliography of its own in
 its front matter; one that does not uses the document's.
+
+For CSL JSON, give an array of reference objects, or an object with the array
+under `references` or `items`. An empty collection or a newly started `.bib`
+shows a warning in the preview and **Check document**. A malformed list is an error.
 
 A front matter names files only within the document's library, or, for a
 document in no library, within its folder and the folders in it, as
@@ -691,6 +724,16 @@ changes.
 defines, a key given to two entries of one file or found in two files, a
 bibliography that cannot be read or has errors, with their lines, a style
 that cannot be used, and citations of a bibliography with no style chosen.
+It also reports when a style expands beyond 100,000 elements, when formatting
+exceeds a citation’s rendering limit, or when the fields inherited through
+BibTeX `crossref` or `xdata` exceed the bibliography’s expansion limit. A
+citation field with more than 32 nested quotes or formatting marks reads as
+plain text. To distinguish citations that read alike, a style can compare up
+to 50 names per work. Check warns if the style reaches that limit. Listing the
+same bibliography twice in a document searches it once.
+
+A newly created bibliography can be empty. The warning in **Check document**
+and `parch check` reads “The bibliography holds no entries yet.”
 
 What citations cannot do yet:
 
@@ -751,6 +794,10 @@ page to page.
   nothing was.
 - An export protects the document and its included files. If an export
   fails or you cancel it, an existing output keeps its previous contents.
+  Replacing a file you own keeps its ordinary read, write and execute
+  permissions, its group and the extended attributes the system allows.
+  Special permission bits are cleared. Replacing another account's file
+  uses the same permissions as creating a new export in that folder.
 - When exporting again, parch reuses identical pictures in the folder it
   made beside the output. If a name is taken by different content, the new
   picture gets a number such as `figure-2.png`. After the export succeeds,
@@ -787,9 +834,13 @@ What each format holds:
   folder and copies other readable pictures into `NAME_files` beside it.
   Choose **copy** to carry all its pictures, **link** to point back to the
   originals, or **Write the text as it is** to keep the source text.
+  Copied pictures keep their original file contents, including editable SVG.
   Assembled Markdown carries the effective bibliography and style when the
   text uses citations. It omits citation files the source's front matter
-  names outside its allowed folders and reports them as omitted.
+  names outside its allowed folders. The export carries a bibliography
+  with a recognized bibliography extension and at least one entry with a key and
+  a type, title or author. A style file must have a `.csl` extension and parse as CSL.
+  The export notice names each omitted file and gives the reason.
 - **HTML**: a page of its own, in typography that does not follow the
   desktop theme. Images are copied into a folder beside it (`NAME_files`),
   written into the page, or linked where they are. If an allowed picture is
@@ -805,17 +856,26 @@ What each format holds:
   can search and copy, working links, and an outline of the headings.
   Relative links lead from the folder the PDF is saved in.
   `+++` starts a new page, and a heading never stays
-  at the foot of a page without its text. Formulas and diagrams are vectors;
+  at the foot of a page without its text. If the document ends with a run of
+  headings, they flow onto successive pages. Formulas and diagrams are vectors;
   a diagram that cannot be drawn as one is printed as a picture at four times
   its size, and the notice says so. The citation style determines the
-  order of the bibliography and collected notes.
+  order of the bibliography and collected notes. A PDF can hold up to
+  512 million decoded picture pixels. Repeated references to the same file
+  count once, including through a symbolic link. Embedded pictures with
+  identical bytes also count once. A picture that would exceed the budget
+  gives way to its description, and the export notice names it.
 - **DOCX**: a Word document with styles for headings, quotes and code,
   bulleted, numbered and task lists, tables with merged cells, links, and
   pictures with their descriptions. Block code and inline code use a
   fixed-width font. Word places notes as footnotes or endnotes, according
   to the export setting. The title, author, subject, keywords and language
   from the front matter are document properties.
-  Formulas and diagrams are pictures, not Word equations.
+  Formulas and diagrams appear as pictures. A picture can be up to 8,192
+  pixels on its longer side and 64 million pixels in all. When a drawing
+  needs fewer pixels to fit, the export keeps its size on the page and
+  reports the reduced resolution. Repeated pictures share one copy in the
+  Word file and keep the description at each place they appear.
 - **EPUB**: an EPUB 3 book with a file for each chapter (each heading of
   level 1, or of level 2 when the document has a single title), a table of
   contents from the headings, its images, formulas and diagrams as SVG, and
@@ -824,6 +884,16 @@ What each format holds:
   the web are left out with their descriptions in their place. Links to the
   book's chapters and to the web work in the book. Other local links appear
   as text, and the export notice names the destinations it leaves out.
+
+When HTML copies or embeds an SVG and when EPUB packs one, parch writes a
+self-contained drawing. It keeps the visible shapes, embedded pictures and
+named views such as `icons.svg#home`. It leaves out scripts, event handlers
+and links to other files. In HTML, **link** points to the original picture.
+Formulas and diagrams also travel as self-contained drawings.
+
+The Markdown and HTML export notices list each file copied beside the
+document, including its folder. EPUB leaves out characters that XML cannot
+represent in the text, headings and book metadata.
 
 Formulas and diagrams are drawn by the same helpers as the preview, dark on
 white whatever the desktop's theme. Without them they are written as their
@@ -866,8 +936,8 @@ several documents at once (see [Command line](#command-line)).
 - `Escape` closes the bar and gives the keys back to the text.
 - **Search the library…** (`Ctrl+Shift+F`) searches the text of every
   document in the library's folders and the drafts. Matches arrive as they
-  are found, grouped by document, with the line around each; choosing one
-  opens the document there.
+  are found, grouped by document. A long match shows an excerpt with an
+  ellipsis. Choosing it takes you to the full match in the document.
 - **Go to heading…** (`Ctrl+R`) lists the document's headings to jump to.
   Searching shows the parent headings of each match. The focused editor uses
   this key for redo in Vim Normal or Visual mode.
@@ -882,7 +952,9 @@ wider or narrower, or reach the edge with `Tab` and use `Left` and `Right`
 own width, and the session brings it back; a new window starts at the width
 you chose last.
 
-- **Drafts** lists your drafts. **Recent** lists the files you opened last.
+- **Drafts** lists open drafts that have never been saved first, newest first.
+  Saved drafts follow in order of their last change. **Recent** lists the
+  files you opened last.
 - `Delete` on a recent file, or **Remove from recent** in its menu, takes it
   out of **Recent**; the file stays where it is. **Clear recent files**, in
   the menu (`F10`), the command palette and the menu of **Recent**, empties
@@ -892,7 +964,10 @@ you chose last.
   brings the draft back, attachments and all, while the notice shows. A draft
   open in another window with text not yet saved is not deleted.
 - **Open folder** adds a folder. Its `.md`, `.markdown` and `.txt` files are
-  listed beneath it and follow changes on disk.
+  listed beneath it and follow changes on disk. Links into any folder you
+  added work throughout the library. A link leading outside has a link icon.
+  You can open a linked document directly. Library searches, moves, trash
+  and link updates work only inside the folders you added.
 - **Find a document** (`Ctrl+Shift+O`) filters every library folder by name,
   including folders you have not opened.
 - **Outline**, at the foot of the library, lists the headings of the document
@@ -906,7 +981,12 @@ you chose last.
   trash…** (`Delete`), from where the desktop's trash can bring it back.
   The same commands are in the menu (`F10`) and the command palette for the
   document in front, with **New document in folder…**, which makes one
-  beside it, when it is in one of the library's folders.
+  beside it, when it is in one of the library's folders. Between file
+  systems, parch copies files up to 64 MiB in the background. It removes the
+  original after verifying both revisions. Opening the destination during the
+  move shares the open document. You can rename or trash a symbolic link
+  whose target is missing or outside the library. The action moves the link itself.
+  A folder move needs a file system that can reserve the new name or exchange two entries.
 - When a document or folder moves or gets a new name, parch reviews affected links, images,
   includes and reference definitions in the library's Markdown and `.txt`
   documents. This includes supported HTML link and image attributes and
@@ -914,7 +994,9 @@ you chose last.
   names references that need attention, such as a bibliography outside
   the destination library. **Update links** applies the offered changes,
   as one step for `Ctrl+Z` in each open document. **Move only** keeps the source
-  text as written. A moved document keeps its tab, history and unsaved text.
+  text as written. When a document has other hard links, updating its references
+  replaces the library copy and preserves the text at its other names.
+  A moved document keeps its tab, history and unsaved text.
 - **Undo**, in the latest move or rename notice, puts the file or folder
   back if its old name is free. It restores the exact spelling of the
   references the move updated and keeps later edits elsewhere. If a later
@@ -980,8 +1062,10 @@ pending.
 
 ### Normal mode
 
-A count before a command repeats it or goes that far, up to 9999: `3w`,
-`2dd`, `d3w`, `2d3w`, `5G`. These keys are covered:
+A count before a command repeats it or goes that far, up to 9999. Examples
+include `3w`, `2dd` and `5G`. Counted inserts and puts have a limit of
+10 million UTF-16 units in all. If repeating an insert would exceed it,
+parch keeps what you typed or pasted once and shows a notice.
 
 - **Moving:** `h` `j` `k` `l` and the arrow keys; `Backspace` and `Space`,
   which go on to the line before or after; `Enter`, to the first non-blank
@@ -1103,7 +1187,13 @@ every five seconds while you keep going. `Ctrl+S` saves at once.
 - A file with several hard links, or one whose owner or group a new file
   could not keep, is written in place instead, after its current text is in
   history.
-- Saving through a symbolic link you opened keeps saving through it.
+- Opening an existing document through a symbolic link keeps its target as
+  the document you edit. Choosing a link in **Save as…** or for the first
+  save shows where it leads. **Replace the link** puts your document at the
+  link's name. **Write to the target** saves into the existing regular file.
+  **Cancel** returns to your document.
+- A link named on the command line whose target is missing opens read-only.
+  The notice shows the target's path.
 - When a save fails, the notice bar says why and offers **Retry** and
   **Save as…**. Your text stays in the window and in recovery.
 
@@ -1123,7 +1213,8 @@ parch keeps earlier versions of each document. Open them with
 - A version is kept every five minutes while you write, when a document is
   first saved after opening, and before anything replaces its text: a reload,
   an overwrite, a restore, or text brought back from recovery. Each version
-  says why it was kept.
+  says why it was kept. After an automatic reload, further saves share the
+  usual five-minute interval.
 - **Restore** replaces the text with the chosen version; `Ctrl+Z` takes it
   back.
 - A file you reopened in another encoding and saved as UTF-8 keeps its
@@ -1137,7 +1228,10 @@ parch keeps earlier versions of each document. Open them with
   applies at once. A lower one waits until you stop changing it; if it would
   remove older versions, Preferences say how many, and they go only when you
   choose **Remove them**. **Keep them**, or closing Preferences, leaves the
-  limits as they were. A version you named is never removed.
+  limits as they were. When space runs low, parch takes older versions
+  from documents using more than their share first, preserving the three
+  newest unnamed versions of each document when space allows. Named
+  versions stay until you remove them.
 - If named versions alone fill that space, history pauses and the notice bar
   says so. Saving carries on.
 
@@ -1297,6 +1391,7 @@ Usage: parch [open] [--theme DIR] [--benchmark OUT] [FILE...]
   --benchmark OUT  Measure the window on a copy of one FILE; write JSON to OUT
   --screenshot     Draw the window off screen, save it as PNG once all of it
                    is drawn, and exit; nothing parch keeps is changed
+  --force          Replace an existing screenshot or benchmark output file
   --version        Print the version and exit
   --help           Print this help and exit
 
@@ -1328,7 +1423,9 @@ Commands that need no display (parch help COMMAND for its options):
 
 Files and folders given to `parch` while it is running open in the running
 window. A folder is added to the library. A file named like a command opens
-with `parch open check` or `parch -- check`.
+with `parch open check` or `parch -- check`. Put options before `--` and
+file names after it when scripting, as in `parch check --json -- "$file"`.
+Qt takes its platform and style from the environment.
 
 ### Checking, rendering and exporting
 
@@ -1358,8 +1455,9 @@ Put `--` before filenames that start with a dash.
   citations, bibliography files and citation styles (a problem in a
   bibliography file is reported at its line there). Notes of severity
   `info` (HTML shown as text, a footnote nothing refers to) are listed but do
-  not count as problems. Every formula and Mermaid diagram is drawn as the
-  preview draws it, and one that RaTeX or Merman refuses is reported
+  not count as problems. Check draws the same formulas and diagrams as the
+  preview and reports `helper-limit` at the first distinct drawing beyond
+  10,000. A formula or diagram that RaTeX or Merman refuses is reported
   (`invalid-math`, `invalid-diagram`) with what the helper said; when a
   helper cannot be found, check says what it could not check and does not
   count it as a problem. With `--json` it reports the RaTeX and Merman
@@ -1367,8 +1465,9 @@ Put `--` before filenames that start with a dash.
 - **render** writes the HTML fragment the preview and exports are made from
   (`html`, the default), the text a reader sees (`text`), the headings
   indented by level (`outline`), or the whole semantic tree with source ranges
-  (`json-tree`). Reader text keeps code indentation and includes formatted
-  citations and the bibliography. In a note style, collected citation notes
+  (`json-tree`). The JSON tree indents its first 16 levels and keeps deeper
+  levels at the same margin. Reader text keeps code indentation and includes
+  formatted citations and the bibliography. In a note style, collected citation notes
   come before the bibliography. Relative links and images lead from the
   folder the HTML is written to, or from the document's.
 - **export** writes the document in any of the formats the window's
@@ -1447,6 +1546,8 @@ screen, and saves it once everything in it is drawn: the preview with its
 formulas and diagrams, spelling and live formatting, and any panel it opens.
 No window shows. It reads copies of your settings and changes nothing parch
 keeps, and it neither hands files to a running parch nor takes them from one.
+Both `--screenshot` and `--benchmark` need `--force` to replace an existing
+output. Choose a regular file. A symbolic link or an input file is refused.
 
 ```sh
 parch --screenshot notes.png --size 1280x800 --view split --line 40 notes.md
@@ -1488,7 +1589,10 @@ web are shown in every document.
 
 parch draws everything from your Omarchy theme and follows it as you switch
 themes, light or dark, along with the theme's font. `Ctrl+=` and `Ctrl+-`
-change the text size, and `Ctrl+0` returns to the theme's size.
+change the text size, and `Ctrl+0` returns to the theme's size. Theme
+settings come from regular files of up to 1 MiB each. If a file cannot be
+read, parch uses its defaults for those settings. Theme font sizes range
+from 1 to 96 and control borders from 0 to 16 pixels.
 
 Screen readers and other assistive technology reach every control by name.
 They can also edit the text, place the caret and select: each edit they
@@ -1515,7 +1619,10 @@ their line endings kept. Everything else parch keeps is in these folders:
 | `~/.cache/parch/render/` | Formulas and diagrams already drawn, at most 128 MiB |
 
 These follow `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and
-`XDG_CACHE_HOME` when they are set.
+`XDG_CACHE_HOME` when they are set. Without `XDG_RUNTIME_DIR`, parch keeps
+its socket in a private `runtime` folder under its state folder. If the
+socket path is too long, that launch uses its own private temporary folder
+and opens a separate instance.
 
 ### Back up and restore
 
@@ -1538,16 +1645,22 @@ thing parch fetches from the network is a picture a document names by web
 address, for the preview, and only once you ask: fetching a picture tells
 its server that the document was opened, when, and from where. A document
 that names such pictures says **This document shows pictures from the web**
-above its preview, and **Show them** fetches them for that document, now
-and whenever it opens again; the choice is kept with its
-[document settings](#choose-how-a-document-is-read). **Fetch pictures from
-the web** under **Preview** in **Preferences…** shows them in every
-document. Exports never fetch pictures.
+above its preview. **Show them** remembers the hosts the document currently
+names. Another picture from one of those hosts can load automatically. If
+the document names a new host, **This document shows pictures from places
+it did not before.** appears. Choose **Show them** again to add the new
+hosts. An approved picture may redirect to another public host for that picture
+alone. A direct picture from that host still needs approval. An approval from
+an older version remembers the hosts present the first time its preview is
+read. **Fetch pictures from the web** under **Preview** in **Preferences…**
+allows web pictures in every document. Exports never fetch pictures.
 
 Even when pictures are shown, parch fetches only from public addresses:
 never from your computer itself, your local network, or link-local and
 shared addresses, whatever name a document gives them, and it checks every
-address a name leads to, again after each redirect. It follows at most
+address a name leads to, again after each redirect. It also checks the
+IPv4 address carried by a 6to4 address and refuses Teredo, IPv6 documentation
+addresses and the local-use NAT64 prefix. It follows at most
 three redirects, never from `https` to `http`, takes only PNG, JPEG, GIF,
 WebP and SVG pictures, at most 32 MiB of one, and gives up on a picture
 that takes more than 30 seconds. The preview connects directly to a checked
@@ -1559,16 +1672,27 @@ and recovery) and what you were doing (open tabs, recent files, settings),
 are readable by your account alone, whatever your umask, and parch makes
 ones an earlier version left open private again as it starts.
 
-A web or mail link you click in the preview opens in your browser or mail
-program; a link of any other kind asks first.
+Before you open a preview link that needs confirmation, the dialog shows
+the scheme and, for a link with a host, its full host name and port.
+International host names appear in their encoded form.
 
-Formulas and diagrams are drawn by helper programs that run on your
-computer, cut off from the network, each in a private temporary folder,
-with at most 2 GiB of memory and 30 seconds of processor time, and stopped
-after 15 seconds. Cutting a helper off from the network needs unprivileged
-user namespaces, which some hardened kernels turn off; there the helpers
-run with the network, and `parch check --json` says so with
-`"isolated": false` under `helpers`.
+Each formula or diagram helper draws in a private temporary folder, with
+at most 2 GiB of memory and 30 seconds of processor time. parch stops a
+drawing after 15 seconds. Under `helpers`, `parch check --json` reports
+which protections your kernel provides.
+
+- `confined` is true when Landlock limits file reads to the helper, runtime
+  libraries, fonts and working folder, limits writes to the working folder,
+  and enforces all the network and signal restrictions. Landlock ABI 4 blocks
+  TCP, ABI 6 isolates abstract Unix sockets and signals, ABI 9 blocks access
+  to pathname Unix sockets, and ABI 10 also blocks UDP.
+- `missingConfinement` lists the restrictions unavailable on your kernel.
+  Older kernels apply the restrictions they support.
+- `isolated` means the helper also has a separate network namespace with
+  no route to the network. This requires unprivileged user namespaces.
+
+A `false` value means that protection is unavailable. Drawing still works
+with the protections the kernel provides.
 
 ## Troubleshooting
 
@@ -1580,7 +1704,10 @@ AUR package `parch` is installed; both have a `parch` command. See
 be: the reason is shown in its place, and **Check document** lists every one.
 A TeX command parch cannot draw is listed under [Math](#math), and a Mermaid
 syntax error is said as Merman reports it. If none is drawn at all, the
-helpers are missing from `/usr/lib/parch`: install the package again.
+packaged helpers should be in `/usr/lib/parch`. Reinstall the package if
+they are missing. A development build first looks in `helpers/<arch>`
+beside the executable and one folder above. If you set `PARCH_HELPERS`,
+only that folder is used. It should contain `render-svg` and `merman-cli`.
 
 **A table shows as Markdown, not as a grid.** To restore a grid you hid,
 put the caret in the table and choose **Show table as grid** in the command
@@ -1702,8 +1829,9 @@ what they mean:
 - **Text level**: `a`, `b`, `i`, `em`, `strong`, `u`, `s`, `del`, `ins`, `mark`, `code`, `kbd`, `sub`, `sup`, `br`, `img`
 - **Blocks**: `p`, `blockquote`, `pre`, `h1`, `h2`, `h3`, `h4`, `h5`, `h6`, `ul`, `ol`, `li`, `dl`, `dt`, `dd`, `hr`, `table`, `caption`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`
 
-They keep only these attributes; any other is left out, and a link or image
-whose address is a script loses it:
+The table lists the supported attributes. If a tag repeats an attribute,
+parch uses its first occurrence. A link or image whose address is a script
+loses that address.
 
 | Element | Attributes kept |
 | --- | --- |
@@ -1748,10 +1876,13 @@ report each of these as a note.
   words takes Qt time that grows with the square of its length; the
   document wraps between words again once it is opened afresh without it.
   The preview and PDF give such a word a place to break every 512
-  characters, which copying leaves out. A table of more than 128 columns or
-  20,000 cells is shown in the preview and printed as it is written, in a
-  code block, rather than laid out as a table. A PDF that takes long to set
-  shows how far it has come and stops when cancelled.
+  characters, which copying leaves out. A Markdown table over 128 columns
+  reads as text. When a table reaches 20,000 cells, including empty positions,
+  the remaining rows read as text. An HTML table over either limit shows its
+  cell text in the preview and formatted exports. Together the tables can
+  occupy 100,000 cells in one document, including its chapters. **Check
+  document** reports a table shown as text when it would pass that limit.
+  A PDF that takes long to set shows how far it has come and stops when cancelled.
 
 ## Getting help
 

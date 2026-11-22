@@ -2,6 +2,7 @@
 
 #include "apppaths.h"
 
+#include <QSet>
 #include <QByteArray>
 #include <QDateTime>
 #include <QHash>
@@ -91,7 +92,7 @@ public:
                     CaptureStatus *status = nullptr, Reason reason = Reason::Save);
     // Records the bytes only when the document's newest version is at least
     // CaptureIntervalMinutes old or there is none. Empty when not due.
-    QString captureIfDue(const QString &documentId, const QByteArray &bytes);
+    QString captureIfDue(const QString &documentId, const QByteArray &bytes, Reason reason = Reason::Save);
     // Records the bytes unless the document's newest version holds them
     // already, as every capture history makes by itself does. An encoding,
     // when given, is kept with the version, the newest one that holds the
@@ -174,8 +175,8 @@ private:
     // Only the document's own versions beyond the count or the age.
     void pruneOwn(const QString &documentId, const QList<Version> &versions);
     void pruneAll();
-    // How many versions pruneAll() would remove under these limits.
-    int removalsLocked(const HistoryLimits &limits) const;
+    // The version IDs pruning would remove under these limits, grouped by document.
+    QHash<QString, QSet<QString>> removalsLocked(const HistoryLimits &limits) const;
     void removeFiles(const QString &documentId, const Version &version) const;
     bool writeName(const QString &documentId, const QString &versionId, const QString &name) const;
     Pause pauseLocked() const;

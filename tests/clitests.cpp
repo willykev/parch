@@ -1,4 +1,6 @@
 #include "clitests.h"
+#include "helperconfinement.h"
+#include <QElapsedTimer>
 
 #include "apppaths.h"
 #include "cli.h"
@@ -408,9 +410,9 @@ void launchFindsCommands()
     QCOMPARE(parseLaunch({"parch", "a.md", "check"}).files, (QStringList{"a.md", "check"}));
     QCOMPARE(parseLaunch({"parch", "--help", "check"}).kind, Launch::Help);
     QCOMPARE(parseLaunch({"parch", "check", "--help"}).kind, Launch::Command);
-    // Qt's own options stay Qt's, wherever they are.
-    QCOMPARE(parseLaunch({"parch", "-platform", "offscreen", "check", "a.md"}).commandArguments,
-             (QStringList{"parch", "check", "a.md"}));
+    const Launch refused = parseLaunch({"parch", "-platform", "offscreen", "check", "a.md"});
+    QCOMPARE(refused.kind, Launch::Invalid);
+    QVERIFY(refused.error.contains(QStringLiteral("-platform")));
     // Opening is as it was.
     QCOMPARE(parseLaunch({"parch", "open", "a.md", "b.md"}).files, (QStringList{"a.md", "b.md"}));
     QCOMPARE(parseLaunch({"parch", "notes.md"}).kind, Launch::Gui);
@@ -1080,7 +1082,8 @@ void exportAssemblesMarkdown()
     QCOMPARE(result.value(QStringLiteral("output")).toString(), box.path(QStringLiteral("out/book.md")));
     QCOMPARE(result.value(QStringLiteral("written")).toArray(),
              (QJsonArray{box.path("out/book.md"), box.path("out/book_files/cover.png"), box.path("out/book_files/fig.png")}));
-    QVERIFY(result.value(QStringLiteral("limitations")).toArray().isEmpty());
+    QCOMPARE(result.value(QStringLiteral("limitations")).toArray(),
+             QJsonArray{QStringLiteral("Files copied beside the export: book_files/cover.png, book_files/fig.png")});
     QVERIFY(result.value(QStringLiteral("warnings")).toArray().isEmpty());
     const QJsonObject recipe = result.value(QStringLiteral("recipe")).toObject();
     QCOMPARE(recipe.value(QStringLiteral("source")).toString(), box.path(QStringLiteral("book/main.md")));
@@ -1547,7 +1550,8 @@ void exportWritesAStandalonePage()
     QCOMPARE(result.value(QStringLiteral("renderers")).toObject().value(QStringLiteral("html")).toString(),
              QStringLiteral("parch " PARCH_VERSION));
     const QJsonArray limitations = result.value(QStringLiteral("limitations")).toArray();
-    QCOMPARE(limitations.size(), 2);
+    QCOMPARE(limitations.size(), 3);
+    QCOMPARE(limitations[2].toString(), QStringLiteral("Files copied beside the export: page_files/a-b.png"));
     QCOMPARE(limitations[0].toString(),
              QStringLiteral("Math is written as its TeX source (2 formulas): the math helper (render-svg) is not installed"));
     QCOMPARE(limitations[1].toString(), QStringLiteral("Mermaid diagrams are written as their source (1 diagram): the "
@@ -2400,31 +2404,51 @@ void keepsQtNamedFilesAfterDoubleDash()
     QCOMPARE(stats.json().value(QStringLiteral("file")).toString(), box.path(file));
 }
 
+void qtOptionsInFileArgumentsAreNotPassedToQt()
+{
+    Sandbox box;
+    box.write(QStringLiteral("-platformpluginpath"), QStringLiteral("# A document\n"));
+    const Ran refused = runProcess(box, {"-platformpluginpath", box.root(), "--version"});
+    QCOMPARE(refused.code, int(Cli::Usage));
+    QVERIFY(refused.err.contains(QStringLiteral("-platformpluginpath")));
+    const Ran kept = runProcess(box, {"stats", "--json", "--", "-platformpluginpath"});
+    QCOMPARE(kept.code, int(Cli::Ok));
+    QCOMPARE(kept.json().value(QStringLiteral("words")).toInt(), 2);
+}
+
+void checkReportsWhetherHelpersAreConfined()
+{
+    Sandbox box;
+    box.write(QStringLiteral("doc.md"), QStringLiteral("Words.\n"));
+    const Ran ran = box.run({"check", "--json", "doc.md"});
+    QCOMPARE(ran.code, int(Cli::Ok));
+    QVERIFY(ran.json().value("helpers").toObject().value("missingConfinement").isArray());
+    QCOMPARE(ran.json().value(QStringLiteral("helpers")).toObject().value(QStringLiteral("confined")),
+             QJsonValue(ran.json().value("helpers").toObject().value("missingConfinement").toArray().isEmpty()));
+}
+
 void qtOptionsBeforeDoubleDash()
 {
     Sandbox box;
     QVERIFY(box.isValid());
     box.write(QStringLiteral("-reverse"), QStringLiteral("# One\n"));
     box.write(QStringLiteral("-platform"), QStringLiteral("# Two\n"));
-    const Ran checked = runProcess(box, {"-style", "Basic", "check", "--json", "--", "-reverse", "-platform"});
+    for (const QStringList &args : QList<QStringList>{{"-style", "Basic", "check", "--", "-reverse"},
+             {"-platform", "offscreen", "export", "-o", "book.pdf", "--", "-platform"},
+             {"stats", "--json", "-style", "--", "-platform"}}) {
+        const Ran refused = runProcess(box, args);
+        QCOMPARE(refused.code, int(Cli::Usage));
+    }
+    const Ran checked = runProcess(box, {"check", "--json", "--", "-reverse", "-platform"});
     QVERIFY2(checked.code == Cli::Ok, qPrintable(checked.said()));
-    const QJsonArray documents = checked.json().value(QStringLiteral("documents")).toArray();
-    QCOMPARE(documents.size(), 2);
-    for (int i = 0; i < documents.size(); ++i)
-        QCOMPARE(documents.at(i).toObject().value(QStringLiteral("file")).toString(),
-                 box.path(i == 0 ? QStringLiteral("-reverse") : QStringLiteral("-platform")));
-    const Ran pdf = runProcess(box, {"-platform", "offscreen", "export", "--quiet", "-o", "book.pdf", "--", "-platform"});
+    QCOMPARE(checked.json().value(QStringLiteral("documents")).toArray().size(), 2);
+    const Ran pdf = runProcess(box, {"export", "--quiet", "-o", "book.pdf", "--", "-platform"});
     QVERIFY2(pdf.code == Cli::Ok, qPrintable(pdf.said()));
     QVERIFY(box.read(QStringLiteral("book.pdf")).startsWith("%PDF-"));
     QVERIFY(pdf.err.isEmpty());
-    const Launch gui = parseLaunch({"parch", "open", "-style", "Basic", "--", "-platform", "offscreen", "-reverse", "--help", "--"});
+    const Launch gui = parseLaunch({"parch", "open", "--", "-platform", "offscreen", "-reverse", "--help", "--"});
     QCOMPARE(gui.kind, Launch::Gui);
     QCOMPARE(gui.files, (QStringList{"-platform", "offscreen", "-reverse", "--help", "--"}));
-    const Launch missingQtValue = parseLaunch({"parch", "stats", "-style", "--", "-platform"});
-    QCOMPARE(missingQtValue.commandArguments, (QStringList{"parch", "stats", "--", "-platform"}));
-    const Ran kept = runProcess(box, {"stats", "--json", "-style", "--", "-platform"});
-    QVERIFY2(kept.code == Cli::Ok, qPrintable(kept.said()));
-    QCOMPARE(kept.json().value(QStringLiteral("words")).toInt(), 1);
 }
 
 void quietExportSwitchesDoNotLogWarnings_data()
@@ -2711,6 +2735,27 @@ void exportNeverWritesThroughALink()
     struct stat status;
     QVERIFY(::stat(QFile::encodeName(plain).constData(), &status) == 0);
     QCOMPARE(status.st_mode & 07777, mode_t(0640));
+    const QString pipe = box.path(QStringLiteral("repo/pipe.json"));
+    QCOMPARE(::mkfifo(QFile::encodeName(pipe), 0600), 0);
+    QVERIFY(!Cli::outputRefusal(pipe, true).isEmpty());
+    QVERIFY(!Exporters::writeFile(pipe, "data", &error, ExistingOutput::ReplaceFile));
+    QVERIFY(::lstat(QFile::encodeName(pipe), &status) == 0 && S_ISFIFO(status.st_mode));
+    {
+        Exporters::PendingFile pending(plain, ExistingOutput::ReplaceFile);
+        QVERIFY(pending.write("new", &error));
+        QVERIFY(QFile::remove(plain));
+        QCOMPARE(::mkfifo(QFile::encodeName(plain), 0600), 0);
+        QVERIFY(!pending.commit(&error));
+        QVERIFY(::lstat(QFile::encodeName(plain), &status) == 0 && S_ISFIFO(status.st_mode));
+        QVERIFY(QFile::remove(plain));
+        QVERIFY(Exporters::writeFile(plain, "page", &error));
+        Exporters::PendingFile publishing(plain, ExistingOutput::ReplaceFile);
+        QVERIFY(publishing.write("new", &error));
+        QVERIFY(!publishing.commit(&error, [&](int, bool) {
+            return QFile::remove(plain) && ::mkfifo(QFile::encodeName(plain), 0600) == 0;
+        }));
+        QVERIFY(::lstat(QFile::encodeName(plain), &status) == 0 && S_ISFIFO(status.st_mode));
+    }
     // Nothing is left behind beside it.
     QStringList left = QDir(box.path(QStringLiteral("repo"))).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
     left.removeIf([](const QString &name) { return !name.contains(QStringLiteral("parch-")); });
@@ -2793,6 +2838,27 @@ void checkingRelativeLinksIgnoresTheQueryForFileLookup()
     QCOMPARE(codes.count(u"broken-link-anchor"_s), 1);
     QCOMPARE(codes.count(u"broken-link"_s), 1);
     QVERIFY(problemCoded(document, u"broken-link"_s).value(u"message"_s).toString().contains(u"sub/absent.md)"));
+}
+
+void aDeepTreeWritesLinearJson()
+{
+    Sandbox box;
+    const auto tree = [&](int depth) {
+        box.write("outline.md", QStringLiteral("> ").repeated(depth) + "leaf");
+        return box.run({"render", "outline.md", "--to", "json-tree"});
+    };
+    const auto ordinary = tree(2);
+    QCOMPARE(ordinary.code, 0);
+    QCOMPARE(ordinary.out.toUtf8(), QJsonDocument(ordinary.json()).toJson(QJsonDocument::Indented));
+    const auto shortTree = tree(32);
+    QElapsedTimer timer;
+    timer.start();
+    const auto tallTree = tree(96);
+    QCOMPARE(tallTree.code, 0);
+    QVERIFY(!tallTree.json().isEmpty());
+    QVERIFY(tallTree.out.contains(QStringLiteral("leaf")));
+    QVERIFY(tallTree.out.size() < shortTree.out.size() * 4);
+    QVERIFY(timer.elapsed() < timeLimit(200));
 }
 
 } // namespace CliTests

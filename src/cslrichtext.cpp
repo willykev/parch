@@ -250,7 +250,10 @@ CslText CslText::fromHtml(const QString &html)
                 }
                 applyStyle(token.style, format);
             }
-            if (!token.selfClosing) stack.append({name, format});
+            if (!token.selfClosing) {
+                if (stack.size() >= CslMarkup::MaxNesting) return CslText(html);
+                stack.append({name, format});
+            }
         } else {
             for (qsizetype i = stack.size() - 1; i >= 0; --i) {
                 if (stack[i].name == token.text) {
@@ -344,7 +347,7 @@ QString attributeValue(const QString &attributes, const QString &name)
 QList<CslMarkup::Token> CslMarkup::tokenize(const QString &markup)
 {
     static const QRegularExpression tag(
-        QStringLiteral("<(/?)(i|em|b|strong|u|sup|sub|sc|span|a|div|br)((?:\\s+[^<>]*?)?)\\s*(/?)>"),
+        QStringLiteral("<(/?)(i|em|b|strong|u|sup|sub|sc|span|a|div|br)(\\s[^<>]*+|/?)>"),
         QRegularExpression::CaseInsensitiveOption);
     QList<Token> tokens;
     qsizetype last = 0;
@@ -367,10 +370,12 @@ QList<CslMarkup::Token> CslMarkup::tokenize(const QString &markup)
         token.type = closing ? Token::Type::Close : Token::Type::Open;
         if (!closing) {
             const QString attributes = match.captured(3);
-            token.cssClass = attributeValue(attributes, QStringLiteral("class"));
-            token.style = attributeValue(attributes, QStringLiteral("style"));
-            token.href = attributeValue(attributes, QStringLiteral("href"));
-            token.selfClosing = !match.captured(4).isEmpty() || token.text == u"br";
+            if (!attributes.isEmpty()) {
+                token.cssClass = attributeValue(attributes, QStringLiteral("class"));
+                token.style = attributeValue(attributes, QStringLiteral("style"));
+                token.href = attributeValue(attributes, QStringLiteral("href"));
+            }
+            token.selfClosing = attributes.endsWith(u'/') || token.text == u"br";
         }
         tokens.append(token);
     }

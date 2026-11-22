@@ -69,6 +69,9 @@ public:
         QList<CslText> citations;
         QList<CslBibliographyEntry> bibliography;
         CslBibliographyLayout layout;
+        bool nestingLimited = false;
+        bool renderLimited = false;
+        bool namesLimited = false;
     };
 
     // The locale is the base for the style's language; the style's own
@@ -77,7 +80,8 @@ public:
 
     // Renders the citations in document order. The bibliography holds every
     // cited reference and, after them, the uncited ones given.
-    Result process(const QList<CslCitation> &citations, const QList<const CslReference *> &uncited = {}) const;
+    Result process(const QList<CslCitation> &citations, const QList<const CslReference *> &uncited = {},
+                   qsizetype maxCiteChars = 4 * 1024 * 1024) const;
 
     // Text that a locator holds, such as "p. 23" or "chaps. 2–3", read into
     // a locator type, the locator and what follows it. Without a known label

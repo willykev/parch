@@ -2,6 +2,7 @@
 
 #include "document.h"
 #include "documentparse.h"
+#include "mdtree.h"
 #include "sourcebuffer.h"
 #include "theme.h"
 
@@ -291,6 +292,7 @@ QThreadPool *stylingPool()
     if (!pool) {
         pool = new QThreadPool(QCoreApplication::instance());
         pool->setObjectName(QStringLiteral("styling"));
+        pool->setStackSize(md::WorkerStackBytes);
         pool->setMaxThreadCount(qBound(1, QThread::idealThreadCount() / 2, 2));
     }
     return pool;

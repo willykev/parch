@@ -1,9 +1,12 @@
 #include "apppaths.h"
 
-#include <QDir>
+#include "privatefiles.h"
+
+#include <QFile>
+#include <QTemporaryDir>
 #include <QStandardPaths>
 #include <QUuid>
-#include <unistd.h>
+#include <sys/un.h>
 
 bool AppPaths::isDocumentId(const QString &id)
 {
@@ -18,12 +21,25 @@ AppPaths AppPaths::standard()
     paths.state = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + name;
     paths.config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + name;
     paths.runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
-    // Without a session runtime folder the temporary folder stands in. Its
-    // name carries the account's numeric id so that two accounts never share
-    // one. Since any account can create a name there first, whoever uses it
-    // must create it private to its owner and refuse one that another made.
-    if (paths.runtime.isEmpty()) paths.runtime = QDir::tempPath() + QStringLiteral("/parch-%1").arg(::getuid());
+    if (paths.runtime.isEmpty()) {
+        paths.runtime = paths.state + QStringLiteral("/runtime");
+        if (paths.socketPathFits()) {
+            PrivateFiles::makeFolder(paths.runtime);
+        } else {
+            // One private folder for this process, removed at exit.
+            static const QTemporaryDir temporary;
+            paths.runtime = temporary.path();
+            paths.singleInstance = false;
+        }
+    }
     return paths;
+}
+
+QString AppPaths::socketPath() const { return runtime + QStringLiteral("/parch.sock"); }
+
+bool AppPaths::socketPathFits() const
+{
+    return QFile::encodeName(socketPath()).size() < qsizetype(sizeof(sockaddr_un::sun_path));
 }
 
 AppPaths AppPaths::under(const QString &root)

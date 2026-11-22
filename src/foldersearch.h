@@ -131,7 +131,8 @@ public:
     // nanoseconds, are the file's as a walk found it. `search`, a search's
     // own number, keeps what that search has used from making room for the
     // rest it reads; 0 for a read that is no search. Safe on any thread.
-    static bool readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search = 0);
+    static bool readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search = 0,
+                         const QStringList *folders = nullptr);
     // How many times a document's file has been read, rather than found in
     // the cache, since the process began; for tests.
     static quint64 fileReads();

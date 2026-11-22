@@ -10,13 +10,20 @@ ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 COMMIT=6eefc5b07c6969ab8999e48542acbcc131cba864
 LIST="$ROOT/tests/csl-suite/fixtures.sha256"
 OUT="$ROOT/build/csl-suite"
+count=$(wc -l < "$LIST")
 
-if [ -d "$OUT" ] && (cd "$OUT" && sha256sum --quiet --check "$LIST") >/dev/null 2>&1; then
+mkdir -p "$ROOT/build"
+exec 9<"$ROOT/build"
+flock 9
+if [ -d "$OUT" ] && [ ! -L "$OUT" ] &&
+    [ -z "$(find "$OUT" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ] &&
+    [ "$(find "$OUT" -maxdepth 1 -type f -printf . | wc -c)" -eq "$count" ] &&
+    (cd "$OUT" && sha256sum --quiet --check "$LIST") >/dev/null 2>&1; then
     echo "The CSL test suite fixtures are in $OUT"
     exit 0
 fi
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/parch-fixtures.XXXXXX")"
+WORK="$(mktemp -d "$ROOT/build/.csl-suite.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 trap 'exit 1' HUP INT TERM
 
@@ -25,16 +32,38 @@ curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
     -o "$WORK/suite.tar.gz" \
     "https://github.com/citation-style-language/test-suite/archive/$COMMIT.tar.gz"
 mkdir "$WORK/suite"
-tar -xzf "$WORK/suite.tar.gz" -C "$WORK/suite" --strip-components=1 \
-    --wildcards '*/processor-tests/humans/*.txt'
+# Only file contents are copied. Destination names come from the checksum
+# list, and permissions and ownership come from the local filesystem.
+python3 -I - "$WORK/suite.tar.gz" "$LIST" "$COMMIT" "$WORK/suite" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+import tarfile
 
-rm -rf "$OUT.new"
-mkdir -p "$OUT.new"
-# Only the listed fixtures are taken, and each must be the one listed.
-awk '{ print $2 }' "$LIST" | while read -r name; do
-    cp "$WORK/suite/processor-tests/humans/$name" "$OUT.new/$name"
-done
-(cd "$OUT.new" && sha256sum --quiet --check "$LIST")
+archive, manifest, commit, destination = sys.argv[1:]
+prefix = f"test-suite-{commit}/processor-tests/humans/"
+wanted = {}
+for line in Path(manifest).read_text().splitlines():
+    _, name = line.split("  ", 1)
+    if not name.endswith(".txt") or "/" in name:
+        sys.exit(f"Invalid fixture name {name!r}")
+    wanted[prefix + name] = Path(destination) / name
+
+with tarfile.open(archive, "r|gz") as suite:
+    for member in suite:
+        if not member.name or member.name.startswith("/") or ".." in member.name.split("/"):
+            sys.exit(f"Invalid fixture archive path {member.name!r}")
+        if not (member.isdir() or member.isreg()):
+            sys.exit(f"Invalid fixture archive member {member.name!r}")
+        path = wanted.get(member.name)
+        if path is None:
+            continue
+        if not member.isreg() or path.exists():
+            sys.exit(f"Expected one regular file for {member.name!r}")
+        with suite.extractfile(member) as source, path.open("xb") as target:
+            shutil.copyfileobj(source, target)
+PY
+(cd "$WORK/suite" && sha256sum --quiet --check "$LIST")
 rm -rf "$OUT"
-mv "$OUT.new" "$OUT"
-echo "The CSL test suite fixtures are in $OUT: $(wc -l < "$LIST") fixtures"
+mv "$WORK/suite" "$OUT"
+echo "The CSL test suite fixtures are in $OUT: $count fixtures"

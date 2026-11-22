@@ -26,7 +26,7 @@ public:
                        const ExportRun &run = ExportRun()) const override;
 
     // HTML from the renderer as XHTML a book holds: alignment as style,
-    // task boxes as characters, characters XML refuses replaced.
+    // task boxes as characters, characters XML refuses left out.
     static QString xhtml(const QString &html);
 
     // The text as the book's files, one per top-level section: a file starts

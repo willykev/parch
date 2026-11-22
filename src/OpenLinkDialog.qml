@@ -1,12 +1,7 @@
 import QtQuick
 import Parch
 
-// Asked before a link in the preview leads out of parch in a way that is
-// not a web or mail address: an address of another scheme goes to whichever
-// program registered for that scheme, and a file on this computer that is
-// not a document parch opens itself is shown in its folder, never opened.
-// The question shows the real destination. Cancel is the safe choice and
-// has focus; Escape and a dialog closed any other way cancel too.
+// A link requiring confirmation shows its destination above the choices.
 ThemedDialog {
     id: dialog
 
@@ -18,7 +13,13 @@ ThemedDialog {
     // A file on this computer, which is shown in its folder.
     property bool local: false
 
-    function ask(target, shown, scheme, local) {
+    property string origin: ""
+    property bool userInfo: false
+
+    function ask(target, shown, scheme, local, origin, userInfo) {
+        dialog.origin = origin
+        dialog.userInfo = userInfo
+        details.contentY = 0
         dialog.target = target
         dialog.shown = shown
         dialog.scheme = scheme
@@ -43,17 +44,14 @@ ThemedDialog {
         spacing: dialog.gap
 
         Text {
-            objectName: "linkQuestion"
+            objectName: "linkOrigin"
+            visible: !dialog.local
             width: parent.width
-            text: dialog.local
-                  ? qsTr("%1 is a file on this computer that parch does not open itself. Show it in its folder?").arg(dialog.shown)
-                  : qsTr("Open %1 with the program registered for it?").arg(dialog.shown)
+            text: dialog.origin
             textFormat: Text.PlainText
-            font.family: theme.fontFamily
-            font.pixelSize: theme.fontSize
+            font: dialog.font
             color: theme.foreground
-            // An address has few spaces to wrap at.
-            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            wrapMode: Text.WrapAnywhere
             Accessible.role: Accessible.StaticText
             Accessible.name: text
         }
@@ -63,7 +61,10 @@ ThemedDialog {
             width: parent.width
             text: dialog.local
                   ? qsTr("A link never opens a file other than a Markdown document: the file manager shows it, and you open it from there if you mean to.")
-                  : qsTr("It is not a web or mail address. Links that start with “%1:” go to whichever program registered for them.").arg(dialog.scheme)
+                  : dialog.userInfo ? qsTr("This address includes user information before the host name.")
+                  : dialog.scheme === "mailto" ? qsTr("This link includes extra instructions for your mail program.")
+                  : dialog.scheme === "http" || dialog.scheme === "https" ? qsTr("Check the host name before opening this address.")
+                  : qsTr("Links that start with “%1:” go to the program registered for them.").arg(dialog.scheme)
             textFormat: Text.PlainText
             font.family: theme.fontFamily
             font.pixelSize: theme.sizes.small
@@ -71,6 +72,32 @@ ThemedDialog {
             wrapMode: Text.Wrap
             Accessible.role: Accessible.StaticText
             Accessible.name: text
+        }
+
+        Flickable {
+            id: details
+            width: parent.width
+            height: Math.min(contentHeight, dialog.parent ? dialog.parent.height * 0.32 : contentHeight)
+            contentHeight: question.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            Text {
+                id: question
+                objectName: "linkQuestion"
+                width: details.width
+                text: dialog.local
+                      ? qsTr("%1 is a file on this computer that parch does not open itself. Show it in its folder?").arg(dialog.shown)
+                      : qsTr("Open %1 with the program registered for it?").arg(dialog.shown)
+                textFormat: Text.PlainText
+                font.family: theme.fontFamily
+                font.pixelSize: theme.fontSize
+                color: theme.foreground
+                // An address has few spaces to wrap at.
+                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+            }
         }
     }
 

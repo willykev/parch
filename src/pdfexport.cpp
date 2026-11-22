@@ -227,6 +227,7 @@ QByteArray PdfExporter::render(const md::Document &document, const ExportRecipe 
             result->limitations.append(QStringLiteral("Mermaid diagrams are printed as their source (%1): diagrams are not drawn")
                                            .arg(diagrams(counts.diagrams)));
     }
+    ExportPictures::noteDrawingLimit(document, result->limitations);
     result->limitations += sheets.limitations();
     result->renderers.insert(QStringLiteral("pdf"), QStringLiteral("parch %1, Qt %2").arg(QStringLiteral(PARCH_VERSION), QString::fromLatin1(qVersion())));
     return pdf;

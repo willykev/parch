@@ -15,6 +15,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QUrl>
+#include <QXmlStreamReader>
 
 #include <algorithm>
 #include <map>
@@ -190,10 +191,10 @@ public:
         const Dialect::Layer own = Dialect::frontMatterLayer(root.frontMatter, root.directory);
         const QStringList original = own.bibliography.value_or(QStringList());
         const auto reach = DocumentCitations::Reach::of(dialect.libraryRoot, root.directory);
-        bool outside = false;
+        QStringList outside;
         const auto allowed = [&](const QString &path) {
             if (reach.allows(path)) return true;
-            outside = true;
+            outside.append(QFileInfo(path).fileName());
             return false;
         };
         const bool ownBibliography = !hasCitations || dialect.bibliographyFrom == u"default";
@@ -219,44 +220,79 @@ public:
         const bool authorStyle = ownStyle || dialect.citationStyleFrom == u"front-matter";
         QString style = ownStyle ? own.citationStyle : dialect.citationStyle;
         if (authorStyle && Dialect::isStyleFile(style) && !allowed(style)) style.clear();
-        if (outside)
-            limitations.append(QStringLiteral("Citation files outside the document's allowed folders were omitted"));
+        if (!outside.isEmpty()) {
+            outside.removeDuplicates();
+            limitations.append(QStringLiteral("Citation files outside the document's allowed folders were omitted: %1")
+                                   .arg(outside.join(QStringLiteral(", "))));
+        }
 
         const bool moved = QDir::cleanPath(root.directory) != folder;
         const bool styleFile = Dialect::isStyleFile(style);
-        const bool writeBibliography = bibliography != original || (moved && !bibliography.isEmpty());
-        const bool writeStyle = style != own.citationStyle || (moved && styleFile);
-        if (!writeBibliography && !writeStyle) return std::nullopt;
-
-        // Front matter names files within its document's folder alone: one
-        // the folder written to does not hold goes along with the text, as
-        // its pictures do.
-        bool uncopied = false;
-        const auto written = [&](const QString &path, bool fromFrontMatter) {
+        const bool rebaseBibliography = bibliography != original || (moved && !bibliography.isEmpty());
+        const bool rebaseStyle = style != own.citationStyle || (moved && styleFile);
+        // Check the bytes of the opened file before naming it or putting
+        // those same bytes alongside the assembled document.
+        const auto written = [&](const QString &path, bool fromFrontMatter, bool isStyle) -> QString {
+            const QString name = QFileInfo(path).fileName();
+            const auto omit = [&](const QString &why) {
+                limitations.append(QStringLiteral("Omitted %1 (%2)").arg(name, why));
+                return QString();
+            };
+            const auto format = BibliographyDatabase::formatForPath(path);
+            if (isStyle && !name.endsWith(QStringLiteral(".csl"), Qt::CaseInsensitive))
+                return omit(QStringLiteral("A citation style needs a .csl filename."));
+            if (!isStyle && format == BibliographyDatabase::Format::Auto)
+                return omit(QStringLiteral("The filename has no bibliography extension."));
+            const auto file = fromFrontMatter ? SafeRead::readWithin(path, SafeRead::ReferenceBytes, reach.folders)
+                                              : SafeRead::read(path, SafeRead::ReferenceBytes);
+            if (!file.ok) return omit(file.error);
+            QString why;
+            bool usable;
+            if (isStyle) {
+                usable = bool(CslStyle::fromXml(file.bytes, &why));
+                if (usable) {
+                    QXmlStreamReader xml(file.bytes);
+                    usable = xml.readNextStartElement() && xml.namespaceUri() == u"http://purl.org/net/xbiblio/csl";
+                    if (!usable) why = QStringLiteral("The style needs a CSL root element.");
+                }
+            } else {
+                const auto db = BibliographyDatabase::fromData(file.bytes, format, path);
+                usable = db.isValid() && db.hasReferenceEntries();
+                if (!usable) {
+                    why = QStringLiteral("The bibliography contains no readable entries.");
+                    for (const auto &d : db.diagnostics())
+                        if (d.severity == BibliographyDiagnostic::Severity::Error) { why = d.message; break; }
+                }
+            }
+            if (!usable) return omit(why);
             const QString relative = Exporters::relativeTo(folder, path);
             const bool within = !QDir::isAbsolutePath(relative) && relative != u".." && !relative.startsWith(QLatin1String("../"));
-            if (within || !citationDestination) return relative;
-            const QString placed = citationDestination(path, fromFrontMatter ? &reach.folders : nullptr);
-            if (placed.isEmpty()) uncopied = true;
-            return placed;
+            if (within || !citationDestination || !(isStyle ? rebaseStyle : rebaseBibliography)) return relative;
+            return citationDestination(file.bytes, name);
         };
+        QStringList names;
+        for (const QString &path : std::as_const(bibliography)) {
+            const QString name = written(path, authorFiles.contains(path), false);
+            if (!name.isEmpty()) names.append(name);
+        }
+        const QString styleName = styleFile ? written(style, authorStyle, true) : style;
+        const bool writeBibliography = rebaseBibliography || names.size() != bibliography.size();
+        const bool writeStyle = rebaseStyle || (styleFile && styleName.isEmpty());
+        if (!writeBibliography && !writeStyle) return std::nullopt;
         QStringList keys;
         QString entries;
         if (writeBibliography) {
             keys.append(QStringLiteral("bibliography"));
-            QString names;
-            for (const QString &path : std::as_const(bibliography)) {
-                const QString name = written(path, authorFiles.contains(path));
-                if (!name.isEmpty()) names += QStringLiteral("  - %1\n").arg(yamlQuoted(name));
+            if (!names.isEmpty()) {
+                entries += QStringLiteral("bibliography:\n");
+                for (const QString &name : std::as_const(names))
+                    entries += QStringLiteral("  - %1\n").arg(yamlQuoted(name));
             }
-            if (!names.isEmpty()) entries += QStringLiteral("bibliography:\n") + names;
         }
         if (writeStyle) {
             keys.append(QStringLiteral("csl"));
-            const QString name = styleFile ? written(style, authorStyle) : style;
-            if (!name.isEmpty()) entries += QStringLiteral("csl: %1\n").arg(yamlQuoted(name));
+            if (!styleName.isEmpty()) entries += QStringLiteral("csl: %1\n").arg(yamlQuoted(styleName));
         }
-        if (uncopied) limitations.append(QStringLiteral("Citation files that could not be copied were omitted"));
         if (!root.frontMatter.present) {
             if (entries.isEmpty()) return std::nullopt;
             const int start = root.text.startsWith(QChar(0xfeff)) ? 1 : 0;
@@ -755,7 +791,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     result.renderers.insert(QStringLiteral("markdown"), QStringLiteral("parch " PARCH_VERSION));
     const QString outputFolder = QFileInfo(recipe.output).absolutePath();
     const QString folder = HtmlExporter::assetFolder(recipe.output);
-    ExportWeb::Assets assets(ExportWeb::Assets::Mode::Copy, QFileInfo(folder).fileName() + u'/', outputFolder);
+    ExportWeb::Assets assets(ExportWeb::Assets::Mode::Markdown, QFileInfo(folder).fileName() + u'/', outputFolder);
     if (recipe.options.contains(QStringLiteral("as-is"))) {
         result.limitations = limitations(document, recipe, {});
         const QString text = document.files.empty() ? QString() : document.files.front().text;
@@ -783,11 +819,8 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
     }
     // A bibliography or style the new folder cannot reach goes along with
     // the text, beside its pictures.
-    const MarkdownExport::FileDestination citationFile = [&](const QString &path, const QStringList *folders) {
-        const SafeRead::Result file = folders ? SafeRead::readWithin(path, SafeRead::ReferenceBytes, *folders)
-                                              : SafeRead::read(path, SafeRead::ReferenceBytes);
-        if (!file.ok) return QString();
-        return QUrl::fromPercentEncoding(assets.copy(file.bytes, QFileInfo(path).fileName()).toUtf8());
+    const MarkdownExport::FileDestination citationFile = [&](const QByteArray &bytes, const QString &name) {
+        return QUrl::fromPercentEncoding(assets.copy(bytes, name).toUtf8());
     };
     const MarkdownExport::Assembled assembled = MarkdownExport::assemble(document, outputFolder, recipe.dialect, image, citationFile);
     result.limitations = assembled.limitations;
@@ -801,7 +834,7 @@ ExportResult MarkdownExporter::write(const md::Document &document, const ExportR
         return result;
     }
     result.written.append(recipe.output);
-    for (const ExportWeb::Assets::Asset &asset : assets.assets()) result.written.append(folder + u'/' + asset.name);
+    assets.listCopies(result);
     result.ok = true;
     return result;
 }

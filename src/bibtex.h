@@ -23,7 +23,7 @@ struct Result {
     QList<BibliographyDiagnostic> diagnostics;
 };
 
-Result parse(const QString &text);
+Result parse(const QString &text, qsizetype maxExpansion = qsizetype(64) << 20);
 
 // The names of a name field, as written in the database ("Doe, John and
 // Ludwig van Beethoven"). The von part becomes a non-dropping particle,

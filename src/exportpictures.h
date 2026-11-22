@@ -12,8 +12,8 @@
 
 #include <functional>
 
-// The formulas and diagrams of a document, drawn for an export: every one
-// the document holds, once each, by the same helpers and render service as
+// The formulas and diagrams accepted for a document, drawn once each for
+// an export by the same helpers and render service as
 // the preview, in paper's colours whatever the desktop's theme. An export
 // draws them all before it writes anything, on its own thread, which waits
 // for them in an event loop of its own and stops at once when the export is
@@ -36,8 +36,7 @@ public:
         QByteArray svg;
         // A diagram as Merman drew it, at print scale.
         QByteArray png;
-        // A diagram's SVG as Merman wrote it, which a browser draws as it
-        // is: for a web page and a book.
+        // Merman's source drawing for a web page or book to turn into plain SVG.
         QByteArray markup;
         // In logical pixels, at the font size the pictures are drawn for.
         QSizeF size;
@@ -90,6 +89,7 @@ public:
         int diagramsAsPictures = 0;
     };
     Counts counts(const md::Document &document) const;
+    static void noteDrawingLimit(const md::Document &document, QStringList &limitations);
 
     // Why every formula or every diagram stays its source, when a helper is
     // missing: "the math helper (render-svg) is not installed"; empty otherwise.

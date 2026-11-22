@@ -33,6 +33,7 @@ class Document : public QObject {
     Q_PROPERTY(bool fileUnreadable READ fileUnreadable NOTIFY changed)
     Q_PROPERTY(QString leadsTo READ leadsTo NOTIFY changed)
     Q_PROPERTY(bool nameTaken READ nameTaken NOTIFY changed)
+    Q_PROPERTY(bool missingLink READ isMissingLink NOTIFY changed)
     Q_PROPERTY(bool textless READ isTextless NOTIFY changed)
     // Whether the text has ever had a file of its own; false for a draft
     // that was never saved, which nothing on disk leads back to.
@@ -59,6 +60,7 @@ public:
     // The canonical path of a named file; empty for a draft.
     QString path() const;
     bool isDraft() const;
+    bool isMissingLink() const { return m_missingLink; }
     QString title() const;
     State state() const;
     QString statusText() const;
@@ -175,7 +177,9 @@ private:
     TextConvention m_convention;
     // What parch last read or wrote; a save only replaces a file still at this version.
     DiskVersion m_diskVersion;
+    std::optional<Revision> m_linkRevision;
     bool m_readOnly;
+    bool m_missingLink = false;
     Problem m_problem = Problem::None;
     QString m_lastError;
     bool m_saving = false;
@@ -190,14 +194,18 @@ private:
     // opened or reloaded, and no save has replaced them yet: the first save
     // keeps them in history before it does.
     bool m_diskUnkept = false;
+    bool m_reloaded = false;
     // The name a naming of the document's own file was asked under, taken
     // by the save that naming starts, which says it again when it ends.
     QString m_askedName;
     // Requests made while a save ran; at most one more save follows it.
     bool m_saveAgain = false;
+    std::optional<DiskFile::NameLink> m_saveLink;
     QString m_pendingSaveAs;
     // The version the waiting name must still find, when the name asked for one.
     std::optional<DiskVersion> m_pendingExpected;
+    std::optional<DiskFile::NameLink> m_pendingLink;
+    bool m_pendingReplaceLink = false;
     // The file is being compared with what parch last read, off the UI thread.
     bool m_checking = false;
     // A choice made in a conflict runs off the UI thread: Keep both reads

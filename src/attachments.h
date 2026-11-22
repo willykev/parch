@@ -128,6 +128,7 @@ public:
     };
     // Saves an image's bytes in <folder>/assets as pasted-<date>-<n>.<extension>,
     // at the first n free or already holding the same bytes.
+    static QString longestPastedPath(const QDate &date);
     static Placed savePasted(const QString &folder, const QDate &date, const QString &extension,
                              const QByteArray &bytes);
     // Copies a file into <folder>/assets under its own name, or with -2, -3

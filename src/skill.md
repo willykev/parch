@@ -17,9 +17,12 @@ The `parch` command reads them without a window: every command below works
 without a display, takes `--json`, never changes the document, and writes
 errors to stderr.
 
+Put options before `--` and file names after it, especially names supplied by another program.
+For example, use `parch check --json -- "$file"` or `parch open -- "$file"`.
+
 ## Commands
 
-- Check: `parch check notes.md [more.md...] --json` reports every problem
+- Check: `parch check --json -- notes.md [more.md...]` reports every problem
   with its file, line, column, severity (`error`, `warning`, `info`), a code
   and a kind: includes that cannot be read (`include`), references, notes,
   citations and variables that lead nowhere (`reference`, `footnote`,
@@ -32,12 +35,12 @@ errors to stderr.
   2 means problems were found. When the renderers are not installed, or
   with `--no-render` (faster, for a quick check), `skipped` in the JSON
   lists what was not checked.
-- Render: `parch render notes.md --to html|text|outline|json-tree [-o out]`.
+- Render: `parch render --to html|text|outline|json-tree [-o out] -- notes.md`.
   `html` is a safe fragment (no page around it), `text` the reading text,
   `outline` the headings indented by level, `json-tree` the whole semantic
   tree with source ranges (UTF-16 offsets per file) and line numbers. With
   `--json` the result is inside a report.
-- Export: `parch export notes.md --to md|html|pdf|docx|epub -o out.pdf`.
+- Export: `parch export --to md|html|pdf|docx|epub -o out.pdf -- notes.md`.
   `md` writes the document as one Markdown file with its includes in place
   (`--as-is` writes its own text); `html` a standalone page with its own
   neutral styling, its images copied beside it (`--images copy|embed|link`);
@@ -51,12 +54,12 @@ errors to stderr.
   `--to` is left out. It refuses to replace a file that is there unless given
   `--force`, and never writes over the document or a file it includes.
   `--quiet` prints nothing but errors.
-- Count: `parch stats notes.md --json` gives words, characters (with and
+- Count: `parch stats --json -- notes.md` gives words, characters (with and
   without spaces), reading minutes at 200 words a minute, and headings.
-- Open: `parch notes.md` (or `parch open notes.md`) opens the document in
+- Open: `parch -- notes.md` (or `parch open -- notes.md`) opens the document in
   the window, in the running parch if there is one. It needs their desktop,
   so do not wait on it. A file named like a command opens with
-  `parch open check`.
+  `parch open -- check`.
 - `parch help <command>` lists a command's options.
 
 Exit codes: 0 done, 1 a wrong command line, 2 problems found (or an export
@@ -107,7 +110,7 @@ say which profile, extensions, bibliography and style were used.
 
 - Their documents are theirs. Change one only when asked, and write exports
   to new files, not over files that are there.
-- Check after writing: `parch check <file> --json`, then fix what it reports
+- Check after writing: `parch check --json -- <file>`, then fix what it reports
   in the source.
 - Write in the dialect above: notes, citations and includes work in their
   app's preview and exports as they do here.

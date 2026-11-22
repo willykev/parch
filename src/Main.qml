@@ -33,7 +33,7 @@ ApplicationWindow {
                                        || headingsDialog.visible || folderSearchDialog.visible || libraryPanel.dialogOpen
                                        || encodingDialog.visible
                                        || documentSettingsDialog.visible || exportDialog.visible || openLinkDialog.visible
-                                       || exportLinkDialog.visible || exportReplacePrompt.visible
+                                       || saveLinkDialog.visible || exportLinkDialog.visible || exportReplacePrompt.visible
     // The window's shortcuts answer only in the window in front, and not over a dialog.
     readonly property bool shortcutsOn: active && !dialogOpen
 
@@ -655,6 +655,9 @@ ApplicationWindow {
         }
         function onCloseConfirmationRequested(document, discarding) { closeConfirmation.made().ask(document, discarding) }
         function onEncodingConfirmationRequested(document) { encodingDialog.made().confirm(document) }
+        function onSaveLinkRequested(document, name, target, canFollow) {
+            saveLinkDialog.made().ask(document, name, target, canFollow)
+        }
         function onExportLinkQuestionRequested(output, target) { exportLinkDialog.made().ask(output, target) }
         function onViewShowRequested() { window.showView() }
     }
@@ -715,7 +718,7 @@ ApplicationWindow {
         case "newDocumentInFolder":
             return tabs.activePath.length > 0 && backend.organizer.libraryOf(tabs.activePath).length > 0
         case "reopenWithEncoding":
-            return document.state === Document.ReadOnly && !document.scratch
+            return document.state === Document.ReadOnly && !document.scratch && !document.missingLink
         default:
             return true
         }
@@ -1138,9 +1141,8 @@ ApplicationWindow {
                     fontFamily: settings.previewFontFamily
                     fontPixelSize: settings.previewFontPixelSize
                     lineHeight: settings.previewLineHeight
-                    // Pictures from the web, for every document or as this one chose.
+                    // The preview also checks the hosts approved for this document.
                     remoteImages: settings.remoteImages
-                                  || (backend.documentSettings.revision >= 0 && backend.documentSettings.remotePictures(window.document))
                     // The caret goes to what was double-clicked, and the keys
                     // with it where the text is shown.
                     onSourceRequested: (position) => {
@@ -1159,7 +1161,7 @@ ApplicationWindow {
                         if (heading.length > 0 && (window.document !== from || window.tabs.activePath === path))
                             Qt.callLater(window.showAnchor, heading)
                     }
-                    onLinkAsked: (target, shown, scheme, local) => openLinkDialog.made().ask(target, shown, scheme, local)
+                    onLinkAsked: (target, shown, scheme, local, origin, userInfo) => openLinkDialog.made().ask(target, shown, scheme, local, origin, userInfo)
                     onEscapePressed: window.escapeInText()
                 }
 
@@ -1389,7 +1391,7 @@ ApplicationWindow {
             encodingDialog: encodingDialog, closeConfirmation: closeConfirmation, attachmentDialog: attachmentDialog,
             linkDialog: openLinkDialog, checkDocumentDialog: checkDocumentDialog, commandPalette: commandPalette,
             preferencesDialog: preferencesDialog, documentSettingsDialog: documentSettingsDialog,
-            exportDialog: exportDialog, exportLinkDialog: exportLinkDialog, exportReplacePrompt: exportReplacePrompt,
+            saveLinkDialog: saveLinkDialog, exportDialog: exportDialog, exportLinkDialog: exportLinkDialog, exportReplacePrompt: exportReplacePrompt,
             shortcutsDialog: shortcutsDialog, headingsDialog: headingsDialog, folderSearchDialog: folderSearchDialog
         }
         return popups[name] ? popups[name].made() : null
@@ -1528,6 +1530,17 @@ ApplicationWindow {
             ExportDialog {
                 objectName: "exportDialog"
                 context: window.context
+                onClosed: window.dialogClosed()
+            }
+        }
+    }
+
+    LazyPopup {
+        id: saveLinkDialog
+        owner: window
+        component: Component {
+            SaveLinkDialog {
+                objectName: "saveLinkDialog"
                 onClosed: window.dialogClosed()
             }
         }

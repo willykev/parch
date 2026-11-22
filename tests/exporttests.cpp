@@ -1,4 +1,8 @@
+// GLib precedes Qt, whose signals keyword is also a GLib member name.
+#include <gio/gio.h>
+
 #include "exporttests.h"
+#include "previewbuilder.h"
 
 #include "backend.h"
 #include "cli.h"
@@ -12,14 +16,18 @@
 #include "exporter.h"
 #include "exportpictures.h"
 #include "exports.h"
+#include "exportweb.h"
 #include "filepicker.h"
+#include "htmlmarkdown.h"
 #include "paperdocument.h"
+#include "picturedata.h"
 #include "pdfexport.h"
 #include "pdfoutline.h"
 #include "previewresources.h"
 #include "previewstyle.h"
 #include "printportal.h"
 #include "printpreview.h"
+#include "rendercheck.h"
 #include "rendertesting.h"
 #include "svgpaper.h"
 #include "testfiles.h"
@@ -31,8 +39,10 @@
 #include <QBuffer>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QImage>
+#include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -50,6 +60,8 @@
 #include <QTimer>
 #include <QXmlStreamReader>
 #include <sys/xattr.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <thread>
@@ -1150,7 +1162,7 @@ void htmlCarriesItsPictures()
              (QStringList{QStringLiteral(".parch-export"), QStringLiteral("diagram.svg"), QStringLiteral("square.png")}));
     QCOMPARE(readFile(folder.path() + QStringLiteral("/out/page_files/square.png")), readFile(folder.path() + QStringLiteral("/square.png")));
     QVERIFY(copied.written.contains(folder.path() + QStringLiteral("/out/page_files/square.png")));
-    QVERIFY2(copied.limitations.isEmpty(), qPrintable(copied.limitations.join(u'\n')));
+    QCOMPARE(copied.limitations, QStringList{QStringLiteral("Files copied beside the export: page_files/diagram.svg, page_files/square.png")});
     // Other files may have been put alongside the exported pictures.
     writeFile(folder.path() + QStringLiteral("/out/page_files/stale.png"), "stale");
     QVERIFY(html->write(loaded.document, recipeFor(loaded, QStringLiteral("html"), page), fakeRun(work)).ok);
@@ -1701,7 +1713,9 @@ void epubReportsLinksToFilesOutsideTheBook()
     QVERIFY(package.contains("href=\"chapter-2.xhtml\""));
     QVERIFY(package.contains("href=\"images/cover.svg\""));
     QVERIFY(!package.contains("extra.html"));
-    QCOMPARE(entry(zip, u"OEBPS/images/cover.svg"_s), readFile(root.filePath(u"doc/pics/cover.svg"_s)));
+    const QByteArray cover = entry(zip, u"OEBPS/images/cover.svg"_s);
+    QVERIFY(!cover.isEmpty() && xmlProblem(cover).isEmpty());
+    QCOMPARE(SvgPaper::raster(cover, QSize(20, 20)), SvgPaper::raster(readFile(root.filePath(u"doc/pics/cover.svg"_s)), QSize(20, 20)));
     QCOMPARE(readFile(root.filePath(u"outside.html"_s)), QByteArray("Outside"));
 }
 
@@ -1723,7 +1737,18 @@ void htmlPicturesKeepTheirViewsAndOddFolderNames()
     const QString shown = QString::fromUtf8(readFile(page));
     QVERIFY2(shown.contains(QStringLiteral("<img src=\"notes%232_files/icons.svg#left\" alt=\"Left\" />")), qPrintable(shown));
     QVERIFY2(shown.contains(QStringLiteral("<img src=\"notes%232_files/icons.svg#right\" alt=\"Right\" />")), qPrintable(shown));
-    QCOMPARE(readFile(folder.path() + QStringLiteral("/notes#2_files/icons.svg")), readFile(folder.path() + QStringLiteral("/icons.svg")));
+    const QByteArray icons = readFile(folder.filePath(QStringLiteral("notes#2_files/icons.svg")));
+    QVERIFY(!icons.isEmpty() && xmlProblem(icons).isEmpty());
+    QCOMPARE(SvgPaper::raster(icons, QSize(20, 10)), SvgPaper::raster(readFile(folder.filePath(QStringLiteral("icons.svg"))), QSize(20, 10)));
+    QXmlStreamReader xml(icons);
+    QHash<QString, QString> views;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isStartElement() && xml.name() == u"view")
+            views.insert(xml.attributes().value(u"id").toString(), xml.attributes().value(u"viewBox").toString());
+    }
+    QCOMPARE(views.value(QStringLiteral("left")), QStringLiteral("0 0 10 10"));
+    QCOMPARE(views.value(QStringLiteral("right")), QStringLiteral("10 0 10 10"));
 }
 
 void aReplacedExportKeepsWhoMayReadIt()
@@ -1737,6 +1762,9 @@ void aReplacedExportKeepsWhoMayReadIt()
     if (::setxattr(name.constData(), "user.comment", "for the team", 12, 0) != 0)
         QSKIP("This folder keeps no extended attributes.");
     QVERIFY(QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup));
+    // The old group may be one the owner cannot give to a replacement.
+    Exporters::setReplacementGroupForTests(gid_t(-2));
+    const auto restoreGroup = qScopeGuard([] { Exporters::setReplacementGroupForTests({}); });
     QVERIFY2(Exporters::writeFile(path, "second", &error), qPrintable(error));
     QCOMPARE(readFile(path), QByteArray("second"));
     char value[32] = {};
@@ -2419,4 +2447,931 @@ void exportLinksKeepQueryAndFragment()
     QVERIFY(readFile(linkOutput).contains("src=\"../sub/icons.svg?contrast=high#small\""));
 }
 
+namespace {
+
+QString pictureUrl(const QByteArray &bytes, const QString &type = QStringLiteral("image/png"))
+{
+    return QStringLiteral("data:") + type + QStringLiteral(";base64,") + QString::fromLatin1(bytes.toBase64());
+}
+
+QByteArray gzipped(const QByteArray &bytes)
+{
+    auto *gzip = g_zlib_compressor_new(G_ZLIB_COMPRESSOR_FORMAT_GZIP, -1);
+    auto *memory = g_memory_output_stream_new_resizable();
+    auto *stream = g_converter_output_stream_new(memory, G_CONVERTER(gzip));
+    const auto close = qScopeGuard([&] { g_object_unref(stream); g_object_unref(memory); g_object_unref(gzip); });
+    if (!g_output_stream_write_all(stream, bytes.constData(), bytes.size(), nullptr, nullptr, nullptr)
+        || !g_output_stream_close(stream, nullptr, nullptr)) return {};
+    auto *out = G_MEMORY_OUTPUT_STREAM(memory);
+    return QByteArray(static_cast<const char *>(g_memory_output_stream_get_data(out)), g_memory_output_stream_get_data_size(out));
+}
+
+QStringList imageNames(const QTextDocument &document)
+{
+    QStringList names;
+    for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            const auto format = it.fragment().charFormat();
+            if (format.isImageFormat()) names << format.toImageFormat().name();
+        }
+    }
+    return names;
+}
+
+} // namespace
+
+void svgPicturesUseTheirDrawingInEveryFormat()
+{
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    SvgSwatch swatch;
+    const QByteArray svg = "\xef\xbb\xbf<?xml version=\"1.0\"?><!-- swatch --><!DOCTYPE svg>" + swatch.svg();
+    const QByteArray compressed = gzipped(svg);
+    QVERIFY(compressed.startsWith(QByteArray::fromHex("1f8b")));
+    QVERIFY(compressed.size() < svg.size());
+    const auto limited = PictureData::read(compressed, compressed.size());
+    QVERIFY(limited.format.isEmpty() && !limited.error.isEmpty());
+    QVERIFY(PictureData::read(gzipped("<other><svg/></other>")).format.isEmpty());
+    writeFile(folder.filePath("swatch.png"), svg);
+    const QStringList sources{QStringLiteral("swatch.png"), pictureUrl(svg), pictureUrl(compressed)};
+    for (int i = 0; i < sources.size(); ++i) {
+        const QString &source = sources.at(i);
+        const QString path = folder.filePath(QStringLiteral("drawing.md"));
+        writeFile(path, (QStringLiteral("![Swatch](") + source + QStringLiteral(")\n")).toUtf8());
+        const auto loaded = load(path);
+        PreviewResources preview;
+        const auto target = md::classifyDestination(source, folder.path());
+        const auto read = [&] { return preview.image(target, source, {folder.path()}); };
+        read();
+        QTRY_COMPARE(preview.pending(), 0);
+        const auto picture = read();
+        QCOMPARE(picture.state, preview::Picture::Ready);
+        QVERIFY(pixelsNear(picture.image, QColor("#008000"), 5) > 0);
+        QCOMPARE(pixelsNear(picture.image, Qt::magenta, 5), 0);
+
+        const QString docx = folder.filePath(QStringLiteral("drawing%1.docx").arg(i));
+        const auto word = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", docx), bareRun());
+        QVERIFY2(word.ok && word.limitations.isEmpty(), qPrintable(word.error + word.limitations.join(u' ')));
+        const QImage media = QImage::fromData(entry(entriesOf(docx), QStringLiteral("word/media/image1.png")), "PNG");
+        QVERIFY(pixelsNear(media, QColor("#008000"), 5) > 0);
+        QCOMPARE(pixelsNear(media, Qt::magenta, 5), 0);
+
+        // Paint the PDF's page and also check that the exported file retains the drawing as vectors.
+        PaperDocument paper(loaded.document, nullptr, nullptr, {});
+        QBuffer buffer;
+        buffer.open(QIODevice::WriteOnly);
+        QPdfWriter pdf(&buffer);
+        pdf.setResolution(96);
+        QVERIFY(paper.layOut(&pdf));
+        QVERIFY2(paper.limitations().isEmpty(), qPrintable(paper.limitations().join(u' ')));
+        QImage page(paper.pageSize().toSize(), QImage::Format_RGB32);
+        page.fill(Qt::white);
+        QPainter painter(&page);
+        paper.paint(painter, 0);
+        painter.end();
+        QVERIFY(pixelsNear(page, QColor("#008000"), 5) > 0);
+        QCOMPARE(pixelsNear(page, Qt::magenta, 5), 0);
+        const QString output = folder.filePath(QStringLiteral("drawing%1.pdf").arg(i));
+        const auto printed = Exporters::find("pdf")->write(loaded.document, recipeFor(loaded, "pdf", output), bareRun());
+        QVERIFY2(printed.ok, qPrintable(printed.error));
+        QCOMPARE(inspectPdf(readFile(output)).images, 0);
+    }
+
+    const QByteArray unsized = "<svg xmlns='http://www.w3.org/2000/svg'><rect width='4' height='4' fill='red'/></svg>";
+    const auto viewport = PictureData::decode(PictureData::read(unsized));
+    QCOMPARE(viewport.image.size(), QSize(300, 150));
+    QCOMPARE(viewport.image.pixelColor(2, 2), QColor(Qt::red));
+    QCOMPARE(SvgPaper::raster(SvgPaper::plain(unsized), viewport.image.size()), viewport.image);
+    QCOMPARE(SvgPaper::size("<svg xmlns='http://www.w3.org/2000/svg' width='42'/>"), QSizeF(42, 150));
+    QVERIFY(SvgPaper::size("<svg xmlns='http://www.w3.org/2000/svg' height='0'/>").isEmpty());
+}
+
+void aPdfIsNotAPicture()
+{
+    QTemporaryDir folder;
+    const QString path = folder.filePath(QStringLiteral("page.svg"));
+    {
+        QPdfWriter pdf(path);
+        QPainter painter(&pdf);
+        painter.fillRect(QRect(0, 0, 10, 10), Qt::green);
+    }
+    const QByteArray bytes = readFile(path);
+    QVERIFY(bytes.startsWith("%PDF"));
+    QVERIFY(ExportWeb::Assets::mediaType("<!-- <svg/> --><other/>", path).isEmpty());
+    QVERIFY(PreviewResources::webPictureFormat("<?xml version='1.0'?><other><svg/></other>").isEmpty());
+    QVERIFY(ExportWeb::Assets::mediaType(bytes, path).isEmpty());
+    const QString data = pictureUrl(bytes);
+    const QString document = folder.filePath("pictures.md");
+    writeFile(document, ("![Page](page.svg)\n\n![Embedded](" + data + ")\n").toUtf8());
+    const auto loaded = load(document);
+    for (const QString &source : {path, data}) {
+        PreviewResources preview;
+        const auto read = [&] { return preview.image(md::classifyDestination(source, folder.path()), source, {folder.path()}); };
+        read();
+        QTRY_COMPARE(preview.pending(), 0);
+        QCOMPARE(read().state, preview::Picture::Failed);
+        QVERIFY(!read().diagnostic.isEmpty());
+    }
+    for (const QString &format : {QStringLiteral("pdf"), QStringLiteral("docx")}) {
+        const QString output = folder.filePath("out." + format);
+        const auto result = Exporters::find(format)->write(loaded.document, recipeFor(loaded, format, output), bareRun());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QVERIFY(!result.limitations.isEmpty());
+        if (format == u"pdf") QCOMPARE(inspectPdf(readFile(output)).images, 0);
+        else QVERIFY(entry(entriesOf(output), "word/media/image1.png").isEmpty());
+    }
+}
+
+void picturesAreReadByTheirOwnFormat_data()
+{
+    QTest::addColumn<QByteArray>("format");
+    for (const char *name : {"png", "jpeg", "gif", "webp", "bmp", "tiff", "avif", "heic", "jxl"})
+        QTest::newRow(name) << QByteArray(name);
+}
+
+void picturesAreReadByTheirOwnFormat()
+{
+    QFETCH(QByteArray, format);
+    const bool fixture = format == "gif" || format == "avif" || format == "heic" || format == "jxl";
+    QByteArray bytes;
+    if (fixture) {
+        bytes = readFile(QStringLiteral(PARCH_SOURCE_DIR "/tests/fixtures/pictures/green.") + QString::fromLatin1(format));
+    } else {
+        if ((format == "webp" || format == "tiff") && !QImageReader::supportedImageFormats().contains(format))
+            QSKIP("The optional picture reader is not installed.");
+        QImage tile(4, 3, QImage::Format_RGB32);
+        tile.fill(QColor("#008000"));
+        QBuffer buffer(&bytes);
+        QVERIFY(buffer.open(QIODevice::WriteOnly));
+        QVERIFY(tile.save(&buffer, format.constData()));
+    }
+    QVERIFY(!bytes.isEmpty());
+    const QString type = ExportWeb::Assets::mediaType(bytes, QStringLiteral("drawing.svg"));
+    QCOMPARE(type, QStringLiteral("image/") + QString::fromLatin1(format == "heic" ? QByteArray("heif") : format));
+    const auto installed = QImageReader::supportedImageFormats();
+    if (!installed.contains(format) && !(format == "heic" && installed.contains("heif")))
+        QSKIP("The optional picture reader is not installed.");
+    const QString url = pictureUrl(bytes, QStringLiteral("image/svg+xml"));
+    PreviewResources preview;
+    const auto read = [&] { return preview.image(md::classifyDestination(url, {}), url, {}); };
+    read();
+    QTRY_COMPARE(preview.pending(), 0);
+    QCOMPARE(read().state, preview::Picture::Ready);
+    QCOMPARE(read().image.size(), QSize(4, 3));
+    QVERIFY(pixelsNear(read().image, QColor("#008000"), 24) > 0);
+}
+
+void exportedSvgPicturesHoldNoScript_data()
+{
+    QTest::addColumn<QString>("format");
+    QTest::addColumn<QString>("images");
+    QTest::addColumn<bool>("embeddedSource");
+    QTest::newRow("copied page") << QStringLiteral("html") << QStringLiteral("copy") << false;
+    QTest::newRow("single page") << QStringLiteral("html") << QStringLiteral("embed") << false;
+    QTest::newRow("embedded source") << QStringLiteral("html") << QStringLiteral("embed") << true;
+    QTest::newRow("book") << QStringLiteral("epub") << QString() << false;
+    QTest::newRow("book with embedded source") << QStringLiteral("epub") << QString() << true;
+    QTest::newRow("assembled Markdown") << QStringLiteral("md") << QStringLiteral("copy") << false;
+}
+
+void svgExportKeepsViewportAndNamedView()
+{
+    QTemporaryDir folder;
+    const QByteArray svg("<svg xmlns='http://www.w3.org/2000/svg' width='240' height='120' viewBox='4 2 24 12'><view id='left' viewBox='4 2 12 12'/><rect x='4' y='2' width='12' height='12' fill='#abcdef'/></svg>");
+    QCOMPARE(SvgPaper::size(svg), QSizeF(240, 120));
+    writeFile(folder.filePath("tile.svg"), svg);
+    writeFile(folder.filePath("note.md"), "![tile](tile.svg#left)");
+    const auto loaded = load(folder.filePath("note.md"));
+    const auto output = folder.filePath("out.html");
+    const auto result = Exporters::find("html")->write(loaded.document, recipeFor(loaded, "html", output, {{"images","copy"}}), bareRun());
+    QVERIFY(result.ok);
+    const auto drawing = readFile(folder.filePath("out_files/tile.svg"));
+    QCOMPARE(SvgPaper::raster(drawing, QSize(240, 120)), SvgPaper::raster(svg, QSize(240, 120)));
+    QXmlStreamReader xml(drawing);
+    QVERIFY(xml.readNextStartElement());
+    QCOMPARE(xml.attributes().value(u"viewBox").toString(), QStringLiteral("4 2 24 12"));
+    QVERIFY(xml.attributes().value(u"width").startsWith(u"240"));
+    QVERIFY(xml.attributes().value(u"height").startsWith(u"120"));
+}
+
+void exportedSvgPicturesHoldNoScript()
+{
+    QFETCH(QString, format);
+    QFETCH(QString, images);
+    QFETCH(bool, embeddedSource);
+    const QByteArray svg = R"(<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="http://www.w3.org/2000/svg" viewBox="20 -10 8 8" onload=""><script/><x:script/><view id="tile" viewBox="20 -10 4 4"/><a href="java&#115;cript:"><rect x="20" y="-10" width="8" height="8" fill="#008000"/></a></svg>)";
+    QTemporaryDir folder;
+    writeFile(folder.filePath("green.png"), svg);
+    const QString source = embeddedSource ? pictureUrl(svg) : QStringLiteral("green.png");
+    writeFile(folder.filePath("note.md"), ("![Green](" + source + ")\n").toUtf8());
+    const auto loaded = load(folder.filePath("note.md"));
+    const QString output = folder.filePath("out." + format);
+    const auto recipe = recipeFor(loaded, format, output, {{QStringLiteral("images"), images}});
+    const auto result = Exporters::find(format)->write(loaded.document, recipe, bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QByteArray drawing;
+    if (images == u"embed") {
+        const auto match = QRegularExpression(QStringLiteral("src=\"data:image/svg\\+xml;base64,([^\"]+)\"")).match(QString::fromUtf8(readFile(output)));
+        QVERIFY(match.hasMatch());
+        drawing = QByteArray::fromBase64(match.captured(1).toLatin1());
+    } else if (format == u"epub") {
+        const auto parts = entriesOf(output);
+        const auto chapter = entry(parts, QStringLiteral("OEBPS/text.xhtml"));
+        const auto match = QRegularExpression(QStringLiteral("src=\"(images/[^\"]+\\.svg)\"")).match(QString::fromUtf8(chapter));
+        QVERIFY(match.hasMatch());
+        drawing = entry(parts, QStringLiteral("OEBPS/") + match.captured(1));
+    } else {
+        drawing = readFile(folder.filePath("out_files/green.svg"));
+    }
+    if (format == u"md") {
+        QCOMPARE(drawing, svg);
+        return;
+    }
+    QVERIFY(!drawing.isEmpty());
+    QVERIFY(!drawing.contains("script") && !drawing.contains("onload") && !drawing.contains("&#115;"));
+    QVERIFY(!drawing.contains("<a "));
+    const auto image = SvgPaper::raster(drawing, QSize(8, 8));
+    QCOMPARE(image.pixelColor(4, 4), QColor("#008000"));
+    // Named views and coordinate-based fragments both use the source's coordinates.
+    QXmlStreamReader xml(drawing);
+    QVERIFY(xml.readNextStartElement());
+    QCOMPARE(xml.attributes().value(u"viewBox").toString(), QStringLiteral("20 -10 8 8"));
+    while (!xml.atEnd() && !(xml.isStartElement() && xml.name() == u"view")) xml.readNext();
+    QCOMPARE(xml.attributes().value(u"id").toString(), QStringLiteral("tile"));
+    QCOMPARE(xml.attributes().value(u"viewBox").toString(), QStringLiteral("20 -10 4 4"));
+}
+
+void embeddedPicturesKeepTheirViewFragments()
+{
+    QTemporaryDir dir;
+    const QByteArray svg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><view id='left' viewBox='0 0 6 12'/><rect width='8' height='8' fill='#abcdef'/></svg>");
+    const QByteArray encoded = QUrl::toPercentEncoding(QString::fromUtf8(svg));
+    writeFile(dir.filePath("note.md"), "![A](data:image/svg+xml," + encoded + "#left)\n![B](data:image/svg+xml;base64," + svg.toBase64() + "#left)");
+    const auto loaded = load(dir.filePath("note.md"));
+    const auto output = dir.filePath("note.html");
+    const auto result = Exporters::find("html")->write(loaded.document, recipeFor(loaded, "html", output, {{"images","copy"}}), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(readFile(output).count("note_files/picture.svg#left"), 2);
+}
+
+void inlineFormulaSvgKeepsOnlyDrawingElements()
+{
+    ExportPictures::Picture formula;
+    formula.drawn = true;
+    formula.svg = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 8"><rect width="5" height="8"/><script/><image href="urn:parch:missing" width="8" height="8"/></svg>)";
+    formula.size = QSizeF(12, 8);
+    formula.baseline = 6;
+    const QString html = ExportWeb::formula(formula, QStringLiteral("x < y"), false, 16);
+    QVERIFY(html.contains(QStringLiteral("x &lt; y")));
+    QVERIFY(html.contains(QStringLiteral("vertical-align")));
+    QVERIFY(!html.contains(QStringLiteral("<script")) && !html.contains(QStringLiteral("urn:parch:missing")));
+    QVERIFY(html.contains(QStringLiteral("<path")) || html.contains(QStringLiteral("<rect")) || html.contains(QStringLiteral("data:image/svg+xml;base64,")));
+    formula.markup = formula.svg;
+    const QByteArray diagram = ExportWeb::diagramSvg(formula);
+    QVERIFY(!diagram.isEmpty());
+    QVERIFY(!diagram.contains("script") && !diagram.contains("urn:parch:missing"));
+}
+
+void hugeSvgSizesAreDrawnWithinBounds()
+{
+    const QByteArray svg = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8193 2"><rect width="8193" height="2"/></svg>)";
+    // A long, narrow drawing crosses the side limit with only a few rows of pixels.
+    QCOMPARE(SvgPaper::raster(svg, QSize(16386, 4)).size(), QSize(8192, 2));
+    QCOMPARE(PictureData::rasterSize(QSizeF(20000, 20000), 4), QSize(8000, 8000));
+    QCOMPARE(PictureData::rasterSize(QSizeF(1e100, 1), 4), QSize(8192, 1));
+    QTemporaryDir folder;
+    writeFile(folder.filePath("wide.svg"), svg);
+    const QString path = folder.filePath("sizes.md");
+    writeFile(path, "![Strip](wide.svg)\n\n$" + QByteArray(3000, 'x') + "$\n");
+    const auto loaded = load(path);
+    const QString out = folder.filePath("sizes.docx");
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", out), fakeRun(folder.path()));
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QVERIFY(result.limitations.join(u' ').contains(QStringLiteral("pixel limit")));
+    const auto entries = entriesOf(out);
+    for (int i : {1, 2}) {
+        const auto image = QImage::fromData(entry(entries, QStringLiteral("word/media/image%1.png").arg(i)), "PNG");
+        QCOMPARE(image.width(), 8192);
+        QVERIFY(image.height() >= 1);
+    }
+}
+
+void onePictureNamedManyWaysIsDecodedOnce()
+{
+    QTemporaryDir folder;
+    QImage tile(12, 8, QImage::Format_RGB32);
+    tile.fill(Qt::green);
+    const QString path = folder.filePath("tile.png");
+    QVERIFY(tile.save(path));
+    QVERIFY(QFile::link(path, folder.filePath("alias.png")));
+    const QByteArray bytes = readFile(path);
+    const QString data = pictureUrl(bytes);
+    const QString other = pictureUrl(bytes, QStringLiteral("image/jpeg"));
+    const QString doc = folder.filePath("note.md");
+    writeFile(doc, ("![a](tile.png) ![b](./tile.png) ![c](alias.png) ![d](" + data + ") ![e](" + other + ")").toUtf8());
+    const auto loaded = load(doc);
+    PaperDocument paper(loaded.document, nullptr, nullptr, {});
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    QPdfWriter pdf(&buffer);
+    pdf.setResolution(96);
+    QVERIFY(paper.layOut(&pdf));
+    const auto names = imageNames(*paper.document());
+    QCOMPARE(names.size(), 5);
+    QCOMPARE(names[1], names[0]);
+    QCOMPARE(names[2], names[0]);
+    QCOMPARE(names[4], names[3]);
+    QVERIFY(paper.limitations().isEmpty());
+}
+
+void picturesPastTheBudgetAreLeftOutWithANote()
+{
+    QTemporaryDir folder;
+    QImage tile(12, 8, QImage::Format_RGB32);
+    tile.fill(Qt::green);
+    QVERIFY(tile.save(folder.filePath("first.png")));
+    tile.fill(Qt::blue);
+    QVERIFY(tile.save(folder.filePath("second.png")));
+    const QString doc = folder.filePath("note.md");
+    const QByteArray embedded = readFile(folder.filePath("second.png")).toBase64();
+    writeFile(folder.filePath("mounted.svg"), "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' "
+              "viewBox='0 0 12 8'><image width='12' height='8' xlink:href='data:image/png;base64," + embedded + "'/></svg>");
+    writeFile(doc, "![First](first.png) ![Second](second.png) ![Mounted](mounted.svg) ![First again](./first.png)");
+    const auto loaded = load(doc);
+    PaperOptions options;
+    options.picturePixelBudget = 96;
+    PaperDocument paper(loaded.document, nullptr, nullptr, options);
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    QPdfWriter pdf(&buffer);
+    pdf.setResolution(96);
+    QVERIFY(paper.layOut(&pdf));
+    const auto names = imageNames(*paper.document());
+    QCOMPARE(names.size(), 2);
+    QCOMPARE(names.front(), names.back());
+    const QString note = paper.limitations().join(u' ');
+    QVERIFY2(note.contains("second.png") && note.contains("pixel", Qt::CaseInsensitive), qPrintable(note));
+    QVERIFY2(note.contains("mounted.svg"), qPrintable(note));
+    QVERIFY(paper.document()->toPlainText().contains("Second"));
+}
+
+void aHugeHtmlTableIsShownAsText()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("calendar.md"), "<table><tr><td colspan='128'>Spring</td><td>Summer</td></tr></table>\n");
+    const auto loaded = load(dir.filePath("calendar.md"));
+    const auto problems = DocumentCheck::problems(loaded);
+    QVERIFY(std::any_of(problems.begin(), problems.end(), [](const auto &p) { return p.kind == u"table"; }));
+    const QString output = dir.filePath("calendar.docx");
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto body = entry(entriesOf(output), "word/document.xml");
+    QVERIFY(body.contains("Spring") && body.contains("Summer") && !body.contains("<w:tbl>"));
+    PaperDocument paper(loaded.document, nullptr, nullptr, {});
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    QPdfWriter pdf(&buffer);
+    QVERIFY(paper.layOut(&pdf));
+    QVERIFY(paper.document()->toPlainText().contains("Summer"));
+    QVERIFY(paper.document()->rootFrame()->childFrames().isEmpty());
+}
+
+void aDeeplyQuotedHtmlPasteFallsBackToText()
+{
+    const QString html = QStringLiteral("<blockquote><blockquote><p>Garden</p><p>Notes</p></blockquote></blockquote>");
+    QVERIFY(!HtmlMarkdown::convert(html).isEmpty());
+    const QString withImage = html + QStringLiteral("<img src='data:image/png;base64,' alt='Notes'>");
+    QVERIFY(HtmlMarkdown::mayEmbedImages(withImage));
+    for (const QString &markup : {html, withImage}) {
+        bool inlineOnly = true;
+        QVERIFY(HtmlMarkdown::convert(markup, {}, &inlineOnly, false, nullptr, 14).isEmpty());
+        QVERIFY(!inlineOnly);
+    }
+    QString accents(HtmlMarkdown::MaxInputBytes / 2, QChar(0x00e9));
+    QVERIFY(HtmlMarkdown::fitsInput(accents));
+    accents += u'.';
+    QVERIFY(!HtmlMarkdown::fitsInput(accents));
+    QVERIFY(HtmlMarkdown::convert(accents).isEmpty());
+    int saves = 0;
+    const HtmlMarkdown::ImageSink save = [&](const QByteArray &, const QString &) {
+        ++saves;
+        return QStringLiteral("assets/image.png");
+    };
+    const QString overBudget = QStringLiteral("<p><img src='data:image/png;base64,YQ=='></p><p>") +
+                              QString(128, u'x') + QStringLiteral("</p>");
+    QVERIFY(HtmlMarkdown::convert(overBudget, save, nullptr, false, nullptr, 64, QStringLiteral("assets/image.png")).isEmpty());
+    QCOMPARE(saves, 0);
+}
+
+void aTagWithManyAttributesPastesQuickly()
+{
+    QString html = QStringLiteral("<a");
+    for (int i = 0; i < 70; ++i) html += QStringLiteral(" data-note%1='field'").arg(i);
+    html += QStringLiteral(" href='https://example.org/notes'>Notes</a>");
+    QCOMPARE(HtmlMarkdown::convert(QStringLiteral("<a href='https://example.org/notes'>Notes</a>")),
+             QStringLiteral("[Notes](https://example.org/notes)"));
+    QElapsedTimer timer;
+    timer.start();
+    QCOMPARE(HtmlMarkdown::convert(html), QStringLiteral("Notes"));
+    QVERIFY(timer.elapsed() < timeLimit(300));
+}
+
+void onlyReferenceFilesTravelWithMarkdown()
+{
+    QTemporaryDir dir;
+    const QByteArray style("<style xmlns='http://purl.org/net/xbiblio/csl' version='1.0' class='note'><citation><layout><text variable='title'/></layout></citation></style>");
+    writeFile(dir.filePath("reading.xml"), style);
+    writeFile(dir.filePath("example.txt"), "@book{note,title={Example}}");
+    writeFile(dir.filePath("inventory.json"), R"({"items":[{"id":"a","location":"shelf"}]})");
+    writeFile(dir.filePath("labels.yml"), "- id: blue\n");
+    writeFile(dir.filePath("notes.md"), "---\nbibliography: [example.txt, inventory.json, labels.yml]\ncsl: ./reading.xml\n---\nNotes.\n");
+    QVERIFY(QDir().mkpath(dir.filePath("out")));
+    const auto loaded = load(dir.filePath("notes.md"));
+    const auto output = dir.filePath("out/book.md");
+    const auto result = Exporters::find("md")->write(loaded.document, recipeFor(loaded, "md", output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(result.written, QStringList{output});
+    QVERIFY(!readFile(output).contains("bibliography:") && !readFile(output).contains("csl:"));
+
+    QByteArray foreign = style;
+    foreign.replace("http://purl.org/net/xbiblio/csl", "urn:inventory");
+    writeFile(dir.filePath("foreign.csl"), foreign);
+    writeFile(dir.filePath("notes.md"), "---\ncsl: ./foreign.csl\n---\nNotes.\n");
+    const auto foreignStyle = load(dir.filePath("notes.md"));
+    const auto second = Exporters::find("md")->write(foreignStyle.document, recipeFor(foreignStyle, "md", output), bareRun());
+    QVERIFY(second.ok);
+    QCOMPARE(second.written, QStringList{output});
+    QVERIFY(!readFile(output).contains("csl:"));
+}
+
+void aBibliographyThatIsNotOneStaysBehind()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("notes.bib"), "Shopping list\n");
+    writeFile(dir.filePath("empty.bib"), "");
+    writeFile(dir.filePath("empty.json"), "[]");
+    writeFile(dir.filePath("draft.csl"), "<draft/>");
+    writeFile(dir.filePath("paper.md"), "---\ntitle: Paper\nbibliography: [notes.bib, empty.bib, empty.json]\ncsl: draft.csl\n---\nText.\n");
+    QVERIFY(QDir().mkpath(dir.filePath("print")));
+    const auto loaded = load(dir.filePath("paper.md"));
+    for (const QString &name : {QStringLiteral("print/copy.md"), QStringLiteral("near.md")}) {
+        const QString output = dir.filePath(name);
+        const auto result = Exporters::find("md")->write(loaded.document, recipeFor(loaded, "md", output), bareRun());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.written, QStringList{output});
+        const QByteArray content = readFile(output);
+        QVERIFY(content.contains("title: Paper") && !content.contains("bibliography:") && !content.contains("csl:"));
+        const QString notes = result.limitations.join(u'\n');
+        for (const auto file : {"notes.bib", "empty.bib", "empty.json"})
+            QVERIFY2(notes.contains(QStringLiteral("%1 (The bibliography contains no readable entries.)").arg(file)), qPrintable(notes));
+        QVERIFY2(notes.contains("draft.csl (The citation style cannot be used.") && notes.contains("<draft>"), qPrintable(notes));
+    }
+    QVERIFY(!QFileInfo::exists(dir.filePath("print/copy_files")));
+}
+
+void copiedCitationFilesAreListed()
+{
+    QTemporaryDir dir;
+    const QByteArray bib("@book{blue, title={Blue}}\n");
+    const QByteArray json("[{\"id\":\"red\",\"type\":\"book\",\"title\":\"Red\"}]");
+    const QByteArray yaml("references:\n  - id: gold\n    type: book\n    title: Gold\n");
+    const QByteArray style("<style xmlns='http://purl.org/net/xbiblio/csl' version='1.0' class='in-text'>"
+                           "<citation><layout><text variable='title'/></layout></citation></style>");
+    writeFile(dir.filePath("one.bib"), bib);
+    writeFile(dir.filePath("two.json"), json);
+    writeFile(dir.filePath("three.yaml"), yaml);
+    writeFile(dir.filePath("reading.csl"), style);
+    QImage dot(2, 2, QImage::Format_RGB32);
+    dot.fill(Qt::green);
+    QVERIFY(dot.save(dir.filePath("dot.png")));
+    writeFile(dir.filePath("notes.md"), "---\nbibliography: [one.bib, two.json, three.yaml]\ncsl: reading.csl\n---\n"
+                                           "![Green](dot.png)\n");
+    QVERIFY(QDir().mkpath(dir.filePath("print")));
+    const auto loaded = load(dir.filePath("notes.md"));
+    for (const QString &format : {QStringLiteral("md"), QStringLiteral("html")}) {
+        const QString output = dir.filePath("print/book." + format);
+        const auto result = Exporters::find(format)->write(loaded.document, recipeFor(loaded, format, output, {{"images","copy"}}), bareRun());
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.written.size(), format == u"md" ? 6 : 2);
+        const QString notes = result.limitations.join(u'\n');
+        for (const QString &file : result.written.sliced(1)) {
+            const QString name = QFileInfo(file).fileName();
+            QCOMPARE(readFile(file), readFile(dir.filePath(name)));
+            QVERIFY2(notes.contains("book_files/" + name), qPrintable(notes));
+        }
+    }
+}
+
+void aReferenceListMustBeAnArrayOfObjects()
+{
+    for (const QByteArray &data : {QByteArray(R"({"references":"notes"})"), QByteArray(R"({"labels":[]})"), QByteArray(R"([42])")}) {
+        const auto db = BibliographyDatabase::fromData(data, BibliographyDatabase::Format::CslJson, "notes.json");
+        QVERIFY2(!db.isValid(), data.constData());
+        QVERIFY(std::any_of(db.diagnostics().cbegin(), db.diagnostics().cend(), [](const auto &d) {
+            return d.severity == BibliographyDiagnostic::Severity::Error;
+        }));
+    }
+}
+
+void checkReportsABibliographyThatCannotBeRead()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("broken.json"), "[}]");
+    writeFile(dir.filePath("draft.csl"), "<draft/>");
+    writeFile(dir.filePath("paper.md"), "---\nbibliography: broken.json\ncsl: draft.csl\n---\nText.\n");
+    DocumentCheck::Loaded loaded;
+    QString error;
+    QVERIFY(DocumentCheck::load(dir.filePath("paper.md"), Dialect::Layers{}, &loaded, &error));
+    const auto problems = DocumentCheck::problems(loaded);
+    const auto reported = [&](const QString &file) {
+        return std::any_of(problems.begin(), problems.end(), [&](const auto &problem) {
+            return QFileInfo(problem.path).fileName() == file && problem.severity == md::Severity::Error && !problem.message.isEmpty();
+        });
+    };
+    QVERIFY(reported("broken.json"));
+    QVERIFY(reported("draft.csl"));
+    const Ran checked = runCli(dir.path(), {"check", "paper.md", "--no-render", "--json"});
+    QCOMPARE(checked.code, int(Cli::Problems));
+    QVERIFY(checked.out.contains("broken.json") && checked.out.contains("draft.csl"));
+}
+
+void anEmptyBibliographyIsAWarning_data()
+{
+    QTest::addColumn<QString>("name");
+    QTest::addColumn<QByteArray>("contents");
+    QTest::newRow("new-bibtex") << QStringLiteral("refs.bib") << QByteArray();
+    QTest::newRow("bibtex-comment") << QStringLiteral("refs.bib") << QByteArray("% References to add later\n");
+    QTest::newRow("csl-json") << QStringLiteral("refs.json") << QByteArray("[]");
+    QTest::newRow("csl-yaml") << QStringLiteral("refs.yaml") << QByteArray("references: []\n");
+}
+
+void anEmptyBibliographyIsAWarning()
+{
+    QFETCH(QString, name);
+    QFETCH(QByteArray, contents);
+    QTemporaryDir dir;
+    writeFile(dir.filePath(name), contents);
+    writeFile(dir.filePath("paper.md"), "---\nbibliography: " + name.toUtf8() + "\ncsl: ieee\n---\nText.\n");
+    DocumentCheck::Loaded loaded;
+    QString error;
+    QVERIFY2(DocumentCheck::load(dir.filePath("paper.md"), Dialect::Layers{}, &loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.citations.databases.size(), 1);
+    const auto &database = loaded.citations.databases.first();
+    QVERIFY(database && database->isValid());
+    QVERIFY(database->references().isEmpty());
+    QCOMPARE(loaded.formatted.problems.size(), 1);
+    const auto &warning = loaded.formatted.problems.first();
+    QCOMPARE(warning.source, canonical(dir.filePath(name)));
+    QCOMPARE(warning.severity, md::Severity::Warning);
+    QCOMPARE(warning.code, QStringLiteral("bibliography"));
+    QCOMPARE(warning.message, QStringLiteral("The bibliography holds no entries yet."));
+
+    const Ran checked = runCli(dir.path(), {"check", "paper.md", "--no-render", "--json"});
+    QCOMPARE(checked.code, int(Cli::Problems));
+    const auto documents = QJsonDocument::fromJson(checked.out.toUtf8()).object().value("documents").toArray();
+    QCOMPARE(documents.size(), 1);
+    const auto problems = documents.first().toObject().value("problems").toArray();
+    QCOMPARE(problems.size(), 1);
+    const auto problem = problems.first().toObject();
+    QCOMPARE(QFileInfo(problem.value("file").toString()).fileName(), name);
+    QCOMPARE(problem.value("severity").toString(), QStringLiteral("warning"));
+    QCOMPARE(problem.value("code").toString(), warning.code);
+    QCOMPARE(problem.value("message").toString(), warning.message);
+}
+
+void epubMetadataWithControlCharactersIsWellFormed()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("story.md"), "---\ntitle: \"Ti\1tle\"\nauthor: \"Au\2thor\"\n"
+                                        "description: \"Book & notes\"\nidentifier: \"ref\3id\"\n---\n# Hello&#1;World\n\nEnd.\n");
+    const auto loaded = load(dir.filePath("story.md"));
+    QCOMPARE(Exporters::frontMatterText(loaded.document, "author"), QStringLiteral("Au\2thor"));
+    const QString output = dir.filePath("story.epub");
+    const auto result = Exporters::find("epub")->write(loaded.document, recipeFor(loaded, "epub", output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto entries = entriesOf(output);
+    for (const auto &part : entries) {
+        if (part.name.endsWith(".xml") || part.name.endsWith(".opf") || part.name.endsWith(".xhtml"))
+            QVERIFY2(xmlProblem(part.data).isEmpty(), qPrintable(part.name + u' ' + xmlProblem(part.data)));
+    }
+    const auto opf = entry(entries, "OEBPS/content.opf");
+    QVERIFY(opf.contains(">Title<") && opf.contains(">Author<") && opf.contains(">refid<"));
+    QVERIFY(opf.contains("Book &amp; notes"));
+    QVERIFY(entry(entries, "OEBPS/nav.xhtml").contains("HelloWorld"));
+}
+
+void aRepeatedHtmlAttributeIsKeptOnce()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("story.md"), "<a href=\"https://first.example/\" HREF=\"https://second.example/\" "
+                                        "title=\"one\" TITLE=\"two\">Words</a>\n");
+    const auto loaded = load(dir.filePath("story.md"));
+    const QString html = md::toHtml(loaded.document);
+    QCOMPARE(html.count("href="), 1);
+    QVERIFY(html.contains("first.example") && html.contains("title=\"one\""));
+    QVERIFY(!html.contains("second.example") && !html.contains("title=\"two\""));
+    for (const QString &format : {QStringLiteral("epub"), QStringLiteral("docx")}) {
+        const QString output = dir.filePath("story." + format);
+        const auto exported = Exporters::find(format)->write(loaded.document, recipeFor(loaded, format, output), bareRun());
+        QVERIFY2(exported.ok, qPrintable(exported.error));
+        const auto member = entry(entriesOf(output), format == u"epub" ? "OEBPS/text.xhtml" : "word/_rels/document.xml.rels");
+        QVERIFY(xmlProblem(member).isEmpty());
+        QVERIFY(member.contains("first.example") && !member.contains("second.example"));
+    }
+    writeFile(dir.filePath("first.md"), "<a href='data:text/plain,word' href='#later'>Words</a>\n");
+    QVERIFY(!md::toHtml(load(dir.filePath("first.md")).document).contains("href=\"#later\""));
+}
+
+void docxBodyTextWithPercentNumbersIsKept()
+{
+    QTemporaryDir dir;
+    writeFile(dir.filePath("text.md"), "# Progress\n\n100%1 and %2, then %3 and %4.\n");
+    const auto loaded = load(dir.filePath("text.md"));
+    const QString output = dir.filePath("text.docx");
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", output, {{"page-size","Letter"}}), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto body = entry(entriesOf(output), "word/document.xml");
+    QVERIFY(body.contains("100%1 and %2, then %3 and %4."));
+    QVERIFY(body.contains("<w:pgSz w:w=\"12240\" w:h=\"15840\""));
+}
+
+void anExportOverSomeoneElsesFileTakesTheUsualMode()
+{
+    QTemporaryDir dir;
+    const QString old = dir.filePath("old.txt"), fresh = dir.filePath("new.txt");
+    writeFile(old, "Earlier");
+    const auto name = QFile::encodeName(old);
+    QVERIFY(::chmod(name.constData(), 0400) == 0);
+    const bool tagged = ::setxattr(name.constData(), "user.parch.test", "mark", 4, 0) == 0;
+    DiskFile::setSavingUser(qint64(::geteuid()) + 1);
+    const auto restore = qScopeGuard([] { DiskFile::setSavingUser(-1); });
+    QString error;
+    QVERIFY2(Exporters::writeFile(fresh, "New", &error), qPrintable(error));
+    QVERIFY2(Exporters::writeFile(old, "Current", &error), qPrintable(error));
+    struct stat replaced{}, usual{};
+    QVERIFY(::stat(name.constData(), &replaced) == 0 && ::stat(QFile::encodeName(fresh).constData(), &usual) == 0);
+    QCOMPARE(replaced.st_mode & 07777, usual.st_mode & 07777);
+    QCOMPARE(replaced.st_gid, usual.st_gid);
+    if (tagged) QVERIFY(::getxattr(name.constData(), "user.parch.test", nullptr, 0) < 0);
+
+    // The access that matters is that of the file in place at publication.
+    DiskFile::setSavingUser(-1);
+    QVERIFY(::chmod(name.constData(), 0400) == 0);
+    Exporters::PendingFile pending(old);
+    QVERIFY2(pending.write("Later", &error), qPrintable(error));
+    DiskFile::setSavingUser(qint64(::geteuid()) + 1);
+    QVERIFY2(pending.commit(&error), qPrintable(error));
+    QVERIFY(::stat(name.constData(), &replaced) == 0);
+    QCOMPARE(replaced.st_mode & 07777, usual.st_mode & 07777);
+}
+
+void anExportNeverCarriesSetIdBits()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("plain.txt");
+    writeFile(path, "Ordinary text");
+    const auto name = QFile::encodeName(path);
+    QVERIFY(::chmod(name.constData(), 07640) == 0);
+    QString error;
+    QVERIFY2(Exporters::writeFile(path, "Current text", &error), qPrintable(error));
+    struct stat replaced{};
+    QVERIFY(::stat(name.constData(), &replaced) == 0);
+    QCOMPARE(replaced.st_mode & 07777, mode_t(0640));
+}
+
+void anOrderedListStartingAtTheLargestNumber()
+{
+    const auto result = HtmlMarkdown::convert(QStringLiteral("<ol start='2147483647'><li>First</li><li>Second</li>"
+                                                              "<li value='7'>Reset</li><li>Next</li></ol>"));
+    QCOMPARE(result, QStringLiteral("2147483647. First\n2147483648. Second\n7. Reset\n8. Next"));
+}
+
+void docxBookmarksAndRelationshipsStayUnique_data()
+{
+    QTest::addColumn<bool>("headings");
+    QTest::newRow("bookmarks") << true;
+    QTest::newRow("relationships") << false;
+}
+
+void docxBookmarksAndRelationshipsStayUnique()
+{
+    QFETCH(bool, headings);
+    // Time only the writer. Each chapter and reference must keep its own
+    // identifier, and two links to one address must share a relationship.
+    QTemporaryDir dir;
+    const int count = headings ? 3500 : 8000;
+    QByteArray source;
+    for (int i = 0; i < count; ++i) {
+        const QByteArray number = QByteArray::number(i);
+        source += headings ? "## Collected observations from the almanac " + number + "\n\n"
+                           : "[Entry](https://example.org/catalog/" + number + ") [Again](https://example.org/catalog/" + number + ")\n\n";
+    }
+    const QString path = dir.filePath("almanac.md");
+    writeFile(path, source);
+    const auto loaded = load(path);
+    const QString output = dir.filePath("almanac.docx");
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", output), bareRun());
+    const qint64 elapsed = timer.elapsed();
+    QVERIFY2(result.ok, qPrintable(result.error));
+    qInfo("DOCX %s: %d distinct names in %lld ms", headings ? "bookmarks" : "relationships", count, qlonglong(elapsed));
+    const auto entries = entriesOf(output);
+    QXmlStreamReader xml(entry(entries, headings ? "word/document.xml" : "word/_rels/document.xml.rels"));
+    QSet<QString> seen;
+    int uses = 0;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement()) continue;
+        const auto attrs = xml.attributes();
+        if (headings && xml.name() == u"bookmarkStart") {
+            ++uses;
+            seen.insert(attrs.value(u"w:name").toString());
+        } else if (!headings && xml.name() == u"Relationship" && attrs.value(u"TargetMode") == u"External") {
+            ++uses;
+            seen.insert(attrs.value(u"Target").toString());
+        }
+    }
+    QVERIFY(!xml.hasError());
+    QCOMPARE(seen.size(), count);
+    QCOMPARE(uses, count);
+    QVERIFY2(elapsed < timeLimit(headings ? 500 : 750), qPrintable(QStringLiteral("%1 ms").arg(elapsed)));
+}
+
+void consecutiveHeadingsKeepTheirPagePositions()
+{
+    QString source;
+    for (int i = 0; i < 3500; ++i) source += QStringLiteral("## Plot %1\n\n").arg(i);
+    const auto doc = md::parse(source);
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QCOMPARE(paper.headings().size(), 3500);
+    for (const int i : {0, 3499}) {
+        auto at = paper.document()->find(QStringLiteral("Plot %1").arg(i));
+        QVERIFY(!at.isNull());
+        at.setPosition(at.selectionStart() + 1);
+        QVERIFY(at.charFormat().anchorNames().contains(QStringLiteral("plot-%1").arg(i)));
+    }
+    QVERIFY(paper.headings().last().page > 0);
+    QVERIFY2(timer.elapsed() < timeLimit(450), qPrintable(QString::number(timer.elapsed())));
+}
+
+void paperSetsManyShortParagraphsPromptly()
+{
+    const auto doc = md::parse(QStringLiteral("A field observation.\n\n").repeated(4000));
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QVERIFY(paper.pageCount() > 1);
+    QCOMPARE(paper.document()->toPlainText().count(QStringLiteral("A field observation.")), 4000);
+    QVERIFY2(timer.elapsed() < timeLimit(500), qPrintable(QString::number(timer.elapsed())));
+}
+
+void paperWrapsLongTextRunsPromptly_data()
+{
+    QTest::addColumn<QString>("run");
+    QTest::newRow("spaces") << QString(15000, u' ');
+    QTest::newRow("long-word") << QStringLiteral("Specimen").repeated(8000);
+}
+
+void paperWrapsLongTextRunsPromptly()
+{
+    QFETCH(QString, run);
+    const QString text = QStringLiteral("Start") + run + QStringLiteral("End");
+    const auto doc = md::parse(text);
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QString shown = paper.document()->toPlainText();
+    shown.remove(QChar(0x200b));
+    shown.remove(u'\n');
+    QCOMPARE(shown, text);
+    QVERIFY2(timer.elapsed() < timeLimit(300), qPrintable(QString::number(timer.elapsed())));
+}
+
+void docxReusesTheBytesOfOnePicture()
+{
+    QTemporaryDir folder;
+    QImage image(320, 320, QImage::Format_ARGB32);
+    image.fill(Qt::darkGreen);
+    QVERIFY(image.save(folder.filePath("plot.png")));
+    const auto bytes = readFile(folder.filePath("plot.png"));
+    QString source;
+    for (int i = 0; i < 15; ++i) {
+        const auto name = QStringLiteral("plot-%1.png").arg(i);
+        writeFile(folder.filePath(name), bytes);
+        source += QStringLiteral("![Plot %1](%2)\n\n").arg(i).arg(name);
+    }
+    const auto path = folder.filePath("plots.md");
+    writeFile(path, source.toUtf8());
+    const auto loaded = load(path);
+    const auto out = folder.filePath("plots.docx");
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = Exporters::find("docx")->write(loaded.document, recipeFor(loaded, "docx", out), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    const auto entries = entriesOf(out);
+    const auto documentXml = entry(entries, "word/document.xml");
+    QCOMPARE(documentXml.count("<w:drawing>"), 15);
+    for (int i = 0; i < 15; ++i) QVERIFY(documentXml.contains("descr=\"Plot " + QByteArray::number(i) + "\""));
+    QCOMPARE(entry(entries, "word/_rels/document.xml.rels").count("relationships/image"), 1);
+    QCOMPARE(entry(entries, "word/media/image1.png"), bytes);
+    QVERIFY(timer.elapsed() < timeLimit(250));
+}
+
+void aDocumentWithManyFormulasStopsAtTheHelperBudget()
+{
+    // Check the production boundary without starting a helper for each formula.
+    QString notes;
+    for (int i = 0; i < 10000; ++i) notes += QStringLiteral("$x_{%1}$\n\n").arg(i);
+    const int firstExtra = int(notes.size());
+    notes += QStringLiteral("$y$\n\n$x_{0}$");
+    const auto lecture = md::parse(notes);
+    const auto checks = RenderCheck::items(lecture);
+    QCOMPARE(checks.size(), size_t(10001));
+    QCOMPARE(checks[9999].source, QStringLiteral("x_{9999}"));
+    QCOMPARE(checks.back().source, QStringLiteral("x_{0}"));
+    QCOMPARE(lecture.diagnostics.size(), size_t(1));
+    QCOMPARE(lecture.diagnostics.front().code, md::DiagnosticCode::HelperLimit);
+    QCOMPARE(lecture.diagnostics.front().range.start, firstExtra);
+
+    // Draw a mixed document at a small limit with the same helpers as an export.
+    const QString source = QStringLiteral("$x$ and $x$\n\n"
+                                          "```mermaid\ngraph LR\nA --> B\n```\n\n"
+                                          "$$\nx\n$$\n\n"
+                                          "$later$ and $x$\n\n"
+                                          "```mermaid\ngraph LR\nB --> C\n```\n");
+    md::Source limits;
+    limits.maxDrawings = 3;
+    DocumentCheck::Loaded loaded;
+    loaded.document = md::parse(source, md::Options::writer(), limits);
+    const auto &doc = loaded.document;
+    const auto problems = DocumentCheck::problems(loaded);
+    QCOMPARE(problems.size(), size_t(1));
+    QCOMPARE(problems.front().code, QStringLiteral("helper-limit"));
+    QCOMPARE(problems.front().severity, md::Severity::Warning);
+    QCOMPARE(problems.front().range.start, source.indexOf(QStringLiteral("$later$")));
+    QVERIFY(problems.front().message.contains(QStringLiteral("3")));
+
+    QTemporaryDir folder;
+    ExportPictures::Options options;
+    options.service = fakeHelpers(folder.path());
+    ExportPictures pictures(options);
+    QElapsedTimer timer;
+    timer.start();
+    QVERIFY(pictures.draw(doc));
+    const auto counts = pictures.counts(doc);
+    QCOMPARE(counts.formulas, 5);
+    QCOMPARE(counts.formulasNotDrawn, 1);
+    QCOMPARE(counts.diagrams, 2);
+    QCOMPARE(counts.diagramsNotDrawn, 1);
+    QVERIFY(!pictures.formula(QStringLiteral("later"), false));
+    QVERIFY(timer.elapsed() < timeLimit(2000));
+
+    PaperDocument paper(doc, nullptr, &pictures, {});
+    QVERIFY(paper.layOut(nullptr));
+    const auto later = paper.document()->find(QStringLiteral("later"));
+    QVERIFY(!later.isNull());
+    QCOMPARE(later.charFormat().toolTip(), problems.front().message);
+    QVERIFY(paper.document()->toPlainText().contains(QStringLiteral("B --> C")));
+}
+
+void paperIndexesUnresolvedReferencesOnce()
+{
+    QString source;
+    for (int i = 0; i < 4000; ++i) source += QStringLiteral("[Plot][plot %1]\n\n").arg(i);
+    source += QStringLiteral("[Again][plot 0]");
+    const auto doc = md::parse(source);
+    QElapsedTimer timer;
+    timer.start();
+    const preview::Unresolved index(doc);
+    QCOMPARE(index.messages().size(), 4000);
+    QVERIFY(index.messages().first().contains(QStringLiteral("plot 0")));
+    QVERIFY(index.messages().last().contains(QStringLiteral("plot 3999")));
+    QVERIFY2(timer.elapsed() < timeLimit(45), qPrintable(QString::number(timer.elapsed())));
+}
+
+void paperPaginatesWrappedHeadingsTogether()
+{
+    QString source;
+    for (int i = 0; i < 1200; ++i)
+        source += QStringLiteral("## Chapter %1. ").arg(i) + QStringLiteral("Field observations and measurements ").repeated(4) + u'\n';
+    const auto doc = md::parse(source);
+    QElapsedTimer timer;
+    timer.start();
+    PaperDocument paper(doc, nullptr, nullptr, {});
+    QVERIFY(paper.layOut(nullptr));
+    QCOMPARE(paper.headings().size(), 1200);
+    const auto first = paper.document()->find(QStringLiteral("Chapter 0."));
+    const auto last = paper.document()->find(QStringLiteral("Chapter 1199."));
+    QVERIFY(!first.isNull() && !last.isNull());
+    QCOMPARE(paper.headings().first().page, paper.pageAt(first.selectionStart()));
+    QCOMPARE(paper.headings().last().page, paper.pageAt(last.selectionStart()));
+    QVERIFY(paper.headings().last().page > 0);
+    QVERIFY2(timer.elapsed() < timeLimit(600), qPrintable(QString::number(timer.elapsed())));
+}
 } // namespace ExportTests

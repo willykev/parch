@@ -31,7 +31,7 @@ constexpr int headerBytes = 4;
 constexpr quint32 maxAnswerBytes = 1 << 16;
 // Qt makes a private socket in a folder beside the name, <name>XXXXXX/s,
 // and renames it into place, and the kernel limits a socket's path.
-constexpr qsizetype socketNameRoom = sizeof(sockaddr_un::sun_path) - 1 - 8;
+constexpr qsizetype privateSocketRoom = sizeof(sockaddr_un::sun_path) - 1 - 8;
 
 QString errorText(int number)
 {
@@ -169,7 +169,7 @@ AppService::~AppService() = default;
 
 QString AppService::socketPath(const AppPaths &paths)
 {
-    return paths.runtime + QStringLiteral("/parch.sock");
+    return paths.socketPath();
 }
 
 QString AppService::error() const { return m_error; }
@@ -178,10 +178,15 @@ QString AppService::activationToken() const { return m_activationToken; }
 bool AppService::listen()
 {
     m_error.clear();
+    if (!m_paths.singleInstance) return trustedFolder(m_paths.runtime, false, &m_error);
     if (m_server->isListening()) return true;
     if (!trustedFolder(m_paths.runtime, true, &m_error)) return false;
     const QString path = socketPath(m_paths);
-    if (QFile::encodeName(path).size() > socketNameRoom) {
+    // At the kernel limit there is room for the socket itself but not
+    // Qt's temporary name. A private directory already restricts access.
+    const bool direct = QFile::encodeName(path).size() > privateSocketRoom;
+    struct stat folder {};
+    if (!m_paths.socketPathFits() || (direct && (::lstat(QFile::encodeName(m_paths.runtime), &folder) || (folder.st_mode & 077)))) {
         m_error = tr("The runtime folder's path is too long for a socket: %1").arg(m_paths.runtime);
         return false;
     }
@@ -200,7 +205,7 @@ bool AppService::listen()
     // Nobody answers: the socket, if any, was left by an instance that ended
     // without removing it.
     QLocalServer::removeServer(path);
-    m_server->setSocketOptions(QLocalServer::UserAccessOption);
+    m_server->setSocketOptions(direct ? QLocalServer::NoOptions : QLocalServer::UserAccessOption);
     if (!m_server->listen(path)) {
         m_error = tr("Cannot listen on %1: %2").arg(path, m_server->errorString());
         return false;
@@ -225,6 +230,7 @@ bool AppService::forward(const AppPaths &paths, const QStringList &files, QStrin
         return false;
     };
     if (error) error->clear();
+    if (!paths.singleInstance) return false;
     // A runtime folder that is missing has no instance in it; one that cannot
     // be trusted may hold someone else's socket, which is never sent to. The
     // launch then tries to listen itself, which says what is wrong.

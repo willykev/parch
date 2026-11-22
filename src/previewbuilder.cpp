@@ -1,4 +1,6 @@
 #include "previewbuilder.h"
+#include "preview.h"
+#include "mdtable.h"
 
 #include "codehighlight.h"
 #include "documentcitations.h"
@@ -122,8 +124,10 @@ void hashNode(const Node &node, Hasher &h, const Citations *citations, const pre
             h.add(quint64(words->note) << 1 | quint64(citations->linkCitations));
         }
     }
-    h.add(quint64(node.children.size()));
-    for (const Node &child : node.children) hashNode(child, h, citations, unresolved);
+    for (md::Align align : node.columnAlignments) h.add(quint64(align));
+    const auto &children = node.contentsChildren();
+    h.add(quint64(children.size()));
+    for (const Node &child : children) hashNode(child, h, citations, unresolved);
 }
 
 // A node's own source too, so that equal keys mean equal offsets inside it.
@@ -192,8 +196,12 @@ QString oneBlock(const QString &text, bool collapse)
 Unresolved::Unresolved(const md::Document &document) : m_references(document.files.size())
 {
     using C = md::DiagnosticCode;
+    QSet<QString> seen;
     for (const md::Diagnostic &diagnostic : document.diagnostics) {
         switch (diagnostic.code) {
+        case C::HelperLimit:
+            m_drawingLimitMessage = diagnostic.message;
+            continue;
         case C::UnresolvedReference:
             if (diagnostic.file >= 0 && size_t(diagnostic.file) < m_references.size())
                 m_references[size_t(diagnostic.file)].push_back({diagnostic.range, diagnostic.message});
@@ -217,7 +225,10 @@ Unresolved::Unresolved(const md::Document &document) : m_references(document.fil
         default:
             continue;
         }
-        if (!m_messages.contains(diagnostic.message)) m_messages.append(diagnostic.message);
+        if (!seen.contains(diagnostic.message)) {
+            seen.insert(diagnostic.message);
+            m_messages.append(diagnostic.message);
+        }
     }
     for (auto &references : m_references)
         std::stable_sort(references.begin(), references.end(),
@@ -242,6 +253,10 @@ std::vector<std::pair<md::Range, QString>> Unresolved::references(const Node &no
 QString Unresolved::of(const Node &node) const
 {
     switch (node.type) {
+    case NodeType::MathInline:
+    case NodeType::MathBlock:
+    case NodeType::MermaidBlock:
+        return node.resolved ? QString() : m_drawingLimitMessage;
     case NodeType::Text:
     case NodeType::Escape:
     case NodeType::Entity: {
@@ -597,24 +612,27 @@ void Builder::text(const QString &text, const Char &state)
         m_out->cursor.insertText(shown, format);
         return;
     }
-    // A word too long to break gets a zero-width space after every LongWord
-    // characters, never inside a surrogate pair or before a combining mark.
+    // Bound the runs the line breaker must shape, including long stretches
+    // of spaces. Keep the break outside surrogate pairs and combining marks.
     QTextCharFormat mark = format;
     mark.setProperty(BreakProperty, true);
-    qsizetype from = 0, run = 0;
+    qsizetype from = 0, run = 0, white = 0;
     for (qsizetype i = 0; i < shown.size(); ++i) {
         const QChar c = shown.at(i);
-        if (c.isSpace() || c == QChar(0x200B) || c == u'-') {
+        if (c.isSpace()) {
             run = 0;
-            continue;
+            ++white;
+        } else {
+            white = 0;
+            run = c == QChar(0x200B) || c == u'-' ? 0 : run + 1;
         }
-        if (++run < LongWord || i + 1 >= shown.size()) continue;
+        if (std::max(run, white) < LongWord || i + 1 >= shown.size()) continue;
         const QChar next = shown.at(i + 1);
         if (c.isHighSurrogate() || next.isLowSurrogate() || next.isMark()) continue;
         m_out->cursor.insertText(shown.mid(from, i + 1 - from), format);
         m_out->cursor.insertText(QString(QChar(0x200B)), mark);
         from = i + 1;
-        run = 0;
+        white = run = 0;
     }
     if (from < shown.size()) m_out->cursor.insertText(shown.mid(from), format);
 }
@@ -932,7 +950,7 @@ void Builder::definitionList(const Node &node, const Flow &flow)
 // stepped in by its depth, without bullets.
 void Builder::contents(const Node &node, const Flow &flow, int depth)
 {
-    for (const Node &child : node.children) {
+    for (const Node &child : node.contentsChildren()) {
         if (child.type == NodeType::List || child.type == NodeType::ListItem) {
             contents(child, flow, child.type == NodeType::List ? depth + 1 : depth);
         } else if (child.type == NodeType::Paragraph) {
@@ -1167,9 +1185,8 @@ void Builder::table(const Node &node, const Flow &flow)
     }
     if (rows.empty()) return;
     // A table too large to lay out is shown as it is written, and says why.
-    qsizetype cells = 0;
-    for (const std::vector<Cell> &cellsOfRow : rows) cells += qsizetype(cellsOfRow.size());
-    if (node.columns > MaxTableColumns || cells > MaxTableCells) {
+    const qsizetype cells = qsizetype(rows.size()) * node.columns;
+    if (node.columns > MdTable::MaxColumns || cells > MdTable::MaxCells) {
         const QString source = node.file >= 0 && size_t(node.file) < m_document.files.size()
                                    ? m_document.source(node).toString()
                                    : QString();
@@ -1216,7 +1233,10 @@ void Builder::mathBlock(const Node &node, const Flow &flow)
 {
     const qreal gap = m_style.gap();
     Picture formula;
-    if (m_resources) formula = m_resources->math(node.text, true, flow.size);
+    if (!node.resolved) {
+        formula.state = Picture::Failed;
+        formula.diagnostic = m_unresolved.of(node);
+    } else if (m_resources) formula = m_resources->math(node.text, true, flow.size);
     uses(formula);
     if (formula.state == Picture::Failed) {
         codeBlock(node, flow, node.text, QString(),
@@ -1256,7 +1276,10 @@ void Builder::mathBlock(const Node &node, const Flow &flow)
 void Builder::diagram(const Node &node, const Flow &flow)
 {
     Picture drawing;
-    if (m_resources) drawing = m_resources->diagram(node.text);
+    if (!node.resolved) {
+        drawing.state = Picture::Failed;
+        drawing.diagnostic = m_unresolved.of(node);
+    } else if (m_resources) drawing = m_resources->diagram(node.text);
     uses(drawing);
     if (drawing.state == Picture::Failed) {
         codeBlock(node, flow, node.text, QString(),
@@ -1353,7 +1376,7 @@ void Builder::htmlElementBlock(const Node &node, const Flow &flow)
         rule(flow, &node, Mark::Rule);
     } else if (tag == QLatin1StringView("ul") || tag == QLatin1StringView("ol")) {
         const bool ordered = tag == QLatin1StringView("ol");
-        int number = 1;
+        qint64 number = 1;
         for (const md::Attribute &attribute : node.attributes)
             if (attribute.name == QLatin1StringView("start")) number = attribute.value.toInt();
         QFont font(m_style.family);
@@ -1427,15 +1450,11 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
         }
     };
     collect(node);
-    // Cells take the first free columns of their row; a cell that spans
-    // rows keeps its columns in the rows below.
     std::vector<std::vector<Cell>> rows;
-    std::vector<std::vector<bool>> taken(rowNodes.size());
-    int columns = 0;
+    const int columns = node.columns;
     int headers = 0;
     for (size_t r = 0; r < rowNodes.size(); ++r) {
         std::vector<Cell> cells;
-        int column = 0;
         bool allHeaders = true;
         for (const Node &child : rowNodes[r]->children) {
             if (child.type != NodeType::HtmlElement) continue;
@@ -1445,9 +1464,10 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
             Cell cell;
             cell.node = &child;
             cell.header = header;
+            cell.column = child.column;
+            cell.span = child.span;
             for (const md::Attribute &attribute : child.attributes) {
-                if (attribute.name == QLatin1StringView("colspan")) cell.span = std::clamp(attribute.value.toInt(), 1, 1000);
-                else if (attribute.name == QLatin1StringView("rowspan"))
+                if (attribute.name == QLatin1StringView("rowspan"))
                     cell.rows = std::clamp(attribute.value.toInt(), 1, int(rowNodes.size() - r));
                 else if (attribute.name == QLatin1StringView("align")) {
                     const QString value = attribute.value.toLower();
@@ -1456,15 +1476,6 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
                                                                        : md::Align::Left;
                 }
             }
-            while (column < int(taken[r].size()) && taken[r][size_t(column)]) ++column;
-            cell.column = column;
-            for (int down = 0; down < cell.rows; ++down) {
-                std::vector<bool> &line = taken[r + size_t(down)];
-                if (int(line.size()) < column + cell.span) line.resize(size_t(column + cell.span), false);
-                std::fill(line.begin() + column, line.begin() + column + cell.span, true);
-            }
-            column += cell.span;
-            columns = std::max(columns, column);
             cells.push_back(cell);
         }
         if (allHeaders && !cells.empty() && headers == int(r)) ++headers;
@@ -1477,7 +1488,6 @@ void Builder::htmlTable(const Node &node, const Flow &flow)
         inlines(caption->children, state);
     }
     if (rows.empty() || columns == 0) return;
-    if (columns > 1000) columns = 1000;
     if (!m_options.islands || m_out->island >= 0) {
         QTextCursor &cursor = m_out->cursor;
         if (!m_out->reuse) cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
@@ -1793,7 +1803,7 @@ void Builder::inl(const Node &node, const Char &given)
             inner.underline = true;
             // Where it leads always, and its title after that, so that a
             // title can never pass for where the link goes.
-            inner.tip = node.title.isEmpty() ? node.dest : node.dest + u'\n' + node.title;
+            inner.tip = Preview::linkHint(inner.href, node.title);
         }
         // A heading that is not there.
         if (state.ink == PreviewStyle::Danger && !node.resolved) {
@@ -1882,7 +1892,7 @@ void Builder::htmlInline(const Node &node, const Char &state)
             inner.ink = PreviewStyle::Link;
             inner.underline = true;
             const QString title = attribute(QLatin1StringView("title"));
-            inner.tip = title.isEmpty() ? href : href + u'\n' + title;
+            inner.tip = Preview::linkHint(inner.href, title);
         }
     }
     anchor(node, 0);
@@ -1954,7 +1964,10 @@ void Builder::image(const Node &node, const QString &destination, const QString 
 void Builder::mathInline(const Node &node, const Char &state)
 {
     Picture formula;
-    if (m_resources) formula = m_resources->math(node.text, node.display, state.size);
+    if (!node.resolved) {
+        formula.state = Picture::Failed;
+        formula.diagnostic = m_unresolved.of(node);
+    } else if (m_resources) formula = m_resources->math(node.text, node.display, state.size);
     uses(formula);
     anchor(node, 0);
     if (formula.state == Picture::Ready && !formula.image.isNull()) {

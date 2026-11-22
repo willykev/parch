@@ -62,6 +62,7 @@ HEADERS += \
     src/docxexport.h \
     src/epubexport.h \
     src/paperdocument.h \
+    src/picturedata.h \
     src/pdfexport.h \
     src/pdfoutline.h \
     src/svgpaper.h \
@@ -106,6 +107,7 @@ HEADERS += \
     src/remotefetcher.h \
     src/rendercache.h \
     src/rendercheck.h \
+    src/helperconfinement.h \
     src/renderhelpers.h \
     src/renderrequest.h \
     src/renderservice.h \
@@ -179,6 +181,7 @@ SOURCES += \
     src/docxexport.cpp \
     src/epubexport.cpp \
     src/paperdocument.cpp \
+    src/picturedata.cpp \
     src/pdfexport.cpp \
     src/pdfoutline.cpp \
     src/svgpaper.cpp \
@@ -228,6 +231,7 @@ SOURCES += \
     src/remotefetcher.cpp \
     src/rendercache.cpp \
     src/rendercheck.cpp \
+    src/helperconfinement.cpp \
     src/renderhelpers.cpp \
     src/renderrequest.cpp \
     src/renderservice.cpp \

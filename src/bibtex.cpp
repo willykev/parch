@@ -737,27 +737,21 @@ struct RawEntry {
     QString type;
     QString key;
     QList<QPair<QString, QString>> fields;
+    QHash<QString, qsizetype> byName;
     int line = 0;
 
     QString value(const QString &name) const
     {
-        for (const auto &field : fields) {
-            if (field.first == name) return field.second;
-        }
-        return {};
+        const auto at = byName.constFind(name);
+        return at == byName.cend() ? QString() : fields[*at].second;
     }
     bool has(const QString &name) const
     {
-        return std::any_of(fields.cbegin(), fields.cend(), [&name](const auto &field) { return field.first == name; });
+        return byName.contains(name);
     }
-    void set(const QString &name, const QString &value)
+    void inheritField(const QString &name, const QString &value)
     {
-        for (auto &field : fields) {
-            if (field.first == name) {
-                field.second = value;
-                return;
-            }
-        }
+        byName.insert(name, fields.size());
         fields.append({name, value});
     }
 };
@@ -773,8 +767,8 @@ constexpr qsizetype MaxExpansion = qsizetype(64) << 20;
 
 class Reader {
 public:
-    explicit Reader(const QString &text)
-        : m_text(text), m_budget(std::min<qsizetype>(MaxExpansion, std::max<qsizetype>(text.size(), 1) * 4))
+    Reader(const QString &text, qsizetype maxExpansion)
+        : m_text(text), m_budget(std::min({MaxExpansion, maxExpansion, std::max<qsizetype>(text.size(), 1) * 4}))
     {
         static const char *const months[] = {"jan", "feb", "mar", "apr", "may", "jun",
                                              "jul", "aug", "sep", "oct", "nov", "dec"};
@@ -783,6 +777,8 @@ public:
             if (text[i] == u'\n') m_lineStarts.append(i + 1);
         }
     }
+
+    qsizetype remaining() const { return m_budget - m_expanded; }
 
     QList<RawEntry> read(QList<BibliographyDiagnostic> &diagnostics)
     {
@@ -896,11 +892,10 @@ private:
         const auto finish = [&] {
             if (cut)
                 warn(at,
-                     (key.isEmpty() ? QStringLiteral("The string “%1” is longer than %2 characters, so it is cut short.")
-                                    : QStringLiteral("The field “%1” of “%3” is longer than %2 characters, so it is cut short."))
-                         .arg(field)
-                         .arg(MaxValueChars)
-                         .arg(key),
+                     key.isEmpty() ? QStringLiteral("The string “%1” is longer than %2 characters, so it is cut short.")
+                                         .arg(field, QString::number(MaxValueChars))
+                                   : QStringLiteral("The field “%1” of “%2” is longer than %3 characters, so it is cut short.")
+                                         .arg(field, key, QString::number(MaxValueChars)),
                      key);
             m_expanded += out.size();
             if (m_expanded <= m_budget) return true;
@@ -1032,7 +1027,9 @@ private:
             m_pos = qMin(m_text.size(), keyStart);
             return;
         }
-        m_entries.append(raw);
+        for (qsizetype i = 0; i < raw.fields.size(); ++i)
+            raw.byName.try_emplace(raw.fields.at(i).first, i);
+        m_entries.append(std::move(raw));
     }
 
     const QString &m_text;
@@ -1188,8 +1185,8 @@ CslDate biblatexDate(const QString &text)
 
 class Converter {
 public:
-    Converter(const QList<RawEntry> &entries, QList<BibliographyDiagnostic> &diagnostics)
-        : m_entries(entries), m_diagnostics(diagnostics)
+    Converter(const QList<RawEntry> &entries, QList<BibliographyDiagnostic> &diagnostics, qsizetype remaining)
+        : m_entries(entries), m_diagnostics(diagnostics), m_remaining(remaining)
     {
         for (qsizetype i = 0; i < entries.size(); ++i) {
             if (!m_byKey.contains(entries[i].key)) m_byKey.insert(entries[i].key, i);
@@ -1202,6 +1199,7 @@ public:
     {
         RawEntry entry = input;
         inherit(entry);
+        if (refused()) return {};
         CslReference reference;
         reference.id = entry.key;
         reference.type = cslType(entry);
@@ -1435,6 +1433,19 @@ private:
         return nullptr;
     }
 
+public:
+    bool refused() const { return m_remaining < 0; }
+
+private:
+    // Each lookup costs the name examined. Each inherited value consumes the
+    // same allowance as a value expanded while reading the file.
+    void takeField(RawEntry &entry, const QString &name, const QString &value)
+    {
+        if (entry.has(name)) return;
+        m_remaining -= value.size();
+        if (!refused()) entry.inheritField(name, value);
+    }
+
     // Fills in fields from a crossref'd or xdata parent, as BibLaTeX does.
     void inherit(RawEntry &entry, int depth = 0)
     {
@@ -1449,7 +1460,10 @@ private:
                 continue;
             }
             for (const auto &field : parent->fields) {
-                if (!entry.has(field.first)) entry.fields.append(field);
+                m_remaining -= field.first.size();
+                if (refused()) return;
+                takeField(entry, field.first, field.second);
+                if (refused()) return;
             }
         }
         const QString parentKey = plain(entry.value(QStringLiteral("crossref")));
@@ -1464,6 +1478,7 @@ private:
         }
         RawEntry parent = *found;
         inherit(parent, depth + 1);
+        if (refused()) return;
         const bool parentIsMulti = parent.type.startsWith(u"mv");
         const bool childIsIn = entry.type.startsWith(u"in") || entry.type == u"bookinbook"
                                || entry.type == u"suppbook" || entry.type == u"suppcollection";
@@ -1477,6 +1492,8 @@ private:
                                          QStringLiteral("shorthandintro"), QStringLiteral("sortkey"),
                                          QStringLiteral("xdata")};
         for (const auto &field : parent.fields) {
+            m_remaining -= field.first.size();
+            if (refused()) return;
             QString name = field.first;
             if (never.contains(name)) continue;
             if (childIsIn || parentIsMulti) {
@@ -1489,12 +1506,14 @@ private:
                 else if (name == u"author" && entry.type == u"inbook")
                     name = QStringLiteral("bookauthor");
             }
-            if (!entry.has(name)) entry.fields.append({name, field.second});
+            takeField(entry, name, field.second);
+            if (refused()) return;
         }
     }
 
     const QList<RawEntry> &m_entries;
     QList<BibliographyDiagnostic> &m_diagnostics;
+    qsizetype m_remaining;
     QHash<QString, qsizetype> m_byKey;
     QHash<QString, qsizetype> m_byLowerKey;
 };
@@ -1577,22 +1596,27 @@ QString BibTeX::sentenceCase(const QString &markup)
     return out;
 }
 
-BibTeX::Result BibTeX::parse(const QString &text)
+BibTeX::Result BibTeX::parse(const QString &text, qsizetype maxExpansion)
 {
     Result result;
-    Reader reader(text);
+    Reader reader(text, maxExpansion);
     const QList<RawEntry> entries = reader.read(result.diagnostics);
-    Converter converter(entries, result.diagnostics);
+    Converter converter(entries, result.diagnostics, reader.remaining());
     latexTooDeep = false;
     for (const RawEntry &entry : entries) {
         result.entries.append({converter.convert(entry), entry.line});
+        if (converter.refused()) {
+            result.entries.clear();
+            result.diagnostics.append({Severity::Error, QStringLiteral("The inherited fields exceed the bibliography's expansion limit."),
+                                       entry.key, entry.line, BibliographyDiagnostic::Kind::Unreadable});
+            break;
+        }
         if (!latexTooDeep) continue;
         result.entries.clear();
         result.diagnostics.append({Severity::Error,
                                    QStringLiteral("The entry “%1” nests braces or commands more than %2 deep, which no "
                                                   "bibliography needs, so the file is not read.")
-                                       .arg(entry.key)
-                                       .arg(MaxLatexNesting),
+                                       .arg(entry.key, QString::number(MaxLatexNesting)),
                                    entry.key, entry.line, BibliographyDiagnostic::Kind::Unreadable});
         break;
     }

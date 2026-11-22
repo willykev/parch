@@ -103,6 +103,7 @@ signals:
     void textFocusRequested();
     void closeConfirmationRequested(Document *document, bool discarding);
     void encodingConfirmationRequested(Document *document);
+    void saveLinkRequested(Document *document, const QString &name, const QString &target, bool canFollow);
     void exportLinkQuestionRequested(const QString &output, const QString &target);
     void viewShowRequested();
     // Something the session keeps changed.

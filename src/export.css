@@ -95,8 +95,8 @@ dd { margin: 0 0 0.5em 1.5em; }
 .math { white-space: pre-wrap; }
 div.math.display { display: block; margin: 0 0 1em; padding: 0.5em 1em; background: var(--tint); border-radius: 0.4em; }
 /* A formula drawn as SVG sits on the text's baseline and grows with it. */
-svg.math-svg { display: inline; overflow: visible; }
-div.math.display:has(> svg.math-svg) { background: none; text-align: center; overflow-x: auto; }
+.math-svg { display: inline; overflow: visible; }
+div.math.display:has(> .math-svg) { background: none; text-align: center; overflow-x: auto; }
 pre.mermaid { color: var(--muted); }
 figure.diagram { margin: 0 0 1em; text-align: center; overflow-x: auto; }
 figure.diagram img { max-width: 100%; height: auto; }

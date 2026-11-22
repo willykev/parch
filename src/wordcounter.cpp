@@ -28,6 +28,7 @@ bool countsByCharacter(char32_t c)
 
 WordCounter::WordCounter(QObject *parent) : QObject(parent)
 {
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(1);
     m_timer.setSingleShot(true);
     connect(&m_timer, &QTimer::timeout, this, &WordCounter::start);

@@ -6,16 +6,25 @@
 // an assets folder that is a link. ParchTests runs each of them as a test
 // function of its own.
 namespace SecurityTests {
+void aHugePastedDataImageIsRefused();
+
 
 void webPictureRequestsKeepTheirHost();
 void webPicturesComeOnlyFromPublicAddresses();
 void webPicturesNeverComeFromThisComputersNetworks();
 void exportsAskBeforeReplacingALink();
 void parchKeepsItsFilesToItself();
+void helperRulesMatchTheKernelABI();
+void fixtureExtractionUsesAnIsolatedInterpreter();
 void helpersRunWithinLimits();
 void aLinkedAssetsFolderIsNotFollowed();
 void bigPastesConvertOffTheWindowThread();
 void aWordTooLongToBreakKeepsTypingQuick();
 void aLongPdfStaysCancellableWhileItIsSet();
+
+void aWebPictureRedirectChecksItsHostAndAddresses();
+void webPicturesCheckTransitionAddresses();
+void aHelperCannotReadOutsideItsFolders();
+void helpersAreNotTakenFromTheProgramsOwnFolder();
 
 } // namespace SecurityTests

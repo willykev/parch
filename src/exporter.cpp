@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include <unistd.h>
+#include <utility>
 
 QJsonObject ExportRecipe::toJson() const
 {
@@ -81,30 +82,62 @@ const Exporter *forFile(const QString &path)
 
 namespace {
 
-// What replaces `file` is readable by whom it was: its group, and its
-// extended attributes, the access control list among them, as far as the
-// system lets this user give them. The mode is set beforehand, and an ACL
-// set after it agrees with it.
-void keepAccess(const QByteArray &file, const struct stat &there, int replacement)
+std::optional<gid_t> testGroup;
+
+const struct stat *ownedAccess(const struct stat &state)
 {
-    if (there.st_gid != ::getegid()) (void)::fchown(replacement, uid_t(-1), there.st_gid);
-    if (::fchmod(replacement, there.st_mode & 07777) != 0) return;
-    ssize_t size = ::llistxattr(file.constData(), nullptr, 0);
-    if (size <= 0) return;
+    return S_ISREG(state.st_mode) && DiskFile::ownedBySavingUser(state.st_uid) ? &state : nullptr;
+}
+
+bool sameAccess(const std::optional<struct stat> &previous, const struct stat *current)
+{
+    if (!previous || !current) return !previous && !current;
+    // A change to permissions, group or an extended attribute changes ctime.
+    return previous->st_dev == current->st_dev && previous->st_ino == current->st_ino &&
+           previous->st_ctim.tv_sec == current->st_ctim.tv_sec && previous->st_ctim.tv_nsec == current->st_ctim.tv_nsec;
+}
+
+// Carry the owner's access bits and, where permitted, the group and extended
+// attributes. Read attributes from the same file whose ownership was checked.
+int keepAccess(int folder, const QByteArray &name, const struct stat &there, int replacement)
+{
+    const int from = ::openat(folder, name.constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    const auto close = qScopeGuard([&] { if (from >= 0) ::close(from); });
+    struct stat opened{};
+    if (from >= 0) {
+        if (::fstat(from, &opened) != 0) return errno;
+        if (opened.st_dev != there.st_dev || opened.st_ino != there.st_ino || opened.st_uid != there.st_uid) return ESTALE;
+    }
+    struct stat made{};
+    if (::fstat(replacement, &made) != 0) return errno;
+    const gid_t group = testGroup.value_or(there.st_gid);
+    if (made.st_gid != group && ::fchown(replacement, uid_t(-1), group) != 0 &&
+        errno != EPERM && errno != EACCES && errno != EINVAL && errno != EOPNOTSUPP && errno != ENOSYS) return errno;
+    if (::fchmod(replacement, there.st_mode & 0777) != 0) return errno;
+    if (from < 0) return 0;
+    ssize_t size = ::flistxattr(from, nullptr, 0);
+    if (size <= 0) return 0;
     QByteArray names(size, '\0');
-    size = ::llistxattr(file.constData(), names.data(), size_t(names.size()));
-    if (size <= 0) return;
-    for (const QByteArray &name : names.left(size).split('\0')) {
-        if (name.isEmpty()) continue;
-        const ssize_t length = ::lgetxattr(file.constData(), name.constData(), nullptr, 0);
+    size = ::flistxattr(from, names.data(), size_t(names.size()));
+    if (size <= 0) return 0;
+    for (const QByteArray &attribute : names.left(size).split('\0')) {
+        if (attribute.isEmpty()) continue;
+        const ssize_t length = ::fgetxattr(from, attribute.constData(), nullptr, 0);
         if (length < 0) continue;
         QByteArray value(length, '\0');
-        const ssize_t read = ::lgetxattr(file.constData(), name.constData(), value.data(), size_t(value.size()));
-        if (read >= 0) (void)::fsetxattr(replacement, name.constData(), value.constData(), size_t(read), 0);
+        const ssize_t read = ::fgetxattr(from, attribute.constData(), value.data(), size_t(value.size()));
+        if (read >= 0 && read <= length)
+            (void)::fsetxattr(replacement, attribute.constData(), value.constData(), size_t(read), 0);
     }
+    return 0;
 }
 
 } // namespace
+
+void setReplacementGroupForTests(std::optional<gid_t> group)
+{
+    testGroup = group;
+}
 
 bool isSource(const md::Document &document, const Dialect::Choice &dialect, const QString &path)
 {
@@ -158,39 +191,52 @@ bool PendingFile::write(const QByteArray &bytes, QString *error)
     if (m_name.isEmpty()) return fail(QStringLiteral("it names no file"), error);
     m_folder = ::open(QFile::encodeName(info.absolutePath()).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (m_folder < 0) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
-    struct stat there;
+    struct stat there{};
     const bool exists = ::fstatat(m_folder, m_name.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0;
+    if (!exists && errno != ENOENT) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
     if (exists && m_existing == ExistingOutput::Refuse) return fail(QStringLiteral("already exists"), error);
     if (exists && S_ISDIR(there.st_mode)) return fail(QStringLiteral("it is a folder"), error);
-    if (m_existing == ExistingOutput::Refuse) {
-        m_contents = bytes;
-        return true;
-    }
+    if (exists && !S_ISREG(there.st_mode) && !(m_existing == ExistingOutput::ReplaceLink && S_ISLNK(there.st_mode)))
+        return fail(QStringLiteral("it is not a regular file"), error);
+    if (m_existing != ExistingOutput::Refuse && !stage(bytes, exists ? ownedAccess(there) : nullptr, error)) return false;
+    m_contents = bytes;
+    return true;
+}
+
+bool PendingFile::stage(const QByteArray &bytes, const struct stat *access, QString *error)
+{
     // The temporary file is made anew, never through anything already there.
+    QByteArray candidate;
     int fd = -1;
     for (int attempt = 0; attempt < 16 && fd < 0; ++attempt) {
         const QByteArray name = ".parch-" + QByteArray::number(QRandomGenerator::global()->generate64(), 16) + ".part";
-        fd = ::openat(m_folder, name.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
-        if (fd >= 0) m_temporary = name;
+        fd = ::openat(m_folder, name.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, access ? 0600 : 0666);
+        if (fd >= 0) candidate = name;
         else if (errno != EEXIST) break;
     }
     if (fd < 0) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
-    // A file replaced keeps its permissions, group and extended attributes;
-    // a new one has the usual.
+    const auto cleanup = qScopeGuard([&] {
+        ::close(fd);
+        if (!candidate.isEmpty()) ::unlinkat(m_folder, candidate.constData(), 0);
+    });
     int why = 0;
-    if (exists && S_ISREG(there.st_mode)) {
-        if (::fchmod(fd, there.st_mode & 07777) != 0) why = errno;
-        else keepAccess(QFile::encodeName(info.absoluteFilePath()), there, fd);
-    }
-    for (qsizetype done = 0; why == 0 && done < bytes.size();) {
+    for (qsizetype done = 0; done < bytes.size();) {
         const ssize_t wrote = ::write(fd, bytes.constData() + done, size_t(bytes.size() - done));
         if (wrote < 0 && errno == EINTR) continue;
-        if (wrote <= 0) why = wrote < 0 ? errno : EIO;
-        else done += wrote;
+        if (wrote <= 0) {
+            why = wrote < 0 ? errno : EIO;
+            break;
+        }
+        done += wrote;
     }
+    if (why == 0 && access) why = keepAccess(m_folder, m_name, *access, fd);
     if (why == 0 && ::fsync(fd) != 0) why = errno;
-    ::close(fd);
     if (why != 0) return fail(QString::fromLocal8Bit(std::strerror(why)), error);
+    if (!m_temporary.isEmpty() && ::unlinkat(m_folder, m_temporary.constData(), 0) != 0)
+        return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    m_temporary = std::exchange(candidate, {});
+    if (access) m_access = *access;
+    else m_access.reset();
     return true;
 }
 
@@ -216,18 +262,25 @@ bool PendingFile::commit(QString *error, const std::function<bool(int, bool)> &p
             return false;
         }
     }
-    if (publishPictures) {
-        struct stat current {};
-        if (m_existing == ExistingOutput::Refuse && ::fstatat(m_folder, m_name.constData(), &current, AT_SYMLINK_NOFOLLOW) == 0)
-            return fail(QStringLiteral("already exists"), error);
-        if (!publishPictures(m_folder, locked)) return false;
-    }
+    struct stat current{};
+    const bool exists = ::fstatat(m_folder, m_name.constData(), &current, AT_SYMLINK_NOFOLLOW) == 0;
+    if (!exists && errno != ENOENT) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    if (exists && m_existing == ExistingOutput::Refuse) return fail(QStringLiteral("already exists"), error);
+    if (exists && S_ISDIR(current.st_mode)) return fail(QStringLiteral("it is a folder"), error);
+    if (exists && !S_ISREG(current.st_mode) && !(m_existing == ExistingOutput::ReplaceLink && S_ISLNK(current.st_mode)))
+        return fail(QStringLiteral("it is not a regular file"), error);
+    const struct stat *access = exists ? ownedAccess(current) : nullptr;
+    // A different file or access list may have taken its place while the
+    // export was written. Restage with the current permissions before publication.
+    if (m_existing != ExistingOutput::Refuse && !sameAccess(m_access, access) && !stage(*m_contents, access, error)) return false;
+    if (publishPictures && !publishPictures(m_folder, locked)) return false;
     if (m_existing == ExistingOutput::Refuse) {
         const SaveResult made = DiskFile::createAt(m_folder, QFileInfo(m_path).absolutePath(), QFile::decodeName(m_name), *m_contents);
         if (made.status != SaveStatus::Saved)
             return fail(made.status == SaveStatus::Conflict ? QStringLiteral("already exists") : made.error, error);
-    } else if (::renameat(m_folder, m_temporary.constData(), m_folder, m_name.constData()) != 0) {
-        return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    } else {
+        const auto published = DiskFile::publishAt(m_folder, m_temporary, m_name, exists ? &current : nullptr);
+        if (published.status != SaveStatus::Saved) return fail(published.error, error);
     }
     m_temporary.clear();
     m_contents.reset();

@@ -1,4 +1,5 @@
 #include "preview.h"
+#include "documentsettingsstore.h"
 
 #include "attachments.h"
 #include "codehighlight.h"
@@ -6,6 +7,7 @@
 #include "mdinclude.h"
 #include "mdparser_p.h"
 #include "documentparse.h"
+#include "mdtree.h"
 #include "outline.h"
 #include "previewresources.h"
 #include "previewwatch.h"
@@ -149,7 +151,7 @@ struct Preview::Parsed {
     // What the preview marks as leading nowhere.
     QStringList unresolved;
     // It names pictures on the web.
-    bool webPictures = false;
+    QSet<QString> webHosts;
 };
 
 // Sections that go and the parts that are built in their place.
@@ -214,6 +216,11 @@ QString visibleText(const QString &text)
     return shown;
 }
 
+QString linkOrigin(const QUrl &url)
+{
+    return url.toString(QUrl::RemoveUserInfo | QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment | QUrl::FullyEncoded);
+}
+
 bool readsAsMarkdown(const QString &path)
 {
     static const QStringList suffixes{QStringLiteral("md"), QStringLiteral("markdown"), QStringLiteral("mdown"),
@@ -224,7 +231,7 @@ bool readsAsMarkdown(const QString &path)
 // The local pictures a tree shows, by the paths the builder reads them
 // from: Markdown images and HTML `img` elements, in every file it includes;
 // and whether it names any on the web.
-void picturesOf(const md::Document &document, const md::Node &node, QStringList &out, bool &web)
+void picturesOf(const md::Document &document, const md::Node &node, QStringList &out, QSet<QString> &web)
 {
     QString written;
     if (node.type == md::NodeType::Image) {
@@ -238,7 +245,10 @@ void picturesOf(const md::Document &document, const md::Node &node, QStringList 
         if (target.kind == md::Destination::Kind::LocalFile && target.absolute
             && SafeRead::pictureRefusal(target.path, document.resourceFolders).isEmpty())
             out.append(target.path);
-        else if (target.kind == md::Destination::Kind::Remote) web = true;
+        else if (target.kind == md::Destination::Kind::Remote) {
+            const QString host = QUrl(written).host(QUrl::FullyEncoded);
+            if (!host.isEmpty()) web.insert(host);
+        }
     }
     for (const md::Node &child : node.children) picturesOf(document, child, out, web);
 }
@@ -265,6 +275,7 @@ Preview::Preview(QObject *parent)
       m_marks(new PreviewMarks(this))
 {
     connect(m_watch, &PreviewWatch::fileChanged, this, &Preview::dependencyChanged);
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(1);
     m_timer.setSingleShot(true);
     connect(&m_timer, &QTimer::timeout, this, &Preview::parse);
@@ -325,7 +336,11 @@ void Preview::setDocument(Document *document)
 void Preview::setBackend(Backend *backend)
 {
     if (backend == m_backend) return;
+    disconnect(m_pictureSettings);
     m_backend = backend;
+    if (backend)
+        m_pictureSettings = connect(backend->documentSettings(), &DocumentSettingsStore::changed, this, &Preview::updatePicturePolicy);
+    updatePicturePolicy();
     connectServices();
     emit backendChanged();
 }
@@ -423,8 +438,16 @@ void Preview::setRemoteImages(bool load)
 {
     if (load == m_remoteImages) return;
     m_remoteImages = load;
-    m_resources->setRemoteAllowed(load);
+    updatePicturePolicy();
     emit remoteImagesChanged();
+}
+
+void Preview::updatePicturePolicy()
+{
+    m_approvedHosts = m_backend ? m_backend->documentSettings()->pictureHosts(m_document) : QSet<QString>{};
+    const bool changed = m_resources->setRemoteAllowed(m_remoteImages, m_approvedHosts);
+    emit webPicturesChanged();
+    if (!changed) return;
     // Sections with pictures are built again, and ask again.
     for (size_t i = 0; i < m_shown.size(); ++i)
         if (!m_shown[i].pictures.isEmpty()) m_dirty.insert(m_ids[i]);
@@ -575,7 +598,8 @@ void Preview::clear()
     m_readFiles.clear();
     m_watch->setFiles({});
     setUnresolved({});
-    setWebPictures(false);
+    m_webHosts.clear();
+    updatePicturePolicy();
     m_startsValid = 0;
     m_shownRevision = 0;
     m_trimmed = 0;
@@ -646,11 +670,11 @@ void Preview::setUnresolved(const QStringList &messages)
     emit unresolvedChanged();
 }
 
-void Preview::setWebPictures(bool web)
+void Preview::showWebPictures()
 {
-    if (web == m_webPictures) return;
-    m_webPictures = web;
-    emit webPicturesChanged();
+    if (!m_document || !m_backend || m_webHosts.isEmpty()) return;
+    auto *settings = m_backend->documentSettings();
+    settings->setPictureHosts(m_document, settings->pictureHosts(m_document) | m_webHosts);
 }
 
 void Preview::setCurrent(bool current)
@@ -743,7 +767,7 @@ Preview::Parsed Preview::parseJob(ParsedTextPtr parse, quint64 generation)
     result.citations = std::shared_ptr<const DocumentCitations::Formatted>(read, &read->formatted);
     result.parts = std::make_shared<std::vector<Part>>(preview::parts(*result.tree, result.citations.get()));
     preview::warm(*result.tree);
-    picturesOf(reading.document, reading.document.root, result.pictures, result.webPictures);
+    picturesOf(reading.document, reading.document.root, result.pictures, result.webHosts);
     result.files = filesRead(reading);
     result.unresolved = preview::Unresolved(reading.document).messages();
     return result;
@@ -889,7 +913,11 @@ void Preview::plan(const Parsed &result)
     m_readFiles = QSet<QString>(result.files.cbegin(), result.files.cend());
     m_watch->setFiles(result.files + result.pictures);
     setUnresolved(result.unresolved);
-    setWebPictures(result.webPictures);
+    const bool hostsChanged = m_webHosts != result.webHosts;
+    m_webHosts = result.webHosts;
+    if (m_backend && m_backend->documentSettings()->needsPictureHosts(m_document))
+        m_backend->documentSettings()->setPictureHosts(m_document, m_webHosts);
+    if (hostsChanged) emit webPicturesChanged();
     m_planRevision = result.revision;
     ++m_updates;
     // Text that reads as it did, as after an undo and its redo, is shown already.
@@ -1785,7 +1813,7 @@ bool Preview::activate(const QString &link, int position, quint64 island)
     }
     if (link.startsWith(u'#')) return goTo(link.mid(1));
     const QUrl url(link);
-    switch (Backend::linkWay(url)) {
+    switch (Backend::linkWay(url, link)) {
     case Backend::LinkWay::Refused:
         return false;
     case Backend::LinkWay::Open:
@@ -1799,12 +1827,14 @@ bool Preview::activate(const QString &link, int position, quint64 island)
         // Any other file, a script or a desktop entry as much as a picture,
         // is never handed to a program from a link: it is offered in its
         // folder, once asked.
-        emit linkAsked(path, visibleText(m_backend ? m_backend->shownText(path) : path), QStringLiteral("file"), true);
+        emit linkAsked(path, visibleText(m_backend ? m_backend->shownText(path) : path), QStringLiteral("file"), true, {}, false);
         return true;
     }
-    case Backend::LinkWay::Ask:
-        emit linkAsked(url.toString(QUrl::FullyEncoded), shownLink(url), url.scheme().toLower(), false);
+    case Backend::LinkWay::Ask: {
+        emit linkAsked(url.toString(QUrl::FullyEncoded), shownLink(url), url.scheme().toLower(), false,
+                       linkOrigin(url), url.authority(QUrl::FullyEncoded).contains(u'@'));
         return true;
+    }
     }
     return false;
 }
@@ -1813,10 +1843,22 @@ QString Preview::shownLink(const QUrl &url)
 {
     // Fully encoded, a character that would hide or reorder what is shown
     // stays a code, and a host is shown as the name it really asks for.
-    QString text = visibleText(url.toString(QUrl::FullyEncoded));
-    constexpr qsizetype Most = 400, Head = 300, Tail = 80;
-    if (text.size() > Most) text = text.left(Head) + u'…' + text.right(Tail);
-    return text;
+    const QString prefix = url.toString(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment | QUrl::FullyEncoded);
+    QString rest = url.path(QUrl::FullyEncoded);
+    if (url.hasQuery()) rest += u'?' + url.query(QUrl::FullyEncoded);
+    if (rest.size() > 400) rest = rest.left(300) + u'…' + rest.right(80);
+    if (url.hasFragment()) rest += u'#' + url.fragment(QUrl::FullyEncoded);
+    return visibleText(prefix + rest);
+}
+
+QString Preview::linkHint(const QString &target, const QString &title)
+{
+    const QUrl url(target);
+    QString hint = shownLink(url);
+    // A long user name can wrap before the host. Name the destination first.
+    if (url.authority(QUrl::FullyEncoded).contains(u'@')) hint.prepend(linkOrigin(url) + u'\n');
+    if (!title.isEmpty()) hint += u'\n' + visibleText(title);
+    return hint;
 }
 
 int Preview::findHeading(const QString &slug)

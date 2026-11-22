@@ -1,5 +1,12 @@
 #include "librarywalk.h"
 
+#include "mdinclude.h"
+#include "diskfile.h"
+#include "saferead.h"
+
+#include <QFileInfo>
+#include <QScopeGuard>
+
 #include <QCollator>
 #include <QFile>
 #include <QList>
@@ -27,9 +34,38 @@ bool LibraryWalk::isTextDocument(const QString &name)
     return false;
 }
 
-LibraryWalk::Stats LibraryWalk::walk(const QStringList &folders, const std::function<bool(const Found &)> &found,
-                                     const std::atomic<bool> *cancel)
+QString LibraryWalk::resolvedRoot(const QString &path)
 {
+    QString prefix = path;
+    QString suffix;
+    for (;;) {
+        const QFileInfo info(prefix);
+        if (info.exists() || info.isSymLink() || info.isRoot()) break;
+        const QString parent = info.absolutePath();
+        if (parent == prefix || info.fileName().isEmpty()) break;
+        suffix.prepend(u'/' + info.fileName());
+        prefix = parent;
+    }
+    const QString root = DiskFile::canonicalPath(prefix);
+    return root == u"/" && !suffix.isEmpty() ? suffix : root + suffix;
+}
+
+QString LibraryWalk::rootOf(const QString &canonicalPath, const QStringList &roots)
+{
+    QString outermost;
+    for (const QString &root : roots)
+        if (md::isWithin(canonicalPath, root) && (outermost.isEmpty() || root.size() < outermost.size()))
+            outermost = root;
+    return outermost;
+}
+
+LibraryWalk::Stats LibraryWalk::walk(const QStringList &folders, const std::function<bool(const Found &)> &found,
+                                     const std::atomic<bool> *cancel, const QStringList &allowedRoots)
+{
+    QStringList roots = allowedRoots;
+    if (roots.isEmpty()) {
+        for (const QString &folder : folders) roots << resolvedRoot(folder);
+    }
     Stats stats;
     QSet<Identity> seenFolders, seenFiles;
     QCollator collator;
@@ -53,15 +89,17 @@ LibraryWalk::Stats LibraryWalk::walk(const QStringList &folders, const std::func
             if (cancelled()) return stats;
             const Pending folder = stack.takeLast();
             const QByteArray encoded = QFile::encodeName(folder.path);
-            struct stat state {};
-            if (::stat(encoded.constData(), &state) != 0 || !S_ISDIR(state.st_mode)) continue;
-            if (seenFolders.contains({quint64(state.st_dev), quint64(state.st_ino)})) continue;
-            seenFolders.insert({quint64(state.st_dev), quint64(state.st_ino)});
             DIR *directory = ::opendir(encoded.constData());
             if (!directory) {
                 ++stats.unreadableFolders;
                 continue;
             }
+            const auto close = qScopeGuard([directory] { ::closedir(directory); });
+            struct stat state {};
+            const int fd = ::dirfd(directory);
+            if (::fstat(fd, &state) || rootOf(SafeRead::descriptorPath(fd), roots).isEmpty()) continue;
+            if (seenFolders.contains({quint64(state.st_dev), quint64(state.st_ino)})) continue;
+            seenFolders.insert({quint64(state.st_dev), quint64(state.st_ino)});
             QStringList names, subfolders;
             QList<Found> documents;
             while (const dirent *entry = ::readdir(directory)) {
@@ -71,13 +109,14 @@ LibraryWalk::Stats LibraryWalk::walk(const QStringList &folders, const std::func
                 if (name.startsWith(u'.') || QFile::encodeName(name) != raw) continue;
                 const bool maybeFolder = entry->d_type == DT_DIR || entry->d_type == DT_LNK || entry->d_type == DT_UNKNOWN;
                 if (!maybeFolder && !(entry->d_type == DT_REG && isTextDocument(name))) continue;
+                if ((entry->d_type == DT_LNK || entry->d_type == DT_UNKNOWN)
+                    && rootOf(QFileInfo(folder.path + u'/' + name).canonicalFilePath(), roots).isEmpty()) continue;
                 names.append(name);
             }
-            ::closedir(directory);
             for (const QString &name : std::as_const(names)) {
                 const QString path = folder.path + u'/' + name;
                 struct stat target {};
-                if (::stat(QFile::encodeName(path).constData(), &target) != 0) continue;
+                if (::fstatat(fd, QFile::encodeName(name).constData(), &target, 0) != 0) continue;
                 if (S_ISDIR(target.st_mode)) {
                     subfolders.append(name);
                 } else if (S_ISREG(target.st_mode) && isTextDocument(name)) {
@@ -129,14 +168,16 @@ QStringList LibraryWalk::folders(const QStringList &roots, int limit, const std:
             if (cancel && cancel->load(std::memory_order_relaxed)) return found;
             const Pending folder = stack.takeLast();
             const QByteArray encoded = QFile::encodeName(folder.path);
+            DIR *directory = ::opendir(encoded.constData());
+            if (!directory) continue;
+            const auto close = qScopeGuard([directory] { ::closedir(directory); });
+            const int fd = ::dirfd(directory);
             struct stat state {};
-            if (::stat(encoded.constData(), &state) != 0 || !S_ISDIR(state.st_mode)) continue;
+            if (::fstat(fd, &state) || rootOf(SafeRead::descriptorPath(fd), roots).isEmpty()) continue;
             if (seen.contains({quint64(state.st_dev), quint64(state.st_ino)})) continue;
             seen.insert({quint64(state.st_dev), quint64(state.st_ino)});
             found.append(folder.path);
             if (folder.depth >= MaxDepth) continue;
-            DIR *directory = ::opendir(encoded.constData());
-            if (!directory) continue;
             QStringList subfolders;
             while (const dirent *entry = ::readdir(directory)) {
                 const QByteArray raw(entry->d_name);
@@ -144,10 +185,10 @@ QStringList LibraryWalk::folders(const QStringList &roots, int limit, const std:
                 if (name.startsWith(u'.') || QFile::encodeName(name) != raw) continue;
                 if (entry->d_type != DT_DIR && entry->d_type != DT_LNK && entry->d_type != DT_UNKNOWN) continue;
                 struct stat target {};
-                if (::stat((encoded + '/' + raw).constData(), &target) == 0 && S_ISDIR(target.st_mode))
+                if (::fstatat(fd, raw.constData(), &target, 0) == 0 && S_ISDIR(target.st_mode)
+                    && (entry->d_type == DT_DIR || !rootOf(QFileInfo(folder.path + u'/' + name).canonicalFilePath(), roots).isEmpty()))
                     subfolders.append(name);
             }
-            ::closedir(directory);
             std::sort(subfolders.begin(), subfolders.end(), [&collator](const QString &a, const QString &b) {
                 const int order = collator.compare(a, b);
                 return order != 0 ? order < 0 : a < b;

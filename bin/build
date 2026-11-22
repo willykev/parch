@@ -4,10 +4,17 @@ set -eu
 # Resolve symlinks exactly as qmake does and pin a local cache so that qmake
 # does not search ancestor directories for unrelated configuration.
 ROOT="$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
-mkdir -p "$ROOT/build"
-cd "$ROOT/build"
+out=${1:-"$ROOT/build"}
+mkdir -p -- "$out"
+CDPATH= cd -P -- "$out"
+out=$(pwd -P)
 [ -e .qmake.cache ] || : > .qmake.cache
-qmake6 -cache "$(pwd -P)/.qmake.cache" "$ROOT/parch.pro"
+set -- -cache "$out/.qmake.cache"
+# Keep qmake's release defaults unless the build environment supplies its own.
+[ -z "${CFLAGS:-}" ] || set -- "$@" "QMAKE_CFLAGS_RELEASE=$CFLAGS"
+[ -z "${CXXFLAGS:-}" ] || set -- "$@" "QMAKE_CXXFLAGS_RELEASE=$CXXFLAGS"
+[ -z "${LDFLAGS:-}" ] || set -- "$@" "QMAKE_LFLAGS_RELEASE=$LDFLAGS"
+qmake6 "$@" "$ROOT/parch.pro"
 make -s -j"$(nproc)"
 
-echo "Built $ROOT/build/parch"
+echo "Built $out/parch"

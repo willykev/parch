@@ -17,11 +17,13 @@
 // one, as in the tests, fetches nothing.
 class RemoteFetcher {
 public:
+    using AllowsHost = std::function<bool(const QString &host)>;
     virtual ~RemoteFetcher() = default;
     // Fetches the URL and calls `done` on the context's thread with its
     // bytes, or with why there are none; never once the context is gone.
+    // When supplied, allowsHost checks each host before lookup, including redirects.
     virtual void fetch(const QUrl &url, QObject *context,
-                       std::function<void(const QByteArray &data, const QString &error)> done) = 0;
+                       std::function<void(const QByteArray &data, const QString &error)> done, AllowsHost allowsHost = {}) = 0;
 };
 
 // Fetches over the network, from public addresses alone. Each host is
@@ -53,7 +55,7 @@ public:
     explicit NetworkFetcher(QObject *parent = nullptr, QNetworkAccessManager *network = nullptr);
     ~NetworkFetcher() override;
     void fetch(const QUrl &url, QObject *context,
-               std::function<void(const QByteArray &data, const QString &error)> done) override;
+               std::function<void(const QByteArray &data, const QString &error)> done, AllowsHost allowsHost = {}) override;
 
     // For tests: how names are resolved (the system's, through Qt's host
     // lookup, unless given), a proxy every request goes through, and a

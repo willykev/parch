@@ -7,8 +7,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QMutex>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QTest>
 
 #include <cmath>
@@ -20,89 +22,59 @@
 #include <sys/wait.h>
 
 namespace {
+QMutex fixtureMutex;
+QHash<QString, QString> fixtureLogs;
 
-void writeScript(const QString &path, const QString &text)
+// The test driver supplies observations and sample drawings inside the helper's
+// home before it runs. The helper receives the same filesystem policy as a real drawing.
+void prepareDrawingFixture(const HelperRun &run, const QString &home)
 {
-    writeFile(path, text.toUtf8());
-    QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    const QDir fixture = QFileInfo(run.program).absoluteDir();
+    QString log;
+    {
+        QMutexLocker lock(&fixtureMutex);
+        log = fixtureLogs.value(fixture.absolutePath());
+    }
+    if (log.isEmpty()) return;
+    QStringList suffixes{QString()};
+    if (run.input.startsWith("sleep")) suffixes << QStringLiteral(".child");
+    if (run.input.startsWith("environ")) suffixes << QStringLiteral(".environ") << QStringLiteral(".folder");
+    for (const auto &suffix : suffixes) {
+        QFile shared(log + suffix);
+        if (!shared.open(QIODevice::WriteOnly | QIODevice::Append)) qFatal("cannot prepare drawing log");
+        if (::link(QFile::encodeName(shared.fileName()).constData(),
+                   QFile::encodeName(home + QStringLiteral("/log") + suffix).constData()) != 0) qFatal("cannot link drawing log");
+    }
+    for (const QString &name : {QStringLiteral("picture.png"), QStringLiteral("formula.svg")}) {
+        const auto source = fixture.filePath(name);
+        if (QFileInfo::exists(source) && !QFile::copy(source, home + u'/' + name)) qFatal("cannot prepare sample drawing");
+    }
 }
-
-// Quoted for the shell.
-QString quoted(QString text) { return u'\'' + text.replace(u'\'', QStringLiteral("'\\''")) + u'\''; }
 
 } // namespace
 
+void installDrawingFixture(const QString &program)
+{
+    const QString fixture = QCoreApplication::applicationDirPath() + QStringLiteral("/drawing-fixture");
+    const QByteArray bytes = readFile(fixture);
+    QVERIFY2(!bytes.isEmpty(), qPrintable(fixture));
+    QVERIFY(QDir().mkpath(QFileInfo(program).absolutePath()));
+    QSaveFile target(program);
+    QVERIFY2(target.open(QIODevice::WriteOnly), qPrintable(target.errorString()));
+    QCOMPARE(target.write(bytes), bytes.size());
+    QVERIFY2(target.setPermissions(QFile::permissions(fixture)), qPrintable(target.errorString()));
+    QVERIFY2(target.commit(), qPrintable(target.errorString()));
+}
+
 void writeFakeHelpers(const QString &folder, const QString &log)
 {
-    writeScript(folder + QStringLiteral("/render-svg"), QStringLiteral(R"(#!/bin/sh
-PATH=/usr/bin:/bin
-LOG=%1
-echo "start $$" >> "$LOG"
-color=black
-size=16
-while [ $# -gt 0 ]; do
-    case "$1" in
-    --color) color=$2; shift 2 ;;
-    --font-size) size=$2; shift 2 ;;
-    *) shift ;;
-    esac
-done
-IFS= read -r formula
-IFS= read -r ruled
-case "$formula" in
-slow*) sleep 0.3 ;;
-sleep*) sleep 60 & echo $! > "$LOG.child"; wait ;;
-flood*) head -c 4000000 /dev/zero; echo "end $$" >> "$LOG"; exit 0 ;;
-environ*)
-    tr '\000' '\n' < /proc/$$/environ > "$LOG.environ"
-    cat /proc/net/dev > "$LOG.net"
-    pwd > "$LOG.folder" ;;
-refuse*)
-    printf 'ERR    1 %s \342\200\224 Parse error: fake refusal of %s\n' "$formula" "$formula" >&2
-    echo "end $$" >> "$LOG"
-    exit 1 ;;
-crash*) echo "end $$" >> "$LOG"; kill -SEGV $$ ;;
-esac
-width=${#formula}
-deep=$((14 + 100 * size))
-printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s 20" width="%spt" height="20pt"><rect width="%s" height="14" fill="%s"/></svg>\n' "$width" "$width" "$width" "$color"
-printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s" width="%spt" height="%spt"></svg>\n' "$width" "$deep" "$width" "$deep"
-printf 'OK     1 %s\nOK     2 %s\n' "$formula" "$ruled" >&2
-echo "end $$" >> "$LOG"
-)")
-                                                          .arg(quoted(log)));
-    writeScript(folder + QStringLiteral("/merman-cli"), QStringLiteral(R"(#!/bin/sh
-PATH=/usr/bin:/bin
-LOG=%1
-DIR=%2
-if [ "$1" = --version ]; then echo "merman-cli 0.0.7"; exit 0; fi
-echo "start $$" >> "$LOG"
-format=svg
-scale=1
-while [ $# -gt 0 ]; do
-    case "$1" in
-    --format) format=$2; shift 2 ;;
-    --scale) scale=$2; shift 2 ;;
-    *) shift ;;
-    esac
-done
-source=$(cat)
-echo "run $format $scale" >> "$LOG"
-case "$source" in
-refuse*)
-    echo "Diagram parse error (flowchart-v2): fake refusal" >&2
-    echo "end $$" >> "$LOG"
-    exit 1 ;;
-slow*) sleep 0.3 ;;
-esac
-if [ "$format" = svg ]; then
-    printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20" aria-roledescription="flowchart-v2"><text x="1" y="12">Fake label</text></svg>'
-else
-    cat "$DIR/picture.png"
-fi
-echo "end $$" >> "$LOG"
-)")
-                                                          .arg(quoted(log), quoted(folder)));
+    HelperProcess::setHomeObserver(prepareDrawingFixture);
+    installDrawingFixture(folder + QStringLiteral("/render-svg"));
+    installDrawingFixture(folder + QStringLiteral("/merman-cli"));
+    {
+        QMutexLocker lock(&fixtureMutex);
+        fixtureLogs.insert(QDir(folder).absolutePath(), log);
+    }
     QImage picture(80, 40, QImage::Format_ARGB32);
     picture.fill(Qt::darkCyan);
     picture.save(folder + QStringLiteral("/picture.png"));
@@ -256,6 +228,24 @@ QJsonArray renderFixtures(const QString &name)
     QFile file(QStringLiteral(PARCH_SOURCE_DIR "/tests/fixtures/") + name + QStringLiteral("/corpus.json"));
     if (!file.open(QIODevice::ReadOnly)) return {};
     return QJsonDocument::fromJson(file.readAll()).array();
+}
+
+SvgSwatch::SvgSwatch() : m_previous(QDir::searchPaths(QStringLiteral("parchswatch")))
+{
+    QImage tile(8, 8, QImage::Format_RGB32);
+    tile.fill(Qt::magenta);
+    if (!tile.save(m_folder.filePath(QStringLiteral("tile.png")))) qFatal("could not make the colour tile");
+    QDir::setSearchPaths(QStringLiteral("parchswatch"), {m_folder.path()});
+}
+
+SvgSwatch::~SvgSwatch()
+{
+    QDir::setSearchPaths(QStringLiteral("parchswatch"), m_previous);
+}
+
+QByteArray SvgSwatch::svg() const
+{
+    return R"(<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 8"><rect width="8" height="8" fill="#008000"/><image x="8" width="8" height="8" xlink:href="parchswatch:tile.png"/></svg>)";
 }
 
 int pixelsNear(const QImage &image, const QColor &color, int tolerance)

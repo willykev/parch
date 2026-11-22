@@ -16,7 +16,7 @@ namespace {
 
 void collect(const md::Node &node, std::vector<Item> &found)
 {
-    if (!node.generated) {
+    if (!node.generated && node.resolved) {
         std::optional<RenderKind> kind;
         if (node.type == md::NodeType::MathInline) kind = node.display ? RenderKind::DisplayMath : RenderKind::InlineMath;
         else if (node.type == md::NodeType::MathBlock) kind = RenderKind::DisplayMath;

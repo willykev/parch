@@ -3,6 +3,8 @@
 #include "document.h"
 #include "documentstore.h"
 #include "pathtext.h"
+#include "librarywalk.h"
+#include "saferead.h"
 #include "recentfiles.h"
 #include "settings.h"
 
@@ -25,6 +27,8 @@ struct LibraryModel::Node {
     QString path;
     QString documentId;
     bool missing = false;
+    bool containsLinks = false;
+    bool outsideLink() const { return kind == Kind::OutsideFolder || kind == Kind::OutsideDocument; }
     Node *parent = nullptr;
     // Every child, in order, and those the filter keeps, in the same order.
     std::vector<std::unique_ptr<Node>> children;
@@ -349,6 +353,8 @@ QVariant LibraryModel::data(const QModelIndex &index, int role) const
         return node->missing;
     case DocumentIdRole:
         return node->documentId;
+    case OutsideLinkRole:
+        return node->outsideLink();
     case LoadingRole:
         return node->request != 0;
     case SectionRole:
@@ -361,7 +367,7 @@ QVariant LibraryModel::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> LibraryModel::roleNames() const
 {
     return {{NameRole, "name"}, {PathRole, "path"}, {KindRole, "kind"}, {MissingRole, "missing"},
-            {DocumentIdRole, "documentId"}, {LoadingRole, "loading"}, {SectionRole, "section"}};
+            {DocumentIdRole, "documentId"}, {LoadingRole, "loading"}, {SectionRole, "section"}, {OutsideLinkRole, "outsideLink"}};
 }
 
 bool LibraryModel::canFetchMore(const QModelIndex &parent) const
@@ -447,7 +453,7 @@ QModelIndexList LibraryModel::matches() const
     if (m_filter.isEmpty()) return found;
     const auto visit = [&](const auto &self, const Node *node) -> void {
         for (const Node *child : node->shown) {
-            if (child->kind != Kind::Section && child->name.contains(m_filter, Qt::CaseInsensitive))
+            if (child->kind != Kind::Section && !child->outsideLink() && child->name.contains(m_filter, Qt::CaseInsensitive))
                 found.append(indexOf(child));
             self(self, child);
         }
@@ -466,7 +472,7 @@ QModelIndexList LibraryModel::nearestMatches(int limit) const
         QList<const Node *> next;
         for (const Node *node : std::as_const(level)) {
             for (const Node *child : node->shown) {
-                if (child->kind != Kind::Section && child->name.contains(m_filter, Qt::CaseInsensitive)) {
+                if (child->kind != Kind::Section && !child->outsideLink() && child->name.contains(m_filter, Qt::CaseInsensitive)) {
                     found.append(indexOf(child));
                     if (found.size() >= limit) return found;
                 }
@@ -484,7 +490,7 @@ int LibraryModel::jobsInFlight() const { return m_jobs + (m_shared->scanning() ?
 
 // What runs off the UI thread works on plain values only.
 
-LibraryModel::FolderListing LibraryModel::listFolder(const QString &path)
+LibraryModel::FolderListing LibraryModel::listFolder(const QString &path, const QStringList &roots)
 {
     FolderListing listing;
     const QByteArray encoded = QFile::encodeName(path);
@@ -507,23 +513,37 @@ LibraryModel::FolderListing LibraryModel::listFolder(const QString &path)
         listing.error = tr("Cannot be read: %1").arg(QString::fromLocal8Bit(std::strerror(errno)));
         return listing;
     }
-    errno = 0;
-    while (const dirent *entry = ::readdir(folder)) {
+    const int fd = ::dirfd(folder);
+    if (LibraryWalk::rootOf(SafeRead::descriptorPath(fd), roots).isEmpty()) {
+        ::closedir(folder);
+        listing.error = tr("This folder is outside the library.");
+        return listing;
+    }
+    while (true) {
+        errno = 0;
+        const dirent *entry = ::readdir(folder);
+        if (!entry) break;
         const QByteArray raw(entry->d_name);
         const QString name = QFile::decodeName(raw);
         // Hidden entries, and a name that would not lead back to its file, are left out.
         if (name.startsWith(u'.') || QFile::encodeName(name) != raw) continue;
         bool isFolder = entry->d_type == DT_DIR;
+        bool outside = false;
         if (entry->d_type == DT_LNK || entry->d_type == DT_UNKNOWN) {
             struct stat target {};
-            if (::stat((encoded + '/' + raw).constData(), &target) != 0) continue;
+            listing.containsLinks = true;
+            outside = LibraryWalk::rootOf(QFileInfo(path + u'/' + name).canonicalFilePath(), roots).isEmpty();
+            if (::fstatat(fd, raw.constData(), &target, 0) != 0) {
+                if (entry->d_type == DT_LNK) listing.entries.append({name, Kind::OutsideDocument});
+                continue;
+            }
             if (!S_ISDIR(target.st_mode) && !S_ISREG(target.st_mode)) continue;
             isFolder = S_ISDIR(target.st_mode);
         } else if (entry->d_type != DT_DIR && entry->d_type != DT_REG) {
             continue;
         }
-        if (isFolder || isTextDocument(name)) listing.entries.append({name, isFolder});
-        errno = 0;
+        if (isFolder) listing.entries.append({name, outside ? Kind::OutsideFolder : Kind::Folder});
+        else if (outside || isTextDocument(name)) listing.entries.append({name, outside ? Kind::OutsideDocument : Kind::Document});
     }
     const int error = errno;
     ::closedir(folder);
@@ -533,7 +553,9 @@ LibraryModel::FolderListing LibraryModel::listFolder(const QString &path)
         return listing;
     }
     std::sort(listing.entries.begin(), listing.entries.end(), [](const Entry &a, const Entry &b) {
-        if (a.folder != b.folder) return a.folder;
+        const bool firstFolder = a.kind == Kind::Folder || a.kind == Kind::OutsideFolder;
+        const bool secondFolder = b.kind == Kind::Folder || b.kind == Kind::OutsideFolder;
+        if (firstFolder != secondFolder) return firstFolder;
         const int order = naturalCompare(a.name, b.name);
         return order != 0 ? order < 0 : a.name < b.name;
     });
@@ -541,14 +563,14 @@ LibraryModel::FolderListing LibraryModel::listFolder(const QString &path)
     return listing;
 }
 
-LibraryModel::FolderListing LibraryModel::examine(const QString &path, bool probeOnly)
+LibraryModel::FolderListing LibraryModel::examine(const QString &path, bool probeOnly, const QStringList &roots)
 {
     if (probeOnly && QFileInfo(path).isDir()) {
         FolderListing there;
         there.probed = true;
         return there;
     }
-    return listFolder(path);
+    return listFolder(path, roots);
 }
 
 QString LibraryModel::kindName(Kind kind)
@@ -556,8 +578,10 @@ QString LibraryModel::kindName(Kind kind)
     switch (kind) {
     case Kind::Section:
         return QStringLiteral("section");
+    case Kind::OutsideFolder:
     case Kind::Folder:
         return QStringLiteral("folder");
+    case Kind::OutsideDocument:
     case Kind::Document:
         return QStringLiteral("document");
     case Kind::Draft:
@@ -576,6 +600,8 @@ LibraryModel::Key LibraryModel::keyOf(Kind kind, const QString &name, const QStr
         return {int(kind), name};
     case Kind::Draft:
         return {int(kind), documentId};
+    case Kind::OutsideFolder:
+    case Kind::OutsideDocument:
     case Kind::Folder:
     case Kind::Document:
         return {int(kind), path};
@@ -599,7 +625,7 @@ bool LibraryModel::sameEntries(const Node *folder, const QList<Entry> &entries)
     if (folder->children.size() != size_t(entries.size())) return false;
     for (qsizetype i = 0; i < entries.size(); ++i) {
         const Node *child = folder->children.at(i).get();
-        const Kind kind = entries.at(i).folder ? Kind::Folder : Kind::Document;
+        const Kind kind = entries.at(i).kind;
         if (child->kind != kind || child->name != entries.at(i).name) return false;
     }
     return true;
@@ -713,7 +739,7 @@ bool LibraryModel::computeWanted(Node *node, bool ancestorMatches, int *matches)
     bool matched = false;
     for (const auto &owned : node->children) {
         Node *child = owned.get();
-        const bool self = !m_filter.isEmpty() && child->kind != Kind::Section
+        const bool self = !m_filter.isEmpty() && child->kind != Kind::Section && !child->outsideLink()
                           && child->name.contains(m_filter, Qt::CaseInsensitive);
         *matches += self ? 1 : 0;
         const bool beneath = computeWanted(child, ancestorMatches || self, matches);
@@ -843,11 +869,11 @@ void LibraryModel::startJob(const QString &path)
     if (token == 0) return;
     m_running.insert(path);
     ++m_jobs;
-    QtConcurrent::run(m_pool, &LibraryModel::examine, path, m_probes.contains(token))
-        .then(this, [this, path, token](const FolderListing &listing) {
+    QtConcurrent::run(m_pool, &LibraryModel::examine, path, m_probes.contains(token), m_folders)
+        .then(this, [this, path, token, roots = m_folders](const FolderListing &listing) {
             --m_jobs;
             m_running.remove(path);
-            applyListing(token, listing);
+            if (!listing.containsLinks || roots == m_folders) applyListing(token, listing);
             startJob(path);
             // A folder the filter waited for while this job ran can be listed now.
             pumpSearch();
@@ -885,6 +911,7 @@ void LibraryModel::applyListing(quint64 request, const FolderListing &listing)
         return;
     }
     folder->listing = Listing::Done;
+    folder->containsLinks = listing.containsLinks;
     folder->missing = listing.missing;
     if (listing.ok) folder->identity = listing.identity;
     const bool wasFailed = std::exchange(folder->failed, !listing.ok);
@@ -900,7 +927,7 @@ void LibraryModel::applyListing(quint64 request, const FolderListing &listing)
     } else {
         staged.rows.reserve(listing.entries.size());
         for (const Entry &entry : listing.entries)
-            staged.rows.append({entry.folder ? Kind::Folder : Kind::Document, entry.name, folder->path + u'/' + entry.name});
+            staged.rows.append({entry.kind, entry.name, folder->path + u'/' + entry.name});
     }
     // Still loading until the last chunk is in, and dropped, as a listing
     // is, should the folder be collapsed, removed or listed again first.
@@ -1074,8 +1101,8 @@ void LibraryModel::pumpSearch()
         ++m_jobs;
         ++m_searchRunning;
         const quint64 generation = m_searchGeneration;
-        QtConcurrent::run(m_pool, &LibraryModel::listFolder, search.path)
-            .then(this, [this, search, generation](const FolderListing &listing) {
+        QtConcurrent::run(m_pool, &LibraryModel::listFolder, search.path, m_folders)
+            .then(this, [this, search, generation, roots = m_folders](const FolderListing &listing) {
                 --m_jobs;
                 m_running.remove(search.path);
                 m_searchJobs.remove(search.path);
@@ -1084,7 +1111,10 @@ void LibraryModel::pumpSearch()
                 // field has text, even one from before it was emptied: the
                 // folder is listed as it is now.
                 if (generation == m_searchGeneration) --m_searchRunning;
-                if (!m_filter.isEmpty()) applySearchListing(search, listing);
+                if (!m_filter.isEmpty()) {
+                    if (listing.containsLinks && roots != m_folders && folderAt(search.path)) m_searchQueue.append(search);
+                    else applySearchListing(search, listing);
+                }
                 startJob(search.path);
                 pumpSearch();
             });
@@ -1105,6 +1135,7 @@ void LibraryModel::applySearchListing(const Search &search, const FolderListing 
         folder->identity = listing.identity;
     }
     folder->listing = Listing::Done;
+    folder->containsLinks = listing.containsLinks;
     folder->missing = listing.missing;
     folder->failed = !listing.ok;
     QList<Row> rows;
@@ -1113,7 +1144,7 @@ void LibraryModel::applySearchListing(const Search &search, const FolderListing 
     } else {
         rows.reserve(listing.entries.size());
         for (const Entry &entry : listing.entries)
-            rows.append({entry.folder ? Kind::Folder : Kind::Document, entry.name, folder->path + u'/' + entry.name});
+            rows.append({entry.kind, entry.name, folder->path + u'/' + entry.name});
     }
     replaceChildren(folder, rows);
     changedData(folder);
@@ -1121,7 +1152,7 @@ void LibraryModel::applySearchListing(const Search &search, const FolderListing 
     int matched = 0;
     for (const auto &child : folder->children) {
         if (child->kind == Kind::Folder) queueSearch(child.get(), search.depth + 1);
-        if (child->name.contains(m_filter, Qt::CaseInsensitive)) ++matched;
+        if (!child->outsideLink() && child->name.contains(m_filter, Qt::CaseInsensitive)) ++matched;
     }
     // Only what this listing added, for a view to open to.
     if (matched > 0 && inView(folder)) emit matchesListed(indexOf(folder), matched);
@@ -1201,6 +1232,14 @@ void LibraryModel::syncFolders()
         rows.append({Kind::Folder, name.isEmpty() ? folder : name, folder});
     }
     replaceChildren(m_root.get(), rows);
+    // A link can change from a leaf into a usable folder or back when
+    // another library folder is added or removed.
+    const auto refreshLinks = [this](const auto &visit, Node *node) -> void {
+        if (node->containsLinks) list(node);
+        for (const auto &child : node->children)
+            if (child->kind == Kind::Folder) visit(visit, child.get());
+    };
+    refreshLinks(refreshLinks, m_root.get());
     for (const auto &child : m_root->children)
         if (child->kind == Kind::Folder && child->listing == Listing::None && !child->request) probe(child.get());
     if (m_filter.isEmpty()) return;
@@ -1221,22 +1260,24 @@ void LibraryModel::rebuildDrafts()
 {
     QList<Row> rows;
     QSet<QString> open;
-    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QList<Row> unsaved;
     for (Document *document : m_store->documents()) {
         if (!document->isDraft() || document->isScratch()) continue;
         open.insert(document->id());
         Row row{Kind::Draft, document->title(), {}, document->id()};
+        if (!document->everSaved()) {
+            unsaved.append(row);
+            continue;
+        }
         const auto disk = m_shared->drafts().constFind(document->id());
         if (disk != m_shared->drafts().cend()) {
             row.order = disk->modified;
         } else {
-            if (!m_firstSeen.contains(document->id())) m_firstSeen.insert(document->id(), now);
-            row.order = m_firstSeen.value(document->id());
+            row.order = QDateTime::fromMSecsSinceEpoch(document->diskVersion().stamp.modified / 1000000);
         }
         rows.append(row);
     }
-    // A draft no longer open needs its first sighting kept no longer.
-    m_firstSeen.removeIf([&open](const auto &seen) { return !open.contains(seen.key()); });
+
     for (const DiskDraft &draft : m_shared->drafts()) {
         if (open.contains(draft.id) || !m_store->isUnnamedDraft(draft.id)) continue;
         rows.append({Kind::Draft, draft.title, {}, draft.id, false, draft.modified});
@@ -1245,7 +1286,9 @@ void LibraryModel::rebuildDrafts()
     std::sort(rows.begin(), rows.end(), [](const Row &a, const Row &b) {
         return a.order != b.order ? a.order > b.order : a.documentId < b.documentId;
     });
-    replaceChildren(m_draftsSection, rows);
+    // The store lists documents in opening order. A new draft precedes every file on disk.
+    std::reverse(unsaved.begin(), unsaved.end());
+    replaceChildren(m_draftsSection, unsaved + rows);
 }
 
 void LibraryModel::updateDraft(Document *draft)

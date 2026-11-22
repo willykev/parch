@@ -57,27 +57,30 @@ bool sourceGraphemeRange(QStringView source, SourceRange range)
         && (range.length == 0 || sourceGraphemeBoundary(source, range.start + range.length));
 }
 
+int SourceGraphemes::step(int position, bool forward) const
+{
+    if (position < 0 || position > m_source.size()
+        || (forward ? position == m_source.size() : position == 0)) return -1;
+    const int candidate = position + (forward ? 1 : -1);
+    if (candidate == 0 || candidate == m_source.size()
+        || (printableAscii(m_source[candidate - 1]) && printableAscii(m_source[candidate]))) return candidate;
+    const int at = forward ? position : position - 1;
+    if (!m_finder || at < m_start || at >= m_end) {
+        const auto context = boundaryContext(m_source, at, m_start);
+        m_end = m_start + int(context.size());
+        m_finder.emplace(QTextBoundaryFinder::Grapheme, context);
+    }
+    m_finder->setPosition(position - m_start);
+    const int found = forward ? m_finder->toNextBoundary() : m_finder->toPreviousBoundary();
+    return found < 0 ? -1 : m_start + found;
+}
+
 int previousSourceGrapheme(QStringView source, int position)
 {
-    if (position <= 0 || position > source.size()) return -1;
-    if (sourceGraphemeBoundary(source, position - 1)) return position - 1;
-    int start;
-    // Look to the left so paragraph-start navigation includes the preceding separator.
-    const auto context = boundaryContext(source, position - 1, start);
-    QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, context);
-    finder.setPosition(position - start);
-    const auto previous = finder.toPreviousBoundary();
-    return previous < 0 ? -1 : start + previous;
+    return SourceGraphemes(source).step(position, false);
 }
 
 int nextSourceGrapheme(QStringView source, int position)
 {
-    if (position < 0 || position >= source.size()) return -1;
-    if (sourceGraphemeBoundary(source, position + 1)) return position + 1;
-    int start;
-    const auto context = boundaryContext(source, position, start);
-    QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, context);
-    finder.setPosition(position - start);
-    const auto next = finder.toNextBoundary();
-    return next < 0 ? -1 : start + next;
+    return SourceGraphemes(source).step(position, true);
 }

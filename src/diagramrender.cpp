@@ -160,7 +160,8 @@ Fonts chooseFonts(const QString &requested)
         }
         fonts.files << file;
         fonts.bytes += info.size();
-        identity << QStringLiteral("%1:%2:%3").arg(file).arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
+        identity << QStringLiteral("%1:%2:%3").arg(file, QString::number(info.size()),
+                                                   QString::number(info.lastModified().toMSecsSinceEpoch()));
         FcCharSet *characters = nullptr;
         if (FcPatternGetCharSet(pattern, FC_CHARSET, 0, &characters) == FcResultMatch)
             covered << FcCharSetCopy(characters);
@@ -581,6 +582,8 @@ RenderResult read(const HelperOutcome &svg, const HelperOutcome &png, const Rend
     QBuffer buffer;
     buffer.setData(png.output);
     QImageReader reader(&buffer, "png");
+    reader.setAutoDetectImageFormat(false);
+    reader.setDecideFormatFromContent(false);
     const QSize pixels = reader.size();
     if (!pixels.isValid() || pixels.isEmpty() || !size.isValid() || size.isEmpty()) {
         result.status = RenderResult::Failed;

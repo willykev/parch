@@ -39,7 +39,11 @@
 namespace md {
 
 // Bumped whenever the same source can yield a different tree.
-inline constexpr int DialectVersion = 1;
+inline constexpr int DialectVersion = 3;
+// Distinct helper drawings in an expanded document. Inline and display math draw differently.
+inline constexpr int MaxDrawings = 10000;
+// Parsing and traversing documents up to the block nesting limit on a worker.
+inline constexpr unsigned WorkerStackBytes = 8U << 20;
 
 // A half-open range of UTF-16 offsets into the text of one source file.
 struct Range {
@@ -113,7 +117,7 @@ enum class NodeType : quint8 {
     HtmlBlock,             // text: the raw HTML; children: the fragment read under the HTML policy (see mdhtml.h)
     LinkDefinition,        // label, dest, title; target: the destination
     Table,                 // columns; open: the delimiter row; children: TableRow (the first is the header)
-    TableRow,              // header; markers: the cell boundaries
+    TableRow,              // header; markers: the cell boundaries; children: the written cells
     TableCell,             // header, align, column, span
     DefinitionList,        // children: DefinitionTerm and DefinitionDescription in source order
     DefinitionTerm,
@@ -200,7 +204,7 @@ struct Node {
     bool fenced = false;       // CodeBlock
     bool setext = false;       // Heading
     bool display = false;      // MathInline
-    bool resolved = true;      // false for a reference, note, citation, variable or include that could not be resolved
+    bool resolved = true;      // false for an unresolved reference, include or drawing
     bool generated = false;
 
     int file = 0;              // index into Document::files
@@ -228,6 +232,10 @@ struct Node {
     std::vector<Attribute> attributes; // HtmlElement: the attributes the HTML policy allows
     std::vector<Range> markers;        // BlockQuote, TableRow, InlineNote; CodeBlock: literal source lines
     std::vector<Node> children;
+    std::vector<Align> columnAlignments; // Table, including columns omitted by short rows
+    // Later contents markers refer to the generated list at the first marker.
+    const Node *contentsOwner = nullptr;
+    const std::vector<Node> &contentsChildren() const { return contentsOwner ? contentsOwner->children : children; }
 
     QString attribute(QLatin1StringView name) const
     {
@@ -269,6 +277,9 @@ enum class DiagnosticCode : quint8 {
     IncludeNoLibrary,         // a `/rooted` include without a library root
     IncludeNoBaseFolder,      // a relative include from a document with no folder
     IncludeOutside,           // an include that leads out of the library, or of the document's folder
+    TableLimit,
+    HelperLimit,
+    ContentsLimit,
 };
 
 struct Diagnostic {
@@ -346,6 +357,9 @@ struct Source {
     // in the order a reader meets them, its content the Citation itself.
     // A citation inside a note stays where it is.
     bool citationNotes = false;
+    int maxTableCells = 100000; // grid positions across all tables in the expanded document
+    int maxContentsNodes = 100000; // generated heading-list nodes across all contents markers
+    int maxDrawings = MaxDrawings; // distinct formulas and diagrams across the expanded document
 };
 
 struct PlainTextOptions {
@@ -412,6 +426,9 @@ QString plainText(const Node &node);
 // Text as a cell displays it, with the requested separator at every inline
 // line break, including HTML br elements.
 QString inlineText(const Node &node, QChar lineBreak);
+// Visits a row at the table's full width. Omitted cells have an empty range
+// at the end of the row. The cell reference is valid during the callback.
+void forEachTableCell(const Node &table, const Node &row, const std::function<void(const Node &)> &visit);
 
 // Parses one text. Includes are recognised and left unexpanded.
 Document parse(const QString &text, const Options &options = Options());

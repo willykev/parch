@@ -107,9 +107,10 @@ std::shared_ptr<const CslStyle> CslCatalog::bundledStyle(const QString &id, QStr
     return style;
 }
 
-std::shared_ptr<const CslStyle> CslCatalog::styleFromFile(const QString &path, QString *error)
+std::shared_ptr<const CslStyle> CslCatalog::styleFromFile(const QString &path, QString *error, const QStringList *folders)
 {
-    const SafeRead::Result read = SafeRead::read(path, SafeRead::ReferenceBytes);
+    const auto read = folders ? SafeRead::readWithin(path, SafeRead::ReferenceBytes, *folders)
+                              : SafeRead::read(path, SafeRead::ReferenceBytes);
     if (!read.ok) {
         if (error)
             *error = QStringLiteral("Cannot read the citation style “%1”: %2.").arg(QFileInfo(path).fileName(), read.error);
@@ -169,6 +170,29 @@ std::shared_ptr<const CslLocale> CslCatalog::locale(const QString &language, con
 }
 
 CitationFormatter::CitationFormatter() = default;
+
+namespace {
+QList<CitationFormatter::Database> distinctDatabases(QList<CitationFormatter::Database> databases)
+{
+    QSet<const BibliographyDatabase *> seen;
+    databases.removeIf([&](const auto &db) {
+        if (!db || seen.contains(db.get())) return true;
+        seen.insert(db.get());
+        return false;
+    });
+    return databases;
+}
+} // namespace
+
+void CitationFormatter::setDatabases(QList<Database> databases)
+{
+    m_databases = distinctDatabases(std::move(databases));
+}
+
+void CitationFormatter::setDatabasesFor(const QString &file, QList<Database> databases)
+{
+    m_fileDatabases.insert(file, distinctDatabases(std::move(databases)));
+}
 
 CitationOutput CitationFormatter::format(const QList<CitationClusterSpec> &clusters,
                                          const QList<WriterDefinition> &definitions) const
@@ -308,6 +332,18 @@ CitationOutput CitationFormatter::format(const QList<CitationClusterSpec> &clust
     CslEngine::Result result;
     if (engine) {
         result = engine->process(citations);
+        if (result.nestingLimited)
+            out.diagnostics.append({Code::FormattingLimit, Severity::Warning,
+                                    QStringLiteral("Citation formatting nested past 32 levels is shown as plain text."),
+                                    {}, -1, -1, {}, 0});
+        if (result.namesLimited)
+            out.diagnostics.append({Code::FormattingLimit, Severity::Warning,
+                                    QStringLiteral("Only the first 50 names are compared to distinguish similar citations."),
+                                    {}, -1, -1, {}, 0});
+        if (result.renderLimited)
+            out.diagnostics.append({Code::FormattingLimit, Severity::Warning,
+                                    QStringLiteral("Citation formatting reached its limit. Further output was omitted."),
+                                    {}, -1, -1, {}, 0});
     } else {
         for (const CslCitation &citation : citations) {
             CslText text;

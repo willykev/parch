@@ -399,6 +399,9 @@ const char *codeName(DiagnosticCode code)
     case DiagnosticCode::DuplicateCitation: return "duplicate-citation";
     case DiagnosticCode::UnresolvedVariable: return "unresolved-variable";
     case DiagnosticCode::MalformedTableRow: return "malformed-table-row";
+    case DiagnosticCode::TableLimit: return "table-limit";
+    case DiagnosticCode::HelperLimit: return "helper-limit";
+    case DiagnosticCode::ContentsLimit: return "contents-limit";
     case DiagnosticCode::UnclosedMath: return "unclosed-math";
     case DiagnosticCode::FrontMatter: return "front-matter";
     case DiagnosticCode::UnsupportedHtml: return "unsupported-html";
@@ -508,10 +511,32 @@ QString inlineText(const Node &node, QChar lineBreak)
     return out;
 }
 
+void forEachTableCell(const Node &table, const Node &row, const std::function<void(const Node &)> &visit)
+{
+    int column = 0;
+    for (const Node &cell : row.children) {
+        if (cell.type != NodeType::TableCell) continue;
+        visit(cell);
+        column = cell.column + cell.span;
+    }
+    if (column >= table.columns) return;
+    Node empty;
+    empty.type = NodeType::TableCell;
+    empty.file = row.file;
+    empty.header = row.header;
+    empty.range = empty.open = empty.close = {row.range.end, row.range.end};
+    for (; column < table.columns; ++column) {
+        empty.column = column;
+        empty.align = size_t(column) < table.columnAlignments.size() ? table.columnAlignments[size_t(column)] : Align::None;
+        visit(empty);
+    }
+}
+
 QString plainText(const Node &node)
 {
     QString out;
-    if (node.isInline() || node.children.empty() || node.children.front().isInline()) {
+    const auto &children = node.contentsChildren();
+    if (node.isInline() || children.empty() || children.front().isInline()) {
         appendPlain(node, out);
         return out;
     }
@@ -520,7 +545,7 @@ QString plainText(const Node &node)
     case NodeType::CitationDefinition:
     case NodeType::TableOfContents:
         // Asked for by name, a block that is otherwise passed over is read.
-        for (const Node &child : node.children) appendBlocks(child, PlainTextOptions(), out);
+        for (const Node &child : children) appendBlocks(child, PlainTextOptions(), out);
         break;
     default:
         appendBlocks(node, PlainTextOptions(), out);
@@ -586,6 +611,13 @@ Destination classifyDestination(const QString &destination, const QString &baseD
             return result;
         }
         if (result.scheme != u"file") {
+            if (result.scheme == u"data") {
+                const qsizetype hash = destination.indexOf(u'#');
+                if (hash >= 0) {
+                    result.encodedFragment = destination.sliced(hash + 1);
+                    result.fragment = QUrl::fromPercentEncoding(result.encodedFragment->toUtf8());
+                }
+            }
             result.kind = Destination::Kind::OtherScheme;
             return result;
         }

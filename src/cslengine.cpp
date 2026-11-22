@@ -5,8 +5,14 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 
 namespace {
+
+constexpr int MaxCiteSteps = 100000;
+constexpr qsizetype MaxCiteChars = 4 * 1024 * 1024;
+constexpr qsizetype MaxDocumentChars = 32 * 1024 * 1024;
+struct RenderLimitReached {};
 
 // ---------------------------------------------------------------------------
 // The output tree. Rendering builds it; text case and period stripping
@@ -69,19 +75,23 @@ struct Out {
 void plainInto(const Out &o, QString &text, bool outer = true)
 {
     if (o.isEmpty()) return;
-    if (!outer) text += o.prefix;
+    const auto append = [&](const QString &piece) {
+        if (piece.size() > MaxCiteChars - text.size()) throw RenderLimitReached{};
+        text += piece;
+    };
+    if (!outer) append(o.prefix);
     if (o.leaf) {
-        text += o.text;
+        append(o.text);
     } else {
         bool first = true;
         for (const Out &kid : o.kids) {
             if (kid.isEmpty()) continue;
-            if (!first) text += o.delimiter;
+            if (!first) append(o.delimiter);
             plainInto(kid, text, false);
             first = false;
         }
     }
-    if (!outer) text += o.suffix;
+    if (!outer) append(o.suffix);
 }
 
 QString plainOf(const Out &o)
@@ -332,7 +342,7 @@ void finish(Out &o, const CslFormatting &f, bool english)
 // spans, and quotation marks, which become quotes that alternate with the
 // quotes around them.
 
-Out richText(const QString &value, bool quotes = true)
+Out readRichText(const QString &value, bool quotes, bool &limited)
 {
     Out root;
     std::vector<Out *> stack{&root};
@@ -340,10 +350,15 @@ Out richText(const QString &value, bool quotes = true)
     std::vector<QChar> opened{QChar()};
     std::vector<QString> names{QString()};
     auto push = [&](Out node, QChar quote, const QString &name) {
+        if (stack.size() > CslMarkup::MaxNesting) {
+            limited = true;
+            return false;
+        }
         stack.back()->kids.push_back(std::move(node));
         stack.push_back(&stack.back()->kids.back());
         opened.push_back(quote);
         names.push_back(name);
+        return true;
     };
     auto pop = [&] {
         if (stack.size() > 1) {
@@ -398,7 +413,7 @@ Out richText(const QString &value, bool quotes = true)
             }
             // Small capitals, superscripts and subscripts keep their case.
             if (node.smallCaps == 1 || node.verticalAlign > 0) node.nocase = true;
-            push(std::move(node), QChar(), name);
+            if (!push(std::move(node), QChar(), name)) return Out::of(value);
             continue;
         }
         if (token.type == CslMarkup::Token::Type::Close) {
@@ -415,6 +430,7 @@ Out richText(const QString &value, bool quotes = true)
             continue;
         }
         const QString &text = token.text;
+        const qsizetype lastSingle = text.lastIndexOf(u'\'');
         QString run;
         for (qsizetype i = 0; i < text.size(); ++i) {
             const QChar c = text[i];
@@ -444,7 +460,7 @@ Out richText(const QString &value, bool quotes = true)
                 Out quote;
                 quote.quotes = true;
                 quote.literalQuotes = !quotes;
-                push(std::move(quote), c, QString());
+                if (!push(std::move(quote), c, QString())) return Out::of(value);
                 continue;
             }
             if (c == u'’' && quoteOpenAt(u'‘') > 0 && !after.isLetter()) {
@@ -468,13 +484,13 @@ Out richText(const QString &value, bool quotes = true)
                     while (qsizetype(stack.size()) > open) pop();
                     continue;
                 }
-                if (opensWord && text.indexOf(u'\'', i + 1) > i) {
+                if (opensWord && i < lastSingle) {
                     addText(run);
                     run.clear();
                     Out quote;
                     quote.quotes = true;
                     quote.literalQuotes = !quotes;
-                    push(std::move(quote), u'\'', QString());
+                    if (!push(std::move(quote), u'\'', QString())) return Out::of(value);
                     continue;
                 }
                 run += QChar(u'’');
@@ -519,7 +535,8 @@ Merge merge(QChar first, QChar second)
 
 class Flattener {
 public:
-    explicit Flattener(const CslLocale &locale) : m_locale(locale) {}
+    Flattener(const CslLocale &locale, qsizetype limit) : m_locale(locale), m_limit(limit) {}
+    qsizetype size() const { return m_text.size(); }
 
     void add(const Out &o, const CslFormat &base = {}) { walk(o, base, 0); }
 
@@ -637,8 +654,13 @@ private:
     void put(QString s, const CslFormat &format, bool quoteMark = false)
     {
         if (s.isEmpty()) return;
+        if (s.size() > m_limit - m_text.size()) throw RenderLimitReached{};
         // One space where two pieces meet with spaces.
-        while (!s.isEmpty() && s[0] == u' ' && (m_text.isEmpty() || m_text.back().isSpace())) s.remove(0, 1);
+        if ((m_text.isEmpty() || m_text.back().isSpace()) && s.front() == u' ') {
+            qsizetype start = 1;
+            while (start < s.size() && s[start] == u' ') ++start;
+            s = s.sliced(start);
+        }
         if (s.isEmpty()) return;
         if (!quoteMark && isMergeable(s[0]) && !m_text.isEmpty()) {
             qsizetype t = m_text.size() - 1;
@@ -674,6 +696,7 @@ private:
     }
 
     const CslLocale &m_locale;
+    const qsizetype m_limit;
     QString m_text;
     QList<int> m_format;
     QList<bool> m_quoteMark;
@@ -700,8 +723,8 @@ bool isNumeric(const QString &value)
 bool isPluralValue(const QString &value)
 {
     static const QRegularExpression joined(QStringLiteral(
-        "^\\s*(?:[A-Za-z]{0,3}\\d+|[ivxlcdm]+\\b)[A-Za-z]{0,3}(?:\\s*(?:[-–—,&]|\\band\\b|\\bet\\b)\\s*)+"
-        "(?:[A-Za-z]{0,3}\\d|[ivxlcdm]+\\b)"),
+        "^\\s*+(?:[A-Za-z]{0,3}\\d++|[ivxlcdm]++\\b)[A-Za-z]{0,3}(?:\\s*+(?:[-–—,&]|\\band\\b|\\bet\\b)\\s*+)++"
+        "(?:[A-Za-z]{0,3}\\d|[ivxlcdm]++\\b)"),
                                              QRegularExpression::CaseInsensitiveOption);
     return joined.match(value).hasMatch();
 }
@@ -846,7 +869,7 @@ QString dateSortKey(const CslDatePoint &point)
 {
     if (point.parts == 0) return {};
     return QStringLiteral("%1%2%3")
-        .arg(point.year + 50000, 6, 10, QLatin1Char('0'))
+        .arg(qint64(point.year) - std::numeric_limits<int>::min(), 10, 10, QLatin1Char('0'))
         .arg(point.parts >= 2 ? point.month : 0, 2, 10, QLatin1Char('0'))
         .arg(point.parts >= 3 ? point.day : 0, 2, 10, QLatin1Char('0'));
 }
@@ -883,6 +906,8 @@ struct ShownName {
 };
 
 struct Context {
+    int stepsLeft = MaxCiteSteps;
+    qsizetype charsLeft = MaxCiteChars;
     const CslReference *reference = nullptr;
     const CslCite *cite = nullptr;
     bool bibliography = false;
@@ -909,13 +934,17 @@ public:
 
     QHash<QString, int> globalGiven;
     bool globalPrimaryOnly = false;
+    bool nestingLimited = false;
+    bool renderLimited = false;
+    Out richText(const QString &value, bool quotes = true) { return readRichText(value, quotes, nestingLimited); }
 
     Out render(const CslNode &node, Context &ctx);
     Out renderChildren(const std::vector<CslNode> &children, Context &ctx, const QString &delimiter = {})
     {
         std::vector<Out> kids;
-        kids.reserve(children.size());
+        kids.reserve(std::min(children.size(), size_t(std::min(ctx.stepsLeft, m_stepsLeft))));
         for (const CslNode &child : children) {
+            if (ctx.stepsLeft <= 0 || m_stepsLeft <= 0) { renderLimited = true; break; }
             Out o = render(child, ctx);
             if (o.splice) {
                 for (Out &kid : o.kids) kids.push_back(std::move(kid));
@@ -923,6 +952,7 @@ public:
                 kids.push_back(std::move(o));
             }
         }
+        if (kids.size() > 1 && !consumeText(qsizetype(kids.size() - 1) * delimiter.size(), ctx)) return {};
         return Out::seq(std::move(kids), delimiter);
     }
 
@@ -938,6 +968,31 @@ public:
                    const QString &nodeAttribute = {}) const;
 
 private:
+    bool consumeText(qsizetype size, Context &ctx)
+    {
+        if (size > ctx.charsLeft || size > m_charsLeft) {
+            renderLimited = true;
+            ctx.stepsLeft = 0;
+            return false;
+        }
+        ctx.charsLeft -= size;
+        m_charsLeft -= size;
+        return true;
+    }
+    bool consumeSteps(int count, Context &ctx)
+    {
+        if (count > ctx.stepsLeft || count > m_stepsLeft) {
+            renderLimited = true;
+            ctx.stepsLeft = 0;
+            return false;
+        }
+        ctx.stepsLeft -= count;
+        m_stepsLeft -= count;
+        return true;
+    }
+
+    int m_stepsLeft = 1000000;
+    qsizetype m_charsLeft = MaxDocumentChars;
     Out text(const CslNode &node, Context &ctx);
     Out number(const CslNode &node, Context &ctx);
     Out date(const CslNode &node, Context &ctx);
@@ -984,6 +1039,9 @@ QString Processor::option(const QString &name, const Context &ctx, const CslNode
 
 Out Processor::render(const CslNode &node, Context &ctx)
 {
+    if (!consumeSteps(1, ctx)) return {};
+    if (!consumeText(node.formatting.prefix.size() + node.formatting.suffix.size() + node.delimiter.size()
+                     + node.attribute(QStringLiteral("value")).size(), ctx)) return {};
     switch (node.element) {
     case CslElement::Text:
         return text(node, ctx);
@@ -1051,7 +1109,7 @@ QString Processor::citationLabel(const CslReference &reference)
         for (int i = 0; i < names.size() && i < 4; ++i) label += letters(names[i], 1);
     if (label.isEmpty()) return {};
     const CslDate issued = reference.dates.value(QStringLiteral("issued"));
-    if (issued.start.parts > 0) label += QStringLiteral("%1").arg(qAbs(issued.start.year) % 100, 2, 10, QLatin1Char('0'));
+    if (issued.start.parts > 0) label += QStringLiteral("%1").arg(qAbs(issued.start.year % 100), 2, 10, QLatin1Char('0'));
     return label;
 }
 
@@ -1072,6 +1130,7 @@ Out Processor::text(const CslNode &node, Context &ctx)
                 shortValue = ctx.reference->field(QStringLiteral("journalAbbreviation"));
             if (!shortValue.isEmpty()) value = shortValue;
         }
+        if (!consumeText(value.size(), ctx)) return {};
         noteVariable(ctx, variable, !value.isEmpty());
         if (value.isEmpty()) return {};
         if (ctx.sortMode && CslReference::isNumberVariable(variable) && isNumeric(value)) {
@@ -1358,9 +1417,9 @@ Out Processor::datePart(const CslNode &spec, const CslDatePoint &point, const Cs
     if (name == u"year") {
         if (point.parts < 1) return {};
         if (form == u"short") {
-            text = QStringLiteral("%1").arg(qAbs(point.year) % 100, 2, 10, QLatin1Char('0'));
+            text = QStringLiteral("%1").arg(qAbs(point.year % 100), 2, 10, QLatin1Char('0'));
         } else {
-            text = QString::number(qAbs(point.year));
+            text = QString::number(qAbs(qint64(point.year)));
             if (point.year < 0)
                 text += m_locale.termText(QStringLiteral("bc"));
             else if (point.year > 0 && point.year < 1000)
@@ -1860,6 +1919,12 @@ Out Processor::nameList(const QList<CslName> &list, const QString &variable, con
     QString form = option(QStringLiteral("name-form"), ctx, nameNode, QStringLiteral("form"));
     if (form.isEmpty()) form = QStringLiteral("long");
     if (form == u"count") return Out::of(QString::number(shown));
+    if (!consumeSteps(shown + int(useLast), ctx)) return {};
+    for (int i = 0; i < shown + int(useLast); ++i) {
+        const CslName &n = i < shown ? list[i] : list.last();
+        if (!consumeText(n.family.size() + n.given.size() + n.literal.size() + n.suffix.size()
+                         + n.droppingParticle.size() + n.nonDroppingParticle.size(), ctx)) return {};
+    }
 
     if (ctx.sortMode) {
         // A sort key names a variable: the full names, family first. A
@@ -2169,7 +2234,8 @@ SortValue Processor::sortValue(const CslStyle::SortKey &key, Context ctx)
 
 class Run {
 public:
-    Run(const CslStyle &style, const CslLocale &locale) : m_style(style), m_locale(locale), m_processor(style, locale) {}
+    Run(const CslStyle &style, const CslLocale &locale, qsizetype perCite)
+        : m_style(style), m_locale(locale), m_processor(style, locale), m_perCite(perCite) {}
 
     CslEngine::Result process(const QList<CslCitation> &input, const QList<const CslReference *> &uncited);
 
@@ -2183,6 +2249,7 @@ private:
     Context context(int reference, const CslCite *cite, const CiteInfo &info, bool bibliography) const
     {
         Context ctx;
+        ctx.charsLeft = m_perCite;
         ctx.reference = reference >= 0 ? m_references[size_t(reference)] : nullptr;
         ctx.cite = cite;
         ctx.info = info;
@@ -2202,16 +2269,25 @@ private:
     std::vector<SortValue> keysFor(const std::vector<CslStyle::SortKey> &keys, int reference, const CslCite *cite,
                                    bool bibliography);
     CslText renderCitation(std::vector<Item> items);
-    CslText flatten(const Out &o) const
+    CslText flatten(const Out &o)
     {
-        Flattener flattener(m_locale);
-        flattener.add(o);
+        Flattener flattener(m_locale, std::min(m_perCite, m_outputLeft));
+        try {
+            flattener.add(o);
+        } catch (const RenderLimitReached &) {
+            m_processor.renderLimited = true;
+            return {};
+        }
+        m_outputLeft -= flattener.size();
         return flattener.result();
     }
 
     const CslStyle &m_style;
     const CslLocale &m_locale;
     Processor m_processor;
+    bool m_namesLimited = false;
+    const qsizetype m_perCite;
+    qsizetype m_outputLeft = MaxDocumentChars;
     std::vector<const CslReference *> m_references;
     std::vector<ItemState> m_states;
     // Each reference's place in the bibliography.
@@ -2318,6 +2394,7 @@ QString yearSuffixLetters(int index)
 void Run::disambiguate()
 {
     const QHash<QString, QString> &options = m_style.citation().options;
+    constexpr int maxNamesToDisambiguate = 50;
     const bool addNames = options.value(QStringLiteral("disambiguate-add-names")) == u"true";
     const bool addGiven = options.value(QStringLiteral("disambiguate-add-givenname")) == u"true";
     const bool addYear = options.value(QStringLiteral("disambiguate-add-year-suffix")) == u"true";
@@ -2384,7 +2461,8 @@ void Run::disambiguate()
             for (const int i : group) m_states[size_t(i)].expandLevel = addGiven ? maxLevel : 0;
             int best = distinct(group);
             int bestCount = -1;
-            const int most = mostNames(group);
+            const int available = mostNames(group);
+            const int most = std::min(available, maxNamesToDisambiguate);
             for (int n = 1; n <= most && best < int(group.size()); ++n) {
                 for (const int i : group) m_states[size_t(i)].namesShown = n;
                 const int count = distinct(group);
@@ -2393,6 +2471,7 @@ void Run::disambiguate()
                     bestCount = n;
                 }
             }
+            if (available > most && best < int(group.size())) m_namesLimited = true;
             for (size_t k = 0; k < group.size(); ++k) {
                 m_states[size_t(group[k])].expandLevel = 0;
                 m_states[size_t(group[k])].namesShown = bestCount < 0 ? original[k] : bestCount;
@@ -2408,7 +2487,8 @@ void Run::disambiguate()
     if (addGiven && rule == u"by-cite" && !groups.empty()) {
         for (const std::vector<int> &group : groups) {
             int current = distinct(group);
-            const int most = mostNames(group);
+            const int available = mostNames(group);
+            const int most = std::min(available, maxNamesToDisambiguate);
             for (int index = 0; index < most && current < int(group.size()); ++index) {
                 for (int level = 1; level <= 2 && current < int(group.size()); ++level) {
                     std::vector<QList<int>> saved;
@@ -2426,6 +2506,7 @@ void Run::disambiguate()
                     }
                 }
             }
+            if (available > most && current < int(group.size())) m_namesLimited = true;
         }
         groups = ambiguousGroups();
     }
@@ -2464,20 +2545,20 @@ CslText Run::renderCitation(std::vector<Item> items)
                                                ? section.options.value(QStringLiteral("after-collapse-delimiter"))
                                                : layoutDelimiter;
 
-    auto affixed = [](Out o, const CslCite &cite) {
+    auto affixed = [this](Out o, const CslCite &cite) {
         if (cite.prefix.isEmpty() && cite.suffix.isEmpty()) return o;
         std::vector<Out> kids;
         if (!cite.prefix.isEmpty()) {
             QString prefix = cite.prefix;
             const QChar last = prefix.back();
             if (!last.isSpace() && last != u'(' && last != u'[' && last != u'“' && last != u'‘') prefix += u' ';
-            kids.push_back(richText(prefix, false));
+            kids.push_back(m_processor.richText(prefix, false));
         }
         kids.push_back(std::move(o));
         if (!cite.suffix.isEmpty()) {
             QString suffix = cite.suffix;
             if (suffix.front().isLetterOrNumber()) suffix.prepend(u' ');
-            kids.push_back(richText(suffix, false));
+            kids.push_back(m_processor.richText(suffix, false));
         }
         return Out::seq(std::move(kids));
     };
@@ -2935,6 +3016,9 @@ CslEngine::Result Run::process(const QList<CslCitation> &input, const QList<cons
             if (!text.isEmpty()) result.bibliography.append({m_references[size_t(i)]->id, text, m_references[size_t(i)]});
         }
     }
+    result.namesLimited = m_namesLimited;
+    result.nestingLimited = m_processor.nestingLimited;
+    result.renderLimited = m_processor.renderLimited;
     return result;
 }
 
@@ -2955,10 +3039,18 @@ CslEngine::CslEngine(std::shared_ptr<const CslStyle> style, const CslLocale &loc
     }
 }
 
-CslEngine::Result CslEngine::process(const QList<CslCitation> &citations, const QList<const CslReference *> &uncited) const
+CslEngine::Result CslEngine::process(const QList<CslCitation> &citations, const QList<const CslReference *> &uncited,
+                                     qsizetype maxCiteChars) const
 {
-    Run run(*m_style, m_locale);
-    return run.process(citations, uncited);
+    Run run(*m_style, m_locale, std::clamp(maxCiteChars, qsizetype(0), MaxCiteChars));
+    try {
+        return run.process(citations, uncited);
+    } catch (const RenderLimitReached &) {
+        Result result;
+        result.citations.resize(citations.size());
+        result.renderLimited = true;
+        return result;
+    }
 }
 
 CslEngine::Locator CslEngine::parseLocator(const QString &input, const CslLocale &locale)

@@ -583,6 +583,31 @@ void writesNothingOfThePersons()
     QCOMPARE(QFileInfo(file).lastModified(), QDateTime(QDate(2026, 1, 2), QTime(3, 4)));
 }
 
+void screenshotRefusesAnExistingFile()
+{
+    QTemporaryDir root;
+    const QString input = root.filePath(QStringLiteral("note.md"));
+    const QString output = root.filePath(QStringLiteral("window.png"));
+    writeFile(input, "# Notes\n");
+    writeFile(output, "keep");
+    for (const QString &option : {QStringLiteral("--screenshot"), QStringLiteral("--benchmark")}) {
+        const Ran refused = runParch(root.path(), {option, output, input});
+        QVERIFY(refused.code != 0);
+        QVERIFY2(refused.said.contains(QStringLiteral("--force")), qPrintable(refused.said));
+        QCOMPARE(readFile(output), QByteArray("keep"));
+        const QString link = root.filePath(QStringLiteral("link"));
+        QVERIFY(QFile::link(output, link));
+        const Ran linked = runParch(root.path(), {option, link, QStringLiteral("--force"), input});
+        QVERIFY(linked.code != 0);
+        QVERIFY2(linked.said.contains(QStringLiteral("link")), qPrintable(linked.said));
+        QVERIFY(QFileInfo(link).isSymLink());
+        QVERIFY(QFile::remove(link));
+    }
+    const Ran replaced = runParch(root.path(), {QStringLiteral("--screenshot"), output, QStringLiteral("--force"), input});
+    QVERIFY2(replaced.code == 0, qPrintable(replaced.said));
+    QVERIFY(!QImage(output).isNull());
+}
+
 void namesWhatCannotBeDone()
 {
     QVERIFY2(QFileInfo(parchBinary).isExecutable(), "build parch with bin/build first");

@@ -34,6 +34,7 @@ QString openHelpText()
         "  --benchmark OUT  Measure the window on a copy of one FILE; write JSON to OUT\n"
         "  --screenshot     Draw the window off screen, save it as PNG once all of it\n"
         "                   is drawn, and exit; nothing parch keeps is changed\n"
+        "  --force          Replace an existing screenshot or benchmark output file\n"
         "  --version        Print the version and exit\n"
         "  --help           Print this help and exit\n"
         "\n"
@@ -74,43 +75,6 @@ QStringList absoluteFiles(const QStringList &files, const QString &workingDirect
         absolute.append(DiskFile::cleanPath(file.startsWith(u'/') ? file : folder + file));
     }
     return absolute;
-}
-
-QStringList withoutQtOptions(const QStringList &arguments)
-{
-    // The options QCoreApplication and QGuiApplication read and take out of
-    // the arguments themselves, as they spell them: those that take the
-    // next argument as their value, those that stand alone, and those that
-    // carry their value after '='. Qt accepts each with one dash or two.
-    static const QStringList takingValue = {
-        QStringLiteral("-platform"),        QStringLiteral("-platformpluginpath"), QStringLiteral("-platformtheme"),
-        QStringLiteral("-plugin"),          QStringLiteral("-qwindowgeometry"),    QStringLiteral("-qwindowicon"),
-        QStringLiteral("-qwindowtitle"),    QStringLiteral("-style"),              QStringLiteral("-session"),
-        QStringLiteral("-qmljsdebugger")};
-    static const QStringList alone = {QStringLiteral("-reverse"), QStringLiteral("-testability")};
-    static const QStringList withEquals = {QStringLiteral("-style="), QStringLiteral("-qmljsdebugger=")};
-
-    QStringList kept;
-    // The first entry is the program name.
-    if (!arguments.isEmpty()) kept.append(arguments.first());
-    for (qsizetype i = 1; i < arguments.size(); ++i) {
-        const QString &argument = arguments.at(i);
-        if (argument == u"--") {
-            kept.append(arguments.sliced(i));
-            break;
-        }
-        const QString option = argument.startsWith(QLatin1String("--")) ? argument.mid(1) : argument;
-        if (takingValue.contains(option)) {
-            if (i + 1 < arguments.size() && arguments.at(i + 1) != u"--") ++i;
-            continue;
-        }
-        if (alone.contains(option)) continue;
-        if (std::any_of(withEquals.cbegin(), withEquals.cend(),
-                        [&option](const QString &prefix) { return option.startsWith(prefix); }))
-            continue;
-        kept.append(argument);
-    }
-    return kept;
 }
 
 namespace {
@@ -160,7 +124,7 @@ QString takePictureValue(Picture &picture, const QString &name, const QString &v
 
 } // namespace
 
-Launch parseLaunch(const QStringList &given)
+Launch parseLaunch(const QStringList &arguments)
 {
     Launch launch;
     const auto refuse = [&launch](const QString &error) {
@@ -168,8 +132,6 @@ Launch parseLaunch(const QStringList &given)
         launch.error = error;
         return launch;
     };
-    // Qt handles its own options up to the positional separator.
-    const QStringList arguments = withoutQtOptions(given);
     // The options that take a value, and those that stand alone.
     static const QStringList valued = {
         QStringLiteral("--theme"), QStringLiteral("--benchmark"), QStringLiteral("--screenshot"),
@@ -178,7 +140,7 @@ Launch parseLaunch(const QStringList &given)
         QStringLiteral("--windows")};
     static const QStringList alone = {QStringLiteral("--default-theme"), QStringLiteral("--focus"),
                                       QStringLiteral("--library"), QStringLiteral("--no-library"),
-                                      QStringLiteral("--adversarial")};
+                                      QStringLiteral("--adversarial"), QStringLiteral("--force")};
     // The options given that set the window up for a picture, in order.
     QStringList forPicture;
     // The options given that say how a benchmark measures.
@@ -237,7 +199,9 @@ Launch parseLaunch(const QStringList &given)
         if (alone.contains(name)) {
             if (equals > 0)
                 return refuse(QCoreApplication::translate("cli", "parch: %1 takes no value").arg(name));
-            if (name == QLatin1String("--default-theme")) {
+            if (name == u"--force") {
+                launch.force = true;
+            } else if (name == QLatin1String("--default-theme")) {
                 launch.defaultTheme = true;
             } else if (name == QLatin1String("--adversarial")) {
                 launch.benchmarkAdversarial = true;
@@ -268,6 +232,8 @@ Launch parseLaunch(const QStringList &given)
         return refuse(QCoreApplication::translate("cli", "parch: %1 and %2 cannot both be given")
                           .arg(QLatin1StringView(one), QLatin1StringView(other)));
     };
+    if (launch.force && launch.picture.file.isEmpty() && launch.benchmarkOutput.isEmpty())
+        return refuse(QCoreApplication::translate("cli", "parch: --force works only with --screenshot or --benchmark"));
     if (!launch.themeDirectory.isEmpty() && launch.defaultTheme) return together("--theme", "--default-theme");
     if (!launch.picture.file.isEmpty() && !launch.benchmarkOutput.isEmpty()) return together("--screenshot", "--benchmark");
     if (forPicture.contains(QLatin1String("--line")) && forPicture.contains(QLatin1String("--scroll")))

@@ -10,6 +10,7 @@
 struct Picture {
     // Where the picture is saved; empty when none is asked for.
     QString file;
+    bool force = false;
     // The window's size in pixels of a screen at normal scale.
     QSize size;
     // How the document is shown: "source", "split" or "reading".
@@ -41,6 +42,7 @@ struct Launch {
     QString themeDirectory;
     // Omarchy's default theme as it ships, rather than the desktop's.
     bool defaultTheme = false;
+    bool force = false;
     QString benchmarkOutput;
     Picture picture;
     // What a benchmark measures, only with benchmarkOutput: the view
@@ -54,17 +56,11 @@ struct Launch {
     QStringList commandArguments;
 };
 
-// Parses a full argument list, program name first. Qt's own options, such
-// as -platform, -style or -qwindowgeometry, are left to Qt. A first argument
-// that names a command (check, render, export, stats, skill, help) runs it;
-// a file of that name opens with `parch open NAME` or `parch -- NAME`. The
+// Parses a full argument list, program name first. A first argument naming
+// a command runs it. A file with that name opens with `parch -- NAME`. The
 // options that set the window up for a picture are refused without
 // --screenshot, and every value is checked here, before any window.
 Launch parseLaunch(const QStringList &arguments);
-
-// Remove the options Qt handles, and their values, before the first "--".
-// The separator and the positional arguments follow as given.
-QStringList withoutQtOptions(const QStringList &arguments);
 
 // The files as full paths, each relative one taken from `workingDirectory`.
 // Nothing else is resolved, so that links and ".." are left to the kernel.

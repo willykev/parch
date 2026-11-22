@@ -149,7 +149,7 @@ Item {
         const kind = rowData(row, LibraryModel.KindRole)
         if (kind === "document") {
             backend.activate(panel.context)
-            backend.openFromLibrary(rowData(row, LibraryModel.PathRole))
+            backend.openFromLibrary(rowData(row, LibraryModel.PathRole), rowData(row, LibraryModel.OutsideLinkRole))
             panel.opened()
         } else if (kind === "draft") {
             backend.activate(panel.context)
@@ -178,7 +178,7 @@ Item {
             menu = folderMenu
         } else if ((kind === "folder" || kind === "document") && backend.organizer.organizes(path)) {
             menu = entryMenu
-            entryMenu.isFolder = kind === "folder"
+            entryMenu.isFolder = kind === "folder" && !rowData(row, LibraryModel.OutsideLinkRole)
         }
         if (!menu)
             return
@@ -689,6 +689,7 @@ Item {
             required property string name
             required property string kind
             required property string path
+            required property bool outsideLink
             required property bool missing
             required property string documentId
             required property string section
@@ -716,7 +717,8 @@ Item {
             font.pixelSize: theme.fontSize
             Accessible.role: Accessible.TreeItem
             Accessible.name: name
-            Accessible.description: kind === "draft" ? qsTr("Draft")
+            Accessible.description: outsideLink ? qsTr("Link outside the library: %1").arg(path)
+                                    : kind === "draft" ? qsTr("Draft")
                                     : kind === "folder" || kind === "document" ? (missing ? qsTr("%1, not found").arg(path) : path)
                                     : ""
             Accessible.expandable: opens
@@ -770,7 +772,7 @@ Item {
             DropArea {
                 anchors.fill: parent
                 keys: ["parch-library-entry"]
-                enabled: entry.kind === "folder"
+                enabled: !entry.outsideLink && entry.kind === "folder"
                 onEntered: (drag) => {
                     drag.accepted = panel.canDrop(entry.path)
                     if (drag.accepted)
@@ -809,6 +811,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     size: panel.iconSize
                     path: entry.section === "recent" ? Icons.recent
+                          : entry.outsideLink ? Icons.link
                           : entry.kind === "section" || entry.kind === "folder" ? Icons.folder
                           : entry.kind === "error" ? Icons.problem
                           : Icons.document

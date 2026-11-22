@@ -7,6 +7,49 @@
 // stand-in for the desktop's print portal. ParchTests runs each of them as a
 // test function of its own.
 namespace ExportTests {
+void paperPaginatesWrappedHeadingsTogether();
+
+void paperIndexesUnresolvedReferencesOnce();
+
+void consecutiveHeadingsKeepTheirPagePositions();
+void paperSetsManyShortParagraphsPromptly();
+void paperWrapsLongTextRunsPromptly_data();
+void paperWrapsLongTextRunsPromptly();
+void docxReusesTheBytesOfOnePicture();
+void aDocumentWithManyFormulasStopsAtTheHelperBudget();
+
+void aHugeHtmlTableIsShownAsText();
+void aDeeplyQuotedHtmlPasteFallsBackToText();
+void aTagWithManyAttributesPastesQuickly();
+
+void onlyReferenceFilesTravelWithMarkdown();
+void aBibliographyThatIsNotOneStaysBehind();
+void copiedCitationFilesAreListed();
+void aReferenceListMustBeAnArrayOfObjects();
+void checkReportsABibliographyThatCannotBeRead();
+void anEmptyBibliographyIsAWarning_data();
+void anEmptyBibliographyIsAWarning();
+void epubMetadataWithControlCharactersIsWellFormed();
+void aRepeatedHtmlAttributeIsKeptOnce();
+void docxBodyTextWithPercentNumbersIsKept();
+void anExportOverSomeoneElsesFileTakesTheUsualMode();
+void anExportNeverCarriesSetIdBits();
+void anOrderedListStartingAtTheLargestNumber();
+void docxBookmarksAndRelationshipsStayUnique_data();
+void docxBookmarksAndRelationshipsStayUnique();
+void svgPicturesUseTheirDrawingInEveryFormat();
+void aPdfIsNotAPicture();
+void picturesAreReadByTheirOwnFormat_data();
+void picturesAreReadByTheirOwnFormat();
+void exportedSvgPicturesHoldNoScript_data();
+void svgExportKeepsViewportAndNamedView();
+void exportedSvgPicturesHoldNoScript();
+void embeddedPicturesKeepTheirViewFragments();
+void inlineFormulaSvgKeepsOnlyDrawingElements();
+void hugeSvgSizesAreDrawnWithinBounds();
+void onePictureNamedManyWaysIsDecodedOnce();
+void picturesPastTheBudgetAreLeftOutWithANote();
+
 void exportLinksKeepQueryAndFragment();
 
 void pdfSetsPagesWithSearchableText();

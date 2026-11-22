@@ -73,7 +73,7 @@ bool hasPipe(QStringView text, const Line &line, const Dialect &dialect)
 {
     QList<Field> fields;
     QList<int> pipes;
-    splitRow(text, line.content, trimmedEnd(text, line), dialect.protectCode, fields, &pipes);
+    splitRow(text, line.content, trimmedEnd(text, line), dialect.protectCode, fields, &pipes, 1);
     return !pipes.isEmpty();
 }
 
@@ -118,7 +118,7 @@ Row rowOf(QStringView text, const Line &line, int columns, const Dialect &dialec
     row.line = line;
     const int end = trimmedEnd(text, line);
     QList<Field> fields;
-    splitRow(text, line.content, end, dialect.protectCode, fields);
+    splitRow(text, line.content, end, dialect.protectCode, fields, nullptr, columns + 1);
     int column = 0;
     for (const Field &field : fields) {
         if (dialect.mergedCells && field.zeroWidth && !row.cells.isEmpty()) {
@@ -176,11 +176,9 @@ QString dashes(int width, Align align)
     }
 }
 
-} // namespace
-
-bool splitRow(QStringView text, int from, int to, bool protectCode, QList<Field> &fields, QList<int> *pipes)
+template <typename Visit>
+void visitFields(QStringView text, int from, int to, bool protectCode, QList<int> *pipes, Visit visit)
 {
-    fields.clear();
     int i = from;
     if (i < to && text[i] == u'|') {
         if (pipes) pipes->append(i);
@@ -223,6 +221,7 @@ bool splitRow(QStringView text, int from, int to, bool protectCode, QList<Field>
             ++i;
         }
         const bool pipe = i < to;
+        if (pipe && pipes) pipes->append(i);
         if (i > start || pipe) {
             Field field;
             field.rawStart = field.start = start;
@@ -230,32 +229,40 @@ bool splitRow(QStringView text, int from, int to, bool protectCode, QList<Field>
             field.zeroWidth = i == start;
             while (field.start < field.end && isSpaceOrTab(text[field.start])) ++field.start;
             while (field.end > field.start && isSpaceOrTab(text[field.end - 1])) --field.end;
-            fields.append(field);
+            if (!visit(field)) break;
         }
-        if (pipe) {
-            if (pipes) pipes->append(i);
-            ++i;
-        }
+        if (pipe) ++i;
     }
+}
+
+} // namespace
+
+bool splitRow(QStringView text, int from, int to, bool protectCode, QList<Field> &fields, QList<int> *pipes, int maxFields)
+{
+    fields.clear();
+    visitFields(text, from, to, protectCode, pipes, [&](const Field &field) {
+        fields.append(field);
+        return fields.size() < maxFields;
+    });
     return !fields.isEmpty();
 }
 
 std::optional<QList<Align>> delimiterRow(QStringView text, int from, int to)
 {
-    QList<Field> fields;
-    if (!splitRow(text, from, to, false, fields)) return std::nullopt;
     QList<Align> aligns;
-    for (const Field &field : fields) {
+    bool valid = true;
+    visitFields(text, from, to, false, nullptr, [&](const Field &field) {
         int a = field.start, b = field.end;
         const bool left = a < b && text[a] == u':';
         if (left) ++a;
         const bool right = b > a && text[b - 1] == u':';
         if (right) --b;
-        if (a >= b) return std::nullopt;
-        for (int i = a; i < b; ++i)
-            if (text[i] != u'-') return std::nullopt;
-        aligns.append(left && right ? Align::Center : left ? Align::Left : right ? Align::Right : Align::None);
-    }
+        valid = a < b && std::all_of(text.begin() + a, text.begin() + b, [](QChar c) { return c == u'-'; });
+        if (valid && aligns.size() <= MaxColumns)
+            aligns.append(left && right ? Align::Center : left ? Align::Left : right ? Align::Right : Align::None);
+        return valid;
+    });
+    if (!valid || aligns.isEmpty()) return std::nullopt;
     return aligns;
 }
 
@@ -285,19 +292,23 @@ int displayWidth(QStringView text)
     return width;
 }
 
-std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dialect)
+static std::optional<Table> scanRows(QStringView text, const Line &header, int to, const Dialect &dialect, bool requirePipe)
 {
-    const Line header = lineAt(text, from);
     const auto second = lineAfter(text, header);
     if (!second || isBlank(text, header)) return std::nullopt;
     QList<Field> fields;
-    splitRow(text, header.content, trimmedEnd(text, header), dialect.protectCode, fields);
+    splitRow(text, header.content, trimmedEnd(text, header), dialect.protectCode, fields, nullptr, MaxColumns + 1);
     const auto aligns = delimiterRow(text, second->content, trimmedEnd(text, *second));
     if (!aligns || fields.size() != aligns->size()) return std::nullopt;
 
     Table table;
     table.start = header.start;
     table.columns = int(aligns->size());
+    table.end = second->end;
+    if (table.columns > MaxColumns) {
+        table.unfit = Unfit::TooLarge;
+        return table;
+    }
     // Every line of a table stands behind the same quote markers and indentation.
     const QStringView prefix = text.mid(header.start, header.content - header.start);
     const auto prefixed = [&](const Line &line, int row) {
@@ -317,7 +328,7 @@ std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dia
     table.end = second->end;
     const int last = std::max(lineAt(text, to).start, second->start);
     for (auto line = lineAfter(text, *second); line && line->start <= last; line = lineAfter(text, *line)) {
-        if (isBlank(text, *line)) break;
+        if (isBlank(text, *line) || (requirePipe && !hasPipe(text, *line, dialect))) break;
         if (isComment(text, *line, dialect)) {
             if (table.unfit == Unfit::None) {
                 table.unfit = Unfit::CommentLine;
@@ -326,6 +337,11 @@ std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dia
             break;
         }
         extra = leading = false;
+        if (table.rows.size() > MaxCells / table.columns) {
+            table.unfit = Unfit::TooLarge;
+            table.unfitRow = int(table.rows.size());
+            return table;
+        }
         prefixed(*line, int(table.rows.size()));
         table.rows.append(rowOf(text, *line, table.columns, dialect, &extra, &leading));
         table.end = line->end;
@@ -334,32 +350,44 @@ std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dia
             table.unfitRow = int(table.rows.size()) - 1;
         }
     }
-    if (table.unfit == Unfit::None
-        && (table.columns > MaxColumns || qsizetype(table.columns) * (table.rows.size() - 1) > MaxCells))
-        table.unfit = Unfit::TooLarge;
     return table;
 }
 
-std::optional<Table> locate(QStringView text, int position, const Dialect &dialect)
+std::optional<Table> scan(QStringView text, int from, int to, const Dialect &dialect)
+{
+    return scanRows(text, lineAt(text, from), to, dialect, false);
+}
+
+std::optional<Table> locate(QStringView text, int position, const Dialect &dialect, int *runEnd)
 {
     const Line here = lineAt(text, position);
     const auto rowLike = [&](const Line &line) {
         return !isBlank(text, line) && !isComment(text, line, dialect) && hasPipe(text, line, dialect);
     };
+    if (runEnd) *runEnd = here.end;
     if (!rowLike(here)) return std::nullopt;
     Line first = here;
     while (const auto above = lineBefore(text, first)) {
         if (!rowLike(*above)) break;
         first = *above;
     }
-    QList<Line> lines;
-    for (std::optional<Line> line = first; line && rowLike(*line); line = lineAfter(text, *line)) lines.append(*line);
     // The header is the line just above the first delimiter row.
-    for (int i = 1; i < lines.size(); ++i) {
-        const auto aligns = delimiterRow(text, lines[i].content, trimmedEnd(text, lines[i]));
-        if (!aligns) continue;
-        if (lines[i - 1].start > here.start) return std::nullopt;
-        return scan(text, lines[i - 1].start, lines.last().start, dialect);
+    for (Line header = first; runEnd || header.start <= here.start;) {
+        const auto next = lineAfter(text, header);
+        if (!next || !rowLike(*next)) break;
+        if (delimiterRow(text, next->content, trimmedEnd(text, *next))) {
+            auto table = scanRows(text, header, int(text.size()), dialect, true);
+            if (runEnd) {
+                // A malformed or oversized grid can end before the pipe lines do.
+                Line last = table ? lineAt(text, table->end) : *next;
+                for (auto row = lineAfter(text, last); row && rowLike(*row); row = lineAfter(text, last))
+                    last = *row;
+                *runEnd = last.end;
+            }
+            return table;
+        }
+        header = *next;
+        if (runEnd) *runEnd = header.end;
     }
     return std::nullopt;
 }
@@ -406,6 +434,7 @@ Model model(QStringView text, const Table &table)
 
 Layout write(const Model &model)
 {
+    if (model.rows.isEmpty()) return {};
     int columns = int(model.aligns.size());
     for (const QList<Item> &row : model.rows) {
         int width = 0;

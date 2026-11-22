@@ -68,6 +68,7 @@ public:
         QString view = QStringLiteral("source"); // "source", "split" or "reading"
         int windows = 1;                          // 2: a second window shows the same document
         bool adversarial = false;
+        bool force = false;
     };
 
     Benchmark(const QString &output, const QString &label, const Timing &timing, QObject *parent = nullptr);

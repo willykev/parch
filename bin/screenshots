@@ -130,7 +130,7 @@ class Stage:
             (self.library / name).write_text(text)
         look = ["--theme", theme] if theme else ["--default-theme"]
         env = dict(self.env, QT_SCALE_FACTOR=f"{scale / self.screen:g}")
-        subprocess.run([str(APP), "--screenshot", str(picture), "--size", size, *look, *map(str, options),
+        subprocess.run([str(APP), "--screenshot", str(picture), "--force", "--size", size, *look, *map(str, options),
                         str(self.library / DOCUMENT)], env=env, check=True, cwd=self.scratch)
 
 

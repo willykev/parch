@@ -273,22 +273,26 @@ private:
         offset += int(trimmedRest.data() - rest.data());
         rest = trimmedRest;
         if (rest.isEmpty()) return {};
-        const QChar first = rest[0];
-        if (first == u'!' || first == u'&') {
+        int prefixes = 0;
+        while (rest.front() == u'!' || rest.front() == u'&') {
             // A tag or an anchor: the word is dropped and the value read as data.
             qsizetype i = 0;
             while (i < rest.size() && !isBlankChar(rest[i])) ++i;
-            if (first == u'!')
+            if (++prefixes == MaxDepth + 1)
+                issue(offset, QStringLiteral("Further YAML tags and anchors are ignored"));
+            if (rest.front() == u'!' && prefixes <= MaxDepth)
                 issue(offset, QStringLiteral("The tag %1 is ignored; its value is read as plain data").arg(rest.first(i)));
-            const QStringView after = trimmed(rest.sliced(i));
-            if (after.isEmpty()) {
+            while (i < rest.size() && isBlankChar(rest[i])) ++i;
+            rest = rest.sliced(i);
+            offset += int(i);
+            if (rest.isEmpty()) {
                 skipBlank();
                 if (m_line < m_lines.size() && m_lines[m_line].indent > parentIndent && depth < MaxDepth)
                     return parseBlock(m_lines[m_line].indent, parentIndent, depth + 1);
                 return {};
             }
-            return parseValue(after, offset + int(after.data() - rest.data()), parentIndent, depth);
         }
+        const QChar first = rest.front();
         if (first == u'|' || first == u'>') {
             YamlValue value = blockScalar(rest, parentIndent);
             value.sourceOffset = m_base + offset;
@@ -391,11 +395,31 @@ private:
     };
 
     // Gathers the lines a quoted scalar or a flow collection runs over.
-    template <typename Closed>
-    QString gather(QStringView rest, int parentIndent, Closed closed, std::vector<FlowLine> *lines = nullptr)
+    QString gather(QStringView rest, int parentIndent, std::vector<FlowLine> *lines = nullptr)
     {
         QString text = rest.toString();
-        while (!closed(text) && m_line < m_lines.size()) {
+        const bool collection = rest.front() == u'[' || rest.front() == u'{';
+        QChar quote = collection ? QChar() : rest.front();
+        qsizetype pos = collection ? 0 : 1;
+        int depth = 0;
+        for (;;) {
+            while (pos < text.size()) {
+                const QChar c = text[pos++];
+                if (!quote.isNull()) {
+                    if (quote == u'"' && c == u'\\') { ++pos; continue; }
+                    if (c != quote) continue;
+                    if (quote == u'\'' && pos < text.size() && text[pos] == quote) { ++pos; continue; }
+                    if (!collection) return text;
+                    quote = QChar();
+                } else if (c == u'"' || c == u'\'') {
+                    quote = c;
+                } else if (c == u'[' || c == u'{') {
+                    ++depth;
+                } else if ((c == u']' || c == u'}') && --depth <= 0) {
+                    return text;
+                }
+            }
+            if (m_line >= m_lines.size()) break;
             const Line &next = m_lines[m_line];
             if (next.start != next.end && next.indent <= parentIndent) break;
             const QStringView piece = trimmed(content(next));
@@ -423,7 +447,7 @@ private:
 
     YamlValue quoted(QStringView rest, int offset, int parentIndent)
     {
-        const QString text = gather(rest, parentIndent, [](const QString &t) { return quotedEnd(t) >= 0; });
+        const QString text = gather(rest, parentIndent);
         const int end = quotedEnd(text);
         YamlValue value;
         value.kind = YamlValue::Kind::Scalar;
@@ -439,28 +463,10 @@ private:
         return value;
     }
 
-    static bool flowClosed(const QString &text)
-    {
-        int depth = 0;
-        for (qsizetype i = 0; i < text.size(); ++i) {
-            const QChar c = text[i];
-            if (c == u'"' || c == u'\'') {
-                const int end = quotedEnd(QStringView(text).sliced(i));
-                if (end < 0) return false;
-                i += end - 1;
-            } else if (c == u'[' || c == u'{') {
-                ++depth;
-            } else if (c == u']' || c == u'}') {
-                if (--depth <= 0) return true;
-            }
-        }
-        return false;
-    }
-
     YamlValue flow(QStringView rest, int offset, int parentIndent)
     {
         std::vector<FlowLine> lines{{0, int(rest.size()), offset}};
-        const QString text = gather(rest, parentIndent, flowClosed, &lines);
+        const QString text = gather(rest, parentIndent, &lines);
         qsizetype pos = 0;
         bool ok = true;
         YamlValue value = flowValue(text, lines, pos, 0, ok);

@@ -10,7 +10,10 @@
 
 struct NetworkFetcher::Job {
     QPointer<QObject> context;
+    QMetaObject::Connection contextGone;
     std::function<void(const QByteArray &, const QString &)> done;
+    AllowsHost allowsHost;
+    QString approvedHost;
     QPointer<QNetworkReply> reply;
     // The time the whole fetch has, redirects and all.
     QTimer deadline;
@@ -32,11 +35,16 @@ void NetworkFetcher::setLocalNetworks(Networks networks) { m_localNetworks = std
 void NetworkFetcher::setTimeout(int milliseconds) { m_timeoutMs = milliseconds; }
 
 void NetworkFetcher::fetch(const QUrl &url, QObject *context,
-                           std::function<void(const QByteArray &data, const QString &error)> done)
+                           std::function<void(const QByteArray &data, const QString &error)> done, AllowsHost allowsHost)
 {
     auto job = std::make_shared<Job>();
     job->context = context;
     job->done = std::move(done);
+    job->approvedHost = url.host(QUrl::FullyEncoded);
+    job->allowsHost = std::move(allowsHost);
+    job->contextGone = connect(context, &QObject::destroyed, this, [this, weak = std::weak_ptr<Job>(job)] {
+        if (auto job = weak.lock()) finish(job, {}, {});
+    });
     const QString scheme = url.scheme().toLower();
     if (!url.isValid() || (scheme != QLatin1String("http") && scheme != QLatin1String("https")) || url.host().isEmpty()) {
         finish(job, {}, tr("Only http and https addresses are fetched."));
@@ -52,6 +60,10 @@ void NetworkFetcher::fetch(const QUrl &url, QObject *context,
 
 void NetworkFetcher::visit(const std::shared_ptr<Job> &job, const QUrl &url)
 {
+    if (!job->context || (job->allowsHost && !job->allowsHost(job->approvedHost))) {
+        finish(job, {}, tr("This picture leads to a host that has not been approved."));
+        return;
+    }
     const auto check = [this, job, url](const QList<QHostAddress> &addresses, const QString &error) {
         if (job->finished) return;
         if (addresses.isEmpty()) {
@@ -182,6 +194,7 @@ void NetworkFetcher::finish(const std::shared_ptr<Job> &job, const QByteArray &d
 {
     if (job->finished) return;
     job->finished = true;
+    disconnect(job->contextGone);
     job->deadline.stop();
     if (QNetworkReply *reply = job->reply) {
         job->reply = nullptr;
@@ -193,26 +206,34 @@ void NetworkFetcher::finish(const std::shared_ptr<Job> &job, const QByteArray &d
     if (job->context && done) done(data, error);
 }
 
+namespace {
+
+// The IPv4 endpoint of a mapped, compatible, NAT64 or 6to4 address.
+QHostAddress carriedIPv4(const QHostAddress &address)
+{
+    if (address.protocol() != QAbstractSocket::IPv6Protocol) return {};
+    const auto six = address.toIPv6Address();
+    const auto zero = [&](int first, int end) {
+        return std::all_of(six.c + first, six.c + end, [](quint8 byte) { return byte == 0; });
+    };
+    int at = 12;
+    if (six[0] == 0x20 && six[1] == 0x02) {
+        at = 2;
+    } else {
+        const bool mapped = zero(0, 10) && six[10] == 0xff && six[11] == 0xff;
+        const bool nat64 = six[0] == 0 && six[1] == 0x64 && six[2] == 0xff && six[3] == 0x9b && zero(4, 12);
+        if (!(mapped || nat64 || zero(0, 12))) return {};
+    }
+    return QHostAddress(quint32(six[at]) << 24 | quint32(six[at + 1]) << 16 | quint32(six[at + 2]) << 8 | six[at + 3]);
+}
+
+} // namespace
+
 bool NetworkFetcher::isPublic(const QHostAddress &given)
 {
-    QHostAddress address = given;
-    if (address.isNull()) return false;
-    if (address.protocol() == QAbstractSocket::IPv6Protocol) {
-        const Q_IPV6ADDR six = address.toIPv6Address();
-        const auto zero = [&six](int from, int to) {
-            for (int i = from; i < to; ++i)
-                if (six[i] != 0) return false;
-            return true;
-        };
-        // IPv4-mapped (::ffff:0:0/96), IPv4-compatible (::/96) and NAT64
-        // (64:ff9b::/96) addresses lead to the IPv4 address they end with.
-        const bool mapped = zero(0, 10) && six[10] == 0xff && six[11] == 0xff;
-        const bool compatible = zero(0, 12);
-        const bool translated = six[0] == 0 && six[1] == 0x64 && six[2] == 0xff && six[3] == 0x9b && zero(4, 12);
-        if (compatible && zero(12, 15) && six[15] <= 1) return false;
-        if (mapped || compatible || translated)
-            address = QHostAddress(quint32(six[12]) << 24 | quint32(six[13]) << 16 | quint32(six[14]) << 8 | quint32(six[15]));
-    }
+    if (given.isNull()) return false;
+    const auto fourAddress = carriedIPv4(given);
+    const auto &address = fourAddress.isNull() ? given : fourAddress;
     struct Net {
         const char *address;
         int bits;
@@ -222,6 +243,7 @@ bool NetworkFetcher::isPublic(const QHostAddress &given)
         {"192.0.0.0", 24},  {"192.168.0.0", 16}, {"198.18.0.0", 15}, {"224.0.0.0", 4},  {"240.0.0.0", 4},
     };
     static const Net closed6[] = {
+        {"2001::", 32}, {"2001:db8::", 32}, {"64:ff9b:1::", 48},
         {"::", 128}, {"::1", 128}, {"100::", 64}, {"fc00::", 7}, {"fe80::", 10}, {"fec0::", 10}, {"ff00::", 8},
     };
     const bool four = address.protocol() == QAbstractSocket::IPv4Protocol;
@@ -232,16 +254,13 @@ bool NetworkFetcher::isPublic(const QHostAddress &given)
 
 bool NetworkFetcher::onLocalNetwork(const QHostAddress &given, const QList<QNetworkAddressEntry> &networks)
 {
-    // An IPv6 address that carries an IPv4 one is that address.
-    QHostAddress address = given;
-    bool four = false;
-    const quint32 v4 = address.toIPv4Address(&four);
-    if (four) address = QHostAddress(v4);
+    const QHostAddress carried = carriedIPv4(given);
     for (const QNetworkAddressEntry &entry : networks) {
         const QHostAddress own = entry.ip();
-        if (own.isNull() || own.protocol() != address.protocol()) continue;
+        if (own.isNull()) continue;
+        const QHostAddress &address = own.protocol() == QAbstractSocket::IPv4Protocol && !carried.isNull() ? carried : given;
+        if (own.protocol() != address.protocol()) continue;
         if (own.isEqual(address, QHostAddress::TolerantConversion)) return true;
-        // A network of no width would be every address; there is none.
         const int bits = entry.prefixLength();
         if (bits > 0 && address.isInSubnet(own, bits)) return true;
     }

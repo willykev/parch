@@ -17,6 +17,7 @@
 #include <QTimeZone>
 #include <algorithm>
 #include <memory>
+#include <queue>
 #include <utility>
 
 namespace {
@@ -333,14 +334,14 @@ QString History::capture(const QString &documentId, const QByteArray &bytes, con
     return id;
 }
 
-QString History::captureIfDue(const QString &documentId, const QByteArray &bytes)
+QString History::captureIfDue(const QString &documentId, const QByteArray &bytes, Reason reason)
 {
     QMutexLocker lock(&m_mutex);
     const QList<Version> existing = load(documentId);
     if (!existing.isEmpty() && utc(existing.first().taken).addSecs(CaptureIntervalMinutes * 60) > utc(m_now()))
         return {};
     CaptureStatus ignored = CaptureStatus::Failed;
-    const QString id = captureLocked(documentId, existing, bytes, {}, ignored, Reason::Save);
+    const QString id = captureLocked(documentId, existing, bytes, {}, ignored, reason);
     announceLocked();
     return id;
 }
@@ -466,43 +467,69 @@ void History::countRemovals(const HistoryLimits &limits)
 {
     m_pruner.start([this, limits] {
         QMutexLocker lock(&m_mutex);
-        const int count = removalsLocked(limits);
+        int count = 0;
+        for (const auto &ids : removalsLocked(limits)) count += int(ids.size());
         lock.unlock();
         emit removalsCounted(limits.versions, limits.days, limits.bytes, count);
     });
 }
 
-int History::removalsLocked(const HistoryLimits &limits) const
+QHash<QString, QSet<QString>> History::removalsLocked(const HistoryLimits &limits) const
 {
-    const int most = std::max(1, limits.versions);
+    struct DocumentVersions {
+        QString id;
+        qint64 bytes = 0;
+        QList<Version> unnamed; // newest first
+    };
+    const QDateTime cutoff = utc(m_now()).addDays(-std::max(1, limits.days));
     const qint64 budget = std::max<qint64>(0, limits.bytes);
-    const QDateTime limit = utc(m_now()).addDays(-std::max(1, limits.days));
-    int removed = 0;
-    qint64 freed = 0;
-    QList<Version> left;
-    // As pruneAll() goes: each document's unnamed versions past the count
-    // or the age, and then the oldest of the rest while all of them take
-    // more than the space, unless the named ones alone do.
-    for (const QString &documentId : documentIds()) {
-        int unnamed = 0;
-        for (const Version &version : load(documentId)) {
-            if (!version.name.isEmpty()) continue;
-            if (++unnamed > most || utc(version.taken) < limit) {
-                ++removed;
-                freed += version.bytes;
+    QHash<QString, QSet<QString>> removed;
+    QList<DocumentVersions> documents;
+    qint64 total = 0, named = 0;
+    for (const QString &id : documentIds()) {
+        DocumentVersions doc{id, 0, {}};
+        for (const Version &version : load(id)) {
+            if (!version.name.isEmpty()) {
+                named += version.bytes;
+            } else if (doc.unnamed.size() >= std::max(1, limits.versions) || utc(version.taken) < cutoff) {
+                removed[id].insert(version.id);
                 continue;
+            } else {
+                doc.unnamed.append(version);
             }
-            left.append(version);
+            doc.bytes += version.bytes;
         }
+        total += doc.bytes;
+        if (doc.bytes || !doc.unnamed.isEmpty()) documents.append(std::move(doc));
     }
-    const Usage totals = totalsLocked();
-    qint64 total = totals.bytes - freed;
-    if (total <= budget || totals.named > budget) return removed;
-    std::stable_sort(left.begin(), left.end(), [](const Version &a, const Version &b) { return a.taken < b.taken; });
-    for (const Version &version : std::as_const(left)) {
-        if (total <= budget) break;
-        ++removed;
+    if (total <= budget || named > budget || documents.isEmpty()) return removed;
+
+    // Reconsider each document after taking its oldest unnamed version.
+    // Take from the largest over-share history first. If only protected
+    // versions put a history over its share, prefer others with more than
+    // three recent versions when reclaiming the remaining space.
+    const qint64 share = budget / documents.size();
+    const auto priority = [share](const DocumentVersions *doc) {
+        const bool aboveShare = doc->bytes > share;
+        return std::tuple{aboveShare, aboveShare ? doc->bytes : qint64(0), doc->unnamed.size() > 3, doc->bytes};
+    };
+    const auto less = [&](const DocumentVersions *a, const DocumentVersions *b) {
+        if (priority(a) != priority(b)) return priority(a) < priority(b);
+        if (a->unnamed.last().taken != b->unnamed.last().taken)
+            return a->unnamed.last().taken > b->unnamed.last().taken;
+        return a->id > b->id;
+    };
+    std::priority_queue<DocumentVersions *, std::vector<DocumentVersions *>, decltype(less)> queue(less);
+    for (auto &doc : documents)
+        if (!doc.unnamed.isEmpty()) queue.push(&doc);
+    while (total > budget && !queue.empty()) {
+        auto *doc = queue.top();
+        queue.pop();
+        const Version version = doc->unnamed.takeLast();
+        removed[doc->id].insert(version.id);
         total -= version.bytes;
+        doc->bytes -= version.bytes;
+        if (!doc->unnamed.isEmpty()) queue.push(doc);
     }
     return removed;
 }
@@ -625,7 +652,7 @@ void History::removeFiles(const QString &documentId, const Version &version) con
 // Unnamed versions go in this order: those of the document just captured
 // beyond the count or older than the age limit; then, only while all
 // documents together exceed the byte budget, every document's beyond the
-// count or the age, and the oldest of all until the total fits. Named
+// count or the age, then older versions from the largest histories. Named
 // versions are never removed.
 void History::prune(const QString &documentId, const QList<Version> &versions)
 {
@@ -653,51 +680,14 @@ void History::pruneOwn(const QString &documentId, const QList<Version> &versions
 
 void History::pruneAll()
 {
-    struct Item {
-        QString documentId;
-        Version version;
-    };
-    const QDateTime limit = utc(m_now()).addDays(-m_limits.days);
-    QList<Item> oldestFirst;
-    // Every index is read here, which also brings the totals up to date with
-    // anything changed behind history's back.
-    for (const QString &documentId : documentIds()) {
-        const QList<Version> all = load(documentId);
-        QList<Version> kept;
-        int unnamed = 0;
-        for (const Version &version : all) {
-            if (version.name.isEmpty()) {
-                if (++unnamed > m_limits.versions || utc(version.taken) < limit) {
-                    removeFiles(documentId, version);
-                    continue;
-                }
-                oldestFirst.prepend({documentId, version});
-            }
-            kept.append(version);
-        }
-        if (kept.size() != all.size()) {
-            noteDocument(documentId, kept);
-            store(documentId, kept);
-        }
-    }
-    qint64 total = totalsLocked().bytes;
-    if (total <= m_limits.bytes) return;
-    // Removing unnamed versions helps only if it can bring the total within
-    // the budget. When the named versions alone exceed it, the rest stay and
-    // history is paused, since deleting them would lose them for nothing.
-    if (totalsLocked().named > m_limits.bytes) return;
-    std::stable_sort(oldestFirst.begin(), oldestFirst.end(),
-                     [](const Item &a, const Item &b) { return a.version.taken < b.version.taken; });
-    QHash<QString, QSet<QString>> dropped;
-    for (const Item &item : std::as_const(oldestFirst)) {
-        if (total <= m_limits.bytes) break;
-        removeFiles(item.documentId, item.version);
-        dropped[item.documentId].insert(item.version.id);
-        total -= item.version.bytes;
-    }
-    for (auto it = dropped.cbegin(); it != dropped.cend(); ++it) {
+    const auto removed = removalsLocked(m_limits);
+    for (auto it = removed.cbegin(); it != removed.cend(); ++it) {
         QList<Version> kept = load(it.key());
-        kept.removeIf([&](const Version &v) { return it.value().contains(v.id); });
+        kept.removeIf([&](const Version &version) {
+            if (!it.value().contains(version.id)) return false;
+            removeFiles(it.key(), version);
+            return true;
+        });
         noteDocument(it.key(), kept);
         store(it.key(), kept);
     }

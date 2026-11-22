@@ -235,7 +235,7 @@ void FileRequests::saveTo(WindowContext *window, Document *document, const QStri
     // A file read in another encoding is written over as UTF-8 only once the
     // writer confirms it, which its window asks, as Save does.
     if (!document->convertedFrom().isEmpty() && !document->isDraft()
-        && DiskFile::canonicalPath(path) == document->path()) {
+        && !QFileInfo(path).isSymLink() && DiskFile::canonicalPath(path) == document->path()) {
         m_failedNames.remove(document->id());
         if (window) window->askToConfirmEncoding(document);
         else emit problem(tr("Not saved"), tr("“%1” was read as %2, and is written as UTF-8 only once you confirm it.")
@@ -249,12 +249,25 @@ void FileRequests::saveTo(WindowContext *window, Document *document, const QStri
     m_store->saveAs(document, path);
 }
 
+WindowContext *FileRequests::namingWindow(Document *document) const
+{
+    return m_namings.value(document->id()).window;
+}
+
 void FileRequests::saveFinished(Document *document, const QString &name, SaveStatus status)
 {
     const auto naming = m_namings.constFind(document->id());
     if (naming == m_namings.cend() || naming->path != name) return;
     const Naming ended = *naming;
     m_namings.erase(naming);
+    if (status == SaveStatus::Cancelled) return;
+    // Following a chosen link can bring Save as back to the document's own
+    // file. Writing it as UTF-8 still needs the encoding confirmation.
+    if (status == SaveStatus::Failed && ended.window && !document->convertedFrom().isEmpty()
+        && DiskFile::canonicalPath(name) == document->path()) {
+        ended.window->askToConfirmEncoding(document);
+        return;
+    }
     // A name that could not be taken fails the save; the document is where it was.
     if (status != SaveStatus::Saved) {
         m_failedNames.insert(document->id(), name);

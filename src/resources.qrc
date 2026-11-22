@@ -61,5 +61,6 @@
         <file>DocumentSettingsDialog.qml</file>
         <file>ExportDialog.qml</file>
         <file>ExportLinkDialog.qml</file>
+        <file>SaveLinkDialog.qml</file>
     </qresource>
 </RCC>

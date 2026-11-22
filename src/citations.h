@@ -50,6 +50,7 @@ struct CitationDiagnostic {
         NoStyle,
         SeparateNumbering,
         Locale,
+        FormattingLimit,
     };
     enum class Severity { Warning, Error };
     Code code = Code::MissingKey;
@@ -94,12 +95,9 @@ public:
     // The locale; the bundled en-US unless set.
     void setLocale(std::shared_ptr<const CslLocale> locale) { m_locale = std::move(locale); }
     // The root document's databases, searched in order.
-    void setDatabases(QList<Database> databases) { m_databases = std::move(databases); }
+    void setDatabases(QList<Database> databases);
     // The databases of one included file; a file without its own uses the root's.
-    void setDatabasesFor(const QString &sourceFile, QList<Database> databases)
-    {
-        m_fileDatabases.insert(sourceFile, std::move(databases));
-    }
+    void setDatabasesFor(const QString &sourceFile, QList<Database> databases);
 
     CitationOutput format(const QList<CitationClusterSpec> &clusters,
                           const QList<WriterDefinition> &definitions = {}) const;
@@ -129,7 +127,7 @@ QList<StyleInfo> bundledStyles();
 QString bundledId(const QString &name);
 std::shared_ptr<const CslStyle> bundledStyle(const QString &id, QString *error = nullptr);
 // A style chosen by the writer, from a .csl file.
-std::shared_ptr<const CslStyle> styleFromFile(const QString &path, QString *error = nullptr);
+std::shared_ptr<const CslStyle> styleFromFile(const QString &path, QString *error = nullptr, const QStringList *folders = nullptr);
 // The bundled en-US locale.
 std::shared_ptr<const CslLocale> defaultLocale();
 std::shared_ptr<const CslLocale> localeFromFile(const QString &path, QString *error = nullptr);

@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <sys/stat.h>
 
 #include <QByteArray>
 #include <QHash>
@@ -148,6 +149,8 @@ public:
 
 namespace Exporters {
 
+void setReplacementGroupForTests(std::optional<gid_t> group);
+
 // Every format, in the order they are listed.
 QList<const Exporter *> all();
 QStringList formats();
@@ -187,6 +190,7 @@ public:
 
 private:
     bool fail(const QString &why, QString *error);
+    bool stage(const QByteArray &bytes, const struct stat *access, QString *error);
 
     QString m_path;
     ExistingOutput m_existing;
@@ -194,6 +198,7 @@ private:
     QByteArray m_name;
     QByteArray m_temporary;
     std::optional<QByteArray> m_contents;
+    std::optional<struct stat> m_access;
 };
 
 // A local file as a link or image in a file written to `outputFolder`

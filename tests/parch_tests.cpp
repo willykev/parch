@@ -287,11 +287,13 @@ private slots:
     void initTestCase();
     void launchParsing();
     void launchMessages();
-    void launchLeavesQtOptionsToQt();
+    void launchRefusesQtOptions();
     void helpColumnsLineUp();
     void testsKeepToTestLocations();
     void desktopEntryOpensMarkdown();
     // The Markdown engine. The tests themselves are in markdown_tests.cpp.
+    void checkingOneLongLineIsQuick() { MarkdownTests::checkingOneLongLineIsQuick(); }
+    void blankLinesUnderDeepListsParseQuickly() { MarkdownTests::blankLinesUnderDeepListsParseQuickly(); }
     void markdownCommonMarkSpec() { MarkdownTests::commonMarkSpec(); }
     void markdownGfmExtensions() { MarkdownTests::gfmExtensions(); }
     void markdownProfilesAndOptions() { MarkdownTests::profilesAndOptions(); }
@@ -302,6 +304,34 @@ private slots:
     void markdownCodeBlocks() { MarkdownTests::codeBlocks(); }
     void markdownLinksAndImages() { MarkdownTests::linksAndImages(); }
     void markdownHeadingLabelsAndSlugs() { MarkdownTests::headingLabelsAndSlugs(); }
+    void aWideTableWithShortRowsStaysSmall() { MarkdownTests::aWideTableWithShortRowsStaysSmall(); }
+    void aTablePastItsCellLimitBecomesText() { MarkdownTests::aTablePastItsCellLimitBecomesText(); }
+    void manyTableOfContentsShareOneList() { MarkdownTests::manyTableOfContentsShareOneList(); }
+    void manyAnchorsBeforeAValueDoNotRecurse() { MarkdownTests::manyAnchorsBeforeAValueDoNotRecurse(); }
+    void anUnclosedFlowListInFrontMatterIsAnError() { MarkdownTests::anUnclosedFlowListInFrontMatterIsAnError(); }
+    void aLongUnclosedFrontMatterScalarParsesQuickly() { MarkdownTests::aLongUnclosedFrontMatterScalarParsesQuickly(); }
+    void sharedYamlReferencesAreReadOnce() { CitationTests::sharedYamlReferencesAreReadOnce(); }
+    void yamlFieldsCanArriveInAnyOrder() { CitationTests::yamlFieldsCanArriveInAnyOrder(); }
+    void longAuthorListsDisambiguatePromptly() { CitationTests::longAuthorListsDisambiguatePromptly(); }
+    void citationMarkupKeepsUnclosedTagsAsText() { CitationTests::citationMarkupKeepsUnclosedTagsAsText(); }
+    void citationLocatorsWithWhitespaceFormatPromptly() { CitationTests::citationLocatorsWithWhitespaceFormatPromptly(); }
+    void aRepeatedBibliographyIsSearchedOnce() { CitationTests::aRepeatedBibliographyIsSearchedOnce(); }
+    void deeplyNestedCitationQuotesAreText() { CitationTests::deeplyNestedCitationQuotesAreText(); }
+    void aTitleOfManyTagsFormatsQuickly() { CitationTests::aTitleOfManyTagsFormatsQuickly(); }
+    void aStyleThatExpandsTooFarIsRefused() { CitationTests::aStyleThatExpandsTooFarIsRefused(); }
+    void crossrefInheritanceCountsAgainstTheBudget() { CitationTests::crossrefInheritanceCountsAgainstTheBudget(); }
+    void manyFieldsAndChildrenParseQuickly() { CitationTests::manyFieldsAndChildrenParseQuickly(); }
+    void consecutiveHeadingsKeepTheirPagePositions() { ExportTests::consecutiveHeadingsKeepTheirPagePositions(); }
+    void paperSetsManyShortParagraphsPromptly() { ExportTests::paperSetsManyShortParagraphsPromptly(); }
+    void paperWrapsLongTextRunsPromptly_data() { ExportTests::paperWrapsLongTextRunsPromptly_data(); }
+    void paperWrapsLongTextRunsPromptly() { ExportTests::paperWrapsLongTextRunsPromptly(); }
+    void docxReusesTheBytesOfOnePicture() { ExportTests::docxReusesTheBytesOfOnePicture(); }
+    void aDocumentWithManyFormulasStopsAtTheHelperBudget() { ExportTests::aDocumentWithManyFormulasStopsAtTheHelperBudget(); }
+    void paperIndexesUnresolvedReferencesOnce() { ExportTests::paperIndexesUnresolvedReferencesOnce(); }
+    void paperPaginatesWrappedHeadingsTogether() { ExportTests::paperPaginatesWrappedHeadingsTogether(); }
+    void aHugeHtmlTableIsShownAsText() { ExportTests::aHugeHtmlTableIsShownAsText(); }
+    void aDeeplyQuotedHtmlPasteFallsBackToText() { ExportTests::aDeeplyQuotedHtmlPasteFallsBackToText(); }
+    void aTagWithManyAttributesPastesQuickly() { ExportTests::aTagWithManyAttributesPastesQuickly(); }
     void markdownTableOfContents() { MarkdownTests::tableOfContents(); }
     void markdownTables() { MarkdownTests::tables(); }
     void markdownDefinitionLists() { MarkdownTests::definitionLists(); }
@@ -329,6 +359,7 @@ private slots:
     void markdownPerformance() { MarkdownTests::performance(); }
     void markdownPathologicalInput() { MarkdownTests::pathologicalInput(); }
     // The commands run from the terminal. The tests themselves are in clitests.cpp.
+    void aDeepTreeWritesLinearJson() { CliTests::aDeepTreeWritesLinearJson(); }
     void cliLaunchFindsCommands() { CliTests::launchFindsCommands(); }
     void cliHelpExplainsEveryCommand() { CliTests::helpExplainsEveryCommand(); }
     void cliUsageErrorsExitOne() { CliTests::usageErrorsExitOne(); }
@@ -389,6 +420,8 @@ private slots:
     void cliWritesThroughShortWrites() { CliTests::writesThroughShortWrites(); }
     void cliKeepsQtNamedFilesAfterDoubleDash_data() { CliTests::keepsQtNamedFilesAfterDoubleDash_data(); }
     void cliKeepsQtNamedFilesAfterDoubleDash() { CliTests::keepsQtNamedFilesAfterDoubleDash(); }
+    void qtOptionsInFileArgumentsAreNotPassedToQt() { CliTests::qtOptionsInFileArgumentsAreNotPassedToQt(); }
+    void checkReportsWhetherHelpersAreConfined() { CliTests::checkReportsWhetherHelpersAreConfined(); }
     void cliQtOptionsBeforeDoubleDash() { CliTests::qtOptionsBeforeDoubleDash(); }
     void cliQuietExportSwitchesDoNotLogWarnings_data() { CliTests::quietExportSwitchesDoNotLogWarnings_data(); }
     void cliQuietExportSwitchesDoNotLogWarnings() { CliTests::quietExportSwitchesDoNotLogWarnings(); }
@@ -399,6 +432,7 @@ private slots:
     void cliExportNeverWritesThroughALink() { CliTests::exportNeverWritesThroughALink(); }
     void cliCheckSaysWhetherHelpersAreIsolated() { CliTests::checkSaysWhetherHelpersAreIsolated(); }
     // Pictures of the window. The tests themselves are in screenshottests.cpp.
+    void screenshotRefusesAnExistingFile() { ScreenshotTests::screenshotRefusesAnExistingFile(); }
     void screenshotOptionsAreParsed() { ScreenshotTests::optionsAreParsed(); }
     void screenshotMalformedOptionsAreRefused() { ScreenshotTests::malformedOptionsAreRefused(); }
     void screenshotHelpNamesEveryOption() { ScreenshotTests::helpNamesEveryOption(); }
@@ -409,6 +443,38 @@ private slots:
     void screenshotWritesNothingOfThePersons() { ScreenshotTests::writesNothingOfThePersons(); }
     void screenshotNamesWhatCannotBeDone() { ScreenshotTests::namesWhatCannotBeDone(); }
     // Exports and printing. The tests themselves are in exporttests.cpp.
+    void onlyReferenceFilesTravelWithMarkdown() { ExportTests::onlyReferenceFilesTravelWithMarkdown(); }
+    void aBibliographyThatIsNotOneStaysBehind() { ExportTests::aBibliographyThatIsNotOneStaysBehind(); }
+    void copiedCitationFilesAreListed() { ExportTests::copiedCitationFilesAreListed(); }
+    void aReferenceListMustBeAnArrayOfObjects() { ExportTests::aReferenceListMustBeAnArrayOfObjects(); }
+    void checkReportsABibliographyThatCannotBeRead() { ExportTests::checkReportsABibliographyThatCannotBeRead(); }
+    void anEmptyBibliographyIsAWarning_data() { ExportTests::anEmptyBibliographyIsAWarning_data(); }
+    void anEmptyBibliographyIsAWarning() { ExportTests::anEmptyBibliographyIsAWarning(); }
+    void epubMetadataWithControlCharactersIsWellFormed() { ExportTests::epubMetadataWithControlCharactersIsWellFormed(); }
+    void aRepeatedHtmlAttributeIsKeptOnce() { ExportTests::aRepeatedHtmlAttributeIsKeptOnce(); }
+    void docxBodyTextWithPercentNumbersIsKept() { ExportTests::docxBodyTextWithPercentNumbersIsKept(); }
+    void anExportOverSomeoneElsesFileTakesTheUsualMode() { ExportTests::anExportOverSomeoneElsesFileTakesTheUsualMode(); }
+    void anExportNeverCarriesSetIdBits() { ExportTests::anExportNeverCarriesSetIdBits(); }
+    void anOrderedListStartingAtTheLargestNumber() { ExportTests::anOrderedListStartingAtTheLargestNumber(); }
+    void docxBookmarksAndRelationshipsStayUnique_data() { ExportTests::docxBookmarksAndRelationshipsStayUnique_data(); }
+    void docxBookmarksAndRelationshipsStayUnique() { ExportTests::docxBookmarksAndRelationshipsStayUnique(); }
+    void diagnosticsKeepPercentNumbers() { CitationTests::diagnosticsKeepPercentNumbers(); }
+    void citationYearsSortAndLabelAtTheirLimits() { CitationTests::citationYearsSortAndLabelAtTheirLimits(); }
+    void movingAcrossUnicodeWordsIsQuick() { VimTests::movingAcrossUnicodeWordsIsQuick(); }
+    void aCountedInsertOfAPasteIsBounded() { VimTests::aCountedInsertOfAPasteIsBounded(); }
+    void percentageMotionsCanCountEveryLine() { VimTests::percentageMotionsCanCountEveryLine(); }
+    void svgPicturesUseTheirDrawingInEveryFormat() { ExportTests::svgPicturesUseTheirDrawingInEveryFormat(); }
+    void aPdfIsNotAPicture() { ExportTests::aPdfIsNotAPicture(); }
+    void picturesAreReadByTheirOwnFormat_data() { ExportTests::picturesAreReadByTheirOwnFormat_data(); }
+    void picturesAreReadByTheirOwnFormat() { ExportTests::picturesAreReadByTheirOwnFormat(); }
+    void exportedSvgPicturesHoldNoScript_data() { ExportTests::exportedSvgPicturesHoldNoScript_data(); }
+    void svgExportKeepsViewportAndNamedView() { ExportTests::svgExportKeepsViewportAndNamedView(); }
+    void exportedSvgPicturesHoldNoScript() { ExportTests::exportedSvgPicturesHoldNoScript(); }
+    void embeddedPicturesKeepTheirViewFragments() { ExportTests::embeddedPicturesKeepTheirViewFragments(); }
+    void inlineFormulaSvgKeepsOnlyDrawingElements() { ExportTests::inlineFormulaSvgKeepsOnlyDrawingElements(); }
+    void hugeSvgSizesAreDrawnWithinBounds() { ExportTests::hugeSvgSizesAreDrawnWithinBounds(); }
+    void onePictureNamedManyWaysIsDecodedOnce() { ExportTests::onePictureNamedManyWaysIsDecodedOnce(); }
+    void picturesPastTheBudgetAreLeftOutWithANote() { ExportTests::picturesPastTheBudgetAreLeftOutWithANote(); }
     void exportPdfSetsPagesWithSearchableText() { ExportTests::pdfSetsPagesWithSearchableText(); }
     void pdfLocalLinksLeadFromTheOutputFolder() { ExportTests::pdfLocalLinksLeadFromTheOutputFolder(); }
     void epubReportsLinksToFilesOutsideTheBook() { ExportTests::epubReportsLinksToFilesOutsideTheBook(); }
@@ -481,6 +547,10 @@ private slots:
     void editsMadeWhileUndoAppliesWaitForTheStep();
     void undoHistoryEdges();
     // Files and text made to harm parch; the tests are in hostiletests.cpp.
+    void aFileThatGrowsPastTheLimitIsNotReadWhole() { HostileTests::aFileThatGrowsPastTheLimitIsNotReadWhole(); }
+    void aThemeFileThatIsNotRegularIsIgnored() { HostileTests::aThemeFileThatIsNotRegularIsIgnored(); }
+    void themeValuesAreClamped() { HostileTests::themeValuesAreClamped(); }
+    void folderSearchResultsShowBoundedContext() { HostileTests::folderSearchResultsShowBoundedContext(); }
     void hostileReadsStopAtTheirLimit() { HostileTests::readsStopAtTheirLimit(); }
     void hostileBibliographiesAndStylesAreReadSafely() { HostileTests::bibliographiesAndStylesAreReadSafely(); }
     void hostileDocumentsAndIncludesAreReadSafely() { HostileTests::documentsAndIncludesAreReadSafely(); }
@@ -813,6 +883,8 @@ private slots:
     void restoringReadsHistoryOffTheUiThread() { LibraryTests::restoringReadsHistoryOffTheUiThread(); }
     void repeatedLibrarySearchesReadLittleAgain() { LibraryTests::repeatedLibrarySearchesReadLittleAgain(); }
     // The preview and the three views, written in previewtests.cpp.
+    void aWebSvgIsDrawnWithoutItsOutsidePictures() { PreviewTests::aWebSvgIsDrawnWithoutItsOutsidePictures(); }
+    void helperSvgWithAnOutsideReferenceIsNotPaintedByQt() { PreviewTests::helperSvgWithAnOutsideReferenceIsNotPaintedByQt(); }
     void viewModesAreKeptByEachView() { PreviewTests::viewModesAreKeptByEachView(); }
     void previewBuildsTextAndInlineFormatting() { PreviewTests::previewBuildsTextAndInlineFormatting(); }
     void previewBuildsListsQuotesAndRules() { PreviewTests::previewBuildsListsQuotesAndRules(); }
@@ -857,6 +929,13 @@ private slots:
         PreviewTests::drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize();
     }
     void headingLinksAreFoundInTheSharedParse() { PreviewTests::headingLinksAreFoundInTheSharedParse(); }
+    void aLinkHintShowsTheHostItOpens() { PreviewTests::aLinkHintShowsTheHostItOpens(); }
+    void aWebLinkWithUserInfoAsksFirst() { PreviewTests::aWebLinkWithUserInfoAsksFirst(); }
+    void theLinkDialogNeverElidesTheHost() { PreviewTests::theLinkDialogNeverElidesTheHost(); }
+    void aMailLinkWithAnAttachmentAsksFirst() { PreviewTests::aMailLinkWithAnAttachmentAsksFirst(); }
+    void showingWebPicturesApprovesTheirHosts() { PreviewTests::showingWebPicturesApprovesTheirHosts(); }
+    void aPictureFromANewHostAsksAgain() { PreviewTests::aPictureFromANewHostAsksAgain(); }
+    void anOlderShowThemSettingStillWorks() { PreviewTests::anOlderShowThemSettingStillWorks(); }
     void webPicturesWaitUntilAsked() { PreviewTests::webPicturesWaitUntilAsked(); }
     void pathologicalBlocksStayCheapToLayOut() { PreviewTests::pathologicalBlocksStayCheapToLayOut(); }
     // What a frame holds, written in frametests.cpp.
@@ -865,6 +944,8 @@ private slots:
     void keysBesideThePreviewDoNotWaitForIt() { FrameTests::keysBesideThePreviewDoNotWaitForIt(); }
     void newWidthsMoveEachViewOnce() { FrameTests::newWidthsMoveEachViewOnce(); }
     // Scrolling with a touchpad, written in touchpadtests.cpp.
+    void editingManyCellsScansTheirTableOnce() { TableTests::editingManyCellsScansTheirTableOnce(); }
+    void aListSelectionOutdentsInOnePass() { TableTests::aListSelectionOutdentsInOnePass(); }
     void formatKeepsMergedCellsWhole() { TableTests::formatKeepsMergedCellsWhole(); }
     void scannerAgreesWithTheParser() { TableTests::scannerAgreesWithTheParser(); }
     void formatIsIdempotentAndKeepsPayloadBytes() { TableTests::formatIsIdempotentAndKeepsPayloadBytes(); }
@@ -1003,11 +1084,18 @@ private slots:
     void aShortSwipeAlongAGlideAddsToIt() { TouchpadTests::aShortSwipeAlongAGlideAddsToIt(); }
     void theEditorAndThePreviewGlide() { TouchpadTests::theEditorAndThePreviewGlide(); }
     // What parch refuses to reach or write, written in securitytests.cpp.
+    void aHugePastedDataImageIsRefused() { SecurityTests::aHugePastedDataImageIsRefused(); }
     void webPictureRequestsKeepTheirHost() { SecurityTests::webPictureRequestsKeepTheirHost(); }
     void webPicturesComeOnlyFromPublicAddresses() { SecurityTests::webPicturesComeOnlyFromPublicAddresses(); }
     void webPicturesNeverComeFromThisComputersNetworks() { SecurityTests::webPicturesNeverComeFromThisComputersNetworks(); }
     void exportsAskBeforeReplacingALink() { SecurityTests::exportsAskBeforeReplacingALink(); }
     void parchKeepsItsFilesToItself() { SecurityTests::parchKeepsItsFilesToItself(); }
+    void aWebPictureRedirectChecksItsHostAndAddresses() { SecurityTests::aWebPictureRedirectChecksItsHostAndAddresses(); }
+    void webPicturesCheckTransitionAddresses() { SecurityTests::webPicturesCheckTransitionAddresses(); }
+    void aHelperCannotReadOutsideItsFolders() { SecurityTests::aHelperCannotReadOutsideItsFolders(); }
+    void helpersAreNotTakenFromTheProgramsOwnFolder() { SecurityTests::helpersAreNotTakenFromTheProgramsOwnFolder(); }
+    void helperRulesMatchTheKernelABI() { SecurityTests::helperRulesMatchTheKernelABI(); }
+    void fixtureExtractionUsesAnIsolatedInterpreter() { SecurityTests::fixtureExtractionUsesAnIsolatedInterpreter(); }
     void helpersRunWithinLimits() { SecurityTests::helpersRunWithinLimits(); }
     void aLinkedAssetsFolderIsNotFollowed() { SecurityTests::aLinkedAssetsFolderIsNotFollowed(); }
     void bigPastesConvertOffTheWindowThread() { SecurityTests::bigPastesConvertOffTheWindowThread(); }
@@ -1219,6 +1307,30 @@ private slots:
     void renameKeepsQuotedIncludesWorking_data();
     void movingADocumentUpdatesTheLinksToIt();
     void closedLinkUpdatesRequireHistory();
+    void linkedFoldersOutsideTheLibraryAreNotWalked() { LibraryTests::linkedFoldersOutsideTheLibraryAreNotWalked(); }
+    void linkUpdatesNeverRewriteFilesOutsideTheLibrary() { LibraryTests::linkUpdatesNeverRewriteFilesOutsideTheLibrary(); }
+    void aLinkedFolderOutsideIsNotAMoveDestination() { LibraryTests::aLinkedFolderOutsideIsNotAMoveDestination(); }
+    void renameAndTrashRefuseAPathThroughALinkOutside() { LibraryTests::renameAndTrashRefuseAPathThroughALinkOutside(); }
+    void linksInsideTheLibraryStillWork() { LibraryTests::linksInsideTheLibraryStillWork(); }
+    void aNewSaveAsNameUsesTheUmask() { LibraryTests::aNewSaveAsNameUsesTheUmask(); }
+    void closingAMissingLinkReleasesItsName() { LibraryTests::closingAMissingLinkReleasesItsName(); }
+    void aLinkEntryCanBeRenamedAndTrashed() { LibraryTests::aLinkEntryCanBeRenamedAndTrashed(); }
+    void aLibraryUnderALinkScansItsDocuments() { LibraryTests::aLibraryUnderALinkScansItsDocuments(); }
+    void linkUpdatesKeepOtherHardLinksIntact() { LibraryTests::linkUpdatesKeepOtherHardLinksIntact(); }
+    void openingAMovingDocumentSharesItsBuffer() { LibraryTests::openingAMovingDocumentSharesItsBuffer(); }
+    void replacingALinkKeepsAConcurrentFile() { LibraryTests::replacingALinkKeepsAConcurrentFile(); }
+    void aCopyCanUseAnExclusiveFileOnALinklessVolume() { LibraryTests::aCopyCanUseAnExclusiveFileOnALinklessVolume(); }
+    void aMoveRemovesOnlyTheRevisionsItClaimed() { LibraryTests::aMoveRemovesOnlyTheRevisionsItClaimed(); }
+    void aFolderMoveCanExchangeAnExclusiveName() { LibraryTests::aFolderMoveCanExchangeAnExclusiveName(); }
+    void saveAsOntoADanglingLinkAsks() { LibraryTests::saveAsOntoADanglingLinkAsks(); }
+    void savingAtALinkOffersTheAvailableChoices() { LibraryTests::savingAtALinkOffersTheAvailableChoices(); }
+    void aDanglingLinkNamedAtLaunchCreatesNothing() { LibraryTests::aDanglingLinkNamedAtLaunchCreatesNothing(); }
+    void savingADocumentOpenedThroughALinkStillWritesItsTarget() { LibraryTests::savingADocumentOpenedThroughALinkStillWritesItsTarget(); }
+    void bibliographyReadsStayWithinTheDocumentsFolders() { LibraryTests::bibliographyReadsStayWithinTheDocumentsFolders(); }
+    void aCrossDeviceMoveOfALargeFileIsRefused() { LibraryTests::aCrossDeviceMoveOfALargeFileIsRefused(); }
+    void oneBusyDocumentDoesNotPruneOthersHistory() { LibraryTests::oneBusyDocumentDoesNotPruneOthersHistory(); }
+    void outsideReloadsShareTheHistoryInterval() { LibraryTests::outsideReloadsShareTheHistoryInterval(); }
+    void withoutARuntimeFolderParchUsesItsOwn() { LibraryTests::withoutARuntimeFolderParchUsesItsOwn(); }
     void crossDeviceMovesKeepChangedSources();
     void undoTakesAMoveAndItsLinkUpdatesBack();
     void aMoveCanLeaveItsLinksOrNotHappen();
@@ -1406,24 +1518,14 @@ void ParchTests::launchMessages()
     QVERIFY(missing.error.contains(QStringLiteral("--theme")));
 }
 
-void ParchTests::launchLeavesQtOptionsToQt()
+void ParchTests::launchRefusesQtOptions()
 {
-    // Qt takes its own options out of the arguments, with one dash or two,
-    // and the value of those that have one; what is left is parch's.
-    const Launch platform = parseLaunch({"parch", "-platform", "offscreen", "x.md"});
-    QCOMPARE(platform.kind, Launch::Gui);
-    QCOMPARE(platform.files, QStringList{"x.md"});
-    const Launch doubled = parseLaunch({"parch", "--platform", "offscreen", "open", "x.md"});
-    QCOMPARE(doubled.kind, Launch::Gui);
-    QCOMPARE(doubled.files, QStringList{"x.md"});
-    const Launch many = parseLaunch({"parch", "open", "-style", "Basic", "-qwindowgeometry", "800x600+0+0", "-reverse",
-                                     "-style=Fusion", "--platformtheme", "generic", "-qwindowtitle", "Notes", "a.md",
-                                     "--theme", "/t", "b.md"});
-    QCOMPARE(many.kind, Launch::Gui);
-    QCOMPARE(many.files, (QStringList{"a.md", "b.md"}));
-    QCOMPARE(many.themeDirectory, QStringLiteral("/t"));
-    // Anything else that looks like an option is still refused.
-    QCOMPARE(parseLaunch({"parch", "--platformz", "x"}).kind, Launch::Invalid);
+    for (const QStringList &args : QList<QStringList>{{"parch", "-platform", "offscreen", "x.md"},
+             {"parch", "--platform", "offscreen", "open", "x.md"}, {"parch", "open", "-style=Basic"},
+             {"parch", "a.md", "--qwindowtitle", "Notes"}, {"parch", "-reverse"}, {"parch", "--platformz", "x"}})
+        QCOMPARE(parseLaunch(args).kind, Launch::Invalid);
+    QCOMPARE(parseLaunch({"parch", "--", "-platform", "offscreen", "x.md"}).files,
+             (QStringList{"-platform", "offscreen", "x.md"}));
 }
 
 void ParchTests::helpColumnsLineUp()
@@ -3901,8 +4003,19 @@ void ParchTests::everyNamingSyncsItsFolder()
     QCOMPARE(DiskFile::create(root.filePath(QStringLiteral("copy.md")), "copy\n").status, SaveStatus::Saved);
     QVERIFY(DiskFile::folderSyncs() > before);
     before = DiskFile::folderSyncs();
+    bool syncable = false;
+    DiskFile::setFolderSyncError([&](int fd) {
+        syncable = (::fcntl(fd, F_GETFL) & O_PATH) == 0;
+        return 0;
+    });
+    const auto clearSync = qScopeGuard([] { DiskFile::setFolderSyncError({}); });
     QCOMPARE(DiskFile::putAt(root.filePath(QStringLiteral("put.md")), "put\n").status, SaveStatus::Saved);
+    QVERIFY(syncable);
     QVERIFY(DiskFile::folderSyncs() > before);
+    before = DiskFile::folderSyncs();
+    DiskFile::setFolderSyncError([](int) { return EIO; });
+    QCOMPARE(DiskFile::putAt(root.filePath("unsynced.md"), "text").status, SaveStatus::Failed);
+    QCOMPARE(DiskFile::folderSyncs(), before);
 }
 
 void ParchTests::recoverySweepsTemporariesACrashLeft()
@@ -6002,7 +6115,7 @@ void ParchTests::aPathThatNowLeadsElsewhereIsNeverTaken()
 void ParchTests::saveAsItsOwnNameNeverWritesThroughALink()
 {
     // Save as… from the conflict of a path that now leads to another file,
-    // answered with the document's own name, as the picker suggests, puts
+    // answered with the document's own name, then Replace the link, puts
     // the text at that name in place of the link: the document stays on its
     // own path, and the file the link led to is never written or taken. So
     // does the same name reached through a link to its folder.
@@ -6025,7 +6138,10 @@ void ParchTests::saveAsItsOwnNameNeverWritesThroughALink()
         QVERIFY(QFile::link(target, plan));
         QTRY_COMPARE_WITH_TIMEOUT(document->state(), Document::State::Conflict, 3000);
         QCOMPARE(document->leadsTo(), target);
+        QSignalSpy question(&store, &DocumentStore::saveLinkRequested);
         store.saveAs(document, name);
+        QCOMPARE(question.size(), 1);
+        store.answerSaveLink(document, name, target, DocumentStore::SaveLinkChoice::Replace);
         store.waitForSaves();
         QCOMPARE(readFile(target), QByteArray("precious\n"));
         QCOMPARE(document->path(), plan);
@@ -6067,7 +6183,10 @@ void ParchTests::savingAsItsOwnNameWaitsWhenSomethingTookIt()
         QVERIFY(QFile::remove(plan));
         QVERIFY(QFile::link(target, plan));
         QTRY_COMPARE_WITH_TIMEOUT(document->leadsTo(), target, 3000);
+        QSignalSpy question(&store, &DocumentStore::saveLinkRequested);
         store.saveAs(document, name);
+        QCOMPARE(question.size(), 1);
+        store.answerSaveLink(document, name, target, DocumentStore::SaveLinkChoice::Replace);
         store.waitForSaves();
         QCOMPARE(document->state(), Document::State::Conflict);
         QVERIFY(document->nameTaken());
@@ -8338,7 +8457,7 @@ void ParchTests::saveCapturesHistory()
 
 void ParchTests::historyKeepsTheTextAFileWasOpenedWith()
 {
-    // The bytes a file held when it was opened, or reloaded, become a
+    // The bytes a file held when it was opened become a
     // version before the first save replaces them, unless history's newest
     // version holds them already, and off the UI thread.
     QTemporaryDir root;
@@ -8375,8 +8494,8 @@ void ParchTests::historyKeepsTheTextAFileWasOpenedWith()
         QCOMPARE(readFile(path), QByteArray("So opened\r\n"));
     }
     {
-        // Opened again, and reloaded with the text history's newest version
-        // holds: a reload counts as opening, and its first save adds no copy.
+        // A reload even before the first edit of a new session shares
+        // the interval with the versions already on disk.
         DocumentStore store(paths);
         Document *document = store.open(path);
         const int before = int(store.history()->versions(id).size());
@@ -8389,8 +8508,9 @@ void ParchTests::historyKeepsTheTextAFileWasOpenedWith()
         QTRY_COMPARE(document->state(), Document::State::Clean);
         const QStringList texts = versionTexts(store.history(), id);
         QCOMPARE(count(texts, QStringLiteral("AS opened\r\n")), 1);
-        QCOMPARE(count(texts, QStringLiteral("More: AS opened\r\n")), 1);
-        QCOMPARE(int(store.history()->versions(id).size()), before + 1);
+        QCOMPARE(count(texts, QStringLiteral("More: AS opened\r\n")), 0);
+        QCOMPARE(int(store.history()->versions(id).size()), before);
+        QCOMPARE(readFile(path), QByteArray("More: AS opened\r\n"));
     }
     {
         // An unchanged file opened and left alone adds nothing.
@@ -16125,6 +16245,10 @@ void ParchTests::draftsFollowCreationNamingAndRemoval()
     const AppPaths paths = AppPaths::under(root.path());
     const QString kept = newUuid();
     writeFile(DocumentStore::draftFile(paths, kept), "\n# A kept draft\n\nwith words");
+    QFile keptFile(DocumentStore::draftFile(paths, kept));
+    QVERIFY(keptFile.open(QIODevice::ReadOnly));
+    QVERIFY(keptFile.setFileTime(QDateTime::currentDateTimeUtc().addSecs(60), QFileDevice::FileModificationTime));
+    keptFile.close();
     DocumentStore store(paths);
     RecentFiles recent(paths);
     Settings settings(paths.settingsFile());
@@ -16140,6 +16264,9 @@ void ParchTests::draftsFollowCreationNamingAndRemoval()
     draft->buffer()->replace({0, 0}, QStringLiteral("## Fresh words\nmore"));
     QCOMPARE(namesUnder(model, drafts), (QStringList{"Fresh words", "A kept draft"}));
     QCOMPARE(model.index(0, 0, drafts).data(LibraryModel::DocumentIdRole).toString(), draft->id());
+    Document *next = store.newDraft();
+    QCOMPARE(model.index(0, 0, drafts).data(LibraryModel::DocumentIdRole).toString(), next->id());
+    QVERIFY(store.drop(next));
     store.save(draft);
     QTRY_VERIFY(QFile::exists(DocumentStore::draftFile(paths, draft->id())));
     // Named, it is a draft no more.
@@ -17837,6 +17964,7 @@ void ParchTests::renamingAnOpenDocumentKeepsItsIdentity()
     QCOMPARE(waiting.viewState(1).path, f.file(QStringLiteral("other.md")));
 }
 
+
 void ParchTests::closedLinkUpdatesRequireHistory()
 {
     OrganizerFixture f;
@@ -17868,14 +17996,31 @@ void ParchTests::crossDeviceMovesKeepChangedSources()
         other = std::make_unique<QTemporaryDir>(folder + "/parch-move-XXXXXX");
         if (other->isValid()) break;
     }
-    if (!other || !other->isValid()) QSKIP("Needs two writable filesystems");
+    if (!other || !other->isValid()) {
+        other = std::make_unique<QTemporaryDir>();
+        QVERIFY(other->isValid());
+        f.organizer()->setCrossDeviceForTests(true);
+    }
     f.backend->settings()->setLibraryFolders({f.library, other->path()});
     const QString file = f.file("sample.bin"), target = other->filePath("sample.bin");
-    writeFile(file, "complete");
+    const QByteArray complete(3 * 65536 + 7, 'x');
+    writeFile(file, complete);
+    std::atomic<bool> offThread{false};
+    DiskFile::setBeforeNaming([&](const QString &path) {
+        if (path == target) offThread = !QThread::isMainThread();
+    });
+    const auto reset = qScopeGuard([] { DiskFile::setBeforeNaming({}); });
+    QSignalSpy moved(f.organizer(), &FileOrganizer::moved);
     f.organizer()->move(file, other->path());
-    QCOMPARE(readFile(target), QByteArray("complete"));
+    QTRY_VERIFY(!f.organizer()->busy());
+    QVERIFY(offThread.load());
+    QCOMPARE(readFile(target), complete);
     QVERIFY(!QFileInfo::exists(file));
-    QVERIFY(QFile::remove(target));
+    QCOMPARE(moved.size(), 1);
+    f.organizer()->undoMove(moved.first().at(2).toULongLong());
+    QTRY_VERIFY(!f.organizer()->busy());
+    QCOMPARE(readFile(file), complete);
+    QVERIFY(!QFileInfo::exists(target));
     writeFile(file, "first version");
     DiskFile::setBeforeNaming([&](const QString &path) {
         if (path == target) writeFile(file, "edited during copy");
@@ -17883,11 +18028,13 @@ void ParchTests::crossDeviceMovesKeepChangedSources()
     const auto restore = qScopeGuard([] { DiskFile::setBeforeNaming({}); });
     QSignalSpy refused(f.organizer(), &FileOrganizer::problem);
     f.organizer()->move(file, other->path());
+    QTRY_VERIFY(!f.organizer()->busy());
     QCOMPARE(refused.count(), 1);
     QCOMPARE(readFile(file), QByteArray("edited during copy"));
     QVERIFY(!QFileInfo::exists(target));
     DiskFile::setBeforeNaming({});
     f.organizer()->move(file, other->path());
+    QTRY_VERIFY(!f.organizer()->busy());
     QCOMPARE(readFile(target), QByteArray("edited during copy"));
     QVERIFY(!QFileInfo::exists(file));
 
@@ -17899,8 +18046,22 @@ void ParchTests::crossDeviceMovesKeepChangedSources()
     });
     const auto restoreAfter = qScopeGuard([] { DiskFile::setAfterNaming({}); });
     f.organizer()->move(file, other->path());
+    QTRY_VERIFY(!f.organizer()->busy());
     QCOMPARE(readFile(file), QByteArray("original"));
     QCOMPARE(readFile(target), QByteArray("changed at destination"));
+    DiskFile::setAfterNaming({});
+
+    QVERIFY(QFile::remove(target));
+    writeFile(file, "original");
+    const QString replacement = f.file("replacement.bin");
+    writeFile(replacement, "new revision");
+    DiskFile::setAfterNaming([&](const QString &path) {
+        if (path == target) ::rename(QFile::encodeName(replacement), QFile::encodeName(file));
+    });
+    f.organizer()->move(file, other->path());
+    QTRY_VERIFY(!f.organizer()->busy());
+    QCOMPARE(readFile(file), QByteArray("new revision"));
+    QVERIFY(!QFileInfo::exists(target));
     DiskFile::setAfterNaming({});
 
     // The same move can be retried once the source folder is writable.
@@ -17911,10 +18072,12 @@ void ParchTests::crossDeviceMovesKeepChangedSources()
         QVERIFY(::chmod(QFile::encodeName(lockedFolder).constData(), 0555) == 0);
         const auto unlock = qScopeGuard([&] { ::chmod(QFile::encodeName(lockedFolder).constData(), 0755); });
         f.organizer()->move(locked, other->path());
+        QTRY_VERIFY(!f.organizer()->busy());
         QCOMPARE(readFile(locked), QByteArray("whole file"));
         QVERIFY(!QFileInfo::exists(copy));
     }
     f.organizer()->move(locked, other->path());
+    QTRY_VERIFY(!f.organizer()->busy());
     QCOMPARE(readFile(copy), QByteArray("whole file"));
     QVERIFY(!QFileInfo::exists(locked));
 
@@ -19126,7 +19289,7 @@ void ParchTests::windowMakesItsDialogsWhenFirstAsked()
                             QStringLiteral("documentSettingsDialog"), QStringLiteral("exportDialog"),
                             QStringLiteral("exportLinkDialog"),   QStringLiteral("exportReplacePrompt"),
                             QStringLiteral("shortcutsDialog"),    QStringLiteral("headingsDialog"),
-                            QStringLiteral("folderSearchDialog")};
+                            QStringLiteral("folderSearchDialog"),  QStringLiteral("saveLinkDialog")};
     const auto made = [](QQuickWindow *in, const QString &name) { return in->findChild<QObject *>(name); };
     for (const QString &name : names) QVERIFY2(!made(window, name), qPrintable(name));
     const qsizetype objects = everyObjectIn(window).size();
@@ -23025,6 +23188,13 @@ void ParchTests::richPasteIsOneUndoStep()
     copyRichText(QStringLiteral("<p> </p>"), QStringLiteral("plain"));
     QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
     QVERIFY(buffer->text().startsWith(QStringLiteral("plainIntro")));
+    // The offered plain text also survives an HTML part over its byte limit.
+    view.cursor(0);
+    copyRichText(QString(HtmlMarkdown::MaxInputBytes / 2 + 1, QChar(0x00e9)), QStringLiteral("Summary "));
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    QVERIFY(buffer->text().startsWith(QStringLiteral("Summary plainIntro")));
+    buffer->undo();
+    QVERIFY(buffer->text().startsWith(QStringLiteral("plainIntro")));
 }
 
 void ParchTests::plainPasteIgnoresRichText()
@@ -23124,6 +23294,14 @@ void ParchTests::pastedImagesAreSavedAsAssets()
     QCOMPARE(filesIn(assets).size(), 3);
     // With its alt text the caret follows it in.
     QCOMPARE(view.binding->cursorSource(), int(QStringLiteral("![Red square](assets/pasted-2026-11-16-1.png)").size()));
+    const QByteArray svg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10000 10000'><circle r='1'/></svg>");
+    auto *vector = new QMimeData;
+    vector->setData("image/svg+xml", svg);
+    QGuiApplication::clipboard()->setMimeData(vector);
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    const QString drawing = assets + QStringLiteral("/pasted-2026-11-16-1.svg");
+    QTRY_VERIFY(QFile::exists(drawing));
+    QCOMPARE(readFile(drawing), svg);
 }
 
 void ParchTests::pastedHtmlImagesLandOnceSaved()
@@ -23793,12 +23971,11 @@ void ParchTests::helpersAreFoundWhereTheyAreInstalled()
     qunsetenv("PARCH_HELPERS");
     const QString arch = HelperSet::architecture();
     QVERIFY(arch == QLatin1String("aarch64") || arch == QLatin1String("x86_64"));
-    // Beside the executable, then the package's folder, then a development build's.
+    // The development folders precede the installed package.
     const QString application = QCoreApplication::applicationDirPath();
     QCOMPARE(HelperSet::searchFolders(),
-             (QStringList{application, QStringLiteral("/usr/lib/parch"),
-                          QDir::cleanPath(application + QStringLiteral("/helpers/") + arch),
-                          QDir::cleanPath(application + QStringLiteral("/../helpers/") + arch)}));
+             (QStringList{QDir::cleanPath(application + QStringLiteral("/helpers/") + arch),
+                          QDir::cleanPath(application + QStringLiteral("/../helpers/") + arch), QStringLiteral("/usr/lib/parch")}));
     // PARCH_HELPERS takes the place of all of them.
     QTemporaryDir folder;
     writeFakeHelpers(folder.path(), folder.filePath(QStringLiteral("log")));
@@ -23835,6 +24012,11 @@ void ParchTests::helpersRunWithoutNetworkEnvironmentOrHome()
     RenderRequest request;
     request.source = QStringLiteral("environ");
     const quint64 ticket = service.render(request);
+    const QString folderLog = log + QStringLiteral(".folder");
+    QTRY_VERIFY(!readFile(folderLog).trimmed().isEmpty());
+    const auto pid = readFile(log).simplified().split(' ').value(1).toLongLong();
+    const QByteArray interfaces = readFile(QStringLiteral("/proc/%1/net/dev").arg(pid));
+    writeFile(QString::fromUtf8(readFile(folderLog)).trimmed() + QStringLiteral("/inspected"), {});
     QVERIFY(results.wait(ticket));
     QCOMPARE(results[ticket].status, RenderResult::Rendered);
     // Nothing of parch's own environment reaches the helper: only a home of
@@ -23854,10 +24036,10 @@ void ParchTests::helpersRunWithoutNetworkEnvironmentOrHome()
     QVERIFY(!QFileInfo::exists(home));
     QVERIFY(QDir(folder.filePath(QStringLiteral("tmp"))).isEmpty());
     if (!results[ticket].networkIsolated)
-        QSKIP("This kernel gives no unprivileged network namespace, so helpers run with the network");
+        QSKIP("This kernel gives no unprivileged network namespace");
     // In a network namespace of its own the helper has a loopback device and nothing else.
     QStringList devices;
-    for (const QString &line : QString::fromUtf8(readFile(log + QStringLiteral(".net"))).split(u'\n', Qt::SkipEmptyParts))
+    for (const QString &line : QString::fromUtf8(interfaces).split(u'\n', Qt::SkipEmptyParts))
         if (line.contains(u':')) devices << line.section(u':', 0, 0).trimmed();
     QCOMPARE(devices, QStringList{QStringLiteral("lo")});
 }
@@ -23922,7 +24104,7 @@ void ParchTests::cancelledRenderStopsItsHelper()
     RenderRequest request;
     request.source = QStringLiteral("sleep");
     const quint64 ticket = service.render(request);
-    QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+    QTRY_VERIFY(!readFile(log + QStringLiteral(".child")).isEmpty());
     const qint64 child = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
     const qint64 helper = QString::fromUtf8(readFile(log)).section(u'\n', 0, 0).section(u' ', 1).toLongLong();
     QVERIFY(child > 0 && helper > 0);
@@ -23945,7 +24127,7 @@ void ParchTests::cancelledRenderStopsItsHelper()
         RenderService closing(renderOptions(HelperSet::in(folder.path()), folder.path()));
         request.source = QStringLiteral("sleep again");
         closing.render(request);
-        QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+        QTRY_VERIFY(!readFile(log + QStringLiteral(".child")).isEmpty());
         orphan = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
         leader = QString::fromUtf8(readFile(log)).split(u'\n', Qt::SkipEmptyParts).last().section(u' ', 1).toLongLong();
         QVERIFY(orphan > 0 && leader > 0);
@@ -24142,7 +24324,7 @@ void ParchTests::supersededRendersAreNeverDelivered()
     RenderRequest old;
     old.source = QStringLiteral("sleep old");
     const quint64 stale = service.render(old, QStringLiteral("block-7"));
-    QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+    QTRY_VERIFY(!readFile(log + QStringLiteral(".child")).isEmpty());
     const qint64 child = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
     RenderRequest current;
     current.source = QStringLiteral("new");

@@ -5,6 +5,8 @@
 // and the agent skill). ParchTests runs each of them as a test function of
 // its own, prefixed `cli`.
 namespace CliTests {
+void aDeepTreeWritesLinearJson();
+
 
 void launchFindsCommands();
 void helpExplainsEveryCommand();
@@ -75,5 +77,8 @@ void nonfiniteExportNumbersAreUsageErrors();
 void bibliographyLinksAreOnlyWebMailOrDoi();
 void exportNeverWritesThroughALink();
 void checkSaysWhetherHelpersAreIsolated();
+
+void qtOptionsInFileArgumentsAreNotPassedToQt();
+void checkReportsWhetherHelpersAreConfined();
 
 } // namespace CliTests

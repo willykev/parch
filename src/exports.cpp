@@ -6,6 +6,7 @@
 #include "exporter.h"
 #include "filerequests.h"
 #include "mdinclude.h"
+#include "mdtree.h"
 #include "pdfexport.h"
 #include "printportal.h"
 #include "privatefiles.h"
@@ -72,6 +73,7 @@ QString kindOf(const ExportOption &option)
 Exports::Exports(const AppPaths &paths, FileRequests *files, QObject *parent)
     : QObject(parent), m_paths(paths), m_files(files), m_preview(new PrintPreview(this))
 {
+    m_pool.setStackSize(md::WorkerStackBytes);
     m_pool.setMaxThreadCount(1);
     m_poll.setInterval(100);
     connect(&m_poll, &QTimer::timeout, this, &Exports::poll);

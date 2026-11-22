@@ -15,4 +15,6 @@ void drawsOffScreenAtTheSizeAsked();
 void writesNothingOfThePersons();
 void namesWhatCannotBeDone();
 
+void screenshotRefusesAnExistingFile();
+
 } // namespace ScreenshotTests

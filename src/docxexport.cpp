@@ -4,7 +4,9 @@
 #include "exportweb.h"
 #include "htmlexport.h"
 #include "mdparser_p.h"
+#include "mdtable.h"
 #include "paperdocument.h"
+#include "picturedata.h"
 #include "saferead.h"
 #include "svgpaper.h"
 #include "zippackage.h"
@@ -15,7 +17,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
-#include <QImageReader>
+#include <QCryptographicHash>
 #include <QImageWriter>
 #include <QSet>
 
@@ -102,13 +104,14 @@ const QString kImageType = QStringLiteral("http://schemas.openxmlformats.org/off
 struct Part {
     QString xml;
     QList<Relationship> relationships;
-    int next = 1;
+    QHash<std::pair<QString, QString>, QString> relationshipIds;
 
     QString relate(const QString &type, const QString &target, bool external)
     {
-        for (const Relationship &r : std::as_const(relationships))
-            if (r.type == type && r.target == target) return r.id;
-        const QString id = QStringLiteral("rId%1").arg(next++);
+        const auto key = std::pair{type, target};
+        if (const auto it = relationshipIds.constFind(key); it != relationshipIds.cend()) return *it;
+        const QString id = QStringLiteral("rId%1").arg(relationships.size() + 1);
+        relationshipIds.insert(key, id);
         relationships.append({id, type, target, external});
         return id;
     }
@@ -139,7 +142,6 @@ public:
           m_destinations(Exporters::destinationsFrom(document, QFileInfo(recipe.output).absolutePath()))
     {
         // Relationships the document part always has, first.
-        m_body.next = 1;
         m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"),
                       QStringLiteral("styles.xml"), false);
         m_body.relate(QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable"),
@@ -166,6 +168,7 @@ public:
     QStringList limitations;
     int formulasAsPictures = 0;
     int diagramsAsPictures = 0;
+    int reducedPictures = 0;
     int remoteImages = 0;
     int notesReferredAgain = 0;
     QStringList unreadImages;
@@ -178,11 +181,17 @@ private:
     {
         if (const auto known = m_bookmarks.constFind(anchor); known != m_bookmarks.cend()) return *known;
         QString name;
-        for (const QChar c : anchor)
+        for (const QChar c : QStringView(anchor).left(30))
             name += (c.isLetterOrNumber() && c.unicode() < 128) ? c : u'_';
-        name = QStringLiteral("h_") + name.left(30);
+        name.prepend(QStringLiteral("h_"));
         QString unique = name;
-        for (int n = 2; m_bookmarkNames.contains(unique); ++n) unique = name.left(34) + u'_' + QString::number(n);
+        if (m_bookmarkNames.contains(name)) {
+            int suffix = m_nextBookmarkSuffix.value(name, 2);
+            do {
+                unique = name + u'_' + QString::number(suffix++);
+            } while (m_bookmarkNames.contains(unique));
+            m_nextBookmarkSuffix.insert(name, suffix);
+        }
         m_bookmarkNames.insert(unique);
         m_bookmarks.insert(anchor, unique);
         return unique;
@@ -276,14 +285,19 @@ private:
 
     void lineBreak() { out() += QStringLiteral("<w:r><w:br/></w:r>"); }
 
+    QString addMedia(const QByteArray &png)
+    {
+        const QString name = QStringLiteral("image%1.png").arg(m_media.size() + 1);
+        m_media.append({name, png});
+        return name;
+    }
+
     // A picture in the text, `lower` pixels below the baseline.
-    void picture(const QByteArray &png, QSizeF size, const QString &description, qreal lower = 0)
+    void picture(const QString &name, QSizeF size, const QString &description, qreal lower = 0)
     {
         if (size.width() > m_textWidth) size = QSizeF(m_textWidth, size.height() * m_textWidth / size.width());
         const qreal tallest = m_textWidth * 1.3;
         if (size.height() > tallest) size = QSizeF(size.width() * tallest / size.height(), tallest);
-        const QString name = QStringLiteral("image%1.png").arg(m_media.size() + 1);
-        m_media.append({name, png});
         const QString id = m_part->relate(kImageType, QStringLiteral("media/") + name, false);
         const qint64 cx = std::max<qint64>(1, qint64(std::round(size.width() * kEmuPerPixel)));
         const qint64 cy = std::max<qint64>(1, qint64(std::round(size.height() * kEmuPerPixel)));
@@ -439,7 +453,8 @@ private:
             Look shown = look;
             shown.italic = true;
             text(alt.isEmpty() ? node.dest : alt, shown);
-            if (!why.isEmpty()) unreadImages.append(QStringLiteral("%1 (%2)").arg(node.dest, why));
+            if (!why.isEmpty()) unreadImages.append(QStringLiteral("%1 (%2)").arg(
+                target.scheme == u"data" ? QStringLiteral("embedded picture") : node.dest, why));
         };
         if (target.kind == md::Destination::Kind::Remote) {
             ++remoteImages;
@@ -453,42 +468,39 @@ private:
             if (!read.ok) why = read.missing ? QStringLiteral("there is no such file") : read.error;
             else bytes = read.bytes;
         } else if (target.kind == md::Destination::Kind::OtherScheme && target.scheme == u"data") {
-            const qsizetype comma = node.dest.indexOf(u',');
-            if (comma > 0 && node.dest.left(comma).endsWith(QLatin1String(";base64")))
-                bytes = QByteArray::fromBase64(node.dest.mid(comma + 1).toLatin1());
+            bytes = PictureData::urlBytes(node.dest, SafeRead::PictureBytes, &why);
         }
         if (bytes.isEmpty()) {
             missing(why.isEmpty() ? QStringLiteral("not a picture parch can read") : why);
             return;
         }
-        QImage picture;
-        QSizeF size;
-        if (ExportWeb::Assets::mediaType(bytes, target.path) == u"image/svg+xml") {
-            size = SvgPaper::size(bytes);
-            picture = SvgPaper::raster(bytes, (size * 2).toSize());
-        } else {
-            QBuffer buffer(&bytes);
-            QImageReader reader(&buffer);
-            reader.setAutoTransform(true);
-            const QSize natural = reader.size();
-            if (natural.width() > 8192 || natural.height() > 8192)
-                reader.setScaledSize(natural.scaled(8192, 8192, Qt::KeepAspectRatio));
-            picture = reader.read();
-            size = picture.size();
+        const auto digest = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
+        auto found = m_images.constFind(digest);
+        if (found == m_images.cend()) {
+            const auto source = PictureData::read(bytes);
+            const auto decoded = PictureData::decode(source, {.svgScale = 2});
+            PreparedImage image;
+            image.size = decoded.naturalSize;
+            image.error = decoded.error;
+            if (!decoded.image.isNull()) {
+                image.reduced = !PictureData::fitsRaster(image.size, source.format == "svg" ? 2 : 1);
+                const bool original = source.format == "png" && decoded.image.size() == image.size;
+                image.media = addMedia(original ? bytes : png(decoded.image));
+            }
+            found = m_images.insert(digest, std::move(image));
         }
-        if (picture.isNull() || size.isEmpty()) {
-            missing(QStringLiteral("not a picture parch can read"));
+        if (found->media.isEmpty()) {
+            missing(found->error);
             return;
         }
-        // PNG and JPEG go in as they are; anything else as PNG.
-        const bool asIs = bytes.startsWith("\x89PNG") && picture.size() == size.toSize();
-        this->picture(asIs ? bytes : png(picture), size, alt.isEmpty() ? node.title : alt);
+        if (found->reduced) ++reducedPictures;
+        picture(found->media, found->size, alt.isEmpty() ? node.title : alt);
     }
 
     void formula(const Node &node, const Look &look)
     {
         const bool display = node.type == NodeType::MathBlock || node.display;
-        const ExportPictures::Picture *drawn = m_pictures ? m_pictures->formula(node.text, display) : nullptr;
+        const ExportPictures::Picture *drawn = node.resolved && m_pictures ? m_pictures->formula(node.text, display) : nullptr;
         if (!drawn || !drawn->drawn) {
             Look source = look;
             source.code = true;
@@ -496,15 +508,16 @@ private:
             return;
         }
         const qreal scale = 4;
-        const QImage image = SvgPaper::raster(drawn->svg, (drawn->size * scale).toSize());
+        const QImage image = SvgPaper::raster(drawn->svg, PictureData::rasterSize(drawn->size, scale));
         if (image.isNull()) {
             Look source = look;
             source.code = true;
             text(node.text, source);
             return;
         }
+        if (!PictureData::fitsRaster(drawn->size, scale)) ++reducedPictures;
         ++formulasAsPictures;
-        picture(png(image), drawn->size, node.text.simplified(), display ? 0 : drawn->size.height() - drawn->baseline);
+        picture(addMedia(png(image)), drawn->size, node.text.simplified(), display ? 0 : drawn->size.height() - drawn->baseline);
     }
 
     void citation(const Node &node, const Look &look)
@@ -707,7 +720,7 @@ private:
         case NodeType::TableOfContents: {
             Flow inner = flow;
             inner.toc = true;
-            for (const Node &child : node.children)
+            for (const Node &child : node.contentsChildren())
                 if (child.type == NodeType::List) list(child, inner);
             break;
         }
@@ -740,7 +753,7 @@ private:
 
     void diagram(const Node &node, const Flow &flow)
     {
-        const ExportPictures::Picture *drawn = m_pictures ? m_pictures->diagram(node.text) : nullptr;
+        const ExportPictures::Picture *drawn = node.resolved && m_pictures ? m_pictures->diagram(node.text) : nullptr;
         if (!drawn || !drawn->drawn || drawn->png.isEmpty()) {
             code(node.text, flow);
             return;
@@ -748,7 +761,7 @@ private:
         ++diagramsAsPictures;
         Para p = para(flow, QStringLiteral("Figure"));
         open(p);
-        picture(drawn->png, drawn->size, drawn->description);
+        picture(addMedia(drawn->png), drawn->size, drawn->description);
         close();
     }
 
@@ -1042,7 +1055,6 @@ private:
     void htmlTable(const Node &node, const Flow &flow)
     {
         std::vector<std::vector<Cell>> rows;
-        int columns = 0;
         std::function<void(const Node &)> collect = [&](const Node &n) {
             for (const Node &child : n.children) {
                 if (child.type != NodeType::HtmlElement) continue;
@@ -1051,30 +1063,20 @@ private:
                     for (const Node &cell : child.children) {
                         if (cell.type != NodeType::HtmlElement || (cell.label != u"td" && cell.label != u"th")) continue;
                         Cell c{&cell, cell.label == u"th", md::Align::None, 1, 1, true};
-                        c.span = std::clamp(attributeOf(cell, "colspan").toInt(), 1, 64);
-                        c.rowSpan = std::clamp(attributeOf(cell, "rowspan").toInt(), 1, 1000);
+                        c.span = cell.span;
+                        c.rowSpan = std::clamp(attributeOf(cell, "rowspan").toInt(), 1, int(MdTable::MaxCells));
                         const QString align = attributeOf(cell, "align");
                         c.align = align == u"center" ? md::Align::Center : align == u"right" ? md::Align::Right : md::Align::None;
                         cells.push_back(c);
                     }
                     rows.push_back(std::move(cells));
-                } else if (child.label != u"caption") {
+                } else if (child.label == u"thead" || child.label == u"tbody" || child.label == u"tfoot") {
                     collect(child);
                 }
             }
         };
         collect(node);
-        // The widest row, counting the cells rows above reach into.
-        std::vector<int> reaching;
-        for (size_t r = 0; r < rows.size(); ++r) {
-            int width = 0;
-            for (const Cell &cell : rows[r]) width += cell.span;
-            for (size_t above = 0; above < r; ++above)
-                for (const Cell &cell : rows[above])
-                    if (above + size_t(cell.rowSpan) > r) width += cell.span;
-            columns = std::max(columns, width);
-        }
-        writeTable(rows, std::max(1, columns), flow);
+        writeTable(rows, std::max(1, node.columns), flow);
     }
 
     // --- The bibliography --------------------------------------------------------
@@ -1154,8 +1156,16 @@ private:
     QHash<const Node *, int> m_citationNotes;
     QHash<QString, QString> m_bookmarks;
     QSet<QString> m_bookmarkNames;
+    QHash<QString, int> m_nextBookmarkSuffix;
     int m_bookmarkId = 0;
     int m_drawings = 0;
+    struct PreparedImage {
+        QString media;
+        QSizeF size;
+        QString error;
+        bool reduced = false;
+    };
+    QHash<QByteArray, PreparedImage> m_images;
     QList<Media> m_media;
     QList<std::pair<int, int>> m_numbers; // per numbering instance: its kind and first number
     QString m_language;
@@ -1320,9 +1330,7 @@ QByteArray Writer::package(QString *error)
                                             "<w:body>%2<w:sectPr><w:pgSz w:w=\"%3\" w:h=\"%4\"/><w:pgMar w:top=\"1440\" "
                                             "w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"708\" "
                                             "w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>")
-                                 .arg(namespaces, m_body.xml)
-                                 .arg(width)
-                                 .arg(height);
+                                 .arg(namespaces, m_body.xml, QString::number(width), QString::number(height));
     const QString kind = m_endnotes ? QStringLiteral("endnote") : QStringLiteral("footnote");
     const auto notesPart = [&](const QString &which, const QString &content) {
         return QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:%1s %2>"
@@ -1521,6 +1529,8 @@ ExportResult DocxExporter::write(const md::Document &document, const ExportRecip
         result.limitations.append(QStringLiteral("Images from the web are not fetched, so their descriptions stand in "
                                                  "their place (%1)")
                                       .arg(Exporters::count(writer.remoteImages, QStringLiteral("image"), QStringLiteral("images"))));
+    if (writer.reducedPictures)
+        result.limitations.append(QStringLiteral("Pictures drawn at a lower resolution to fit the pixel limit: %1").arg(writer.reducedPictures));
     if (!writer.unreadImages.isEmpty())
         result.limitations.append(QStringLiteral("Images that could not be read are left out: %1")
                                       .arg(writer.unreadImages.join(QStringLiteral(", "))));

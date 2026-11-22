@@ -14,6 +14,7 @@
 #include "windowtesting.h"
 
 #include <QClipboard>
+#include <limits>
 #include <QGuiApplication>
 #include <QHash>
 #include <QInputMethodEvent>
@@ -303,6 +304,15 @@ void undoStepsJoinIntoOneChange()
     redoable.undo();
     redoable.undo();
     QCOMPARE(redoable.text(), QString());
+}
+
+void percentageMotionsCanCountEveryLine()
+{
+    constexpr int lines = std::numeric_limits<int>::max();
+    QCOMPARE(VimMode::percentageLine(100, lines), lines - 1);
+    QCOMPARE(VimMode::percentageLine(50, lines), 1073741823);
+    QCOMPARE(VimMode::percentageLine(1, 101), 1);
+    QCOMPARE(VimMode::percentageLine(101, 7), -1);
 }
 
 void motionsMoveAsVimDoes()
@@ -1270,6 +1280,65 @@ void windowShowsAndLeavesVimKeys()
     QTRY_VERIFY(!isOpen(dialog));
     QTRY_COMPARE(shownText(shell, "vimMode"), QStringLiteral("NORMAL"));
     QVERIFY(Settings(shell.paths().settingsFile()).vimKeys());
+}
+
+void movingAcrossUnicodeWordsIsQuick()
+{
+    const QString word = QString::fromUtf8("café");
+    Editor view;
+    view.load(QStringLiteral("‸") + word.repeated(1100) + QStringLiteral(" end"));
+    QElapsedTimer timer;
+    timer.start();
+    view.keys(QStringLiteral("w"));
+    QCOMPARE(view.vim->cursor(), 4401);
+    QVERIFY2(timer.elapsed() < timeLimit(100), qPrintable(QString::number(timer.elapsed())));
+}
+
+void aCountedInsertOfAPasteIsBounded()
+{
+    // The view counts replayed commits without allocating their text.
+    struct Host : VimHost {
+        Document *doc;
+        explicit Host(Document *document) : doc(document) {}
+        int repeats = 0;
+        Document *document() const override { return doc; }
+        bool editable() const override { return true; }
+        bool composing() const override { return false; }
+        int cursor() const override { return 0; }
+        int anchor() const override { return 0; }
+        void select(int, int) override {}
+        bool apply(const TextChange &) override { return true; }
+        void type(int, Qt::KeyboardModifiers, const QString &) override { ++repeats; }
+        void commit(const QString &) override { ++repeats; }
+        void setInputMethodEnabled(bool) override {}
+    };
+    QTemporaryDir dir;
+    DocumentStore store(AppPaths::under(dir.path()));
+    Host host(store.newDraft());
+    VimMode vim(&host);
+    vim.setActive(true);
+    const auto key = [&](int code, const QString &text) {
+        QKeyEvent event(QEvent::KeyPress, code, {}, text);
+        return vim.handleKey(&event);
+    };
+    QVERIFY(key(Qt::Key_3, "3"));
+    QVERIFY(key(Qt::Key_I, "i"));
+    QInputMethodEvent commit;
+    commit.setCommitString("field notes");
+    QVERIFY(!vim.handleInputMethod(&commit));
+    QVERIFY(key(Qt::Key_Escape, {}));
+    QCOMPARE(host.repeats, 2);
+
+    for (int i = 0; i < 4; ++i) QVERIFY(key(Qt::Key_9, "9"));
+    QVERIFY(key(Qt::Key_I, "i"));
+    const QString pasted = QStringLiteral("field notes ").repeated(100);
+    QKeyEvent paste(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+    QVERIFY(!vim.handleKey(&paste));
+    host.doc->buffer()->replace({0, 0}, pasted);
+    QVERIFY(key(Qt::Key_Escape, {}));
+    QCOMPARE(host.repeats, 2);
+    QCOMPARE(host.doc->buffer()->text(), pasted);
+    QVERIFY(vim.message().contains("too much"));
 }
 
 } // namespace VimTests

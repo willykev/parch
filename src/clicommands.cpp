@@ -1,4 +1,5 @@
 #include "clicommands.h"
+#include "helperconfinement.h"
 
 #include "citations.h"
 #include "cli.h"
@@ -46,9 +47,9 @@ const QString version = QStringLiteral(PARCH_VERSION);
 
 // JSON with the control characters QJsonDocument leaves as they are (delete
 // and the C1 controls, inside strings only) escaped too.
-QByteArray printableJson(const QJsonDocument &document)
+QByteArray printableJson(const QJsonDocument &document, bool tree = false)
 {
-    const QString text = QString::fromUtf8(document.toJson(QJsonDocument::Indented));
+    const QString text = QString::fromUtf8(tree ? TreeJson::encode(document.object()) : document.toJson(QJsonDocument::Indented));
     QString safe;
     safe.reserve(text.size());
     for (const QChar c : text) {
@@ -395,30 +396,14 @@ bool loadDocument(const QString &path, const DialectFlags &flags, const Context 
 bool mayWrite(const QString &output, bool force, const md::Document &document, const Dialect::Choice &dialect,
               QString *error)
 {
-    const QFileInfo info(output);
     if (Exporters::isSource(document, dialect, output)) {
         *error = QStringLiteral("%1 is the document or a file it is made from (one it includes, its bibliography or "
                                 "style, or a picture it shows); parch never writes over it")
                      .arg(output);
         return false;
     }
-    if (const QString why = Exporters::linkRefusal(output); !why.isEmpty()) {
-        *error = why + QStringLiteral(", even with --force: export to another name, or remove the link");
-        return false;
-    }
-    if (info.isDir()) {
-        *error = QStringLiteral("%1 is a folder").arg(output);
-        return false;
-    }
-    if (!QFileInfo(info.absolutePath()).isDir()) {
-        *error = QStringLiteral("there is no folder %1").arg(info.absolutePath());
-        return false;
-    }
-    if (info.exists() && !force) {
-        *error = QStringLiteral("%1 is already there; give --force to replace it").arg(output);
-        return false;
-    }
-    return true;
+    *error = outputRefusal(output, force);
+    return error->isEmpty();
 }
 
 // The file a problem is in: one of the document's, or a bibliography or style.
@@ -459,10 +444,8 @@ QString problemLine(const DocumentCheck::Problem &problem, const md::Document &d
     if (problem.position.line <= 0)
         return QStringLiteral("%1: %2: %3 [%4]").arg(file, severity, problem.message, problem.code);
     return QStringLiteral("%1:%2:%3: %4: %5 [%6]")
-        .arg(file)
-        .arg(problem.position.line)
-        .arg(problem.position.column)
-        .arg(severity, problem.message, problem.code);
+        .arg(file, QString::number(problem.position.line), QString::number(problem.position.column),
+             severity, problem.message, problem.code);
 }
 
 QString plural(int count, const char *one, const char *many)
@@ -601,6 +584,9 @@ int check(const QStringList &arguments, const Context &context)
             helperPaths.insert(QStringLiteral("merman-cli"), helpers.merman);
         }
         // Whether the helpers run cut off from the network, as the kernel allows.
+        const auto missing = HelperConfinement::missingProtections();
+        helperPaths.insert(QStringLiteral("confined"), missing.isEmpty());
+        helperPaths.insert(QStringLiteral("missingConfinement"), QJsonArray::fromStringList(missing));
         helperPaths.insert(QStringLiteral("isolated"), HelperProcess::canIsolate());
         result.insert(QStringLiteral("renderers"), used);
         result.insert(QStringLiteral("helpers"), helperPaths);
@@ -732,7 +718,8 @@ int render(const QStringList &arguments, const Context &context)
         const QJsonObject parts = TreeJson::document(document);
         for (auto it = parts.begin(); it != parts.end(); ++it) tree.insert(it.key(), it.value());
         tree.insert(QStringLiteral("diagnostics"), diagnosticsJson(document));
-        text = QString::fromUtf8(printableJson(QJsonDocument(tree)));
+        if (!command.wantsJson() || command.parser.isSet(QStringLiteral("output")))
+            text = QString::fromUtf8(printableJson(QJsonDocument(tree), true));
         result = tree;
     }
 
@@ -750,7 +737,7 @@ int render(const QStringList &arguments, const Context &context)
         report.insert(QStringLiteral("diagnostics"), int(document.diagnostics.size()));
         if (output.isEmpty()) report.insert(QStringLiteral("result"), result);
         else report.insert(QStringLiteral("output"), output);
-        json(context.out, report);
+        writeAll(context.out, printableJson(QJsonDocument(report), to == u"json-tree"));
     } else if (document.incomplete) {
         line(context.err, QStringLiteral("parch render: %1 includes a file that could not be read; parch check %2 "
                                          "says which")
@@ -1121,6 +1108,18 @@ int runCommand(const QStringList &arguments, const Context &context)
 }
 
 } // namespace
+
+QString outputRefusal(const QString &output, bool force)
+{
+    const QFileInfo info(output);
+    if (const QString why = Exporters::linkRefusal(output); !why.isEmpty())
+        return why + QStringLiteral(", even with --force: choose another name, or remove the link");
+    if (info.isDir()) return QStringLiteral("%1 is a folder").arg(output);
+    if (!QFileInfo(info.absolutePath()).isDir()) return QStringLiteral("there is no folder %1").arg(info.absolutePath());
+    if (info.exists() && !info.isFile()) return QStringLiteral("%1 is not a regular file").arg(output);
+    if (info.exists() && !force) return QStringLiteral("%1 is already there; give --force to replace it").arg(output);
+    return {};
+}
 
 bool isCommand(const QString &word)
 {

@@ -76,7 +76,23 @@ void count(const md::Document &document, const md::Node &node, Counts &counts)
 
 bool missing(const QString &helper) { return helper.isEmpty() || !QFileInfo(helper).isExecutable(); }
 
-QString escaped(const QString &text) { return md::escapeHtml(text); }
+QString xmlCharacters(QStringView text)
+{
+    QString out;
+    out.reserve(text.size());
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        const QChar c = text[i];
+        if (c.isHighSurrogate() && i + 1 < text.size() && text[i + 1].isLowSurrogate()) {
+            out += c;
+            out += text[++i];
+        } else if (c == u'\t' || c == u'\n' || c == u'\r' || (c >= u' ' && c.unicode() <= 0xfffd && !c.isSurrogate())) {
+            out += c;
+        }
+    }
+    return out;
+}
+
+QString escaped(const QString &text) { return md::escapeHtml(xmlCharacters(text)); }
 
 QString styleSheet()
 {
@@ -196,12 +212,7 @@ QString EpubExporter::xhtml(const QString &html)
                 QStringLiteral("<span class=\"task\" role=\"img\" aria-label=\"done\">\u2611</span>"));
     out.replace(QStringLiteral("<input disabled=\"\" type=\"checkbox\" />"),
                 QStringLiteral("<span class=\"task\" role=\"img\" aria-label=\"to do\">\u2610</span>"));
-    // Characters XML does not allow.
-    for (QChar &c : out) {
-        const char16_t u = c.unicode();
-        if ((u < 0x20 && u != u'\t' && u != u'\n' && u != u'\r') || u == 0xfffe || u == 0xffff) c = QChar(0xfffd);
-    }
-    return out;
+    return xmlCharacters(out);
 }
 
 QList<EpubExporter::Chapter> EpubExporter::chapters(const QString &body, const md::Document &document)

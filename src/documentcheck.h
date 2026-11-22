@@ -53,6 +53,7 @@ public:
 private:
     QStringView m_text;
     std::vector<int> m_starts;
+    std::vector<int> m_lowSurrogates; // cumulative count at each 128-unit boundary
 };
 
 struct Problem {

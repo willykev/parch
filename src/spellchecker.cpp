@@ -1,5 +1,6 @@
 #include "spellchecker.h"
 
+#include "mdtree.h"
 #include "privatefiles.h"
 
 #include <QCoreApplication>
@@ -231,6 +232,7 @@ SpellChecker::SpellChecker(const QString &personalFile, QObject *parent)
       m_engine(std::make_shared<SpellEngine>()), m_pool(std::make_unique<QThreadPool>())
 {
     // One worker: Hunspell answers one question at a time anyway.
+    m_pool->setStackSize(md::WorkerStackBytes);
     m_pool->setMaxThreadCount(1);
 }
 

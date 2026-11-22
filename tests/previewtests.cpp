@@ -539,6 +539,8 @@ void previewBuildsListsQuotesAndRules()
     QVERIFY(lines.contains(QStringLiteral("2)") + gap + QStringLiteral("loose four")));
     QVERIFY(lines.contains(QChar::ObjectReplacementCharacter + QString(gap) + QStringLiteral("to do")));
     QVERIFY(lines.contains(QChar::ObjectReplacementCharacter + QString(gap) + QStringLiteral("done well")));
+    const auto raw = build(QStringLiteral("<ol start='2147483647'><li>One</li><li>Two</li></ol>"));
+    QVERIFY(raw->lines().contains(QStringLiteral("2147483648.") + gap + QStringLiteral("Two")));
     // The Standard profile numbers a list from the number it starts with.
     const auto standard = build(QStringLiteral("5. five\n6. six\n"), md::Options::standard());
     QVERIFY(standard->lines().contains(QStringLiteral("5.") + gap + QStringLiteral("five")));
@@ -2033,6 +2035,73 @@ void linksGoWhereTheyLead()
     QVERIFY(w.preview->goTo(QStringLiteral("the-end")));
 }
 
+void aLinkHintShowsTheHostItOpens()
+{
+    const QString source = QStringLiteral("[written](https://reader%20name@pages.example/p \"Notes\") and "
+                                          "<a href=\"https://reader name@pages.example/p\" title=\"Notes\">raw</a>.");
+    PreviewWindow w(source);
+    QVERIFY2(w.ok(), qPrintable(w.shell.error));
+    w.run("viewReading");
+    QVERIFY(w.settled());
+    const QString hint = QStringLiteral("https://pages.example\nhttps://reader%20name@pages.example/p\nNotes");
+    for (const QString &label : {QStringLiteral("written"), QStringLiteral("raw")}) {
+        const QPointF at = w.surface->mapFromScene(QPointF(placeOf(w, label)));
+        QCOMPARE(w.preview->hintAt(at.x(), at.y()), hint);
+    }
+    QVERIFY(hint.section(u'\n', 0, 0).contains(QStringLiteral("pages.example")));
+}
+
+void aWebLinkWithUserInfoAsksFirst()
+{
+    PreviewWindow w(QStringLiteral("Links"));
+    QVERIFY(w.ok());
+    QList<QUrl> opened;
+    w.shell.backend->setLinkOpener([&](const QUrl &url) { opened << url; return true; });
+    QSignalSpy asked(w.preview, &Preview::linkAsked);
+    const QString target = QStringLiteral("https://reader@pages.example:8443/chapter");
+    QVERIFY(w.preview->activate(target, 0));
+    QCOMPARE(asked.size(), 1);
+    QVERIFY(opened.isEmpty());
+    QVERIFY(!w.shell.backend->openLink(QUrl(target)));
+    QVERIFY(w.shell.backend->openAsked(asked.first().first().toString()));
+    QCOMPARE(opened, QList<QUrl>{QUrl(target)});
+    const QString alternative = QStringLiteral("https://%70ages.example/chapter");
+    QVERIFY(w.preview->activate(alternative, 0));
+    QCOMPARE(asked.size(), 2);
+    QCOMPARE(opened.size(), 1);
+    QCOMPARE(Backend::linkWay(QUrl(QStringLiteral("https://@pages.example"))), Backend::LinkWay::Ask);
+    QCOMPARE(Backend::linkWay(QUrl(QStringLiteral("https://pages.example/chapter"))), Backend::LinkWay::Open);
+}
+
+void theLinkDialogNeverElidesTheHost()
+{
+    PreviewWindow w(QStringLiteral("Links"));
+    QVERIFY(w.ok());
+    const QString host = QStringLiteral("xn--bcher-kva.example:8443");
+    const QString target = QStringLiteral("reader://") + QString(600, u'a') + u'@' + host + u'/' + QString(1600, u'b');
+    QVERIFY(w.preview->activate(target, 0));
+    QObject *dialog = w.shell.object(QStringLiteral("linkDialog"));
+    QVERIFY(dialog && dialog->property("opened").toBool());
+    const auto *origin = dialog->findChild<QObject *>(QStringLiteral("linkOrigin"));
+    QVERIFY(origin);
+    QCOMPARE(origin->property("text").toString(), QStringLiteral("reader://") + host);
+    QVERIFY(dialog->findChild<QObject *>(QStringLiteral("linkExplanation"))->property("text").toString().contains(
+        QStringLiteral("user information"), Qt::CaseInsensitive));
+    const QString shown = Preview::shownLink(QUrl(target));
+    QVERIFY(shown.contains(host));
+    QVERIFY(shown.contains(u'…'));
+}
+
+void aMailLinkWithAnAttachmentAsksFirst()
+{
+    QCOMPARE(Backend::linkWay(QUrl(QStringLiteral("mailto:reader@example.org?SUBJECT=Notes&cc=a@example.org&body=Hello&In-Reply-To=12"))),
+             Backend::LinkWay::Open);
+    for (const char *field : {"attachment", "AtTaCh", "%61ttach", "extra"}) {
+        const QUrl url(QStringLiteral("mailto:reader@example.org?body=Hello&") + QLatin1StringView(field) + QStringLiteral("=part"));
+        QCOMPARE(Backend::linkWay(url), Backend::LinkWay::Ask);
+    }
+}
+
 void linksOfOtherKindsAskFirst()
 {
     QAccessible::setActive(true);
@@ -2780,7 +2849,7 @@ public:
         QPointer<QObject> context;
         std::function<void(const QByteArray &, const QString &)> done;
     };
-    void fetch(const QUrl &url, QObject *context, std::function<void(const QByteArray &, const QString &)> done) override
+    void fetch(const QUrl &url, QObject *context, std::function<void(const QByteArray &, const QString &)> done, AllowsHost = {}) override
     {
         requests.push_back({url, context, std::move(done)});
     }
@@ -2834,8 +2903,7 @@ void pathologicalBlocksStayCheapToLayOut()
     const auto prose = build(QStringLiteral("Some ordinary words in a line.\n"));
     QVERIFY(!prose->lines().join(u' ').contains(QChar(0x200B)));
 
-    // A table too wide or too large to lay out is shown as it is written,
-    // in a code island that scrolls sideways, and says why.
+    // A table past the column limit reads as paragraphs and has a diagnostic.
     QString wide = QStringLiteral("|");
     QString rule = QStringLiteral("|");
     QString row = QStringLiteral("|");
@@ -2846,11 +2914,17 @@ void pathologicalBlocksStayCheapToLayOut()
     }
     const auto table = build(wide + u'\n' + rule + u'\n' + row + u'\n' + row + QStringLiteral("\n\nAfter.\n"));
     QVERIFY(!table->island(Island::Table));
-    const Island *shown = table->island(Island::Code);
-    QVERIFY(shown && shown->document);
-    QVERIFY(shown->document->toPlainText().startsWith(QStringLiteral("| h0 | h1 |")));
-    QCOMPARE(shown->document->defaultTextOption().wrapMode(), QTextOption::NoWrap);
-    QVERIFY(shown->document->toPlainText().contains(QStringLiteral("too large to lay out as a table (300 columns, 3 rows)")));
+    const QString tableText = table->document.toPlainText();
+    QVERIFY(tableText.contains(wide));
+    QVERIFY(tableText.contains(rule));
+    QCOMPARE(tableText.count(row), 2);
+    QVERIFY(tableText.contains(QStringLiteral("After.")));
+    QVERIFY(std::any_of(table->tree.diagnostics.begin(), table->tree.diagnostics.end(), [](const auto &d) {
+        return d.code == md::DiagnosticCode::TableLimit && d.severity == md::Severity::Warning;
+    }));
+    const auto spans = build(QStringLiteral("<table><tr><td colspan='128'>East</td><td>West</td></tr></table>"));
+    QVERIFY(!spans->island(Island::Table));
+    QVERIFY(spans->document.toPlainText().contains(QStringLiteral("East West")));
     // An ordinary table is still a table.
     const auto ordinary = build(QStringLiteral("| a | b |\n|---|---|\n| 1 | 2 |\n"));
     QVERIFY(ordinary->island(Island::Table));
@@ -2865,6 +2939,47 @@ void pathologicalBlocksStayCheapToLayOut()
     QMetaObject::invokeMethod(w.surface, "selectAll");
     const QStringList copied = w.preview->copied(w.surface);
     QCOMPARE(copied.value(0).trimmed(), QStringLiteral("Start ") + QString(3000, u'z') + QStringLiteral(" end."));
+}
+
+void aWebSvgIsDrawnWithoutItsOutsidePictures()
+{
+    SvgSwatch swatch;
+    TestFetcher fetcher;
+    PreviewResources resources;
+    resources.setFetcher(&fetcher);
+    resources.setRemoteAllowed(true);
+    const QString url = QStringLiteral("https://example.test/swatch.png");
+    const auto image = [&] { return resources.image(md::classifyDestination(url, {}), url, {}); };
+    QCOMPARE(image().state, Picture::Pending);
+    QCOMPARE(fetcher.asked(), QList<QUrl>{QUrl(url)});
+    fetcher.answer(QUrl(url), swatch.svg());
+    QTRY_COMPARE(resources.pending(), 0);
+    const Picture shown = image();
+    QCOMPARE(shown.state, Picture::Ready);
+    QVERIFY(pixelsNear(shown.image, QColor("#008000"), 5) > 0);
+    QCOMPARE(pixelsNear(shown.image, Qt::magenta, 5), 0);
+}
+
+void helperSvgWithAnOutsideReferenceIsNotPaintedByQt()
+{
+    SvgSwatch swatch;
+    QTemporaryDir folder;
+    writeFakeHelpers(folder.path(), folder.filePath(QStringLiteral("log")));
+    writeFile(folder.filePath(QStringLiteral("formula.svg")), swatch.svg());
+    RenderService service(renderOptions(HelperSet::in(folder.path()), folder.path()));
+    PreviewResources resources;
+    resources.setRenderService(&service);
+    const auto math = [&] { return resources.math(QStringLiteral("x"), false, 16); };
+    QCOMPARE(math().state, Picture::Pending);
+    QTRY_COMPARE_WITH_TIMEOUT(resources.pending(), 0, 10000);
+    const Picture shown = math();
+    if (shown.state == Picture::Failed) {
+        QVERIFY(!shown.diagnostic.isEmpty());
+    } else {
+        QCOMPARE(shown.state, Picture::Ready);
+        QVERIFY(pixelsNear(shown.image, QColor("#008000"), 5) > 0);
+        QCOMPARE(pixelsNear(shown.image, Qt::magenta, 5), 0);
+    }
 }
 
 void webPicturesWaitUntilAsked()
@@ -2941,7 +3056,7 @@ void webPicturesWaitUntilAsked()
     // Taken back, the pictures go again.
     w.tabs()->setActiveIndex(1);
     QVERIFY(w.settled());
-    QVERIFY(w.shell.backend->documentSettings()->setRemotePictures(w.document, false));
+    QVERIFY(w.shell.backend->documentSettings()->setPictureHosts(w.document, {}));
     QTRY_VERIFY(row->isVisible());
     DocumentSettings::Store again(w.shell.paths().documentSettingsFile());
     QVERIFY(again.load());
@@ -2949,6 +3064,86 @@ void webPicturesWaitUntilAsked()
     // The Preferences switch shows them in every document.
     w.shell.settings()->setRemoteImages(true);
     QTRY_VERIFY(!row->isVisible());
+}
+
+void showingWebPicturesApprovesTheirHosts()
+{
+    QTemporaryDir folder;
+    const QString path = folder.filePath(QStringLiteral("web.md"));
+    writeFile(path, "![One](https://Images.Example/one.png)\n\n<img src=\"https://other.example/two.png\">\n");
+    ShellOptions options;
+    options.files = {path};
+    TestFetcher fetcher;
+    PreviewWindow w({}, 1000, options);
+    QVERIFY(w.ok());
+    w.shell.backend->setRemoteFetcher(&fetcher);
+    w.run("viewReading");
+    QVERIFY(w.settled());
+    QVERIFY(QMetaObject::invokeMethod(w.shell.object(QStringLiteral("showWebPictures")), "clicked"));
+    QTRY_COMPARE(fetcher.requests.size(), size_t(2));
+    const QByteArray saved = readFile(w.shell.paths().documentSettingsFile());
+    QVERIFY(saved.contains("images.example"));
+    QVERIFY(saved.contains("other.example"));
+}
+
+void aPictureFromANewHostAsksAgain()
+{
+    TestFetcher fetcher;
+    PreviewWindow w(QStringLiteral("![One](https://one.example/a.png)\n"));
+    QVERIFY(w.ok());
+    w.shell.backend->setRemoteFetcher(&fetcher);
+    w.run("viewReading");
+    QVERIFY(w.settled());
+    auto *show = w.shell.object(QStringLiteral("showWebPictures"));
+    QVERIFY(QMetaObject::invokeMethod(show, "clicked"));
+    QTRY_COMPARE(fetcher.requests.size(), size_t(1));
+    w.document->buffer()->replace({w.document->buffer()->length(), 0},
+                                 QStringLiteral("\n![Two](https://ONE.example/b.png)\n\n![Three](https://two.example/c.png)\n"));
+    QVERIFY(w.settled());
+    QTRY_VERIFY(fetcher.asked().contains(QUrl(QStringLiteral("https://one.example/b.png"))));
+    QVERIFY(!fetcher.asked().contains(QUrl(QStringLiteral("https://two.example/c.png"))));
+    auto *notice = w.shell.item(QStringLiteral("webPicturesNotice"));
+    QVERIFY(notice && notice->isVisible());
+    QCOMPARE(w.shell.item(QStringLiteral("webPicturesText"))->property("text").toString(),
+             QStringLiteral("This document shows pictures from places it did not before."));
+    QVERIFY(QMetaObject::invokeMethod(show, "clicked"));
+    QTRY_COMPARE(fetcher.requests.size(), size_t(3));
+    QTRY_VERIFY(!notice->isVisible());
+}
+
+void anOlderShowThemSettingStillWorks()
+{
+    QTemporaryDir folder;
+    ShellOptions options;
+    options.root = folder.filePath(QStringLiteral("state"));
+    options.files = {folder.filePath(QStringLiteral("old.md"))};
+    writeFile(options.files.first(), "![One](https://first.example/a.png)\n");
+    QString file, id;
+    {
+        PreviewWindow w({}, 1000, options);
+        QVERIFY(w.ok());
+        file = w.shell.paths().documentSettingsFile();
+        id = w.document->id();
+    }
+    writeFile(file, "{\"documents\":{\"" + id.toUtf8() + "\":{\"remotePictures\":true}}}");
+    {
+        TestFetcher fetcher;
+        PreviewWindow w({}, 1000, options);
+        QVERIFY(w.ok());
+        w.shell.backend->setRemoteFetcher(&fetcher);
+        w.run("viewReading");
+        QTRY_COMPARE(fetcher.requests.size(), size_t(1));
+        QVERIFY(readFile(file).contains("first.example"));
+    }
+    writeFile(options.files.first(), "![Known](https://first.example/b.png)\n\n![New](https://next.example/a.png)\n");
+    TestFetcher fetcher;
+    PreviewWindow w({}, 1000, options);
+    QVERIFY(w.ok());
+    w.shell.backend->setRemoteFetcher(&fetcher);
+    w.run("viewReading");
+    QVERIFY(w.settled());
+    QCOMPARE(fetcher.asked(), QList<QUrl>{QUrl(QStringLiteral("https://first.example/b.png"))});
+    QVERIFY(w.shell.item(QStringLiteral("webPicturesNotice"))->isVisible());
 }
 
 void picturesArriveAndFailInTheirPlace()

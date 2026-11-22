@@ -4,6 +4,7 @@
 #include "dialectchoice.h"
 
 #include <QJsonObject>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -20,7 +21,7 @@
 //                         "bibliography": ["/full/path/refs.bib"],
 //                         "citationStyle": "/full/path/style.csl",
 //                         "maxIncludeDepth": 8, "maxIncludeSize": 1048576,
-//                         "maxIncludes": 100, "remotePictures": true}
+//                         "maxIncludes": 100, "remotePictures": ["pictures.example"]}
 //     },
 //     "libraries": {
 //       "/full/path/of/a/library/folder": {"profile": "writer",
@@ -35,10 +36,10 @@
 // (an empty list chooses none), `citationStyle` is the id of a bundled
 // style or the full path of a .csl file, and the three include limits are
 // whole numbers within their ranges (dialectchoice.h), the size in bytes;
-// one out of its range is not read. `remotePictures` says that the
-// writer chose to show the document's pictures from the web, which are
-// otherwise shown only when the preferences show them for every document;
-// it is the document's alone, and no layer of its dialect. A library's entry applies to every
+// one out of its range is not read. `remotePictures` lists the hosts
+// approved for this document. An older true value becomes the hosts named
+// in the first reading of its preview. The choice belongs to the document
+// alone. A library's entry applies to every
 // document beneath its folder; the nearest library folder holding a
 // document is its library, and also where its `/rooted` includes are found
 // unless a setting says otherwise. The application's entry applies to every
@@ -96,7 +97,9 @@ public:
     // Whether the document's pictures from the web are shown, as its entry's
     // `remotePictures` says.
     bool remotePictures(const QString &documentId) const;
-    bool setRemotePictures(const QString &documentId, bool shown, QString *error = nullptr);
+    QSet<QString> pictureHosts(const QString &documentId) const;
+    bool needsPictureHosts(const QString &documentId) const;
+    bool setPictureHosts(const QString &documentId, const QSet<QString> &hosts, QString *error = nullptr);
 
     // The saved layers of a document: its own by id (none for an empty id),
     // those of the nearest library folder holding `path` among `folders`

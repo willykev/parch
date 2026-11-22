@@ -147,7 +147,7 @@ public:
     // Beside the name, path, kind and missing of every row: a draft's
     // document id, whether a folder is being listed, and which section a
     // section is, "drafts" or "recent".
-    enum Role { NameRole = Qt::UserRole + 1, PathRole, KindRole, MissingRole, DocumentIdRole, LoadingRole, SectionRole };
+    enum Role { NameRole = Qt::UserRole + 1, PathRole, KindRole, MissingRole, DocumentIdRole, LoadingRole, SectionRole, OutsideLinkRole };
     Q_ENUM(Role)
 
     // How long a folder's changes must pause before it is listed again.
@@ -217,17 +217,18 @@ signals:
     void matchesListed(const QModelIndex &folder, int count);
 
 private:
-    enum class Kind { Section, Folder, Document, Draft, Error };
+    enum class Kind { Section, Folder, Document, Draft, Error, OutsideFolder, OutsideDocument };
     enum class Listing { None, Pending, Done };
     struct Node;
     struct Entry {
         QString name;
-        bool folder = false;
+        Kind kind;
     };
     struct FolderListing {
         bool ok = false;
         // Only whether the folder is there was asked, and it is.
         bool probed = false;
+        bool containsLinks = false;
         // The folder itself is not there, or is not a folder.
         bool missing = false;
         QString error;
@@ -261,8 +262,8 @@ private:
         QString identity;
     };
 
-    static FolderListing listFolder(const QString &path);
-    static FolderListing examine(const QString &path, bool probeOnly);
+    static FolderListing listFolder(const QString &path, const QStringList &roots);
+    static FolderListing examine(const QString &path, bool probeOnly, const QStringList &roots);
     static std::unique_ptr<Node> makeNode(const Row &row);
     static QString kindName(Kind kind);
     static Key keyOf(Kind kind, const QString &name, const QString &path, const QString &documentId);
@@ -359,8 +360,6 @@ private:
     QSet<QString> m_changed;
     QTimer m_settle;
 
-    // When each open draft with no file yet was first seen, for its order.
-    QHash<QString, QDateTime> m_firstSeen;
 
     QHash<QString, bool> m_missing;
     bool m_checking = false;

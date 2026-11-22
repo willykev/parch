@@ -117,6 +117,8 @@ public:
 
     // Returns once nothing runs off the UI thread; for tests and the end.
     void waitForWork();
+    // Exercise cross-filesystem copies on a single test filesystem.
+    void setCrossDeviceForTests(bool crossDevice) { m_crossDevice = crossDevice; }
 
 signals:
     void busyChanged();
@@ -136,6 +138,8 @@ signals:
     void trashed(const QString &path);
 
 private:
+    bool m_crossDevice = false;
+    QString m_reservedMove;
     struct FilePlan {
         QString path;
         QList<DocumentLinks::Change> changes;
@@ -145,6 +149,7 @@ private:
         QString to;
         QString library;
         QString destinationLibrary;
+        QStringList roots;
         bool folder = false;
         // The documents the move takes along.
         int documents = 0;
@@ -197,18 +202,19 @@ private:
 
     void startMove(const QString &from, const QString &to);
     static Plan planJob(Plan plan, QHash<std::pair<quint64, quint64>, QString> open, std::shared_ptr<std::atomic<bool>> cancel);
-    // Moves on disk and lets open documents follow; false, having said why,
-    // when it could not.
-    bool perform(const Plan &plan, std::optional<DiskVersion> *copiedVersion = nullptr);
+    // On success the documents follow before the move or undo continues.
+    void perform(const Plan &plan, std::function<void(std::optional<DiskVersion>)> moved);
     void updateReferences(const Plan &plan);
     static Rewritten rewriteJob(QList<Rewrite> files, Plan plan, History *history);
     static std::optional<Patched> inverseFor(const QString &path, const QString &documentId, const QString &text,
                                             const QList<SourceEdit> &edits, int references, QString *written);
     static std::optional<QList<SourceEdit>> inverseEdits(const Patched &patch, const QString &text, SourceBuffer *buffer = nullptr);
-    static void rewriteOpen(const StagedRewrite &staged, Document *open, Rewritten &done);
-    static void rewriteClosed(const StagedRewrite &staged, History *history, Rewritten &done);
+    void rewriteOpen(const StagedRewrite &staged, Document *open, Rewritten &done);
+    static void rewriteClosed(const StagedRewrite &staged, const QStringList &roots, History *history, Rewritten &done);
     static QList<SourceEdit> referenceEdits(const QList<DocumentLinks::Change> &changes, const QString &path, Rewritten &done);
     void finishUndo(Plan back, const QList<Patched> &open, QList<StagedRewrite> closed, QStringList failed);
+    void undoReferences(Plan back, QList<StagedRewrite> buffers, QList<StagedRewrite> closed,
+                        const std::optional<DiskVersion> &copied);
     // Says what a move did: what it took along, and what became of the
     // references to what moved.
     void finishMove(const Plan &plan, bool updated, Rewritten done);

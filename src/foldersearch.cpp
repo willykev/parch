@@ -175,6 +175,7 @@ struct FolderSearch::Run {
     quint64 number = ++searches;
     QRegularExpression expression;
     QStringList folders;
+    QStringList draftRoots;
     AppPaths paths;
     // The text of each open named document, by its file's device and inode.
     QHash<Identity, QString> openTexts;
@@ -323,26 +324,28 @@ QVariantMap FolderSearch::row(int row) const
     return values;
 }
 
-bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search)
+bool FolderSearch::readText(const QString &path, qint64 size, qint64 modified, QString *text, quint64 search, const QStringList *folders)
 {
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    if (folders && LibraryWalk::rootOf(canonical, *folders).isEmpty()) return false;
     TextCache &cache = textCache();
     {
         QMutexLocker lock(&cache.mutex);
-        const TextCache::Entry *cached = cache.find(path, search);
+        const TextCache::Entry *cached = cache.find(canonical, search);
         if (cached && cached->size == size && cached->modified == modified) {
             *text = cached->text;
             return true;
         }
     }
     if (size > MaxFileBytes) return false;
-    const SafeRead::Result read = SafeRead::read(path, MaxFileBytes);
+    const auto read = folders ? SafeRead::readWithin(path, MaxFileBytes, *folders) : SafeRead::read(path, MaxFileBytes);
     if (!read.ok) return false;
     ++reads;
     const DecodedText decoded = DiskFile::decode(read.bytes);
     if (!decoded.valid) return false;
     *text = decoded.text;
     QMutexLocker lock(&cache.mutex);
-    cache.insert(path, size, modified, decoded.text, search);
+    cache.insert(read.canonicalPath, size, modified, decoded.text, search);
     return true;
 }
 
@@ -444,6 +447,7 @@ void FolderSearch::walk(const std::shared_ptr<Run> &run, QThreadPool *pool)
     // Open drafts first, then the other drafts, then the library's folders.
     batch = run->openDrafts;
     const QDir drafts(run->paths.drafts());
+    run->draftRoots = {drafts.canonicalPath()};
     for (const QString &id : drafts.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
         if (run->cancel.load() || run->openDraftIds.contains(id) || !AppPaths::isDocumentId(id)) continue;
         Item draft;
@@ -474,7 +478,7 @@ void FolderSearch::walk(const std::shared_ptr<Run> &run, QThreadPool *pool)
         batch.append(item);
         if (batch.size() >= BatchFiles) hand();
         return true;
-    }, &run->cancel);
+    }, &run->cancel, run->folders);
     hand();
     QMutexLocker lock(&run->mutex);
     run->batches = sequence;
@@ -514,13 +518,14 @@ FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &it
     QString text;
     if (item.hasText) {
         text = item.text;
-    } else if (!readText(item.path, item.size, item.modified, &text, run.number)) {
-        return result;
+    } else {
+        const QStringList &roots = item.documentId.isEmpty() ? run.folders : run.draftRoots;
+        if (!readText(item.path, item.size, item.modified, &text, run.number, &roots)) return result;
     }
     *read = true;
     // Line numbers are counted as the matches come, from where the last one was.
     int line = 0;
-    qsizetype lineStart = 0, scanned = 0;
+    qsizetype lineStart = 0, lineEnd = -1, scanned = 0;
     TextSearch::forEachMatch(text, run.expression, [&](const QRegularExpressionMatch &match) {
         const qsizetype start = match.capturedStart(), length = match.capturedLength();
         if (length == 0) return true;
@@ -531,23 +536,33 @@ FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &it
         }
         ++result.count;
         if (result.hits.size() < MaxRowsPerFile) {
-            qsizetype lineEnd = start;
-            while (lineEnd < text.size() && text.at(lineEnd) != u'\n' && text.at(lineEnd) != u'\r') ++lineEnd;
+            if (lineEnd < start) {
+                lineEnd = start;
+                while (lineEnd < text.size() && text.at(lineEnd) != u'\n' && text.at(lineEnd) != u'\r') ++lineEnd;
+            }
             const qsizetype matchEnd = std::min(start + length, lineEnd);
             Hit hit;
             hit.line = line + 1;
             hit.column = int(start - lineStart) + 1;
             hit.start = int(start);
             hit.length = int(length);
-            const qsizetype from = std::max(lineStart, start - beforeUnits);
+            qsizetype from = std::max(lineStart, start - beforeUnits);
+            if (from > lineStart && text.at(from).isLowSurrogate()) ++from;
             hit.before = text.mid(from, start - from);
             // From the start of the line its indent goes; from within it, a mark says so.
             if (from == lineStart) hit.before = leftTrimmed(hit.before);
             else hit.before.prepend(u'…');
-            hit.match = text.mid(start, matchEnd - start);
-            const qsizetype until = std::min(lineEnd, matchEnd + afterUnits);
+            const qsizetype shownEnd = std::min(matchEnd, start + afterUnits);
+            hit.match = text.mid(start, shownEnd - start);
+            if (shownEnd < matchEnd) {
+                if (hit.match.back().isHighSurrogate()) hit.match.chop(1);
+                hit.match += u'…';
+            }
+            qsizetype until = std::min(lineEnd, matchEnd + afterUnits);
+            if (until < lineEnd && text.at(until - 1).isHighSurrogate()) --until;
             hit.after = text.mid(matchEnd, until - matchEnd) + (until < lineEnd ? QStringLiteral("…") : QString());
-            hit.lineText = text.mid(lineStart, std::min(lineEnd - lineStart, qsizetype(lineUnits))).trimmed();
+            hit.lineText = lineEnd - lineStart <= lineUnits ? text.mid(lineStart, lineEnd - lineStart).trimmed()
+                                                          : hit.before + hit.match + hit.after;
             result.hits.append(hit);
         }
         return result.count < countedPerFile;

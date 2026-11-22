@@ -2,6 +2,7 @@
 
 #include "diskfile.h"
 #include "pathtext.h"
+#include "librarywalk.h"
 #include "privatefiles.h"
 #include "theme.h"
 
@@ -56,12 +57,14 @@ bool isFocusDimming(const QString &strength) { return strength == u"off" || stre
 constexpr qsizetype maxLibraryFolders = 1000;
 
 // Full paths only, each once, in order.
-QStringList usableFolders(const QStringList &folders)
+QStringList usableFolders(const QStringList &folders, const QStringList &known)
 {
     QStringList usable;
-    for (const QString &folder : folders)
-        if (PathText::isFullPath(folder) && !usable.contains(folder) && usable.size() < maxLibraryFolders)
-            usable.append(folder);
+    for (const QString &folder : folders) {
+        if (!PathText::isFullPath(folder) || usable.size() >= maxLibraryFolders) continue;
+        const QString root = known.contains(folder) ? folder : LibraryWalk::resolvedRoot(folder);
+        if (!usable.contains(root)) usable.append(root);
+    }
     return usable;
 }
 
@@ -248,7 +251,7 @@ void Settings::setLibraryWidth(int width)
 
 void Settings::setLibraryFolders(const QStringList &folders)
 {
-    const QStringList usable = usableFolders(folders);
+    const QStringList usable = usableFolders(folders, m_libraryFolders);
     if (usable == m_libraryFolders) return;
     m_libraryFolders = usable;
     if (usable.isEmpty()) m_stored.remove(libraryFoldersKey);
@@ -525,7 +528,7 @@ void Settings::load()
         const QJsonValue value = m_stored.value(libraryFoldersKey);
         QStringList folders;
         for (const QJsonValue &folder : value.toArray()) folders.append(folder.toString());
-        m_libraryFolders = usableFolders(folders);
+        m_libraryFolders = usableFolders(folders, m_libraryFolders);
         // A folder left out is said, but the others are kept.
         if (!value.isArray() || m_libraryFolders.size() != value.toArray().size()) ignored << libraryFoldersKey;
     }

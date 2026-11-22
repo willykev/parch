@@ -175,6 +175,7 @@ struct FolderSearch::Run {
     quint64 number = ++searches;
     QRegularExpression expression;
     QStringList folders;
+    QStringList draftRoots;
     AppPaths paths;
     // The text of each open named document, by its file's device and inode.
     QHash<Identity, QString> openTexts;
@@ -446,6 +447,7 @@ void FolderSearch::walk(const std::shared_ptr<Run> &run, QThreadPool *pool)
     // Open drafts first, then the other drafts, then the library's folders.
     batch = run->openDrafts;
     const QDir drafts(run->paths.drafts());
+    run->draftRoots = {drafts.canonicalPath()};
     for (const QString &id : drafts.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
         if (run->cancel.load() || run->openDraftIds.contains(id) || !AppPaths::isDocumentId(id)) continue;
         Item draft;
@@ -476,7 +478,7 @@ void FolderSearch::walk(const std::shared_ptr<Run> &run, QThreadPool *pool)
         batch.append(item);
         if (batch.size() >= BatchFiles) hand();
         return true;
-    }, &run->cancel);
+    }, &run->cancel, run->folders);
     hand();
     QMutexLocker lock(&run->mutex);
     run->batches = sequence;
@@ -517,7 +519,7 @@ FolderSearch::FileResult FolderSearch::searchItem(const Run &run, const Item &it
     if (item.hasText) {
         text = item.text;
     } else {
-        const QStringList roots = item.documentId.isEmpty() ? run.folders : QStringList{run.paths.drafts()};
+        const QStringList &roots = item.documentId.isEmpty() ? run.folders : run.draftRoots;
         if (!readText(item.path, item.size, item.modified, &text, run.number, &roots)) return result;
     }
     *read = true;

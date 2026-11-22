@@ -7,19 +7,22 @@
   hardening flags.
 - Link confirmations show the full host and port. Web links with user
   information and mail links that request attachments ask before opening.
-- **Show them** remembers a document’s picture hosts. A new host asks
-  again. Formula and diagram helpers use a private working folder, and
-  `parch check --json` reports their file and network protections.
+- **Show them** remembers a document’s picture hosts. An approved picture
+  can redirect to another public host. A new host named in the text asks again. Formula and diagram helpers use a private working folder, and
+  `parch check --json` lists any missing file, socket or signal protections.
 - Screenshot and benchmark outputs need `--force` to replace an existing
-  file. Use `--` before file names that start with a dash.
+  regular file. Use `--` before file names that start with a dash.
 
 - The library marks links leading outside its folders. You can open a linked
   document directly. Searches, moves, trash and link updates stay inside
-  the library. Open, unsaved drafts appear first.
+  the library. A dangling or external link can be renamed or trashed. Link updates
+  preserve other hard links to the same file. Open, unsaved drafts appear first.
 - Saving under a link's name shows where it leads and lets you replace the
   link or write to its existing target. A launch through a link whose file
-  is missing opens read-only.
+  is missing opens read-only and releases the name when its tab closes.
+  **Save As** uses the usual permissions for a new file.
 - Moving files between file systems copies up to 64 MiB in the background.
+  The move verifies both revisions and shares the open buffer at the new name.
   History shares space across documents and uses its usual five-minute
   interval after automatic reloads.
 - Sessions without a runtime folder use a private folder under parch's
@@ -27,15 +30,17 @@
 - Pictures open by their contents, whatever their extension, and a PDF is no
   longer read as a picture. An SVG draws only the pictures embedded in it,
   never other files on your computer. HTML and EPUB carry its drawing and
-  named views without scripts, and Markdown copies keep the original file.
+  named views at the original display size, including views of embedded SVGs.
+  Markdown copies keep the original file.
 - Large pictures and formulas keep their size on the Word page at a lower
   resolution. PDF exports reuse repeated pictures and report any left out
   at the total pixel limit.
 - Pasting an oversized picture from a web page keeps its alt text and
-  explains why the picture could not be saved.
+  explains why the picture could not be saved. Vector pictures with large
+  coordinates can be pasted at their original size.
 - Markdown and HTML exports list the files copied beside them. Assembled
-  Markdown checks bibliographies and citation styles before carrying them,
-  and names any it omits. **Check document** reports an empty bibliography
+  Markdown carries bibliographies and styles with recognized extensions and
+  usable content, and names any it omits. **Check document** reports an empty bibliography
   as a warning and unreadable files as errors.
 - EPUB leaves out control characters that a book cannot contain. Raw HTML
   uses the first occurrence of each attribute.
@@ -43,14 +48,15 @@
   documents with many links or similarly named headings.
 - An export replacing your file keeps its access permissions. Replacing
   another account's file uses the usual permissions for a new file.
-- Pasted numbered lists continue past 2,147,483,647. Vim percentage jumps
+- Numbered lists in pasted HTML and the preview continue past 2,147,483,647. Vim percentage jumps
   and citation year labels also work at the ends of their numeric ranges.
 
 - Wide tables and rows past the cell limit stay readable as text in the
   preview and formatted exports. **Check document** also points out omitted
   tables of contents and citation formatting that reached a limit.
 - Rich paste falls back to the clipboard’s plain text when the HTML exceeds
-  16 MiB or its formatting would produce too much Markdown.
+  16 MiB or its formatting would produce too much Markdown. A paste that
+  falls back leaves its pictures off disk.
 
 - PDFs with many headings, long lines or unresolved links export faster. Word
   reuses repeated pictures and keeps each picture’s description.

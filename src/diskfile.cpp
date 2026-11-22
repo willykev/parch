@@ -30,25 +30,56 @@
 namespace {
 // Makes a new or changed name in a folder last through a power cut: the
 // file's own data is synced before it is named, and this syncs the folder
-// that now holds the name. File systems that cannot sync a folder say so
-// with EINVAL, and the name is then as safe as they make it anyway.
+// that now holds the name. A filesystem-wide sync can stand in where a
+// folder cannot be synced on its own.
 std::atomic<quint64> syncedFolders{0};
 
-void syncFolder(int directory)
+std::function<int(int)> syncError;
+
+bool syncFolder(int directory, int written)
 {
-    if (directory < 0) return;
-    ::fsync(directory);
+    int error = syncError ? syncError(directory) : 0;
+    if (error == 0) {
+        while (::fsync(directory) != 0) {
+            if (errno == EINTR) continue;
+            error = errno;
+            // Search and write permission suffice to create an entry. A
+            // search-only descriptor cannot itself sync the directory.
+            if ((error == EBADF && (::fcntl(directory, F_GETFL) & O_PATH)) || error == EINVAL || error == EOPNOTSUPP) {
+                while (::syncfs(written) != 0) {
+                    if (errno == EINTR) continue;
+                    return false;
+                }
+                error = 0;
+            }
+            break;
+        }
+    }
+    if (error) {
+        errno = error;
+        return false;
+    }
     syncedFolders.fetch_add(1);
+    return true;
 }
 
-void syncFolderOf(const QByteArray &path)
+int openFolderToSync(const QByteArray &folder)
+{
+    const int fd = ::open(folder, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    return fd < 0 && errno == EACCES ? ::open(folder, O_PATH | O_DIRECTORY | O_CLOEXEC) : fd;
+}
+
+bool syncFolderOf(const QByteArray &path, int written)
 {
     const qsizetype slash = path.lastIndexOf('/');
     const QByteArray folder = slash > 0 ? path.left(slash) : (slash == 0 ? QByteArray("/") : QByteArray("."));
-    const int directory = ::open(folder.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (directory < 0) return;
-    syncFolder(directory);
+    const int directory = openFolderToSync(folder);
+    if (directory < 0) return false;
+    const bool synced = syncFolder(directory, written);
+    const int error = errno;
     ::close(directory);
+    errno = error;
+    return synced;
 }
 
 const QByteArray utf8Bom("\xEF\xBB\xBF", 3);
@@ -353,6 +384,7 @@ QByteArray randomSuffix()
 // What tests make of create(): a step before the new file takes its name,
 // and a file system that cannot rename without replacing.
 std::function<void(const QString &)> beforeNaming;
+std::function<void(const QString &)> beforeClaim;
 std::function<void(const QString &)> afterNaming;
 std::atomic<bool> renameWithoutReplacing{true};
 std::atomic<bool> linking{true};
@@ -408,8 +440,7 @@ public:
             return false;
         }
         m_name.clear();
-        syncFolderOf(m_target);
-        return true;
+        return syncFolderOf(m_target, m_descriptor);
     }
     void discard()
     {
@@ -668,7 +699,7 @@ SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
     }
     // Only the folder is resolved: the name itself is never followed, and
     // every step below is taken in that one folder.
-    const int directory = ::open(QFile::encodeName(folder).constData(), O_PATH | O_DIRECTORY | O_CLOEXEC);
+    const int directory = openFolderToSync(QFile::encodeName(folder));
     if (directory < 0) {
         const int reason = errno;
         // The folder is what stops it, so it is named.
@@ -679,6 +710,70 @@ SaveResult create(const QString &path, const QByteArray &bytes, quint32 mode)
     const auto closing = qScopeGuard([directory] { ::close(directory); });
     return createAt(directory, folder, leaf, bytes, mode);
 }
+
+// Only the entry moved into this private directory can be discarded. If
+// another writer takes the public name, restoring never overwrites it.
+class HeldEntry {
+public:
+    HeldEntry(int parent, const QByteArray &name) : parent(parent), name(name) {}
+    Q_DISABLE_COPY_MOVE(HeldEntry)
+    ~HeldEntry()
+    {
+        if (fd >= 0) ::close(fd);
+        if (!folder.isEmpty()) ::unlinkat(parent, folder, AT_REMOVEDIR);
+    }
+
+    bool take()
+    {
+        const QByteArray candidate = ".parch-move-" + randomSuffix();
+        if (::mkdirat(parent, candidate, 0700) != 0) return false;
+        folder = candidate;
+        fd = ::openat(parent, folder, O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd < 0) return false;
+        struct stat dir {};
+        if (::fstat(fd, &dir) != 0) return false;
+        if (dir.st_uid != ::geteuid() || (dir.st_mode & 0022)) {
+            errno = EACCES;
+            return false;
+        }
+        if ((dir.st_mode & 0700) != 0700) {
+            const QByteArray anchor = "/proc/self/fd/" + QByteArray::number(fd);
+            if (::chmod(anchor, 0700) != 0) return false;
+        }
+        if (beforeClaim) beforeClaim(SafeRead::descriptorPath(parent) + u'/' + QFile::decodeName(name));
+        return ::renameat(parent, name, fd, "entry") == 0;
+    }
+
+    QString restore() { return restoreTo(parent, name); }
+
+    QString restoreTo(int directory, const QByteArray &leaf)
+    {
+        if (::renameat2(fd, "entry", directory, leaf, RENAME_NOREPLACE) == 0) return {};
+        if ((errno == ENOSYS || errno == EINVAL || errno == EOPNOTSUPP)
+            && ::linkat(fd, "entry", directory, leaf, 0) == 0 && discard()) return {};
+        const int failure = errno;
+        const QString detail = QCoreApplication::translate("DiskFile", "The displaced entry was kept at %1.").arg(path());
+        errno = failure;
+        return detail;
+    }
+
+    bool matches(const struct stat &known) const
+    {
+        struct stat found {};
+        return ::fstatat(fd, "entry", &found, AT_SYMLINK_NOFOLLOW) == 0 &&
+               known.st_dev == found.st_dev && known.st_ino == found.st_ino && known.st_mode == found.st_mode &&
+               known.st_uid == found.st_uid && known.st_gid == found.st_gid && known.st_size == found.st_size &&
+               known.st_mtim.tv_sec == found.st_mtim.tv_sec && known.st_mtim.tv_nsec == found.st_mtim.tv_nsec;
+    }
+
+    bool discard() const { return ::unlinkat(fd, "entry", 0) == 0; }
+    QString path() const { return SafeRead::descriptorPath(fd) + QStringLiteral("/entry"); }
+
+    int fd = -1;
+private:
+    int parent;
+    QByteArray name, folder;
+};
 
 static SaveResult writeNewAt(int directory, const QString &folder, const QString &leaf, const QByteArray &bytes,
                              quint32 mode, int source, qint64 size)
@@ -703,7 +798,7 @@ static SaveResult writeNewAt(int directory, const QString &folder, const QString
     for (int attempt = 0; attempt < 100 && descriptor < 0; ++attempt) {
         temporary = name + '.' + randomSuffix();
         // The umask applies, as to any file made.
-        descriptor = ::openat(directory, temporary.constData(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode ? mode & 0777 : 0666);
+        descriptor = ::openat(directory, temporary.constData(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, mode ? mode & 0777 : 0666);
         if (descriptor < 0 && errno != EEXIST) break;
     }
     if (descriptor < 0) {
@@ -740,37 +835,41 @@ static SaveResult writeNewAt(int directory, const QString &folder, const QString
     // is removed.
     int failure = 0;
     bool named = false;
-    if (source >= 0) {
-        if (::linkat(directory, temporary.constData(), directory, name.constData(), 0) == 0) {
-            named = true;
-            if (::unlinkat(directory, temporary.constData(), 0) == 0) temporary.clear();
-        } else {
-            failure = errno;
-        }
-    } else if (renameWithoutReplacing) {
+    if (renameWithoutReplacing) {
         named = ::renameat2(directory, temporary.constData(), directory, name.constData(), RENAME_NOREPLACE) == 0;
         if (named) temporary.clear();
         else failure = errno;
     }
     int written = descriptor;
-    if (source < 0 && !named && (!renameWithoutReplacing || failure == EINVAL || failure == ENOSYS || failure == EOPNOTSUPP)) {
+    if (!named && (!renameWithoutReplacing || failure == EINVAL || failure == ENOSYS || failure == EOPNOTSUPP)) {
         named = linking && ::linkat(directory, temporary.constData(), directory, name.constData(), 0) == 0;
         if (!named) failure = linking ? errno : EINVAL;
         if (!named && failure != EEXIST) {
-            written = ::openat(directory, name.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
-            if (written >= 0 && mode != 0) ::fchmod(written, mode_t(mode & 0777));
+            written = ::openat(directory, name.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode ? mode & 0777 : 0666);
+            const auto fill = [&] {
+                if (mode && ::fchmod(written, mode_t(mode & 0777)) != 0) return false;
+                if (source < 0) return writeAll(written, bytes);
+                QByteArray copied;
+                return ::lseek(descriptor, 0, SEEK_SET) == 0 && copyAndHash(descriptor, written, size, copied) && copied == digest;
+            };
             if (written < 0) {
                 failure = errno;
             } else if (const int injected = directWriteFailure ? directWriteFailure(folder + u'/' + leaf) : 0;
-                       injected != 0 || !writeAll(written, bytes) || ::fdatasync(written) != 0) {
+                       injected != 0 || !fill() || ::fdatasync(written) != 0) {
                 failure = injected != 0 ? injected : errno;
-                // Only the file it made goes, while the name still holds
-                // it: anything put at the name since stays.
-                struct stat mine {}, there {};
-                if (::fstat(written, &mine) == 0
-                    && ::fstatat(directory, name.constData(), &there, AT_SYMLINK_NOFOLLOW) == 0
-                    && mine.st_dev == there.st_dev && mine.st_ino == there.st_ino)
-                    ::unlinkat(directory, name.constData(), 0);
+                // A replacement at the public name belongs to its writer.
+                struct stat mine {};
+                HeldEntry partial(directory, name);
+                if (::fstat(written, &mine) == 0 && partial.take()) {
+                    if (partial.matches(mine)) partial.discard();
+                    else {
+                        const QString kept = partial.restore();
+                        if (!kept.isEmpty()) {
+                            ::close(written);
+                            return {SaveStatus::Failed, systemError(failure) + u' ' + kept, {}};
+                        }
+                    }
+                }
                 ::close(written);
             } else {
                 named = true;
@@ -786,7 +885,7 @@ static SaveResult writeNewAt(int directory, const QString &folder, const QString
         result.error = QCoreApplication::translate("DiskFile", "Something is already at that name");
         return result;
     }
-    syncFolder(directory);
+    if (!syncFolder(directory, written)) return failed(errno);
     struct stat made {};
     FileStamp stamp;
     if (!stamped(written, made, stamp)) return failed(errno);
@@ -830,6 +929,147 @@ bool copyStillAt(int directory, const QByteArray &leaf, const DiskVersion &expec
            && opened.st_ctim.tv_sec == named.st_ctim.tv_sec && opened.st_ctim.tv_nsec == named.st_ctim.tv_nsec;
 }
 
+bool removeCopyAt(int directory, const QByteArray &leaf, const DiskVersion &expected, QString *error,
+                  const std::function<bool()> &canRemove)
+{
+    HeldEntry held(directory, leaf);
+    if (!held.take()) {
+        *error = systemError(errno);
+        return false;
+    }
+    DiskVersion claimed = expected;
+    claimed.canonicalPath = held.path();
+    if (copyStillAt(held.fd, "entry", claimed) && (!canRemove || canRemove()) && held.discard()) return true;
+    *error = QCoreApplication::translate("DiskFile", "The file changed during the move.");
+    const QString kept = held.restore();
+    if (!kept.isEmpty()) *error += u' ' + kept;
+    return false;
+}
+
+SaveResult publishAt(int directory, QByteArray &staged, const QByteArray &name, const struct stat *expected)
+{
+    const auto failed = [](int error) {
+        return SaveResult{error == EEXIST || error == ENOENT ? SaveStatus::Conflict : SaveStatus::Failed, systemError(error), {}};
+    };
+    HeldEntry writing(directory, staged);
+    if (!writing.take()) return failed(errno);
+    staged.clear();
+    struct stat ours {};
+    if (::fstatat(writing.fd, "entry", &ours, AT_SYMLINK_NOFOLLOW) != 0) return failed(errno);
+    if (expected) {
+        if (beforeClaim) beforeClaim(SafeRead::descriptorPath(directory) + u'/' + QFile::decodeName(name));
+        if (::renameat2(writing.fd, "entry", directory, name, RENAME_EXCHANGE) == 0) {
+            if (writing.matches(*expected) && writing.discard()) return {SaveStatus::Saved, {}, {}};
+            // An unapproved file was displaced. Return it only to a free
+            // name. If a third file arrived, it keeps the public name.
+            HeldEntry current(directory, name);
+            QString detail;
+            if (current.take()) {
+                if (current.matches(ours)) {
+                    detail = writing.restoreTo(directory, name);
+                    current.discard();
+                } else {
+                    detail = current.restore();
+                    detail += QCoreApplication::translate("DiskFile", " The displaced entry was kept at %1.").arg(writing.path());
+                }
+            } else {
+                detail = writing.restoreTo(directory, name);
+            }
+            return {SaveStatus::Conflict, (QCoreApplication::translate("DiskFile", "The chosen name changed during the save.") +
+                                           u' ' + detail).trimmed(), {}};
+        }
+        const int error = errno;
+        if (error != EINVAL && error != EOPNOTSUPP && error != ENOSYS) {
+            writing.discard();
+            return failed(error);
+        }
+    }
+    // Without exchange, retain the old entry until exclusive publication
+    // succeeds. On a collision both the newer name and the old data survive.
+    HeldEntry old(directory, name);
+    if (expected) {
+        if (!old.take()) {
+            const int error = errno;
+            writing.discard();
+            return failed(error);
+        }
+        if (!old.matches(*expected)) {
+            writing.discard();
+            return {SaveStatus::Conflict, QCoreApplication::translate("DiskFile", "The chosen name changed. ") + old.restore(), {}};
+        }
+    }
+    const QString problem = writing.restoreTo(directory, name);
+    if (!problem.isEmpty()) {
+        const int error = errno;
+        writing.discard();
+        auto result = failed(error);
+        if (expected) result.error += u' ' + old.restore();
+        return result;
+    }
+    if (expected && !old.discard()) return {SaveStatus::Failed, old.path(), {}};
+    return {SaveStatus::Saved, {}, {}};
+}
+
+SaveResult moveByLinkAt(int from, const QByteArray &oldName, int into, const QByteArray &newName, const struct stat &original)
+{
+    HeldEntry held(from, oldName);
+    if (!held.take()) return {SaveStatus::Failed, systemError(errno), {}};
+    struct stat claimed {};
+    if (::fstatat(held.fd, "entry", &claimed, AT_SYMLINK_NOFOLLOW) == 0 &&
+        claimed.st_dev == original.st_dev && claimed.st_ino == original.st_ino) {
+        if (::linkat(held.fd, "entry", into, newName, 0) == 0 && held.discard()) return {SaveStatus::Saved, {}, {}};
+    }
+    const QString why = QCoreApplication::translate("DiskFile", "The file could not be moved without replacing another entry.");
+    return {SaveStatus::Failed, (why + u' ' + held.restore()).trimmed(), {}};
+}
+
+SaveResult moveDirectoryAt(int from, const QByteArray &oldName, int into, const QByteArray &newName, const struct stat &original)
+{
+    const auto failed = [](int error) { return SaveResult{SaveStatus::Failed, systemError(error), {}}; };
+    if (renameWithoutReplacing) {
+        if (::renameat2(from, oldName, into, newName, RENAME_NOREPLACE) == 0) return {SaveStatus::Saved, {}, {}};
+        if (errno != ENOSYS && errno != EINVAL && errno != EOPNOTSUPP) return failed(errno);
+    }
+    // An exclusive regular file reserves the destination and gives us a
+    // descriptor for the exact entry an exchange should displace.
+    const int reservation = ::openat(into, newName, O_CREAT | O_EXCL | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (reservation < 0) return failed(errno);
+    const auto close = qScopeGuard([reservation] { ::close(reservation); });
+    struct stat slot {};
+    FileStamp stamp;
+    if (!stamped(reservation, slot, stamp)) return failed(errno);
+    const DiskVersion marker{{}, quint64(slot.st_dev), quint64(slot.st_ino),
+                             QCryptographicHash::hash(QByteArray(), QCryptographicHash::Sha256), true, stamp};
+    struct stat source {};
+    const bool unchanged = ::fstatat(from, oldName, &source, AT_SYMLINK_NOFOLLOW) == 0 &&
+                           source.st_dev == original.st_dev && source.st_ino == original.st_ino;
+    if (unchanged && beforeClaim) beforeClaim(SafeRead::descriptorPath(into) + u'/' + QFile::decodeName(newName));
+    const bool moved = unchanged && ::renameat2(from, oldName, into, newName, RENAME_EXCHANGE) == 0;
+    const int failure = unchanged ? errno : ESTALE;
+    QString reason;
+    if (moved) {
+        HeldEntry displaced(from, oldName);
+        if (!displaced.take()) return failed(errno);
+        if (displaced.matches(slot) && displaced.discard()) return {SaveStatus::Saved, {}, {}};
+        // An entry took the slot before the exchange. Put it back without
+        // publishing over a third writer who arrived in the meantime.
+        HeldEntry current(into, newName);
+        if (!current.take()) {
+            reason = displaced.restoreTo(into, newName);
+        } else if (current.matches(original)) {
+            reason = displaced.restoreTo(into, newName) + u' ' + current.restoreTo(from, oldName);
+        } else {
+            reason = current.restore() + u' ' + displaced.restore();
+        }
+        return {SaveStatus::Conflict, (QCoreApplication::translate("DiskFile", "The destination changed during the folder move. ") +
+                                       reason).trimmed(), {}};
+    }
+    if (!removeCopyAt(into, newName, marker, &reason)) return {SaveStatus::Conflict, reason, {}};
+    if (failure == ENOSYS || failure == EINVAL || failure == EOPNOTSUPP)
+        return {SaveStatus::Failed, QCoreApplication::translate("DiskFile", "This file system cannot move a folder without risking another entry at its new name."), {}};
+    return failed(failure);
+}
+
 SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode, const NameLink *expectedLink)
 {
     SaveResult result;
@@ -844,7 +1084,7 @@ SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode, con
     }
     // Only the folder is resolved: the name itself is never followed, and
     // every step below is taken in that one folder.
-    const int directory = ::open(QFile::encodeName(folder).constData(), O_PATH | O_DIRECTORY | O_CLOEXEC);
+    const int directory = openFolderToSync(QFile::encodeName(folder));
     if (directory < 0) {
         result.error = QCoreApplication::translate("DiskFile", "parch cannot write in “%1” (%2)")
                            .arg(folder, systemError(errno));
@@ -890,9 +1130,9 @@ SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode, con
         result.error = QCoreApplication::translate("DiskFile", "Something is already at that name");
         return result;
     }
-    if (::renameat(directory, temporary.constData(), directory, name.constData()) != 0) return failed(errno);
-    temporary.clear();
-    syncFolder(directory);
+    const auto published = publishAt(directory, temporary, name, exists ? &there : nullptr);
+    if (published.status != SaveStatus::Saved) return published;
+    if (!syncFolder(directory, descriptor)) return failed(errno);
     struct stat made {};
     FileStamp stamp;
     if (!stamped(descriptor, made, stamp)) return failed(errno);
@@ -902,6 +1142,16 @@ SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode, con
     result.version.mode = quint32(made.st_mode & 0777);
     if (afterNaming) afterNaming(folder + u'/' + leaf);
     return result;
+}
+
+void setBeforeClaim(std::function<void(const QString &)> hook)
+{
+    beforeClaim = std::move(hook);
+}
+
+void setFolderSyncError(std::function<int(int)> hook)
+{
+    syncError = std::move(hook);
 }
 
 void setBeforeNaming(std::function<void(const QString &path)> hook)
@@ -1015,7 +1265,7 @@ QByteArray encode(const QString &text, const TextConvention &convention)
 }
 
 SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion &expected, const KeepCurrent &keep,
-                int directory)
+                int directory, bool replacementOnly)
 {
     SaveResult result;
     DiskVersion initial;
@@ -1026,7 +1276,9 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
     const QByteArray target = QFile::encodeName(directory < 0 ? initial.canonicalPath : checked);
     // A file with other names would lose them to a new file, and a file of
     // another account its owner, so such a file is written in place.
-    if (initial.exists && (original.st_nlink > 1 || !ownedBySavingUser(original.st_uid)))
+    if (replacementOnly && initial.exists && !ownedBySavingUser(original.st_uid))
+        return {SaveStatus::Failed, QCoreApplication::translate("DiskFile", "The owner cannot be preserved."), {}};
+    if (!replacementOnly && initial.exists && (original.st_nlink > 1 || !ownedBySavingUser(original.st_uid)))
         return writeInPlace(checked, initial, bytes, keep, target);
     // A file its owner made read-only is not replaced either.
     if (initial.exists && ::faccessat(AT_FDCWD, target.constData(), W_OK, AT_EACCESS) != 0) {
@@ -1064,6 +1316,7 @@ SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion 
         const Carried carried = carryAttributes(from, opened, output.handle(), result.error);
         ::close(from);
         if (carried == Carried::Uncarried) {
+            if (replacementOnly) return {SaveStatus::Failed, QCoreApplication::translate("DiskFile", "The file's access permissions cannot be preserved."), {}};
             output.discard();
             return writeInPlace(checked, initial, bytes, keep, target);
         }

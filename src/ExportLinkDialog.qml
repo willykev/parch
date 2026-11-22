@@ -45,7 +45,7 @@ ThemedDialog {
     contentItem: Text {
         objectName: "exportLinkQuestion"
         text: qsTr("%1 is a link to %2. parch never writes through a link: export to another file, or replace the link itself with the export, which leaves %2 as it is.")
-              .arg(dialog.output).arg(dialog.target)
+              .replace(/%[12]/g, function(slot) { return slot === "%1" ? dialog.output : dialog.target })
         textFormat: Text.PlainText
         font.family: theme.fontFamily
         font.pixelSize: theme.fontSize

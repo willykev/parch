@@ -33,6 +33,7 @@ class Document : public QObject {
     Q_PROPERTY(bool fileUnreadable READ fileUnreadable NOTIFY changed)
     Q_PROPERTY(QString leadsTo READ leadsTo NOTIFY changed)
     Q_PROPERTY(bool nameTaken READ nameTaken NOTIFY changed)
+    Q_PROPERTY(bool missingLink READ isMissingLink NOTIFY changed)
     Q_PROPERTY(bool textless READ isTextless NOTIFY changed)
     // Whether the text has ever had a file of its own; false for a draft
     // that was never saved, which nothing on disk leads back to.
@@ -59,6 +60,7 @@ public:
     // The canonical path of a named file; empty for a draft.
     QString path() const;
     bool isDraft() const;
+    bool isMissingLink() const { return m_missingLink; }
     QString title() const;
     State state() const;
     QString statusText() const;
@@ -175,7 +177,9 @@ private:
     TextConvention m_convention;
     // What parch last read or wrote; a save only replaces a file still at this version.
     DiskVersion m_diskVersion;
+    std::optional<Revision> m_linkRevision;
     bool m_readOnly;
+    bool m_missingLink = false;
     Problem m_problem = Problem::None;
     QString m_lastError;
     bool m_saving = false;

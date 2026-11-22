@@ -103,6 +103,7 @@ public:
     QString identity() const { return m_identity; }
     // False when the file could not be read at all.
     bool isValid() const { return m_valid; }
+    bool hasReferenceEntries() const { return m_hasReferenceEntries; }
     const QList<CslReference> &references() const { return m_references; }
     const CslReference *find(const QString &key) const;
     const QList<BibliographyDiagnostic> &diagnostics() const { return m_diagnostics; }
@@ -112,6 +113,7 @@ private:
 
     QString m_identity;
     bool m_valid = false;
+    bool m_hasReferenceEntries = false;
     QList<CslReference> m_references;
     QHash<QString, qsizetype> m_index;
     QList<BibliographyDiagnostic> m_diagnostics;

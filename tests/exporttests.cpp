@@ -1762,6 +1762,9 @@ void aReplacedExportKeepsWhoMayReadIt()
     if (::setxattr(name.constData(), "user.comment", "for the team", 12, 0) != 0)
         QSKIP("This folder keeps no extended attributes.");
     QVERIFY(QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup));
+    // The old group may be one the owner cannot give to a replacement.
+    Exporters::setReplacementGroupForTests(gid_t(-2));
+    const auto restoreGroup = qScopeGuard([] { Exporters::setReplacementGroupForTests({}); });
     QVERIFY2(Exporters::writeFile(path, "second", &error), qPrintable(error));
     QCOMPARE(readFile(path), QByteArray("second"));
     char value[32] = {};
@@ -2631,6 +2634,26 @@ void exportedSvgPicturesHoldNoScript_data()
     QTest::newRow("assembled Markdown") << QStringLiteral("md") << QStringLiteral("copy") << false;
 }
 
+void svgExportKeepsViewportAndNamedView()
+{
+    QTemporaryDir folder;
+    const QByteArray svg("<svg xmlns='http://www.w3.org/2000/svg' width='240' height='120' viewBox='4 2 24 12'><view id='left' viewBox='4 2 12 12'/><rect x='4' y='2' width='12' height='12' fill='#abcdef'/></svg>");
+    QCOMPARE(SvgPaper::size(svg), QSizeF(240, 120));
+    writeFile(folder.filePath("tile.svg"), svg);
+    writeFile(folder.filePath("note.md"), "![tile](tile.svg#left)");
+    const auto loaded = load(folder.filePath("note.md"));
+    const auto output = folder.filePath("out.html");
+    const auto result = Exporters::find("html")->write(loaded.document, recipeFor(loaded, "html", output, {{"images","copy"}}), bareRun());
+    QVERIFY(result.ok);
+    const auto drawing = readFile(folder.filePath("out_files/tile.svg"));
+    QCOMPARE(SvgPaper::raster(drawing, QSize(240, 120)), SvgPaper::raster(svg, QSize(240, 120)));
+    QXmlStreamReader xml(drawing);
+    QVERIFY(xml.readNextStartElement());
+    QCOMPARE(xml.attributes().value(u"viewBox").toString(), QStringLiteral("4 2 24 12"));
+    QVERIFY(xml.attributes().value(u"width").startsWith(u"240"));
+    QVERIFY(xml.attributes().value(u"height").startsWith(u"120"));
+}
+
 void exportedSvgPicturesHoldNoScript()
 {
     QFETCH(QString, format);
@@ -2676,6 +2699,19 @@ void exportedSvgPicturesHoldNoScript()
     while (!xml.atEnd() && !(xml.isStartElement() && xml.name() == u"view")) xml.readNext();
     QCOMPARE(xml.attributes().value(u"id").toString(), QStringLiteral("tile"));
     QCOMPARE(xml.attributes().value(u"viewBox").toString(), QStringLiteral("20 -10 4 4"));
+}
+
+void embeddedPicturesKeepTheirViewFragments()
+{
+    QTemporaryDir dir;
+    const QByteArray svg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><view id='left' viewBox='0 0 6 12'/><rect width='8' height='8' fill='#abcdef'/></svg>");
+    const QByteArray encoded = QUrl::toPercentEncoding(QString::fromUtf8(svg));
+    writeFile(dir.filePath("note.md"), "![A](data:image/svg+xml," + encoded + "#left)\n![B](data:image/svg+xml;base64," + svg.toBase64() + "#left)");
+    const auto loaded = load(dir.filePath("note.md"));
+    const auto output = dir.filePath("note.html");
+    const auto result = Exporters::find("html")->write(loaded.document, recipeFor(loaded, "html", output, {{"images","copy"}}), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(readFile(output).count("note_files/picture.svg#left"), 2);
 }
 
 void inlineFormulaSvgKeepsOnlyDrawingElements()
@@ -2816,6 +2852,15 @@ void aDeeplyQuotedHtmlPasteFallsBackToText()
     accents += u'.';
     QVERIFY(!HtmlMarkdown::fitsInput(accents));
     QVERIFY(HtmlMarkdown::convert(accents).isEmpty());
+    int saves = 0;
+    const HtmlMarkdown::ImageSink save = [&](const QByteArray &, const QString &) {
+        ++saves;
+        return QStringLiteral("assets/image.png");
+    };
+    const QString overBudget = QStringLiteral("<p><img src='data:image/png;base64,YQ=='></p><p>") +
+                              QString(128, u'x') + QStringLiteral("</p>");
+    QVERIFY(HtmlMarkdown::convert(overBudget, save, nullptr, false, nullptr, 64, QStringLiteral("assets/image.png")).isEmpty());
+    QCOMPARE(saves, 0);
 }
 
 void aTagWithManyAttributesPastesQuickly()
@@ -2829,6 +2874,34 @@ void aTagWithManyAttributesPastesQuickly()
     timer.start();
     QCOMPARE(HtmlMarkdown::convert(html), QStringLiteral("Notes"));
     QVERIFY(timer.elapsed() < timeLimit(300));
+}
+
+void onlyReferenceFilesTravelWithMarkdown()
+{
+    QTemporaryDir dir;
+    const QByteArray style("<style xmlns='http://purl.org/net/xbiblio/csl' version='1.0' class='note'><citation><layout><text variable='title'/></layout></citation></style>");
+    writeFile(dir.filePath("reading.xml"), style);
+    writeFile(dir.filePath("example.txt"), "@book{note,title={Example}}");
+    writeFile(dir.filePath("inventory.json"), R"({"items":[{"id":"a","location":"shelf"}]})");
+    writeFile(dir.filePath("labels.yml"), "- id: blue\n");
+    writeFile(dir.filePath("notes.md"), "---\nbibliography: [example.txt, inventory.json, labels.yml]\ncsl: ./reading.xml\n---\nNotes.\n");
+    QVERIFY(QDir().mkpath(dir.filePath("out")));
+    const auto loaded = load(dir.filePath("notes.md"));
+    const auto output = dir.filePath("out/book.md");
+    const auto result = Exporters::find("md")->write(loaded.document, recipeFor(loaded, "md", output), bareRun());
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(result.written, QStringList{output});
+    QVERIFY(!readFile(output).contains("bibliography:") && !readFile(output).contains("csl:"));
+
+    QByteArray foreign = style;
+    foreign.replace("http://purl.org/net/xbiblio/csl", "urn:inventory");
+    writeFile(dir.filePath("foreign.csl"), foreign);
+    writeFile(dir.filePath("notes.md"), "---\ncsl: ./foreign.csl\n---\nNotes.\n");
+    const auto foreignStyle = load(dir.filePath("notes.md"));
+    const auto second = Exporters::find("md")->write(foreignStyle.document, recipeFor(foreignStyle, "md", output), bareRun());
+    QVERIFY(second.ok);
+    QCOMPARE(second.written, QStringList{output});
+    QVERIFY(!readFile(output).contains("csl:"));
 }
 
 void aBibliographyThatIsNotOneStaysBehind()
@@ -2886,6 +2959,17 @@ void copiedCitationFilesAreListed()
             QCOMPARE(readFile(file), readFile(dir.filePath(name)));
             QVERIFY2(notes.contains("book_files/" + name), qPrintable(notes));
         }
+    }
+}
+
+void aReferenceListMustBeAnArrayOfObjects()
+{
+    for (const QByteArray &data : {QByteArray(R"({"references":"notes"})"), QByteArray(R"({"labels":[]})"), QByteArray(R"([42])")}) {
+        const auto db = BibliographyDatabase::fromData(data, BibliographyDatabase::Format::CslJson, "notes.json");
+        QVERIFY2(!db.isValid(), data.constData());
+        QVERIFY(std::any_of(db.diagnostics().cbegin(), db.diagnostics().cend(), [](const auto &d) {
+            return d.severity == BibliographyDiagnostic::Severity::Error;
+        }));
     }
 }
 

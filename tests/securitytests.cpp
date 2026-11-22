@@ -416,6 +416,31 @@ void aHelperCannotReadOutsideItsFolders()
     QCOMPARE(readFile(outside), QByteArray("outside\n"));
 }
 
+void helperRulesMatchTheKernelABI()
+{
+    const auto older = HelperConfinement::restrictionsFor(5);
+    const auto scoped = HelperConfinement::restrictionsFor(6);
+    const auto pathname = HelperConfinement::restrictionsFor(9);
+    const auto datagrams = HelperConfinement::restrictionsFor(10);
+    QCOMPARE(older.scoped, quint64(0));
+    QCOMPARE(scoped.scoped, quint64(3));
+    QVERIFY(!(scoped.handled_access_fs & (1ULL << 16)));
+    QVERIFY(pathname.handled_access_fs & (1ULL << 16));
+    QCOMPARE(pathname.handled_access_net, quint64(3));
+    QCOMPARE(datagrams.handled_access_net, quint64(15));
+    QCOMPARE(datagrams.scoped, scoped.scoped);
+}
+
+void fixtureExtractionUsesAnIsolatedInterpreter()
+{
+    QFile script(QStringLiteral(PARCH_SOURCE_DIR "/bin/fetch-test-fixtures"));
+    QVERIFY(script.open(QIODevice::ReadOnly));
+    const auto lines = script.readAll().split('\n');
+    const auto command = std::find_if(lines.cbegin(), lines.cend(), [](const auto &line) { return line.startsWith("python3 "); });
+    QVERIFY(command != lines.cend());
+    QVERIFY(command->startsWith("python3 -I - "));
+}
+
 void helpersRunWithinLimits()
 {
     QTemporaryDir folder;
@@ -731,10 +756,12 @@ void aWebPictureRedirectChecksItsHostAndAddresses()
                         [&](const QString &host) { return hosts.contains(host); });
     };
     auto result = fetch();
-    QVERIFY(result.done && result.error.contains(QStringLiteral("host")));
-    QCOMPARE(resolved, QStringList{QStringLiteral("first.example")});
-    QCOMPARE(network.attempts.size(), 1);
-    hosts.insert(QStringLiteral("next.example"));
+    QVERIFY2(result.done && result.error.isEmpty(), qPrintable(result.error));
+    QCOMPARE(resolved, (QStringList{"first.example", "next.example"}));
+    QCOMPARE(network.attempts.size(), 2);
+    const auto direct = fetchNow(fetcher, QStringLiteral("https://next.example/figure.png"), 2000,
+                                 [&](const QString &host) { return hosts.contains(host); });
+    QVERIFY(direct.done && !direct.error.isEmpty());
     privateNext = true;
     result = fetch();
     QVERIFY(result.done && result.error.contains(QStringLiteral("private")));

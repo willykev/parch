@@ -358,12 +358,21 @@ void Attachments::report(const QString &title, const QString &detail)
     emit problem(title, detail);
 }
 
+static QString pastedName(const QDate &date, int number, const QString &extension)
+{
+    return QStringLiteral("pasted-") + date.toString(QStringLiteral("yyyy-MM-dd")) + u'-' + QString::number(number) + u'.' + extension;
+}
+
+QString Attachments::longestPastedPath(const QDate &date)
+{
+    return QStringLiteral("assets/") + pastedName(date, 10000, QStringLiteral("webp"));
+}
+
 Attachments::Placed Attachments::savePasted(const QString &folder, const QDate &date, const QString &extension,
                                             const QByteArray &bytes)
 {
-    const QString stem = QStringLiteral("pasted-") + date.toString(QStringLiteral("yyyy-MM-dd")) + u'-';
     return place(
-        folder, [&](int n) { return stem + QString::number(n) + u'.' + extension; },
+        folder, [&](int n) { return pastedName(date, n, extension); },
         [&](const QString &path) { return holdsBytes(path, bytes); },
         [&](QFile &out, QString *) { return out.write(bytes) == bytes.size(); });
 }

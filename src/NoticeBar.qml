@@ -63,7 +63,9 @@ Rectangle {
                 break
             case Document.ReadOnly:
                 // parch's own read-only documents, such as its guide, are as they should be.
-                if (!bar.document.scratch)
+                if (bar.document.missingLink)
+                    shown.push("missingLink")
+                else if (!bar.document.scratch)
                     shown.push("readOnly")
                 break
             }
@@ -163,6 +165,8 @@ Rectangle {
                                  : qsTr("The file has changed on disk"))
                     case "saveFailed":
                         return error.length > 0 ? qsTr("Not saved: %1").arg(error) : qsTr("Not saved")
+                    case "missingLink":
+                        return qsTr("The file this link points to was missing when the link was opened.")
                     case "readOnly":
                         return qsTr("Read-only: this file is not valid UTF-8 text, so its bytes are kept as they are and it is never saved. Reopen it in the encoding it was written in to edit it.")
                     case "converted":
@@ -225,7 +229,7 @@ Rectangle {
                     // was headed off. News is marked in the dim role, a mix of
                     // the text and the background, since some themes' accent is
                     // as red as their danger.
-                    color: row.kind === "readOnly" || row.kind === "history" || row.kind === "converted"
+                    color: row.kind === "missingLink" || row.kind === "readOnly" || row.kind === "history" || row.kind === "converted"
                            || (row.kind === "app" && bar.noticeTone === Backend.Warning) ? theme.warning
                          : row.kind === "export" ? theme.accent
                          : row.kind === "app" && bar.noticeTone === Backend.News ? theme.dim : theme.danger

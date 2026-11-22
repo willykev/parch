@@ -32,7 +32,7 @@ bool fitsInput(QStringView html);
 // whether the Markdown is one paragraph, which can go inside a line.
 QString convert(const QString &html, const ImageSink &images = {}, bool *inlineOnly = nullptr,
                 bool mergedCells = false, QStringList *imageErrors = nullptr,
-                qsizetype maxOutput = MaxInputBytes);
+                qsizetype maxOutput = MaxInputBytes, const QString &longestImagePath = {});
 
 struct TableCells {
     QList<QStringList> rows;

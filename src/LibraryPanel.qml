@@ -178,7 +178,7 @@ Item {
             menu = folderMenu
         } else if ((kind === "folder" || kind === "document") && backend.organizer.organizes(path)) {
             menu = entryMenu
-            entryMenu.isFolder = kind === "folder"
+            entryMenu.isFolder = kind === "folder" && !rowData(row, LibraryModel.OutsideLinkRole)
         }
         if (!menu)
             return
@@ -745,7 +745,7 @@ Item {
             DragHandler {
                 id: dragger
                 target: null
-                enabled: !entry.outsideLink && (entry.kind === "document" || entry.kind === "folder") && entry.section.length === 0
+                enabled: (entry.kind === "document" || entry.kind === "folder") && entry.section.length === 0
                          && backend.organizer.organizes(entry.path)
                 onActiveChanged: {
                     if (active) {

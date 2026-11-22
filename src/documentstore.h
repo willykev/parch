@@ -198,9 +198,11 @@ public:
 
     // The open document whose file is at this canonical path, if any.
     Document *documentOf(const QString &canonicalPath) const;
-    // Whether the document's file may be moved now: it is a named file, no
-    // save or choice of it runs, and it waits on no choice about its file.
-    // False, with why in a few words, otherwise.
+    // While the copy runs, both names share a buffer and saves wait.
+    bool reserveMove(const QString &source, const QString &destination, Document *document);
+    void releaseMove(const QString &destination);
+    bool applyLinkEdits(Document *document, Revision revision, const QList<SourceEdit> &edits);
+    // Whether the document's file may be moved now, or why it must wait.
     bool canRelocate(const Document *document, QString *reason = nullptr) const;
     // The document's file has been moved to this canonical path, as the
     // library renames and moves files: the document follows it, keeping its
@@ -327,6 +329,7 @@ private:
         // its folder is made first and the expected version taken after,
         // because a path in a missing folder has no version yet.
         bool savesDraft = false;
+        bool replacesForLinks = false;
         // The document takes the target as its new name when the save succeeds.
         bool renames = false;
         // A naming replaces whatever is at the target when the save starts,
@@ -591,6 +594,9 @@ private:
     // name from the moment the save starts, so that no other document can
     // open or take the same file before the save finishes.
     QHash<QString, Document *> m_claims;
+    QHash<QString, QString> m_moveSources;
+    QSet<Document *> m_moving;
+    QSet<Document *> m_saveAfterMove;
     // Every save running, every Keep both, whose copy is a save too, every
     // Follow, and every text going into history on a worker.
     QList<QFutureWatcherBase *> m_running;

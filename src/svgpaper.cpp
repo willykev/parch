@@ -62,11 +62,11 @@ QSizeF sizeOf(RsvgHandle *handle)
     RsvgRectangle box{};
     RsvgLength w{}, h{};
     rsvg_handle_get_intrinsic_dimensions(handle, nullptr, &w, nullptr, &h, &hasViewBox, &box);
-    if (hasViewBox) return QSizeF(box.width, box.height);
     if (w.length <= 0 || h.length <= 0) return {};
     gdouble width = 0, height = 0;
     if (rsvg_handle_get_intrinsic_size_in_pixels(handle, &width, &height))
         return QSizeF(width, height);
+    if (hasViewBox) return QSizeF(box.width, box.height);
     // An embedded SVG with no intrinsic size uses a 300 by 150 viewport.
     // With one definite length, let librsvg resolve its units and font.
     if (w.unit == RSVG_UNIT_PERCENT && h.unit == RSVG_UNIT_PERCENT) return QSizeF(300, 150);
@@ -94,14 +94,29 @@ QSizeF size(const QByteArray &svg)
     return sizeOf(handle.handle);
 }
 
-QByteArray plain(const QByteArray &svg, QString *error)
+QByteArray plain(const QByteArray &svg, QString *error, QSizeF *sourceViewport)
 {
     Handle handle(svg);
     if (!handle.handle) {
         if (error) *error = handle.error;
         return {};
     }
-    const QSizeF size = sizeOf(handle.handle);
+    QSizeF size = sizeOf(handle.handle);
+    if (sourceViewport) {
+        *sourceViewport = size;
+        gboolean hasBox = false;
+        RsvgRectangle box{};
+        rsvg_handle_get_intrinsic_dimensions(handle.handle, nullptr, nullptr, nullptr, nullptr, &hasBox, &box);
+        if (hasBox && box.width > 0 && box.height > 0) {
+            // Draw in the source coordinate system. The outer SVG will map
+            // that drawing and its named views into the original viewport.
+            const QByteArray css = ":root{width:" + QByteArray::number(box.width, 'g', 16) +
+                "px!important;height:" + QByteArray::number(box.height, 'g', 16) + "px!important}";
+            if (!rsvg_handle_set_stylesheet(handle.handle, reinterpret_cast<const guint8 *>(css.constData()), css.size(), nullptr))
+                return {};
+            size = QSizeF(box.width, box.height);
+        }
+    }
     if (!size.isValid() || size.isEmpty()) {
         if (error) *error = QStringLiteral("the SVG gives itself no size");
         return {};

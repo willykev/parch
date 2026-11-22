@@ -7,6 +7,7 @@
 #include "htmlmarkdown.h"
 #include "picturedata.h"
 #include "sourceboundaries.h"
+#include "svgpaper.h"
 
 #include <QBuffer>
 #include <QClipboard>
@@ -62,6 +63,10 @@ Attachments::Placed saveClipboardImage(const QString &folder, const QDate &date,
 {
     if (!bytes.isEmpty()) {
         const auto source = PictureData::read(bytes);
+        if (source.format == "svg") {
+            if (!SvgPaper::valid(source.bytes)) return {{}, EditorBinding::tr("The SVG on the clipboard could not be read")};
+            return Attachments::savePasted(folder, date, QStringLiteral("svg"), source.bytes);
+        }
         const auto decoded = PictureData::decode(source, {.refuseOversize = true});
         if (decoded.image.isNull()) return {{}, decoded.error};
         const QString extension = Attachments::extensionFor(source.mediaType());
@@ -95,7 +100,8 @@ void convertPaste(Attachments *attachments, Insertion *insertion, const QString 
                     return placed.relative;
                 };
             }
-            converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly, mergedCells, &converted.errors);
+            converted.markdown = HtmlMarkdown::convert(html, save, &converted.inlineOnly, mergedCells, &converted.errors,
+                                                       HtmlMarkdown::MaxInputBytes, Attachments::longestPastedPath(date));
             return converted;
         },
         [insertion, attachments, html, plain, folder, date, images, mergedCells](Converted converted) {

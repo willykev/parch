@@ -13,6 +13,7 @@ struct NetworkFetcher::Job {
     QMetaObject::Connection contextGone;
     std::function<void(const QByteArray &, const QString &)> done;
     AllowsHost allowsHost;
+    QString approvedHost;
     QPointer<QNetworkReply> reply;
     // The time the whole fetch has, redirects and all.
     QTimer deadline;
@@ -39,6 +40,7 @@ void NetworkFetcher::fetch(const QUrl &url, QObject *context,
     auto job = std::make_shared<Job>();
     job->context = context;
     job->done = std::move(done);
+    job->approvedHost = url.host(QUrl::FullyEncoded);
     job->allowsHost = std::move(allowsHost);
     job->contextGone = connect(context, &QObject::destroyed, this, [this, weak = std::weak_ptr<Job>(job)] {
         if (auto job = weak.lock()) finish(job, {}, {});
@@ -58,7 +60,7 @@ void NetworkFetcher::fetch(const QUrl &url, QObject *context,
 
 void NetworkFetcher::visit(const std::shared_ptr<Job> &job, const QUrl &url)
 {
-    if (!job->context || (job->allowsHost && !job->allowsHost(url.host(QUrl::FullyEncoded)))) {
+    if (!job->context || (job->allowsHost && !job->allowsHost(job->approvedHost))) {
         finish(job, {}, tr("This picture leads to a host that has not been approved."));
         return;
     }

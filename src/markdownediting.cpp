@@ -1585,7 +1585,7 @@ std::optional<TextChange> moveToCell(QStringView text, int anchor, int cursor, b
 std::optional<TextChange> formatTable(QStringView text, int anchor, int cursor, const Options &options)
 {
     const auto table = MdTable::locate(text, cursor, dialectOf(options));
-    if (!table) return std::nullopt;
+    if (!table || table->unfit == MdTable::Unfit::TooLarge) return std::nullopt;
     const MdTable::Layout layout = MdTable::write(MdTable::model(text, *table));
     const QStringView before = text.mid(table->start, table->end - table->start);
     if (before == layout.text) return std::nullopt;

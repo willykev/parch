@@ -15,6 +15,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QUrl>
+#include <QXmlStreamReader>
 
 #include <algorithm>
 #include <map>
@@ -232,26 +233,38 @@ public:
         // Check the bytes of the opened file before naming it or putting
         // those same bytes alongside the assembled document.
         const auto written = [&](const QString &path, bool fromFrontMatter, bool isStyle) -> QString {
+            const QString name = QFileInfo(path).fileName();
+            const auto omit = [&](const QString &why) {
+                limitations.append(QStringLiteral("Omitted %1 (%2)").arg(name, why));
+                return QString();
+            };
+            const auto format = BibliographyDatabase::formatForPath(path);
+            if (isStyle && !name.endsWith(QStringLiteral(".csl"), Qt::CaseInsensitive))
+                return omit(QStringLiteral("A citation style needs a .csl filename."));
+            if (!isStyle && format == BibliographyDatabase::Format::Auto)
+                return omit(QStringLiteral("The filename has no bibliography extension."));
             const auto file = fromFrontMatter ? SafeRead::readWithin(path, SafeRead::ReferenceBytes, reach.folders)
                                               : SafeRead::read(path, SafeRead::ReferenceBytes);
-            const QString name = QFileInfo(path).fileName();
-            QString why = file.error;
-            bool usable = file.ok;
-            if (usable && isStyle) {
+            if (!file.ok) return omit(file.error);
+            QString why;
+            bool usable;
+            if (isStyle) {
                 usable = bool(CslStyle::fromXml(file.bytes, &why));
-            } else if (usable) {
-                const auto db = BibliographyDatabase::fromData(file.bytes, BibliographyDatabase::Format::Auto, path);
-                usable = db.isValid() && !db.references().isEmpty();
+                if (usable) {
+                    QXmlStreamReader xml(file.bytes);
+                    usable = xml.readNextStartElement() && xml.namespaceUri() == u"http://purl.org/net/xbiblio/csl";
+                    if (!usable) why = QStringLiteral("The style needs a CSL root element.");
+                }
+            } else {
+                const auto db = BibliographyDatabase::fromData(file.bytes, format, path);
+                usable = db.isValid() && db.hasReferenceEntries();
                 if (!usable) {
                     why = QStringLiteral("The bibliography contains no readable entries.");
                     for (const auto &d : db.diagnostics())
                         if (d.severity == BibliographyDiagnostic::Severity::Error) { why = d.message; break; }
                 }
             }
-            if (!usable) {
-                limitations.append(QStringLiteral("Omitted %1 (%2)").arg(name, why));
-                return {};
-            }
+            if (!usable) return omit(why);
             const QString relative = Exporters::relativeTo(folder, path);
             const bool within = !QDir::isAbsolutePath(relative) && relative != u".." && !relative.startsWith(QLatin1String("../"));
             if (within || !citationDestination || !(isStyle ? rebaseStyle : rebaseBibliography)) return relative;

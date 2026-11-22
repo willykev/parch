@@ -1376,7 +1376,7 @@ void Builder::htmlElementBlock(const Node &node, const Flow &flow)
         rule(flow, &node, Mark::Rule);
     } else if (tag == QLatin1StringView("ul") || tag == QLatin1StringView("ol")) {
         const bool ordered = tag == QLatin1StringView("ol");
-        int number = 1;
+        qint64 number = 1;
         for (const md::Attribute &attribute : node.attributes)
             if (attribute.name == QLatin1StringView("start")) number = attribute.value.toInt();
         QFont font(m_style.family);

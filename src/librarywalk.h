@@ -44,6 +44,8 @@ bool isTextDocument(const QString &name);
 // name. Stops early once `cancel` is set or `found` returns false.
 // The outermost configured folder containing an already resolved path.
 QString rootOf(const QString &canonicalPath, const QStringList &roots);
+// Resolve the existing prefix even when the chosen folder has yet to be made.
+QString resolvedRoot(const QString &path);
 
 Stats walk(const QStringList &folders, const std::function<bool(const Found &)> &found,
            const std::atomic<bool> *cancel = nullptr, const QStringList &allowedRoots = {});

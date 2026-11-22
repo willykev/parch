@@ -24,8 +24,9 @@ namespace SvgPaper {
 bool valid(const QByteArray &svg);
 
 // The SVG as plain SVG, the same size, in pixels; empty, with why, when
-// librsvg cannot read it.
-QByteArray plain(const QByteArray &svg, QString *error = nullptr);
+// librsvg cannot read it. With sourceViewport, return the display size and
+// draw in view-box units for an enclosing SVG to position named views.
+QByteArray plain(const QByteArray &svg, QString *error = nullptr, QSizeF *sourceViewport = nullptr);
 
 // The SVG drawn at the requested size within the raster limits, on a
 // transparent ground. A null image comes with a reason.

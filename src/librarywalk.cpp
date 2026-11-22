@@ -1,6 +1,7 @@
 #include "librarywalk.h"
 
 #include "mdinclude.h"
+#include "diskfile.h"
 #include "saferead.h"
 
 #include <QFileInfo>
@@ -33,6 +34,22 @@ bool LibraryWalk::isTextDocument(const QString &name)
     return false;
 }
 
+QString LibraryWalk::resolvedRoot(const QString &path)
+{
+    QString prefix = path;
+    QString suffix;
+    for (;;) {
+        const QFileInfo info(prefix);
+        if (info.exists() || info.isSymLink() || info.isRoot()) break;
+        const QString parent = info.absolutePath();
+        if (parent == prefix || info.fileName().isEmpty()) break;
+        suffix.prepend(u'/' + info.fileName());
+        prefix = parent;
+    }
+    const QString root = DiskFile::canonicalPath(prefix);
+    return root == u"/" && !suffix.isEmpty() ? suffix : root + suffix;
+}
+
 QString LibraryWalk::rootOf(const QString &canonicalPath, const QStringList &roots)
 {
     QString outermost;
@@ -45,7 +62,10 @@ QString LibraryWalk::rootOf(const QString &canonicalPath, const QStringList &roo
 LibraryWalk::Stats LibraryWalk::walk(const QStringList &folders, const std::function<bool(const Found &)> &found,
                                      const std::atomic<bool> *cancel, const QStringList &allowedRoots)
 {
-    const QStringList &roots = allowedRoots.isEmpty() ? folders : allowedRoots;
+    QStringList roots = allowedRoots;
+    if (roots.isEmpty()) {
+        for (const QString &folder : folders) roots << resolvedRoot(folder);
+    }
     Stats stats;
     QSet<Identity> seenFolders, seenFiles;
     QCollator collator;

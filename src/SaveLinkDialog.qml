@@ -41,7 +41,9 @@ ThemedDialog {
     contentItem: Text {
         objectName: "saveLinkQuestion"
         text: dialog.request ? qsTr("“%1” links to “%2”. Replacing the link puts this document at “%1”.")
-                               .arg(backend.shownText(dialog.request.name)).arg(backend.shownText(dialog.request.target)) : ""
+                               .replace(/%[12]/g, function(slot) {
+                                   return backend.shownText(slot === "%1" ? dialog.request.name : dialog.request.target)
+                               }) : ""
         textFormat: Text.PlainText
         font.family: theme.fontFamily
         font.pixelSize: theme.fontSize

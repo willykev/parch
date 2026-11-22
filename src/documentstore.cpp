@@ -517,11 +517,17 @@ Document *DocumentStore::openMissingLink(const QString &name)
 {
     const QString path = DiskFile::literalPath(name);
     if (Document *live = documentAt(path)) return handOut(live);
-    return adopt(new Document(newId(), path, {}, {}, {}, true, this));
+    auto *document = new Document(newId(), path, {}, {}, {}, true, this);
+    document->m_missingLink = true;
+    return adopt(document);
 }
 
 Document *DocumentStore::openAt(const QString &path, const QString &canonical, const QString &spelled, QString *error)
 {
+    if (const QString source = m_moveSources.value(canonical); !source.isEmpty()) {
+        if (Document *live = documentAt(canonical)) return handOut(live);
+        if (QFileInfo::exists(source)) return openAt(source, source, source, error);
+    }
     // A path recorded as a document's file, in the registry or by text
     // recovery holds for it, however it is spelled, which leads to another
     // file now.
@@ -1206,6 +1212,10 @@ void DocumentStore::release(Document *document)
 
 void DocumentStore::save(Document *document)
 {
+    if (m_moving.contains(document)) {
+        m_saveAfterMove.insert(document);
+        return;
+    }
     if (!m_documents.contains(document)) return;
     // Text read from invalid UTF-8 cannot be written back unchanged, and a
     // conflict waits for a choice, so neither is ever saved over; nor is a
@@ -1233,6 +1243,7 @@ void DocumentStore::save(Document *document)
     job.bytes = DiskFile::encode(snapshot->text, document->m_convention);
     job.revision = snapshot->revision;
     job.expected = document->m_diskVersion;
+    job.replacesForLinks = document->m_linkRevision.has_value();
     // A draft's saves are noted too, for the revision each wrote.
     job.notesSave = true;
     job.from = contentOf(document->m_diskVersion);
@@ -1276,6 +1287,11 @@ void DocumentStore::nameAs(Document *document, const QString &path, const std::o
                            const std::optional<DiskFile::NameLink> &approved, bool replace)
 {
     if (!m_documents.contains(document) || document->m_readOnly || path.isEmpty()) return;
+    if (m_moving.contains(document)) {
+        emit saveFinished(document, path, SaveStatus::Failed);
+        refuse(document, tr("The document is moving. Try saving under another name when the move finishes."));
+        return;
+    }
     if (document->m_textless) {
         refuseChoice(document, textlessReason(document), nullptr);
         emit saveFinished(document, path, SaveStatus::Failed);
@@ -1326,7 +1342,7 @@ void DocumentStore::nameAs(Document *document, const QString &path, const std::o
         return;
     }
     // Another document open at the target, or already saving to it, keeps it.
-    if (Document *other = documentAt(target); other && other != document) {
+    if (Document *other = documentAt(target); (other && other != document) || m_moveSources.contains(target)) {
         refuse(document, tr("Another document is already at %1").arg(path));
         emit saveFinished(document, path, SaveStatus::Failed);
         return;
@@ -1513,18 +1529,18 @@ DocumentStore::SaveOutcome DocumentStore::writeJob(const SaveJob &job, History *
         return false;
     };
     if (putsHere) {
-        outcome.result = DiskFile::putAt(job.target, written, job.mode, job.link ? &*job.link : nullptr);
+        outcome.result = DiskFile::putAt(job.target, written, job.renames ? 0 : job.mode, job.link ? &*job.link : nullptr);
         outcome.nameTaken = outcome.result.status == SaveStatus::Conflict;
         outcome.put = !job.renames || job.ownPath == job.target;
     } else if (creates) {
         // A draft's text is its owner's alone, as its folder is.
-        outcome.result = DiskFile::create(job.target, written, job.savesDraft ? 0600 : job.mode);
+        outcome.result = DiskFile::create(job.target, written, job.savesDraft ? 0600 : job.renames ? 0 : job.mode);
         // What took the name is said once the outcome is back, where folders are named.
         if (outcome.result.status == SaveStatus::Conflict && job.savesDraft)
             outcome.result.error = tr("A file is already where the draft goes");
         outcome.nameTaken = outcome.result.status == SaveStatus::Conflict && !job.savesDraft;
     } else {
-        outcome.result = DiskFile::save(job.target, written, expected, keep);
+        outcome.result = DiskFile::save(job.target, written, expected, keep, -1, job.replacesForLinks);
     }
     if (outcome.result.status != SaveStatus::Saved) {
         placement.undo();
@@ -1564,6 +1580,13 @@ Document *DocumentStore::adopt(Document *document)
 {
     document->parse()->setDraftFolder(draftFolder(document->m_id));
     m_documents.append(document);
+    if (!document->m_path.isEmpty()) {
+        const QString moved = m_moveSources.contains(document->m_path) ? document->m_path : m_moveSources.key(document->m_path);
+        if (!moved.isEmpty()) {
+            m_claims.insert(moved, document);
+            m_moving.insert(document);
+        }
+    }
     watchPath(document->m_path);
     emit documentOpened(document);
     return document;
@@ -1582,6 +1605,8 @@ Document *DocumentStore::documentAt(const QString &canonicalPath) const
 {
     if (canonicalPath.isEmpty()) return nullptr;
     if (Document *claimant = m_claims.value(canonicalPath)) return claimant;
+    if (!m_moveSources.isEmpty())
+        if (Document *moving = m_claims.value(m_moveSources.key(canonicalPath))) return moving;
     for (Document *document : m_documents)
         if (document->m_path == canonicalPath) return document;
     return nullptr;
@@ -1666,6 +1691,7 @@ void DocumentStore::finish(Document *document, const SaveJob &job, SaveOutcome o
         document->m_problem = Document::Problem::None;
         document->m_lastError.clear();
         document->m_diskVersion = result.version;
+        if (document->m_linkRevision && job.revision >= *document->m_linkRevision) document->m_linkRevision.reset();
         document->m_diskUnkept = false;
         document->m_reloaded = false;
         // Written as UTF-8, by a naming or a choice made in a conflict.
@@ -1771,8 +1797,8 @@ void DocumentStore::closeIfUnused(Document *document)
 {
     // A document with no text of its own has nothing to keep it open, nor
     // has one of parch's own, which is never kept.
-    if (!m_unviewed.contains(document)
-        || (document->state() != Document::State::Clean && !document->m_textless && !document->m_scratch))
+    if (!m_unviewed.contains(document) || m_moving.contains(document)
+        || (document->state() != Document::State::Clean && !document->m_textless && !document->m_scratch && !document->isMissingLink()))
         return;
     close(document);
 }
@@ -1787,7 +1813,7 @@ void DocumentStore::askForView(Document *document)
 
 bool DocumentStore::drop(Document *document)
 {
-    if (!m_documents.contains(document) || m_views.contains(document)) return false;
+    if (!m_documents.contains(document) || m_views.contains(document) || m_moving.contains(document)) return false;
     if (document->m_saving) {
         m_dropping.insert(document);
         return true;
@@ -1894,7 +1920,7 @@ void DocumentStore::checkDisk(Document *document)
 {
     if (!document || !m_documents.contains(document) || document->isDraft()) return;
     // A save changes the file itself; whatever was seen meanwhile is looked at afterwards.
-    if (document->m_saving || document->m_checking) {
+    if (document->m_saving || document->m_checking || m_moving.contains(document)) {
         document->m_checkAgain = true;
         return;
     }
@@ -1911,7 +1937,7 @@ void DocumentStore::checkDisk(Document *document)
         target->m_checking = false;
         // Something newer happened: a save moved the document's version, or
         // another event came in. The result is out of date, so look again.
-        if (std::exchange(target->m_checkAgain, false) || target->m_saving || target->m_diskVersion != known) {
+        if (std::exchange(target->m_checkAgain, false) || target->m_saving || m_moving.contains(target) || target->m_diskVersion != known) {
             checkDisk(target);
             return;
         }
@@ -2095,6 +2121,7 @@ void DocumentStore::takeFile(Document *document, const LoadedFile &file, bool au
     document->m_buffer->markSaved();
     document->m_convention = file.convention;
     document->m_readOnly = file.readOnly;
+    document->m_missingLink = false;
     document->m_convertedFrom.clear();
     document->m_textless = false;
     document->m_diskVersion = file.version;
@@ -2235,9 +2262,42 @@ void DocumentStore::writeRegistryFile(const QJsonObject &entries)
 Document *DocumentStore::documentOf(const QString &canonicalPath) const
 {
     if (canonicalPath.isEmpty()) return nullptr;
+    if (m_moveSources.contains(canonicalPath)) return m_claims.value(canonicalPath);
     for (Document *document : m_documents)
         if (document->m_path == canonicalPath) return document;
     return nullptr;
+}
+
+bool DocumentStore::applyLinkEdits(Document *document, Revision revision, const QList<SourceEdit> &edits)
+{
+    const auto previous = document->m_linkRevision;
+    document->m_linkRevision = revision + 1;
+    if (document->buffer()->replaceAtRevision(revision, edits) == SourceBuffer::EditOutcome::Applied) return true;
+    document->m_linkRevision = previous;
+    return false;
+}
+
+bool DocumentStore::reserveMove(const QString &source, const QString &destination, Document *document)
+{
+    if (documentAt(destination) || m_moveSources.contains(destination) || m_moveSources.contains(source) ||
+        !m_moveSources.key(source).isEmpty() || !m_moveSources.key(destination).isEmpty()) return false;
+    m_moveSources.insert(destination, source);
+    if (document) {
+        m_claims.insert(destination, document);
+        m_moving.insert(document);
+    }
+    return true;
+}
+
+void DocumentStore::releaseMove(const QString &destination)
+{
+    m_moveSources.remove(destination);
+    Document *document = m_claims.take(destination);
+    if (!document || !m_documents.contains(document)) return;
+    m_moving.remove(document);
+    if (m_saveAfterMove.remove(document)) save(document);
+    if (std::exchange(document->m_checkAgain, false)) checkDisk(document);
+    closeIfUnused(document);
 }
 
 bool DocumentStore::canRelocate(const Document *document, QString *reason) const
@@ -2322,7 +2382,7 @@ bool DocumentStore::reopenAs(Document *document, const QString &text, const Text
         if (refusal) *refusal = why;
         return false;
     };
-    if (!m_documents.contains(document) || document->isDraft() || document->isScratch() || !document->m_readOnly
+    if (!m_documents.contains(document) || document->isDraft() || document->isScratch() || document->isMissingLink() || !document->m_readOnly
         || document->m_problem == Document::Problem::Conflict)
         return refused(tr("Only a file that is open read-only, because it is not UTF-8, can be read in another encoding."));
     if (document->m_saving || document->m_checking || !(read == document->m_diskVersion))

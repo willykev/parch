@@ -327,6 +327,8 @@ void tablesTheGridCannotHoldSayWhy()
     QCOMPARE(unfit(u"| a | b |\n|---|---|\n| c | d |\n// note\n| e | f |"_s, standard), std::pair(MdTable::Unfit::None, -1));
     QString wide = QStringLiteral("|") + QStringLiteral(" a |").repeated(129) + u'\n' + u'|' + QStringLiteral("---|").repeated(129);
     QCOMPARE(unfit(wide).first, MdTable::Unfit::TooLarge);
+    QVERIFY(!MarkdownEditing::formatTable(wide, 0, 0, {}).has_value());
+    QVERIFY(MdTable::write({}).text.isEmpty());
     QString tall = QStringLiteral("| a | b |\n|---|---|");
     for (int i = 0; i < 10001; ++i) tall += QStringLiteral("\n| x | y |");
     QCOMPARE(unfit(tall).first, MdTable::Unfit::TooLarge);

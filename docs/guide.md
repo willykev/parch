@@ -673,7 +673,7 @@ link-citations: true               # each citation links to its entry
 ---
 ```
 
-parch reads BibTeX and BibLaTeX (`.bib`), CSL JSON (`.json`) and CSL YAML
+parch reads BibTeX and BibLaTeX (`.bib`, `.bibtex`, `.biblatex`), CSL JSON (`.json`) and CSL YAML
 (`.yaml`, `.yml`) files, found from the document's folder when the front
 matter names them, and reads a file again when it changes. The bundled styles
 are APA (`apa`), Chicago author-date (`chicago-author-date`), Chicago notes
@@ -683,6 +683,10 @@ and bibliography (`chicago-notes-bibliography`), IEEE (`ieee`), MLA
 (`nlm-citation-sequence`, or `vancouver`); a `.csl` style file of your own
 works as well. A chapter you include can name a bibliography of its own in
 its front matter; one that does not uses the document's.
+
+For CSL JSON, give an array of reference objects, or an object with the array
+under `references` or `items`. An empty collection or a newly started `.bib`
+shows a warning in the preview and **Check document**. A malformed list is an error.
 
 A front matter names files only within the document's library, or, for a
 document in no library, within its folder and the folders in it, as
@@ -834,7 +838,8 @@ What each format holds:
   Assembled Markdown carries the effective bibliography and style when the
   text uses citations. It omits citation files the source's front matter
   names outside its allowed folders. The export carries a bibliography
-  once it has at least one readable entry. A style file must parse as CSL.
+  with a recognized bibliography extension and at least one entry with a key and
+  a type, title or author. A style file must have a `.csl` extension and parse as CSL.
   The export notice names each omitted file and gives the reason.
 - **HTML**: a page of its own, in typography that does not follow the
   desktop theme. Images are copied into a folder beside it (`NAME_files`),
@@ -978,7 +983,10 @@ you chose last.
   document in front, with **New document in folder…**, which makes one
   beside it, when it is in one of the library's folders. Between file
   systems, parch copies files up to 64 MiB in the background. It removes the
-  original once the complete copy is in place.
+  original after verifying both revisions. Opening the destination during the
+  move shares the open document. You can rename or trash a symbolic link
+  whose target is missing or outside the library. The action moves the link itself.
+  A folder move needs a file system that can reserve the new name or exchange two entries.
 - When a document or folder moves or gets a new name, parch reviews affected links, images,
   includes and reference definitions in the library's Markdown and `.txt`
   documents. This includes supported HTML link and image attributes and
@@ -986,7 +994,9 @@ you chose last.
   names references that need attention, such as a bibliography outside
   the destination library. **Update links** applies the offered changes,
   as one step for `Ctrl+Z` in each open document. **Move only** keeps the source
-  text as written. A moved document keeps its tab, history and unsaved text.
+  text as written. When a document has other hard links, updating its references
+  replaces the library copy and preserves the text at its other names.
+  A moved document keeps its tab, history and unsaved text.
 - **Undo**, in the latest move or rename notice, puts the file or folder
   back if its old name is free. It restores the exact spelling of the
   references the move updated and keeps later edits elsewhere. If a later
@@ -1639,7 +1649,8 @@ above its preview. **Show them** remembers the hosts the document currently
 names. Another picture from one of those hosts can load automatically. If
 the document names a new host, **This document shows pictures from places
 it did not before.** appears. Choose **Show them** again to add the new
-hosts. A redirect can fetch only from an approved host. An approval from
+hosts. An approved picture may redirect to another public host for that picture
+alone. A direct picture from that host still needs approval. An approval from
 an older version remembers the hosts present the first time its preview is
 read. **Fetch pictures from the web** under **Preview** in **Preferences…**
 allows web pictures in every document. Exports never fetch pictures.
@@ -1670,10 +1681,13 @@ at most 2 GiB of memory and 30 seconds of processor time. parch stops a
 drawing after 15 seconds. Under `helpers`, `parch check --json` reports
 which protections your kernel provides.
 
-- `confined` means Landlock limits the files helpers can open to their
-  program, runtime libraries, fonts and private working folder.
-  They can write only in that folder. Landlock version 4 and later also
-  blocks TCP connections and listening ports.
+- `confined` is true when Landlock limits file reads to the helper, runtime
+  libraries, fonts and working folder, limits writes to the working folder,
+  and enforces all the network and signal restrictions. Landlock ABI 4 blocks
+  TCP, ABI 6 isolates abstract Unix sockets and signals, ABI 9 blocks access
+  to pathname Unix sockets, and ABI 10 also blocks UDP.
+- `missingConfinement` lists the restrictions unavailable on your kernel.
+  Older kernels apply the restrictions they support.
 - `isolated` means the helper also has a separate network namespace with
   no route to the network. This requires unprivileged user namespaces.
 

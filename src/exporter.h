@@ -149,6 +149,8 @@ public:
 
 namespace Exporters {
 
+void setReplacementGroupForTests(std::optional<gid_t> group);
+
 // Every format, in the order they are listed.
 QList<const Exporter *> all();
 QStringList formats();

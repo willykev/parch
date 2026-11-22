@@ -434,6 +434,7 @@ Model model(QStringView text, const Table &table)
 
 Layout write(const Model &model)
 {
+    if (model.rows.isEmpty()) return {};
     int columns = int(model.aligns.size());
     for (const QList<Item> &row : model.rows) {
         int width = 0;

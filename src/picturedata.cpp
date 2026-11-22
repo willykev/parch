@@ -108,6 +108,8 @@ QString Source::mediaType() const
 QByteArray urlBytes(QStringView url, qint64 byteLimit, QString *error)
 {
     error->clear();
+    const qsizetype fragment = url.indexOf(u'#');
+    if (fragment >= 0) url = url.first(fragment);
     const qsizetype comma = url.indexOf(u',');
     if (comma < 0 || !url.startsWith(u"data:", Qt::CaseInsensitive)) {
         *error = unreadable();

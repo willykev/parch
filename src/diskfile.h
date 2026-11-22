@@ -213,9 +213,10 @@ QByteArray encode(const QString &text, const TextConvention &convention);
 // place instead, so that it stays the same file: only once keep has taken
 // the bytes it holds, since a write cut short leaves a torn file. Without
 // keep, such a file is not saved. With an open directory, the expected
-// file and its replacement are accessed relative to that directory.
+// file and its replacement are accessed relative to that directory. A library
+// link update requires a replacement so a write cannot reach other hard links.
 SaveResult save(const QString &path, const QByteArray &bytes, const DiskVersion &expected,
-                const KeepCurrent &keep = {}, int directory = -1);
+                const KeepCurrent &keep = {}, int directory = -1, bool replacementOnly = false);
 // Makes a new file with the bytes at a name parch made up, or at a file it
 // makes again: in the path's folder, resolved, under its last part taken as
 // it is. It has the permission bits given, or else the default ones, less
@@ -232,11 +233,18 @@ SaveResult createAt(int directory, const QString &folder, const QString &leaf, c
 // Anything there but a link, a folder or a file, is left as it is:
 // Conflict, and nothing is written.
 SaveResult putAt(const QString &path, const QByteArray &bytes, quint32 mode = 0, const NameLink *expectedLink = nullptr);
-// Streams a regular file into a temporary sibling, then links it at a free name.
+// Stream a regular file and publish it only at a free name.
 SaveResult copyAt(int directory, const QString &folder, const QString &leaf, int source, qint64 size, quint32 mode);
 
 // Checks the published copy by identity and content before deleting either file.
 bool copyStillAt(int directory, const QByteArray &leaf, const DiskVersion &expected);
+// Publish a staged file only over the observed entry, or only at a free name.
+SaveResult publishAt(int directory, QByteArray &staged, const QByteArray &name, const struct stat *expected);
+SaveResult moveByLinkAt(int from, const QByteArray &oldName, int into, const QByteArray &newName, const struct stat &original);
+SaveResult moveDirectoryAt(int from, const QByteArray &oldName, int into, const QByteArray &newName, const struct stat &original);
+// Claim the name, then verify the entry that will actually be removed.
+bool removeCopyAt(int directory, const QByteArray &leaf, const DiskVersion &expected, QString *error,
+                  const std::function<bool()> &canRemove = {});
 
 // For tests: called with the path just before create() gives the new file
 // its name; and whether the file system is taken to rename without
@@ -247,6 +255,8 @@ void setAfterNaming(std::function<void(const QString &path)> hook);
 void setRenameWithoutReplacing(bool supported);
 // For tests: whether the file system is taken to make hard links.
 void setLinking(bool supported);
+void setFolderSyncError(std::function<int(int)> hook);
+void setBeforeClaim(std::function<void(const QString &)> hook);
 // For tests: called with the path once create() has made the file at its
 // name directly, where neither a rename that does not replace nor a link
 // works; an error number it returns fails the write as the system would.

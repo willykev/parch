@@ -2422,8 +2422,9 @@ void checkReportsWhetherHelpersAreConfined()
     box.write(QStringLiteral("doc.md"), QStringLiteral("Words.\n"));
     const Ran ran = box.run({"check", "--json", "doc.md"});
     QCOMPARE(ran.code, int(Cli::Ok));
+    QVERIFY(ran.json().value("helpers").toObject().value("missingConfinement").isArray());
     QCOMPARE(ran.json().value(QStringLiteral("helpers")).toObject().value(QStringLiteral("confined")),
-             QJsonValue(HelperConfinement::available()));
+             QJsonValue(ran.json().value("helpers").toObject().value("missingConfinement").toArray().isEmpty()));
 }
 
 void qtOptionsBeforeDoubleDash()
@@ -2734,6 +2735,27 @@ void exportNeverWritesThroughALink()
     struct stat status;
     QVERIFY(::stat(QFile::encodeName(plain).constData(), &status) == 0);
     QCOMPARE(status.st_mode & 07777, mode_t(0640));
+    const QString pipe = box.path(QStringLiteral("repo/pipe.json"));
+    QCOMPARE(::mkfifo(QFile::encodeName(pipe), 0600), 0);
+    QVERIFY(!Cli::outputRefusal(pipe, true).isEmpty());
+    QVERIFY(!Exporters::writeFile(pipe, "data", &error, ExistingOutput::ReplaceFile));
+    QVERIFY(::lstat(QFile::encodeName(pipe), &status) == 0 && S_ISFIFO(status.st_mode));
+    {
+        Exporters::PendingFile pending(plain, ExistingOutput::ReplaceFile);
+        QVERIFY(pending.write("new", &error));
+        QVERIFY(QFile::remove(plain));
+        QCOMPARE(::mkfifo(QFile::encodeName(plain), 0600), 0);
+        QVERIFY(!pending.commit(&error));
+        QVERIFY(::lstat(QFile::encodeName(plain), &status) == 0 && S_ISFIFO(status.st_mode));
+        QVERIFY(QFile::remove(plain));
+        QVERIFY(Exporters::writeFile(plain, "page", &error));
+        Exporters::PendingFile publishing(plain, ExistingOutput::ReplaceFile);
+        QVERIFY(publishing.write("new", &error));
+        QVERIFY(!publishing.commit(&error, [&](int, bool) {
+            return QFile::remove(plain) && ::mkfifo(QFile::encodeName(plain), 0600) == 0;
+        }));
+        QVERIFY(::lstat(QFile::encodeName(plain), &status) == 0 && S_ISFIFO(status.st_mode));
+    }
     // Nothing is left behind beside it.
     QStringList left = QDir(box.path(QStringLiteral("repo"))).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
     left.removeIf([](const QString &name) { return !name.contains(QStringLiteral("parch-")); });

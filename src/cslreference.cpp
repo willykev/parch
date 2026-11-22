@@ -657,7 +657,8 @@ BibliographyDatabase::Format BibliographyDatabase::formatForPath(const QString &
     const QString suffix = QFileInfo(path).suffix().toLower();
     if (suffix == u"json") return Format::CslJson;
     if (suffix == u"yaml" || suffix == u"yml") return Format::CslYaml;
-    return Format::BibLaTeX;
+    if (suffix == u"bib" || suffix == u"bibtex" || suffix == u"biblatex") return Format::BibLaTeX;
+    return Format::Auto;
 }
 
 BibliographyDatabase BibliographyDatabase::fromFile(const QString &path, Format format, const QStringList *folders)
@@ -746,11 +747,12 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
             database.m_diagnostics.append({BibliographyDiagnostic::Severity::Warning,
                                            QStringLiteral("The bibliography holds no entries yet."), {}, 0});
     };
-    if (format == Format::BibLaTeX) {
+    if (format == Format::BibLaTeX || format == Format::Auto) {
         const BibTeX::Result result = BibTeX::parse(QString::fromUtf8(data));
         database.m_valid = true;
         database.m_diagnostics = result.diagnostics;
         for (const BibTeX::Entry &entry : result.entries) database.add(entry.reference, entry.line);
+        database.m_hasReferenceEntries = !database.m_references.isEmpty();
         checkEntries();
         return database;
     }
@@ -787,26 +789,27 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
         items = root.toArray();
     } else if (root.isObject()) {
         const QJsonObject object = root.toObject();
-        if (object.value(QStringLiteral("references")).isArray()) {
-            items = object.value(QStringLiteral("references")).toArray();
-            sequence = sharing.field(sharing.root, QStringLiteral("references"));
-        } else if (object.value(QStringLiteral("items")).isArray()) {
-            items = object.value(QStringLiteral("items")).toArray();
-            sequence = sharing.field(sharing.root, QStringLiteral("items"));
-        } else if (object.contains(QStringLiteral("id"))) {
+        const QString field = object.contains(QStringLiteral("references")) ? QStringLiteral("references") : QStringLiteral("items");
+        if (object.value(field).isArray()) {
+            items = object.value(field).toArray();
+            sequence = sharing.field(sharing.root, field);
+        } else if (format == Format::CslYaml && object.contains(QStringLiteral("id")) && !object.contains(field)) {
             items.append(object);
             single = true;
+        } else {
+            error(QStringLiteral("The bibliography needs a list of reference objects."), 0);
+            return database;
         }
-    } else if (!root.isNull()) {
+    } else if (format == Format::CslJson || !root.isNull()) {
         error(QStringLiteral("The bibliography holds no list of references."), 0);
         return database;
     }
     database.m_valid = true;
     for (qsizetype i = 0; i < items.size(); ++i) {
         if (!items[i].isObject()) {
-            database.m_diagnostics.append({BibliographyDiagnostic::Severity::Warning,
-                                           QStringLiteral("Item %1 is not an object and is ignored.").arg(i + 1), {}, 0});
-            continue;
+            error(QStringLiteral("Reference %1 is not an object.").arg(i + 1), 0);
+            database.m_valid = false;
+            return database;
         }
         const auto item = items.at(i).toObject();
         CslReference key;
@@ -814,7 +817,12 @@ BibliographyDatabase BibliographyDatabase::fromData(const QByteArray &data, Form
         if (key.id.isEmpty() || database.find(key.id)) database.add(std::move(key), 0);
         else {
             const int shape = sequence < 0 || single ? sequence : sharing.shapes[size_t(sequence)].elements.value(i, -1);
-            database.add(readReference(item, nullptr, sharing, shape), 0);
+            auto reference = readReference(item, nullptr, sharing, shape);
+            if (!item.value(QStringLiteral("type")).toString().trimmed().isEmpty() ||
+                !reference.fields.value(QStringLiteral("title")).trimmed().isEmpty() ||
+                !reference.names.value(QStringLiteral("author")).isEmpty())
+                database.m_hasReferenceEntries = true;
+            database.add(std::move(reference), 0);
         }
     }
     checkEntries();

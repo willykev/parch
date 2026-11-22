@@ -718,7 +718,7 @@ ApplicationWindow {
         case "newDocumentInFolder":
             return tabs.activePath.length > 0 && backend.organizer.libraryOf(tabs.activePath).length > 0
         case "reopenWithEncoding":
-            return document.state === Document.ReadOnly && !document.scratch
+            return document.state === Document.ReadOnly && !document.scratch && !document.missingLink
         default:
             return true
         }

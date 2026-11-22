@@ -82,6 +82,8 @@ const Exporter *forFile(const QString &path)
 
 namespace {
 
+std::optional<gid_t> testGroup;
+
 const struct stat *ownedAccess(const struct stat &state)
 {
     return S_ISREG(state.st_mode) && DiskFile::ownedBySavingUser(state.st_uid) ? &state : nullptr;
@@ -108,7 +110,9 @@ int keepAccess(int folder, const QByteArray &name, const struct stat &there, int
     }
     struct stat made{};
     if (::fstat(replacement, &made) != 0) return errno;
-    if (made.st_gid != there.st_gid && ::fchown(replacement, uid_t(-1), there.st_gid) != 0) return errno;
+    const gid_t group = testGroup.value_or(there.st_gid);
+    if (made.st_gid != group && ::fchown(replacement, uid_t(-1), group) != 0 &&
+        errno != EPERM && errno != EACCES && errno != EINVAL && errno != EOPNOTSUPP && errno != ENOSYS) return errno;
     if (::fchmod(replacement, there.st_mode & 0777) != 0) return errno;
     if (from < 0) return 0;
     ssize_t size = ::flistxattr(from, nullptr, 0);
@@ -129,6 +133,11 @@ int keepAccess(int folder, const QByteArray &name, const struct stat &there, int
 }
 
 } // namespace
+
+void setReplacementGroupForTests(std::optional<gid_t> group)
+{
+    testGroup = group;
+}
 
 bool isSource(const md::Document &document, const Dialect::Choice &dialect, const QString &path)
 {
@@ -187,6 +196,8 @@ bool PendingFile::write(const QByteArray &bytes, QString *error)
     if (!exists && errno != ENOENT) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
     if (exists && m_existing == ExistingOutput::Refuse) return fail(QStringLiteral("already exists"), error);
     if (exists && S_ISDIR(there.st_mode)) return fail(QStringLiteral("it is a folder"), error);
+    if (exists && !S_ISREG(there.st_mode) && !(m_existing == ExistingOutput::ReplaceLink && S_ISLNK(there.st_mode)))
+        return fail(QStringLiteral("it is not a regular file"), error);
     if (m_existing != ExistingOutput::Refuse && !stage(bytes, exists ? ownedAccess(there) : nullptr, error)) return false;
     m_contents = bytes;
     return true;
@@ -256,6 +267,8 @@ bool PendingFile::commit(QString *error, const std::function<bool(int, bool)> &p
     if (!exists && errno != ENOENT) return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
     if (exists && m_existing == ExistingOutput::Refuse) return fail(QStringLiteral("already exists"), error);
     if (exists && S_ISDIR(current.st_mode)) return fail(QStringLiteral("it is a folder"), error);
+    if (exists && !S_ISREG(current.st_mode) && !(m_existing == ExistingOutput::ReplaceLink && S_ISLNK(current.st_mode)))
+        return fail(QStringLiteral("it is not a regular file"), error);
     const struct stat *access = exists ? ownedAccess(current) : nullptr;
     // A different file or access list may have taken its place while the
     // export was written. Restage with the current permissions before publication.
@@ -265,8 +278,9 @@ bool PendingFile::commit(QString *error, const std::function<bool(int, bool)> &p
         const SaveResult made = DiskFile::createAt(m_folder, QFileInfo(m_path).absolutePath(), QFile::decodeName(m_name), *m_contents);
         if (made.status != SaveStatus::Saved)
             return fail(made.status == SaveStatus::Conflict ? QStringLiteral("already exists") : made.error, error);
-    } else if (::renameat(m_folder, m_temporary.constData(), m_folder, m_name.constData()) != 0) {
-        return fail(QString::fromLocal8Bit(std::strerror(errno)), error);
+    } else {
+        const auto published = DiskFile::publishAt(m_folder, m_temporary, m_name, exists ? &current : nullptr);
+        if (published.status != SaveStatus::Saved) return fail(published.error, error);
     }
     m_temporary.clear();
     m_contents.reset();

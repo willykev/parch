@@ -443,8 +443,10 @@ private slots:
     void screenshotWritesNothingOfThePersons() { ScreenshotTests::writesNothingOfThePersons(); }
     void screenshotNamesWhatCannotBeDone() { ScreenshotTests::namesWhatCannotBeDone(); }
     // Exports and printing. The tests themselves are in exporttests.cpp.
+    void onlyReferenceFilesTravelWithMarkdown() { ExportTests::onlyReferenceFilesTravelWithMarkdown(); }
     void aBibliographyThatIsNotOneStaysBehind() { ExportTests::aBibliographyThatIsNotOneStaysBehind(); }
     void copiedCitationFilesAreListed() { ExportTests::copiedCitationFilesAreListed(); }
+    void aReferenceListMustBeAnArrayOfObjects() { ExportTests::aReferenceListMustBeAnArrayOfObjects(); }
     void checkReportsABibliographyThatCannotBeRead() { ExportTests::checkReportsABibliographyThatCannotBeRead(); }
     void anEmptyBibliographyIsAWarning_data() { ExportTests::anEmptyBibliographyIsAWarning_data(); }
     void anEmptyBibliographyIsAWarning() { ExportTests::anEmptyBibliographyIsAWarning(); }
@@ -466,7 +468,9 @@ private slots:
     void picturesAreReadByTheirOwnFormat_data() { ExportTests::picturesAreReadByTheirOwnFormat_data(); }
     void picturesAreReadByTheirOwnFormat() { ExportTests::picturesAreReadByTheirOwnFormat(); }
     void exportedSvgPicturesHoldNoScript_data() { ExportTests::exportedSvgPicturesHoldNoScript_data(); }
+    void svgExportKeepsViewportAndNamedView() { ExportTests::svgExportKeepsViewportAndNamedView(); }
     void exportedSvgPicturesHoldNoScript() { ExportTests::exportedSvgPicturesHoldNoScript(); }
+    void embeddedPicturesKeepTheirViewFragments() { ExportTests::embeddedPicturesKeepTheirViewFragments(); }
     void inlineFormulaSvgKeepsOnlyDrawingElements() { ExportTests::inlineFormulaSvgKeepsOnlyDrawingElements(); }
     void hugeSvgSizesAreDrawnWithinBounds() { ExportTests::hugeSvgSizesAreDrawnWithinBounds(); }
     void onePictureNamedManyWaysIsDecodedOnce() { ExportTests::onePictureNamedManyWaysIsDecodedOnce(); }
@@ -1090,6 +1094,8 @@ private slots:
     void webPicturesCheckTransitionAddresses() { SecurityTests::webPicturesCheckTransitionAddresses(); }
     void aHelperCannotReadOutsideItsFolders() { SecurityTests::aHelperCannotReadOutsideItsFolders(); }
     void helpersAreNotTakenFromTheProgramsOwnFolder() { SecurityTests::helpersAreNotTakenFromTheProgramsOwnFolder(); }
+    void helperRulesMatchTheKernelABI() { SecurityTests::helperRulesMatchTheKernelABI(); }
+    void fixtureExtractionUsesAnIsolatedInterpreter() { SecurityTests::fixtureExtractionUsesAnIsolatedInterpreter(); }
     void helpersRunWithinLimits() { SecurityTests::helpersRunWithinLimits(); }
     void aLinkedAssetsFolderIsNotFollowed() { SecurityTests::aLinkedAssetsFolderIsNotFollowed(); }
     void bigPastesConvertOffTheWindowThread() { SecurityTests::bigPastesConvertOffTheWindowThread(); }
@@ -1306,6 +1312,16 @@ private slots:
     void aLinkedFolderOutsideIsNotAMoveDestination() { LibraryTests::aLinkedFolderOutsideIsNotAMoveDestination(); }
     void renameAndTrashRefuseAPathThroughALinkOutside() { LibraryTests::renameAndTrashRefuseAPathThroughALinkOutside(); }
     void linksInsideTheLibraryStillWork() { LibraryTests::linksInsideTheLibraryStillWork(); }
+    void aNewSaveAsNameUsesTheUmask() { LibraryTests::aNewSaveAsNameUsesTheUmask(); }
+    void closingAMissingLinkReleasesItsName() { LibraryTests::closingAMissingLinkReleasesItsName(); }
+    void aLinkEntryCanBeRenamedAndTrashed() { LibraryTests::aLinkEntryCanBeRenamedAndTrashed(); }
+    void aLibraryUnderALinkScansItsDocuments() { LibraryTests::aLibraryUnderALinkScansItsDocuments(); }
+    void linkUpdatesKeepOtherHardLinksIntact() { LibraryTests::linkUpdatesKeepOtherHardLinksIntact(); }
+    void openingAMovingDocumentSharesItsBuffer() { LibraryTests::openingAMovingDocumentSharesItsBuffer(); }
+    void replacingALinkKeepsAConcurrentFile() { LibraryTests::replacingALinkKeepsAConcurrentFile(); }
+    void aCopyCanUseAnExclusiveFileOnALinklessVolume() { LibraryTests::aCopyCanUseAnExclusiveFileOnALinklessVolume(); }
+    void aMoveRemovesOnlyTheRevisionsItClaimed() { LibraryTests::aMoveRemovesOnlyTheRevisionsItClaimed(); }
+    void aFolderMoveCanExchangeAnExclusiveName() { LibraryTests::aFolderMoveCanExchangeAnExclusiveName(); }
     void saveAsOntoADanglingLinkAsks() { LibraryTests::saveAsOntoADanglingLinkAsks(); }
     void savingAtALinkOffersTheAvailableChoices() { LibraryTests::savingAtALinkOffersTheAvailableChoices(); }
     void aDanglingLinkNamedAtLaunchCreatesNothing() { LibraryTests::aDanglingLinkNamedAtLaunchCreatesNothing(); }
@@ -3987,8 +4003,19 @@ void ParchTests::everyNamingSyncsItsFolder()
     QCOMPARE(DiskFile::create(root.filePath(QStringLiteral("copy.md")), "copy\n").status, SaveStatus::Saved);
     QVERIFY(DiskFile::folderSyncs() > before);
     before = DiskFile::folderSyncs();
+    bool syncable = false;
+    DiskFile::setFolderSyncError([&](int fd) {
+        syncable = (::fcntl(fd, F_GETFL) & O_PATH) == 0;
+        return 0;
+    });
+    const auto clearSync = qScopeGuard([] { DiskFile::setFolderSyncError({}); });
     QCOMPARE(DiskFile::putAt(root.filePath(QStringLiteral("put.md")), "put\n").status, SaveStatus::Saved);
+    QVERIFY(syncable);
     QVERIFY(DiskFile::folderSyncs() > before);
+    before = DiskFile::folderSyncs();
+    DiskFile::setFolderSyncError([](int) { return EIO; });
+    QCOMPARE(DiskFile::putAt(root.filePath("unsynced.md"), "text").status, SaveStatus::Failed);
+    QCOMPARE(DiskFile::folderSyncs(), before);
 }
 
 void ParchTests::recoverySweepsTemporariesACrashLeft()
@@ -18024,6 +18051,19 @@ void ParchTests::crossDeviceMovesKeepChangedSources()
     QCOMPARE(readFile(target), QByteArray("changed at destination"));
     DiskFile::setAfterNaming({});
 
+    QVERIFY(QFile::remove(target));
+    writeFile(file, "original");
+    const QString replacement = f.file("replacement.bin");
+    writeFile(replacement, "new revision");
+    DiskFile::setAfterNaming([&](const QString &path) {
+        if (path == target) ::rename(QFile::encodeName(replacement), QFile::encodeName(file));
+    });
+    f.organizer()->move(file, other->path());
+    QTRY_VERIFY(!f.organizer()->busy());
+    QCOMPARE(readFile(file), QByteArray("new revision"));
+    QVERIFY(!QFileInfo::exists(target));
+    DiskFile::setAfterNaming({});
+
     // The same move can be retried once the source folder is writable.
     const QString lockedFolder = f.file("read-only"), locked = lockedFolder + "/kept.bin";
     const QString copy = other->filePath("kept.bin");
@@ -23254,6 +23294,14 @@ void ParchTests::pastedImagesAreSavedAsAssets()
     QCOMPARE(filesIn(assets).size(), 3);
     // With its alt text the caret follows it in.
     QCOMPARE(view.binding->cursorSource(), int(QStringLiteral("![Red square](assets/pasted-2026-11-16-1.png)").size()));
+    const QByteArray svg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10000 10000'><circle r='1'/></svg>");
+    auto *vector = new QMimeData;
+    vector->setData("image/svg+xml", svg);
+    QGuiApplication::clipboard()->setMimeData(vector);
+    QTest::keyClick(&view.window, Qt::Key_V, Qt::ControlModifier);
+    const QString drawing = assets + QStringLiteral("/pasted-2026-11-16-1.svg");
+    QTRY_VERIFY(QFile::exists(drawing));
+    QCOMPARE(readFile(drawing), svg);
 }
 
 void ParchTests::pastedHtmlImagesLandOnceSaved()

@@ -14,6 +14,8 @@ void webPicturesComeOnlyFromPublicAddresses();
 void webPicturesNeverComeFromThisComputersNetworks();
 void exportsAskBeforeReplacingALink();
 void parchKeepsItsFilesToItself();
+void helperRulesMatchTheKernelABI();
+void fixtureExtractionUsesAnIsolatedInterpreter();
 void helpersRunWithinLimits();
 void aLinkedAssetsFolderIsNotFollowed();
 void bigPastesConvertOffTheWindowThread();

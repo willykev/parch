@@ -130,7 +130,7 @@ namespace {
 
 // Keep named views and the coordinates used by svgView fragments. Only the
 // geometry of the views travels from the source into the new drawing.
-void keepViews(const QByteArray &svg, QByteArray &drawing)
+void keepViews(const QByteArray &svg, const QSizeF &viewport, QByteArray &drawing)
 {
     static const QRegularExpression separator(QStringLiteral("[,\\s]+"));
     const auto box = [&](QStringView value) -> QRectF {
@@ -147,6 +147,7 @@ void keepViews(const QByteArray &svg, QByteArray &drawing)
     QXmlStreamReader xml(svg);
     if (!xml.readNextStartElement()) return;
     const auto canvas = box(xml.attributes().value(u"viewBox"));
+    const auto aspect = xml.attributes().value(u"preserveAspectRatio").toString();
     const auto svgNamespace = xml.namespaceUri().toString();
     QByteArray views;
     QXmlStreamWriter writer(&views);
@@ -166,13 +167,15 @@ void keepViews(const QByteArray &svg, QByteArray &drawing)
             writer.writeAttribute(QStringLiteral("preserveAspectRatio"), attrs.value(u"preserveAspectRatio").toString());
         writer.writeEndElement();
     }
-    if (canvas.isValid() && !canvas.topLeft().isNull()) {
+    if (canvas.isValid() && (!canvas.topLeft().isNull() || canvas.size() != viewport || !aspect.isEmpty())) {
         // Cairo's viewport starts at zero. Position it within the source's
         // view box so a fragment can still select the original coordinates.
         const QString frame = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%1\" height=\"%2\" "
-                                             "viewBox=\"%3 %4 %1 %2\"><g transform=\"translate(%3 %4)\">")
-                                  .arg(canvas.width(), 0, 'g', 16).arg(canvas.height(), 0, 'g', 16)
-                                  .arg(canvas.x(), 0, 'g', 16).arg(canvas.y(), 0, 'g', 16);
+                                             "viewBox=\"%3 %4 %5 %6\"%7><g transform=\"translate(%3 %4)\">")
+                                  .arg(QString::number(viewport.width(), 'g', 16), QString::number(viewport.height(), 'g', 16),
+                                       QString::number(canvas.x(), 'g', 16), QString::number(canvas.y(), 'g', 16),
+                                       QString::number(canvas.width(), 'g', 16), QString::number(canvas.height(), 'g', 16),
+                                       aspect.isEmpty() ? QString() : QStringLiteral(" preserveAspectRatio=\"%1\"").arg(aspect.toHtmlEscaped()));
         drawing.insert(drawing.indexOf("<svg"), frame.toUtf8());
         drawing.append("</g>").append(views).append("</svg>");
     } else if (!views.isEmpty()) {
@@ -192,9 +195,10 @@ QString Assets::picture(const QByteArray &data, const QString &suggested, QStrin
     const QString type = source.mediaType();
     if (m_mode == Mode::Markdown) return place(data, type, suggested);
     if (source.format == "svg") {
-        QByteArray plain = SvgPaper::plain(source.bytes, error);
+        QSizeF viewport;
+        QByteArray plain = SvgPaper::plain(source.bytes, error, &viewport);
         if (plain.isEmpty()) return {};
-        keepViews(source.bytes, plain);
+        keepViews(source.bytes, viewport, plain);
         return place(plain, type, suggested);
     }
     if (source.format == "png" || source.format == "jpeg" || source.format == "gif" || source.format == "webp")

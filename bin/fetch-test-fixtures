@@ -34,7 +34,7 @@ curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
 mkdir "$WORK/suite"
 # Only file contents are copied. Destination names come from the checksum
 # list, and permissions and ownership come from the local filesystem.
-python3 - "$WORK/suite.tar.gz" "$LIST" "$COMMIT" "$WORK/suite" <<'PY'
+python3 -I - "$WORK/suite.tar.gz" "$LIST" "$COMMIT" "$WORK/suite" <<'PY'
 from pathlib import Path
 import shutil
 import sys

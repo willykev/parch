@@ -611,6 +611,13 @@ Destination classifyDestination(const QString &destination, const QString &baseD
             return result;
         }
         if (result.scheme != u"file") {
+            if (result.scheme == u"data") {
+                const qsizetype hash = destination.indexOf(u'#');
+                if (hash >= 0) {
+                    result.encodedFragment = destination.sliced(hash + 1);
+                    result.fragment = QUrl::fromPercentEncoding(result.encodedFragment->toUtf8());
+                }
+            }
             result.kind = Destination::Kind::OtherScheme;
             return result;
         }

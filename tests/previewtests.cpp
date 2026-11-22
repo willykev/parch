@@ -539,6 +539,8 @@ void previewBuildsListsQuotesAndRules()
     QVERIFY(lines.contains(QStringLiteral("2)") + gap + QStringLiteral("loose four")));
     QVERIFY(lines.contains(QChar::ObjectReplacementCharacter + QString(gap) + QStringLiteral("to do")));
     QVERIFY(lines.contains(QChar::ObjectReplacementCharacter + QString(gap) + QStringLiteral("done well")));
+    const auto raw = build(QStringLiteral("<ol start='2147483647'><li>One</li><li>Two</li></ol>"));
+    QVERIFY(raw->lines().contains(QStringLiteral("2147483648.") + gap + QStringLiteral("Two")));
     // The Standard profile numbers a list from the number it starts with.
     const auto standard = build(QStringLiteral("5. five\n6. six\n"), md::Options::standard());
     QVERIFY(standard->lines().contains(QStringLiteral("5.") + gap + QStringLiteral("five")));

@@ -139,6 +139,7 @@ signals:
 
 private:
     bool m_crossDevice = false;
+    QString m_reservedMove;
     struct FilePlan {
         QString path;
         QList<DocumentLinks::Change> changes;
@@ -208,7 +209,7 @@ private:
     static std::optional<Patched> inverseFor(const QString &path, const QString &documentId, const QString &text,
                                             const QList<SourceEdit> &edits, int references, QString *written);
     static std::optional<QList<SourceEdit>> inverseEdits(const Patched &patch, const QString &text, SourceBuffer *buffer = nullptr);
-    static void rewriteOpen(const StagedRewrite &staged, Document *open, Rewritten &done);
+    void rewriteOpen(const StagedRewrite &staged, Document *open, Rewritten &done);
     static void rewriteClosed(const StagedRewrite &staged, const QStringList &roots, History *history, Rewritten &done);
     static QList<SourceEdit> referenceEdits(const QList<DocumentLinks::Change> &changes, const QString &path, Rewritten &done);
     void finishUndo(Plan back, const QList<Patched> &open, QList<StagedRewrite> closed, QStringList failed);

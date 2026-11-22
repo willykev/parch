@@ -1697,15 +1697,23 @@ bool HtmlMarkdown::fitsInput(QStringView html)
 }
 
 QString HtmlMarkdown::convert(const QString &html, const ImageSink &images, bool *inlineOnly, bool mergedCells,
-                              QStringList *imageErrors, qsizetype maxOutput)
+                              QStringList *imageErrors, qsizetype maxOutput, const QString &longestImagePath)
 {
     if (inlineOnly) *inlineOnly = false;
     if (!fitsInput(html)) return {};
     const qsizetype limit = std::min({maxOutput, MaxInputBytes, std::max<qsizetype>(1024 * 1024, 4 * html.size())});
     try {
         Parser parser(withoutHeader(html));
+        const Node *root = parser.parse();
+        if (images && !longestImagePath.isEmpty()) {
+            // Fit the complete paste before any embedded image reaches disk.
+            // A collision can give the real asset a longer numbered name.
+            const ImageSink measure = [&](const QByteArray &, const QString &) { return longestImagePath; };
+            Converter preflight(limit, measure, mergedCells, nullptr);
+            preflight.flow(root, 0);
+        }
         Converter converter(limit, images, mergedCells, imageErrors);
-        const Blocks blocks = converter.flow(parser.parse(), 0);
+        const Blocks blocks = converter.flow(root, 0);
         if (inlineOnly) *inlineOnly = blocks.size() == 1 && blocks.first().kind == Block::Paragraph;
         return joined(blocks);
     } catch (const OutputLimitReached &) {

@@ -584,7 +584,9 @@ int check(const QStringList &arguments, const Context &context)
             helperPaths.insert(QStringLiteral("merman-cli"), helpers.merman);
         }
         // Whether the helpers run cut off from the network, as the kernel allows.
-        helperPaths.insert(QStringLiteral("confined"), HelperConfinement::available());
+        const auto missing = HelperConfinement::missingProtections();
+        helperPaths.insert(QStringLiteral("confined"), missing.isEmpty());
+        helperPaths.insert(QStringLiteral("missingConfinement"), QJsonArray::fromStringList(missing));
         helperPaths.insert(QStringLiteral("isolated"), HelperProcess::canIsolate());
         result.insert(QStringLiteral("renderers"), used);
         result.insert(QStringLiteral("helpers"), helperPaths);
@@ -1114,6 +1116,7 @@ QString outputRefusal(const QString &output, bool force)
         return why + QStringLiteral(", even with --force: choose another name, or remove the link");
     if (info.isDir()) return QStringLiteral("%1 is a folder").arg(output);
     if (!QFileInfo(info.absolutePath()).isDir()) return QStringLiteral("there is no folder %1").arg(info.absolutePath());
+    if (info.exists() && !info.isFile()) return QStringLiteral("%1 is not a regular file").arg(output);
     if (info.exists() && !force) return QStringLiteral("%1 is already there; give --force to replace it").arg(output);
     return {};
 }

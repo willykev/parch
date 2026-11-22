@@ -53,4 +53,12 @@ void pathologicalBlocksStayCheapToLayOut();
 void drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize();
 void headingLinksAreFoundInTheSharedParse();
 
+void aLinkHintShowsTheHostItOpens();
+void aWebLinkWithUserInfoAsksFirst();
+void theLinkDialogNeverElidesTheHost();
+void aMailLinkWithAnAttachmentAsksFirst();
+void showingWebPicturesApprovesTheirHosts();
+void aPictureFromANewHostAsksAgain();
+void anOlderShowThemSettingStillWorks();
+
 } // namespace PreviewTests

@@ -60,7 +60,7 @@ Rectangle {
     // A link names a document to open, and perhaps a heading of it by its slug.
     signal openRequested(string path, string heading)
     // A link leads out of parch in a way that is asked about first, as Preview's linkAsked().
-    signal linkAsked(string target, string shown, string scheme, bool local)
+    signal linkAsked(string target, string shown, string scheme, bool local, string origin, bool userInfo)
     signal escapePressed()
 
     // Gives the keys to the preview; `byKeys` when a key asked for it, as
@@ -105,7 +105,7 @@ Rectangle {
         scale: Screen.devicePixelRatio
         remoteImages: pane.remoteImages
         onOpenRequested: (path, heading) => pane.openRequested(path, heading)
-        onLinkAsked: (target, shown, scheme, local) => pane.linkAsked(target, shown, scheme, local)
+        onLinkAsked: (target, shown, scheme, local, origin, userInfo) => pane.linkAsked(target, shown, scheme, local, origin, userInfo)
     }
 
     // The advance of "0" in the reading face, the width CSS calls one character.
@@ -123,7 +123,7 @@ Rectangle {
         id: webNotice
         objectName: "webPicturesNotice"
         readonly property real pad: Math.round(theme.fontSize / 2)
-        visible: pane.document !== null && preview.webPictures && !pane.remoteImages
+        visible: pane.document !== null && preview.heldWebPictures
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -140,7 +140,8 @@ Rectangle {
             anchors.right: showWeb.left
             anchors.rightMargin: webNotice.pad
             anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("This document shows pictures from the web.")
+            text: preview.hasApprovedHosts ? qsTr("This document shows pictures from places it did not before.")
+                                           : qsTr("This document shows pictures from the web.")
             textFormat: Text.PlainText
             font.family: theme.fontFamily
             font.pixelSize: theme.sizes.small
@@ -159,8 +160,8 @@ Rectangle {
             text: qsTr("Show them")
             font.pixelSize: theme.sizes.small
             Accessible.name: text
-            Accessible.description: qsTr("Fetches this document's pictures from the web, now and whenever it is opened. Preferences shows them in every document.")
-            onClicked: pane.application.documentSettings.setRemotePictures(pane.document, true)
+            Accessible.description: qsTr("Fetch pictures from the hosts this document names, now and whenever it is opened.")
+            onClicked: preview.showWebPictures()
         }
     }
 

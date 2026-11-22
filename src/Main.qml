@@ -1141,9 +1141,8 @@ ApplicationWindow {
                     fontFamily: settings.previewFontFamily
                     fontPixelSize: settings.previewFontPixelSize
                     lineHeight: settings.previewLineHeight
-                    // Pictures from the web, for every document or as this one chose.
+                    // The preview also checks the hosts approved for this document.
                     remoteImages: settings.remoteImages
-                                  || (backend.documentSettings.revision >= 0 && backend.documentSettings.remotePictures(window.document))
                     // The caret goes to what was double-clicked, and the keys
                     // with it where the text is shown.
                     onSourceRequested: (position) => {
@@ -1162,7 +1161,7 @@ ApplicationWindow {
                         if (heading.length > 0 && (window.document !== from || window.tabs.activePath === path))
                             Qt.callLater(window.showAnchor, heading)
                     }
-                    onLinkAsked: (target, shown, scheme, local) => openLinkDialog.made().ask(target, shown, scheme, local)
+                    onLinkAsked: (target, shown, scheme, local, origin, userInfo) => openLinkDialog.made().ask(target, shown, scheme, local, origin, userInfo)
                     onEscapePressed: window.escapeInText()
                 }
 

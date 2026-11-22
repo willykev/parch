@@ -20,4 +20,9 @@ void bigPastesConvertOffTheWindowThread();
 void aWordTooLongToBreakKeepsTypingQuick();
 void aLongPdfStaysCancellableWhileItIsSet();
 
+void aWebPictureRedirectChecksItsHostAndAddresses();
+void webPicturesCheckTransitionAddresses();
+void aHelperCannotReadOutsideItsFolders();
+void helpersAreNotTakenFromTheProgramsOwnFolder();
+
 } // namespace SecurityTests

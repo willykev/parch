@@ -188,10 +188,26 @@ Dialect::Layer Store::document(const QString &documentId) const
 
 bool Store::remotePictures(const QString &documentId) const
 {
-    return m_stored.value(documentsKey).toObject().value(documentId).toObject().value(remotePicturesKey).toBool();
+    return needsPictureHosts(documentId) || !pictureHosts(documentId).isEmpty();
 }
 
-bool Store::setRemotePictures(const QString &documentId, bool shown, QString *error)
+bool Store::needsPictureHosts(const QString &documentId) const
+{
+    return m_stored.value(documentsKey).toObject().value(documentId).toObject().value(remotePicturesKey) == QJsonValue(true);
+}
+
+QSet<QString> Store::pictureHosts(const QString &documentId) const
+{
+    QSet<QString> hosts;
+    const auto saved = m_stored.value(documentsKey).toObject().value(documentId).toObject().value(remotePicturesKey).toArray();
+    for (const auto &item : saved) {
+        const auto host = item.toString();
+        if (!host.isEmpty()) hosts.insert(host);
+    }
+    return hosts;
+}
+
+bool Store::setPictureHosts(const QString &documentId, const QSet<QString> &hosts, QString *error)
 {
     if (!AppPaths::isDocumentId(documentId)) {
         if (error) *error = QStringLiteral("%1 is not a document id").arg(documentId);
@@ -199,8 +215,13 @@ bool Store::setRemotePictures(const QString &documentId, bool shown, QString *er
     }
     QJsonObject entries = m_stored.value(documentsKey).toObject();
     QJsonObject entry = entries.value(documentId).toObject();
-    if (shown) entry.insert(remotePicturesKey, true);
-    else entry.remove(remotePicturesKey);
+    if (hosts.isEmpty()) {
+        entry.remove(remotePicturesKey);
+    } else {
+        QStringList sorted = hosts.values();
+        sorted.sort();
+        entry.insert(remotePicturesKey, QJsonArray::fromStringList(sorted));
+    }
     if (entry.isEmpty()) entries.remove(documentId);
     else entries.insert(documentId, entry);
     if (entries.isEmpty()) m_stored.remove(documentsKey);

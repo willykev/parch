@@ -1,4 +1,5 @@
 #include "previewbuilder.h"
+#include "preview.h"
 #include "mdtable.h"
 
 #include "codehighlight.h"
@@ -1802,7 +1803,7 @@ void Builder::inl(const Node &node, const Char &given)
             inner.underline = true;
             // Where it leads always, and its title after that, so that a
             // title can never pass for where the link goes.
-            inner.tip = node.title.isEmpty() ? node.dest : node.dest + u'\n' + node.title;
+            inner.tip = Preview::linkHint(inner.href, node.title);
         }
         // A heading that is not there.
         if (state.ink == PreviewStyle::Danger && !node.resolved) {
@@ -1891,7 +1892,7 @@ void Builder::htmlInline(const Node &node, const Char &state)
             inner.ink = PreviewStyle::Link;
             inner.underline = true;
             const QString title = attribute(QLatin1StringView("title"));
-            inner.tip = title.isEmpty() ? href : href + u'\n' + title;
+            inner.tip = Preview::linkHint(inner.href, title);
         }
     }
     anchor(node, 0);

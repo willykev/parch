@@ -250,18 +250,29 @@ bool DocumentSettingsStore::remotePictures(Document *document) const
     return m_store.remotePictures(document->id());
 }
 
-bool DocumentSettingsStore::setRemotePictures(Document *document, bool shown)
+QSet<QString> DocumentSettingsStore::pictureHosts(Document *document) const
+{
+    if (!document) return {};
+    return document->isScratch() ? m_scratchPictures.value(document->id()) : m_store.pictureHosts(document->id());
+}
+
+bool DocumentSettingsStore::needsPictureHosts(Document *document) const
+{
+    return document && !document->isScratch() && m_store.needsPictureHosts(document->id());
+}
+
+bool DocumentSettingsStore::setPictureHosts(Document *document, const QSet<QString> &hosts)
 {
     if (!document) return false;
-    if (remotePictures(document) == shown) return true;
+    if (!needsPictureHosts(document) && pictureHosts(document) == hosts) return true;
     QString error;
     bool kept = true;
     if (document->isScratch()) {
-        if (shown) m_scratchPictures.insert(document->id());
+        if (!hosts.isEmpty()) m_scratchPictures.insert(document->id(), hosts);
         else m_scratchPictures.remove(document->id());
     } else {
         // A change that could not be written still applies while parch runs.
-        kept = m_store.setRemotePictures(document->id(), shown, &error);
+        kept = m_store.setPictureHosts(document->id(), hosts, &error);
         if (!kept) emit problem(tr("Document settings not saved"), error);
     }
     ++m_revision;

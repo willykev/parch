@@ -37,8 +37,7 @@ public:
     void setRenderService(RenderService *service);
     // Without a fetcher, or when not allowed, images from the network are not shown.
     void setFetcher(RemoteFetcher *fetcher);
-    void setRemoteAllowed(bool allowed);
-    bool remoteAllowed() const { return m_remoteAllowed; }
+    bool setRemoteAllowed(bool all, const QSet<QString> &hosts = {});
     // What formulas and diagrams are drawn with. A change draws them again.
     void setColors(const RenderColors &colors);
     void setScale(qreal scale);
@@ -67,11 +66,16 @@ signals:
     void changed(const QString &key);
 
 private:
+    struct WebRequest : QObject {
+        QSet<QString> hosts;
+        QString heldHost;
+    };
     struct Entry {
         preview::Picture picture;
         // What it was drawn with; another value asks for it again.
         QString drawnWith;
         QString askedWith;
+        std::shared_ptr<WebRequest> webRequest;
         QString imagePath;
         QStringList imageFolders;
         quint64 ticket = 0;
@@ -89,6 +93,7 @@ private:
     RenderService *m_service = nullptr;
     RemoteFetcher *m_fetcher = nullptr;
     bool m_remoteAllowed = false;
+    QSet<QString> m_remoteHosts;
     RenderColors m_colors;
     qreal m_scale = 1;
     QString m_labelFamily;

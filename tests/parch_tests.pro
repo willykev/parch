@@ -16,6 +16,13 @@ DEFINES += PARCH_VERSION=\\\"$$VERSION\\\"
 # is not at a fixed depth below the repository root.
 DEFINES += PARCH_SOURCE_DIR=\\\"$$clean_path($$PWD/..)\\\"
 
+drawingfixture.target = drawing-fixture
+drawingfixture.depends = $$PWD/drawingfixture.cpp
+drawingfixture.commands = $(CXX) $(CXXFLAGS) $(LFLAGS) -o $@ $<
+QMAKE_EXTRA_TARGETS += drawingfixture
+PRE_TARGETDEPS += drawing-fixture
+QMAKE_CLEAN += drawing-fixture
+
 INCLUDEPATH += ../src
 
 HEADERS += \
@@ -133,6 +140,7 @@ HEADERS += \
     ../src/remotefetcher.h \
     ../src/rendercache.h \
     ../src/rendercheck.h \
+    ../src/helperconfinement.h \
     ../src/renderhelpers.h \
     ../src/renderrequest.h \
     ../src/renderservice.h \
@@ -281,6 +289,7 @@ SOURCES += \
     ../src/remotefetcher.cpp \
     ../src/rendercache.cpp \
     ../src/rendercheck.cpp \
+    ../src/helperconfinement.cpp \
     ../src/renderhelpers.cpp \
     ../src/renderrequest.cpp \
     ../src/renderservice.cpp \

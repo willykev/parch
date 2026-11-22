@@ -54,6 +54,9 @@ int printResult(const QString &text, QIODevice *out, QIODevice *err);
 // Best-effort diagnostic for failure to write or flush standard output.
 int outputError(QIODevice *err, const QString &error);
 
+// Why a command cannot write an output name, before starting work.
+QString outputRefusal(const QString &output, bool force);
+
 // The commands, a line each, for parch --help.
 QString summary();
 

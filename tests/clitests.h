@@ -78,4 +78,7 @@ void bibliographyLinksAreOnlyWebMailOrDoi();
 void exportNeverWritesThroughALink();
 void checkSaysWhetherHelpersAreIsolated();
 
+void qtOptionsInFileArgumentsAreNotPassedToQt();
+void checkReportsWhetherHelpersAreConfined();
+
 } // namespace CliTests

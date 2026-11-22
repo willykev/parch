@@ -874,7 +874,8 @@ void Benchmark::plan()
         m_out["pssEndWithOwnedMiB"] =
             m_out["pssEndMiB"].toDouble() + m_out["ownedProcessesEnd"].toObject()["pssMiB"].toDouble();
         QString error;
-        if (!Exporters::writeFile(m_output, QJsonDocument(m_out).toJson(), &error)) {
+        if (!Exporters::writeFile(m_output, QJsonDocument(m_out).toJson(), &error,
+                                  m_options.force ? ExistingOutput::ReplaceFile : ExistingOutput::Refuse)) {
             fail(error);
             return;
         }

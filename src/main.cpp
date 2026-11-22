@@ -120,12 +120,9 @@ int main(int argc, char *argv[])
         arguments.append(argument);
     }
     const Launch launch = parseLaunch(arguments);
-    // Launch holds the positional arguments. Qt receives only the prefix
-    // where its own options can occur.
-    if (const qsizetype separator = arguments.indexOf(QStringLiteral("--"), 1); separator >= 0) {
-        argc = int(separator);
-        argv[argc] = nullptr;
-    }
+    // Qt takes its configuration from the environment. Only parch reads the arguments.
+    int qtArgc = 1;
+    char *qtArgv[] = {argv[0], nullptr};
     if (launch.kind != Launch::Gui) {
         std::signal(SIGPIPE, SIG_IGN);
         if (launch.kind == Launch::Invalid) {
@@ -146,9 +143,9 @@ int main(int argc, char *argv[])
             if (launch.commandArguments.value(1) == u"export") {
                 qputenv("QT_QPA_PLATFORM", "offscreen");
                 qputenv("QT_QPA_PLATFORMTHEME", "generic");
-                application = std::make_unique<QGuiApplication>(argc, argv);
+                application = std::make_unique<QGuiApplication>(qtArgc, qtArgv);
             } else {
-                application = std::make_unique<QCoreApplication>(argc, argv);
+                application = std::make_unique<QCoreApplication>(qtArgc, qtArgv);
             }
             QThreadPool::globalInstance()->setStackSize(md::WorkerStackBytes);
             application->setApplicationName(QStringLiteral("parch"));
@@ -173,6 +170,7 @@ int main(int argc, char *argv[])
     // that is there.
     const bool picturing = !launch.picture.file.isEmpty();
     Picture picture = launch.picture;
+    picture.force = launch.force;
     if (picturing) {
         picture.file = QDir::current().absoluteFilePath(picture.file);
         if (!QFileInfo(QFileInfo(picture.file).absolutePath()).isDir())
@@ -223,6 +221,7 @@ int main(int argc, char *argv[])
             return refused(QCoreApplication::translate("main", "%1 is an input document").arg(benchmarkOutput));
         if (!QFileInfo(QFileInfo(benchmarkOutput).absolutePath()).isDir())
             return refused(QCoreApplication::translate("main", "there is no folder for %1").arg(benchmarkOutput));
+        if (const QString why = Cli::outputRefusal(benchmarkOutput, launch.force); !why.isEmpty()) return refused(why);
         scratchRoot.emplace(QDir::tempPath() + QStringLiteral("/parch-benchmark-XXXXXX"));
         if (!scratchRoot->isValid())
             return refused(QCoreApplication::translate("main", "cannot make a temporary folder to measure in"));
@@ -255,6 +254,7 @@ int main(int argc, char *argv[])
         }
         if (namesInput(picture.file, files, &paths))
             return refused(QCoreApplication::translate("main", "%1 is an input document").arg(picture.file));
+        if (const QString why = Cli::outputRefusal(picture.file, launch.force); !why.isEmpty()) return refused(why);
         qputenv("XDG_CACHE_HOME", QFile::encodeName(scratchRoot->filePath(QStringLiteral("cache"))));
         // Drawn off screen by the processor, with Qt's plainest platform
         // theme: no window shows, and the picture is the same on any machine.
@@ -284,7 +284,7 @@ int main(int argc, char *argv[])
         if (!why.isEmpty()) return refused(why);
     }
 
-    QGuiApplication app(argc, argv);
+    QGuiApplication app(qtArgc, qtArgv);
     QThreadPool::globalInstance()->setStackSize(md::WorkerStackBytes);
     app.setDesktopFileName(QStringLiteral("parch"));
     app.setApplicationName(QStringLiteral("parch"));
@@ -415,7 +415,7 @@ int main(int argc, char *argv[])
     std::unique_ptr<Benchmark> benchmark;
     if (benchmarking) {
         benchmark = std::make_unique<Benchmark>(benchmarkOutput, benchmarkLabel);
-        benchmark->setOptions({launch.benchmarkView, launch.benchmarkWindows, launch.benchmarkAdversarial});
+        benchmark->setOptions({launch.benchmarkView, launch.benchmarkWindows, launch.benchmarkAdversarial, launch.force});
         benchmark->setBackend(&backend);
         benchmark->setLaunchTime(launched);
         benchmark->opening();

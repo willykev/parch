@@ -235,7 +235,8 @@ void Screenshot::poll()
         return;
     }
     QString error;
-    if (!Exporters::writeFile(m_picture.file, encoded.data(), &error)) {
+    if (!Exporters::writeFile(m_picture.file, encoded.data(), &error,
+                              m_picture.force ? ExistingOutput::ReplaceFile : ExistingOutput::Refuse)) {
         finish(3, tr("cannot write the picture (%1)").arg(error));
         return;
     }

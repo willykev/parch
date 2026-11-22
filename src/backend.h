@@ -164,7 +164,8 @@ public:
     // scheme, which goes to whichever program registered for it), or, for
     // a file on this computer, shown in its folder once the writer agrees.
     enum class LinkWay { Refused, Open, Ask, Local };
-    static LinkWay linkWay(const QUrl &url);
+    // The written spelling lets the preview detect a host that changed when parsed.
+    static LinkWay linkWay(const QUrl &url, QStringView written = {});
     // Opens a web or mail address, and nothing else. True when an opener took it.
     bool openLink(const QUrl &url);
     // Opens an address of another kind that the writer agreed to open;

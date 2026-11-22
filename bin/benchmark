@@ -207,7 +207,7 @@ def run_matrix(out, cases, runs, offscreen):
                 folder = work / f"{name}-{run}"
                 shutil.copytree(documents[document].parent, folder)
                 result = out / f"{name}-{run}.json"
-                command = [str(ROOT / "build" / "parch"), "open", "--benchmark", str(result), "--view", view,
+                command = [str(ROOT / "build" / "parch"), "open", "--benchmark", str(result), "--force", "--view", view,
                            "--windows", str(windows)]
                 if adversarial:
                     command.append("--adversarial")

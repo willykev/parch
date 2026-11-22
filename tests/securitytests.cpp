@@ -10,6 +10,7 @@
 #include "editorbinding.h"
 #include "sourcebuffer.h"
 #include "history.h"
+#include "helperconfinement.h"
 #include "exporter.h"
 #include "exports.h"
 #include "filepicker.h"
@@ -51,6 +52,7 @@
 #include <QTextDocument>
 #include <QTextOption>
 #include <memory>
+#include <unistd.h>
 #include <sys/stat.h>
 
 namespace SecurityTests {
@@ -136,14 +138,17 @@ private:
 // before connecting; the second completes with a known server response.
 class AddressReply : public QNetworkReply {
 public:
-    AddressReply(const QNetworkRequest &request, QNetworkReply::NetworkError error, bool stall, QObject *parent)
+    AddressReply(const QNetworkRequest &request, QNetworkReply::NetworkError error, bool stall, const QByteArray &redirect, QObject *parent)
         : QNetworkReply(parent)
     {
         setRequest(request);
         setUrl(request.url());
         open(QIODevice::ReadOnly);
-        if (!stall) QTimer::singleShot(0, this, [this, error] {
-            if (error == NoError) {
+        if (!stall) QTimer::singleShot(0, this, [this, error, redirect] {
+            if (!redirect.isEmpty()) {
+                setAttribute(QNetworkRequest::HttpStatusCodeAttribute, 302);
+                setRawHeader("Location", redirect);
+            } else if (error == NoError) {
                 setAttribute(QNetworkRequest::HttpStatusCodeAttribute, 200);
                 setRawHeader("Content-Type", "image/png");
             } else {
@@ -167,13 +172,14 @@ class AddressNetwork : public QNetworkAccessManager {
 public:
     QList<QUrl> attempts;
     bool stall = false;
+    QByteArray firstRedirect;
     QNetworkReply::NetworkError firstError = QNetworkReply::UnknownNetworkError;
 protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override
     {
         attempts.append(request.url());
         const bool first = attempts.size() == 1;
-        return new AddressReply(request, first ? firstError : QNetworkReply::NoError, first && stall, this);
+        return new AddressReply(request, first ? firstError : QNetworkReply::NoError, first && stall, first ? firstRedirect : QByteArray(), this);
     }
 };
 
@@ -183,13 +189,13 @@ struct Fetched {
     bool done = false;
 };
 
-Fetched fetchNow(NetworkFetcher &fetcher, const QString &address, int timeoutMs = 10000)
+Fetched fetchNow(NetworkFetcher &fetcher, const QString &address, int timeoutMs = 10000, RemoteFetcher::AllowsHost allows = {})
 {
     QObject context;
     auto result = std::make_shared<Fetched>();
     fetcher.fetch(QUrl(address), &context, [result](const QByteArray &data, const QString &error) {
         *result = {data, error, true};
-    });
+    }, std::move(allows));
     QTest::qWaitFor([&] { return result->done; }, timeoutMs);
     return *result;
 }
@@ -365,13 +371,58 @@ void parchKeepsItsFilesToItself()
     QVERIFY(QFileInfo(named).permissions() & QFileDevice::ReadOther);
 }
 
+void webPicturesCheckTransitionAddresses()
+{
+    for (const char *closed : {"2001::1", "2001:0:ffff::", "2001:db8::1", "64:ff9b:1:ffff::", "2002:7f00:1::", "2002:c0a8:101::"})
+        QVERIFY2(!NetworkFetcher::isPublic(QHostAddress(QLatin1StringView(closed))), closed);
+    for (const char *open : {"2002:0808:0808::", "2606:4700::1111", "2001:4860:4860::8888"})
+        QVERIFY2(NetworkFetcher::isPublic(QHostAddress(QLatin1StringView(open))), open);
+}
+
+void helpersAreNotTakenFromTheProgramsOwnFolder()
+{
+    const QByteArray chosen = qgetenv("PARCH_HELPERS");
+    const auto restore = qScopeGuard([&] {
+        if (chosen.isNull()) qunsetenv("PARCH_HELPERS");
+        else qputenv("PARCH_HELPERS", chosen);
+    });
+    qunsetenv("PARCH_HELPERS");
+    QVERIFY(!HelperSet::searchFolders().contains(QCoreApplication::applicationDirPath()));
+    qputenv("PARCH_HELPERS", "");
+    QVERIFY(HelperSet::searchFolders().isEmpty());
+}
+
+void aHelperCannotReadOutsideItsFolders()
+{
+    if (!HelperConfinement::available())
+        QSKIP("Landlock is unavailable on this kernel");
+    QTemporaryDir folder;
+    const QString outside = folder.filePath(QStringLiteral("example.txt"));
+    writeFile(outside, "outside\n");
+    const QByteArray script =
+        "printf 'inside\\n' > own && read -r text < own && printf '%s\\n' \"$text\"\n"
+        "if (read -r text < \"$1\"); then echo outside-read; fi\n"
+        "if (echo changed > \"$1\"); then echo outside-written; fi\n"
+        "exit 0\n";
+    const QString name = QStringLiteral("draw.sh");
+    HelperProcess process({QStringLiteral("/bin/sh"), {name, outside}, {}, {{name, script}}, {}}, {},
+                          folder.filePath(QStringLiteral("tmp")));
+    QSignalSpy ended(&process, &HelperProcess::finished);
+    process.start();
+    QTRY_COMPARE(ended.size(), 1);
+    const auto outcome = ended.first().first().value<HelperOutcome>();
+    QVERIFY2(outcome.succeeded(), outcome.errors.constData());
+    QCOMPARE(outcome.output, QByteArray("inside\n"));
+    QCOMPARE(readFile(outside), QByteArray("outside\n"));
+}
+
 void helpersRunWithinLimits()
 {
     QTemporaryDir folder;
     QVERIFY(folder.isValid());
     // A stand-in helper that says what it may use.
     const QString program = folder.filePath(QStringLiteral("limits"));
-    writeFile(program, "#!/bin/sh\nexec cat /proc/self/limits\n");
+    installDrawingFixture(program);
     QVERIFY(QFile::setPermissions(program, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
     const RenderLimits limits;
     HelperProcess process({program, {}, {}, {}, {}}, limits, folder.filePath(QStringLiteral("tmp")));
@@ -384,7 +435,7 @@ void helpersRunWithinLimits()
     process.start();
     QVERIFY(QTest::qWaitFor([&] { return done; }, 30000));
     QVERIFY2(outcome.succeeded(), outcome.errors.constData());
-    // Each limit, soft and hard alike, from /proc/self/limits.
+    // The helper reads each soft and hard limit with getrlimit.
     const auto limit = [&](const char *name) {
         for (const QByteArray &line : outcome.output.split('\n'))
             if (line.startsWith(name)) {
@@ -630,7 +681,7 @@ void aLongPdfStaysCancellableWhileItIsSet()
 void webPictureRequestsKeepTheirHost()
 {
     const QUrl origin(QStringLiteral("https://pictures.example:8443/figures/one.png?size=2"));
-    for (const QHostAddress &address : {QHostAddress("203.0.113.7"), QHostAddress("2001:db8::7")}) {
+    for (const QHostAddress &address : {QHostAddress("203.0.113.7"), QHostAddress("2606:4700::7")}) {
         const QNetworkRequest request = NetworkFetcher::pictureRequest(origin, address);
         QCOMPARE(QHostAddress(request.url().host()), address);
         QCOMPARE(request.url().port(), origin.port());
@@ -639,7 +690,7 @@ void webPictureRequestsKeepTheirHost()
         QCOMPARE(request.rawHeader("Host"), QByteArray("pictures.example:8443"));
         QCOMPARE(request.peerVerifyName(), origin.host());
     }
-    const QList<QHostAddress> checked{QHostAddress("2001:db8::7"), QHostAddress("203.0.113.7")};
+    const QList<QHostAddress> checked{QHostAddress("2606:4700::7"), QHostAddress("203.0.113.7")};
     AddressNetwork network;
     NetworkFetcher fetcher(nullptr, &network);
     fetcher.setResolver([&](const QString &, auto answer) { answer(checked, {}); });
@@ -660,6 +711,41 @@ void webPictureRequestsKeepTheirHost()
     QCOMPARE(network.attempts.size(), 1);
 }
 
+void aWebPictureRedirectChecksItsHostAndAddresses()
+{
+    AddressNetwork network;
+    network.firstRedirect = "https://next.example/figure.png";
+    NetworkFetcher fetcher(nullptr, &network);
+    fetcher.setLocalNetworks([] { return QList<QNetworkAddressEntry>{}; });
+    QStringList resolved;
+    bool privateNext = false;
+    fetcher.setResolver([&](const QString &host, auto answer) {
+        resolved << host;
+        answer({QHostAddress(host == u"next.example" && privateNext ? "192.168.1.2" : "203.0.113.7")}, {});
+    });
+    QSet<QString> hosts{QStringLiteral("first.example")};
+    const auto fetch = [&] {
+        network.attempts.clear();
+        resolved.clear();
+        return fetchNow(fetcher, QStringLiteral("https://first.example/p.png"), 2000,
+                        [&](const QString &host) { return hosts.contains(host); });
+    };
+    auto result = fetch();
+    QVERIFY(result.done && result.error.contains(QStringLiteral("host")));
+    QCOMPARE(resolved, QStringList{QStringLiteral("first.example")});
+    QCOMPARE(network.attempts.size(), 1);
+    hosts.insert(QStringLiteral("next.example"));
+    privateNext = true;
+    result = fetch();
+    QVERIFY(result.done && result.error.contains(QStringLiteral("private")));
+    QCOMPARE(resolved.size(), 2);
+    QCOMPARE(network.attempts.size(), 1);
+    privateNext = false;
+    result = fetch();
+    QVERIFY2(result.done && result.error.isEmpty(), qPrintable(result.error));
+    QCOMPARE(network.attempts.size(), 2);
+}
+
 void webPicturesNeverComeFromThisComputersNetworks()
 {
     // This computer's own address, public or not, and any address on a
@@ -672,11 +758,11 @@ void webPicturesNeverComeFromThisComputersNetworks()
         networks.append(entry);
     };
     add("203.0.113.5", 24);
-    add("2001:db8:1::5", 64);
+    add("2606:4700:1::5", 64);
     add("198.51.100.9", 0);
-    for (const char *address : {"203.0.113.5", "203.0.113.77", "2001:db8:1::99", "::ffff:203.0.113.9", "198.51.100.9"})
+    for (const char *address : {"203.0.113.5", "203.0.113.77", "2606:4700:1::99", "::ffff:203.0.113.9", "2002:cb00:7109::", "64:ff9b::cb00:7109", "198.51.100.9"})
         QVERIFY2(NetworkFetcher::onLocalNetwork(QHostAddress(QString::fromLatin1(address)), networks), address);
-    for (const char *address : {"203.0.114.1", "2001:db8:2::1", "198.51.100.10"})
+    for (const char *address : {"203.0.114.1", "2606:4700:2::1", "198.51.100.10"})
         QVERIFY2(!NetworkFetcher::onLocalNetwork(QHostAddress(QString::fromLatin1(address)), networks), address);
 
     // Such an address is refused before anything is asked of it.
@@ -687,7 +773,7 @@ void webPicturesNeverComeFromThisComputersNetworks()
     fetcher.setProxy(QNetworkProxy(QNetworkProxy::HttpProxy, QStringLiteral("127.0.0.1"), server.port()));
     fetcher.setLocalNetworks([&] { return networks; });
     fetcher.setResolver([](const QString &host, std::function<void(const QList<QHostAddress> &, const QString &)> answer) {
-        answer({QHostAddress(host == u"home.test" ? QStringLiteral("2001:db8:1::42") : QStringLiteral("203.0.113.7"))}, {});
+        answer({QHostAddress(host == u"home.test" ? QStringLiteral("2606:4700:1::42") : QStringLiteral("203.0.113.7"))}, {});
     });
     for (const char *url : {"http://neighbour.test/pic.png", "http://home.test/pic.png"}) {
         const Fetched fetched = fetchNow(fetcher, QString::fromLatin1(url));
@@ -732,7 +818,7 @@ void webPicturesComeOnlyFromPublicAddresses()
     NetworkFetcher fetcher;
     fetcher.setProxy(QNetworkProxy(QNetworkProxy::HttpProxy, QStringLiteral("127.0.0.1"), server.port()));
     const QHash<QString, QStringList> names{
-        {QStringLiteral("public.test"), {QStringLiteral("203.0.113.7"), QStringLiteral("2001:db8::7")}},
+        {QStringLiteral("public.test"), {QStringLiteral("203.0.113.7"), QStringLiteral("2606:4700::7")}},
         {QStringLiteral("inside.test"), {QStringLiteral("10.1.2.3")}},
         {QStringLiteral("router.test"), {QStringLiteral("192.168.1.1")}},
         {QStringLiteral("office.test"), {QStringLiteral("172.20.0.4")}},
@@ -819,12 +905,12 @@ void webPicturesComeOnlyFromPublicAddresses()
     QVERIFY2(!fetched.error.isEmpty() && fetched.data.isEmpty(), qPrintable(fetched.error));
 
     // What counts as an address parch fetches from.
-    for (const char *open : {"203.0.113.7", "8.8.8.8", "2001:db8::1", "2606:4700::1111", "100.63.255.255", "100.128.0.0",
+    for (const char *open : {"203.0.113.7", "8.8.8.8", "2606:4700::1111", "100.63.255.255", "100.128.0.0",
                              "172.15.0.1", "172.32.0.1"})
         QVERIFY2(NetworkFetcher::isPublic(QHostAddress(QLatin1StringView(open))), open);
     for (const char *closed : {"127.0.0.1", "127.255.255.254", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.0.1",
                                "100.64.0.0", "100.127.255.255", "169.254.0.1", "224.0.0.1", "255.255.255.255", "0.0.0.0",
-                               "0.1.2.3", "::", "::1", "fc00::1", "fdff::1", "fe80::1", "febf::1", "ff00::1",
+                               "0.1.2.3", "::", "::1", "2001:db8::1", "2001::1", "64:ff9b:1::2", "2002:7f00:1::", "fc00::1", "fdff::1", "fe80::1", "febf::1", "ff00::1",
                                "::ffff:10.0.0.1", "::ffff:127.0.0.1", "::127.0.0.1", "64:ff9b::7f00:1"})
         QVERIFY2(!NetworkFetcher::isPublic(QHostAddress(QLatin1StringView(closed))), closed);
 

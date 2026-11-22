@@ -103,7 +103,21 @@ void PreviewResources::setRenderService(RenderService *service)
 }
 
 void PreviewResources::setFetcher(RemoteFetcher *fetcher) { m_fetcher = fetcher; }
-void PreviewResources::setRemoteAllowed(bool allowed) { m_remoteAllowed = allowed; }
+bool PreviewResources::setRemoteAllowed(bool all, const QSet<QString> &hosts)
+{
+    if (m_remoteAllowed == all && m_remoteHosts == hosts) return false;
+    m_remoteAllowed = all;
+    m_remoteHosts = hosts;
+    // Cancel a request whose hosts lost permission and retry a redirect
+    // that has just gained it. Completed pictures stay cached for later.
+    m_entries.removeIf([this](QHash<QString, Entry>::iterator it) {
+        const Entry &entry = it.value();
+        if (!entry.webRequest) return false;
+        return (entry.waiting && !m_remoteAllowed && !m_remoteHosts.contains(entry.webRequest->hosts)) ||
+               (!entry.webRequest->heldHost.isEmpty() && (m_remoteAllowed || m_remoteHosts.contains(entry.webRequest->heldHost)));
+    });
+    return true;
+}
 void PreviewResources::setColors(const RenderColors &colors) { m_colors = colors; }
 void PreviewResources::setScale(qreal scale) { m_scale = std::max<qreal>(1, scale); }
 void PreviewResources::setLabelFamily(const QString &family) { m_labelFamily = family; }
@@ -222,14 +236,19 @@ preview::Picture PreviewResources::image(const md::Destination &destination, con
     const QString key = QStringLiteral("parch:image/%1").arg(digest(source));
     // Whether pictures may be fetched is asked each time one is shown, and
     // one that was fetched before is not shown while they may not be.
-    if (remote && !m_remoteAllowed) {
+    const QUrl url = remote ? QUrl(written) : QUrl();
+    const auto known = m_entries.constFind(key);
+    const bool held = remote && !m_remoteAllowed && !m_remoteHosts.contains(url.host(QUrl::FullyEncoded));
+    const bool heldRedirect = remote && !m_remoteAllowed && known != m_entries.cend() && known->webRequest &&
+                              !m_remoteHosts.contains(known->webRequest->hosts);
+    if (held || heldRedirect) {
         preview::Picture refused;
         refused.key = key;
         refused.state = preview::Picture::Failed;
-        refused.diagnostic = tr("pictures from the network are turned off");
+        refused.diagnostic = held ? tr("pictures from the network are turned off")
+                                  : tr("This picture leads to a host that has not been approved.");
         return refused;
     }
-    const auto known = m_entries.constFind(key);
     if (known != m_entries.cend() && (known->waiting || known->drawnWith == QLatin1String("done"))) return known->picture;
     Entry &entry = m_entries[key];
     entry.picture.key = key;
@@ -258,17 +277,27 @@ preview::Picture PreviewResources::image(const md::Destination &destination, con
         }).then(this, take);
     } else if (remote) {
         if (!m_fetcher) return fail(tr("pictures from the network are not available"));
-        const QUrl url(written);
         if (!url.isValid()) return fail(tr("its address is not valid"));
         entry.waiting = true;
         entry.picture.state = preview::Picture::Pending;
-        m_fetcher->fetch(url, this, [this, key, generation, take](const QByteArray &data, const QString &error) {
+        entry.webRequest = std::make_shared<WebRequest>();
+        WebRequest *context = entry.webRequest.get();
+        entry.webRequest->hosts.insert(url.host(QUrl::FullyEncoded));
+        const auto allowsHost = [this, context](const QString &host) {
+            if (m_remoteAllowed || m_remoteHosts.contains(host)) {
+                context->hosts.insert(host);
+                return true;
+            }
+            context->heldHost = host;
+            return false;
+        };
+        m_fetcher->fetch(url, context, [this, context, key, generation, take](const QByteArray &data, const QString &error) {
             if (!error.isEmpty() || data.isEmpty()) {
                 loaded(key, generation, QImage(), error.isEmpty() ? tr("nothing came back") : error);
                 return;
             }
-            QtConcurrent::run(&m_pool, readBytes, data, true).then(this, take);
-        });
+            QtConcurrent::run(&m_pool, readBytes, data, true).then(context, take);
+        }, allowsHost);
     } else {
         return fail(tr("its address is not one parch shows pictures from"));
     }

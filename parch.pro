@@ -107,6 +107,7 @@ HEADERS += \
     src/remotefetcher.h \
     src/rendercache.h \
     src/rendercheck.h \
+    src/helperconfinement.h \
     src/renderhelpers.h \
     src/renderrequest.h \
     src/renderservice.h \
@@ -230,6 +231,7 @@ SOURCES += \
     src/remotefetcher.cpp \
     src/rendercache.cpp \
     src/rendercheck.cpp \
+    src/helperconfinement.cpp \
     src/renderhelpers.cpp \
     src/renderrequest.cpp \
     src/renderservice.cpp \

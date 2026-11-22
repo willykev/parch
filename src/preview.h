@@ -152,6 +152,8 @@ class Preview : public QObject {
     Q_PROPERTY(QString unresolved READ unresolved NOTIFY unresolvedChanged)
     // The text as last read names pictures on the web, whether or not they are shown.
     Q_PROPERTY(bool webPictures READ webPictures NOTIFY webPicturesChanged)
+    Q_PROPERTY(bool heldWebPictures READ heldWebPictures NOTIFY webPicturesChanged)
+    Q_PROPERTY(bool hasApprovedHosts READ hasApprovedHosts NOTIFY webPicturesChanged)
     // Why the text as it is now could not be read for the preview, as when
     // memory ran out; empty when it was.
     Q_PROPERTY(QString failure READ failure NOTIFY failureChanged)
@@ -219,7 +221,10 @@ public:
     bool late() const { return m_late; }
     bool canGoBack() const { return !m_trail.isEmpty(); }
     QString unresolved() const { return m_unresolved; }
-    bool webPictures() const { return m_webPictures; }
+    bool webPictures() const { return !m_webHosts.isEmpty(); }
+    bool heldWebPictures() const { return !m_remoteImages && !m_approvedHosts.contains(m_webHosts); }
+    bool hasApprovedHosts() const { return !m_approvedHosts.isEmpty(); }
+    Q_INVOKABLE void showWebPictures();
     QString failure() const { return m_failure; }
 
     // The document as it is built, its style, and how much it has built: for tests.
@@ -272,14 +277,13 @@ public:
 
     // Follows a link at a position of the surface or of an island: a place
     // in this document is scrolled to, a task's box is ticked in the source,
-    // a document is opened, a web or mail address goes to the desktop's
-    // handler, and anything else asks first (linkAsked()), as
+    // a document is opened, and web and mail addresses can go to the desktop
+    // directly or after confirmation (linkAsked()), as
     // Backend::linkWay() says. True when the link was taken.
     Q_INVOKABLE bool activate(const QString &link, int position, quint64 island = 0);
-    // An address as a question about opening it shows it: every character
-    // that cannot be seen by its code, and a very long one shortened in the
-    // middle, so that its scheme and host are always in view.
+    // A fully encoded address with long paths and queries shortened for display.
     static QString shownLink(const QUrl &url);
+    static QString linkHint(const QString &target, const QString &title);
     // Scrolls to a heading's slug, a note or a reference; false for a name
     // nothing has.
     Q_INVOKABLE bool goTo(const QString &name);
@@ -341,7 +345,8 @@ signals:
     // `target` is the address to open, or for a file on this computer
     // (`local`) its path, to show in its folder; `shown` is how the
     // question shows it.
-    void linkAsked(const QString &target, const QString &shown, const QString &scheme, bool local);
+    void linkAsked(const QString &target, const QString &shown, const QString &scheme, bool local,
+                   const QString &origin, bool userInfo);
     // What findHeading() found, for the request it numbered.
     void headingFound(int request, const QString &slug, int position);
 
@@ -414,7 +419,7 @@ private:
     bool toggleTask(int source);
     void setCurrent(bool current);
     void setUnresolved(const QStringList &messages);
-    void setWebPictures(bool web);
+    void updatePicturePolicy();
     void pictureChanged(const QString &key);
     // A file the text depends on changed on disk: a picture is read again,
     // and an included file, a bibliography or a style has the text read again.
@@ -484,7 +489,8 @@ private:
     Revision m_shownRevision = 0;
     bool m_current = false;
     QString m_unresolved;
-    bool m_webPictures = false;
+    QSet<QString> m_webHosts, m_approvedHosts;
+    QMetaObject::Connection m_pictureSettings;
     QString m_failure;
     QMetaObject::Connection m_parseFailures;
     quint64 m_nextId = 1;

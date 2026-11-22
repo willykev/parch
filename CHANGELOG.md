@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Link confirmations show the full host and port. Web links with user
+  information and mail links that request attachments ask before opening.
+- **Show them** remembers a document’s picture hosts. A new host asks
+  again. Formula and diagram helpers use a private working folder, and
+  `parch check --json` reports their file and network protections.
+- Screenshot and benchmark outputs need `--force` to replace an existing
+  file. Use `--` before file names that start with a dash.
+
 - The library marks links leading outside its folders. You can open a linked
   document directly. Searches, moves, trash and link updates stay inside
   the library. Open, unsaved drafts appear first.

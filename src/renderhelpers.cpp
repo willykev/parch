@@ -1,17 +1,19 @@
 #include "renderhelpers.h"
+#include "helperconfinement.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
 #include <QProcess>
-#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTimer>
 
+#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <sched.h>
@@ -28,6 +30,7 @@ namespace {
 // kernel would not give it a network namespace. Taken off again before the
 // errors are read.
 constexpr char kNoNetworkMarker[] = "\x01parch: no network namespace\n";
+std::atomic<HelperProcess::HomeObserver> homeObserver{nullptr};
 
 } // namespace
 
@@ -44,11 +47,12 @@ QString HelperSet::architecture()
 QStringList HelperSet::searchFolders()
 {
     const QString chosen = qEnvironmentVariable("PARCH_HELPERS");
-    if (!chosen.isEmpty()) return {QDir::cleanPath(chosen)};
+    if (qEnvironmentVariableIsSet("PARCH_HELPERS"))
+        return chosen.isEmpty() ? QStringList{} : QStringList{QDir::cleanPath(chosen)};
     const QString application = QCoreApplication::applicationDirPath();
     const QString development = QStringLiteral("/helpers/") + architecture();
-    return {application, QStringLiteral("/usr/lib/parch"), QDir::cleanPath(application + development),
-            QDir::cleanPath(application + QStringLiteral("/..") + development)};
+    return {QDir::cleanPath(application + development), QDir::cleanPath(application + QStringLiteral("/..") + development),
+            QStringLiteral("/usr/lib/parch")};
 }
 
 HelperSet HelperSet::in(const QString &folder)
@@ -87,18 +91,22 @@ QString HelperSet::mermanVersion() const
     QString version = pinnedVersion(merman, QLatin1StringView("merman"));
     if (version.isEmpty()) {
         // "merman-cli 0.10.0"
-        QProcess process;
-        process.setProcessChannelMode(QProcess::SeparateChannels);
-        process.start(merman, {QStringLiteral("--version")});
-        process.closeWriteChannel();
-        if (process.waitForFinished(5000) && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0) {
-            const QStringList words = QString::fromUtf8(process.readAllStandardOutput().left(256)).split(
-                QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
-            if (words.size() >= 2 && words.first() == u"merman-cli") version = words.at(1);
-        } else {
-            process.kill();
-            process.waitForFinished(1000);
-        }
+        RenderLimits limits;
+        limits.timeoutMs = 5000;
+        limits.maxOutputBytes = 4096;
+        HelperProcess process({merman, {QStringLiteral("--version")}, {}, {}, {}}, limits, QDir::tempPath());
+        QEventLoop loop;
+        bool done = false;
+        QObject::connect(&process, &HelperProcess::finished, &loop, [&](const HelperOutcome &result) {
+            if (result.succeeded()) {
+                const QStringList words = QString::fromUtf8(result.output.left(256)).simplified().split(u' ');
+                if (words.size() >= 2 && words.first() == u"merman-cli") version = words.at(1);
+            }
+            done = true;
+            loop.quit();
+        });
+        process.start();
+        if (!done) loop.exec();
     }
     return version.isEmpty() ? QStringLiteral("Merman (version unknown)") : QStringLiteral("Merman ") + version;
 }
@@ -135,6 +143,7 @@ HelperProcess::~HelperProcess()
         m_process->waitForFinished(2000);
     }
     delete m_process;
+    if (m_rules >= 0) ::close(m_rules);
     delete m_home;
 }
 
@@ -165,6 +174,16 @@ void HelperProcess::start()
         }
     }
 
+    if (const auto observe = homeObserver.load()) observe(m_run, home);
+    if (HelperConfinement::available()) {
+        m_rules = HelperConfinement::rulesFor(m_run, home);
+        if (m_rules < 0) {
+            m_outcome.errors = tr("could not allow the drawing helper and its required files").toUtf8();
+            m_done = true;
+            QMetaObject::invokeMethod(this, [this] { emit finished(m_outcome); }, Qt::QueuedConnection);
+            return;
+        }
+    }
     m_process = new QProcess;
     m_process->setProgram(m_run.program);
     m_process->setArguments(m_run.arguments);
@@ -186,7 +205,9 @@ void HelperProcess::start()
     const rlim_t memoryLimit = rlim_t(m_limits.maxMemoryBytes);
     const rlim_t cpuLimit = rlim_t(m_limits.maxCpuSeconds);
     // Runs in the child between fork and exec: system calls only.
-    m_process->setChildProcessModifier([fileLimit, memoryLimit, cpuLimit] {
+    m_process->setChildProcessModifier([fileLimit, memoryLimit, cpuLimit, rules = m_rules, process = m_process] {
+        if (::prctl(PR_SET_NO_NEW_PRIVS, 1L, 0L, 0L, 0L) != 0)
+            process->failChildProcessModifier("no new privileges", errno);
         // Dies with the thread that started it, so that a helper never
         // outlives parch.
         ::prctl(PR_SET_PDEATHSIG, SIGKILL);
@@ -200,6 +221,8 @@ void HelperProcess::start()
         ::setrlimit(RLIMIT_CPU, &cpu);
         const rlimit core{0, 0};
         ::setrlimit(RLIMIT_CORE, &core);
+        if (rules >= 0 && !HelperConfinement::enter(rules))
+            process->failChildProcessModifier("restrict helper files", errno);
         // A user namespace makes a network namespace possible without
         // privileges; the new network namespace has no way out.
         if (::unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0) {
@@ -241,6 +264,8 @@ std::function<bool()> &isolationProbe()
     return probe;
 }
 } // namespace
+
+void HelperProcess::setHomeObserver(HomeObserver observer) { homeObserver.store(observer); }
 
 void HelperProcess::setIsolationProbe(std::function<bool()> probe) { isolationProbe() = std::move(probe); }
 

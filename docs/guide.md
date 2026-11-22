@@ -530,14 +530,17 @@ In the preview:
 
 - It scrolls with the text beside it, each showing the same place. **Scroll
   sync** in the status line turns that off and on.
-- A click on a link opens a web or mail address in your browser or mail
-  program. A link to a Markdown or `.txt` document opens a tab at the
+- A click on an ordinary web or mail address opens your browser or mail
+  program. A web address with user information before the host, or a host
+  whose spelling changes when read, asks first. A mail link also asks if it
+  requests an attachment or uses fields beyond `to`, `cc`, `bcc`, `subject`,
+  `body` and `in-reply-to`. A link to a Markdown or `.txt` document opens a tab at the
   heading if the link names one. A link to a heading in the same document
   scrolls there. A footnote's number goes to the note and the arrow after
   the note comes back.
 - A link of any other kind asks first. An address such as `zoommtg:` or
-  `steam:` names the program it would go to by its scheme, and shows the
-  whole address; **Open** hands it to that program. A link to any other file
+  `steam:` shows its scheme, host and port on their own line. Long paths and
+  queries are shortened. **Open** hands the address to the registered program. A link to any other file
   on your computer, such as a PDF, a script or a folder, never opens from
   the preview: **Show in folder** shows it in your file manager, where you
   can open it yourself. Resting the pointer on a link always shows where it
@@ -1372,6 +1375,7 @@ Usage: parch [open] [--theme DIR] [--benchmark OUT] [FILE...]
   --benchmark OUT  Measure the window on a copy of one FILE; write JSON to OUT
   --screenshot     Draw the window off screen, save it as PNG once all of it
                    is drawn, and exit; nothing parch keeps is changed
+  --force          Replace an existing screenshot or benchmark output file
   --version        Print the version and exit
   --help           Print this help and exit
 
@@ -1403,7 +1407,9 @@ Commands that need no display (parch help COMMAND for its options):
 
 Files and folders given to `parch` while it is running open in the running
 window. A folder is added to the library. A file named like a command opens
-with `parch open check` or `parch -- check`.
+with `parch open check` or `parch -- check`. Put options before `--` and
+file names after it when scripting, as in `parch check --json -- "$file"`.
+Qt takes its platform and style from the environment.
 
 ### Checking, rendering and exporting
 
@@ -1524,6 +1530,8 @@ screen, and saves it once everything in it is drawn: the preview with its
 formulas and diagrams, spelling and live formatting, and any panel it opens.
 No window shows. It reads copies of your settings and changes nothing parch
 keeps, and it neither hands files to a running parch nor takes them from one.
+Both `--screenshot` and `--benchmark` need `--force` to replace an existing
+output. Choose a regular file. A symbolic link or an input file is refused.
 
 ```sh
 parch --screenshot notes.png --size 1280x800 --view split --line 40 notes.md
@@ -1621,16 +1629,21 @@ thing parch fetches from the network is a picture a document names by web
 address, for the preview, and only once you ask: fetching a picture tells
 its server that the document was opened, when, and from where. A document
 that names such pictures says **This document shows pictures from the web**
-above its preview, and **Show them** fetches them for that document, now
-and whenever it opens again; the choice is kept with its
-[document settings](#choose-how-a-document-is-read). **Fetch pictures from
-the web** under **Preview** in **Preferences…** shows them in every
-document. Exports never fetch pictures.
+above its preview. **Show them** remembers the hosts the document currently
+names. Another picture from one of those hosts can load automatically. If
+the document names a new host, **This document shows pictures from places
+it did not before.** appears. Choose **Show them** again to add the new
+hosts. A redirect can fetch only from an approved host. An approval from
+an older version remembers the hosts present the first time its preview is
+read. **Fetch pictures from the web** under **Preview** in **Preferences…**
+allows web pictures in every document. Exports never fetch pictures.
 
 Even when pictures are shown, parch fetches only from public addresses:
 never from your computer itself, your local network, or link-local and
 shared addresses, whatever name a document gives them, and it checks every
-address a name leads to, again after each redirect. It follows at most
+address a name leads to, again after each redirect. It also checks the
+IPv4 address carried by a 6to4 address and refuses Teredo, IPv6 documentation
+addresses and the local-use NAT64 prefix. It follows at most
 three redirects, never from `https` to `http`, takes only PNG, JPEG, GIF,
 WebP and SVG pictures, at most 32 MiB of one, and gives up on a picture
 that takes more than 30 seconds. The preview connects directly to a checked
@@ -1642,16 +1655,24 @@ and recovery) and what you were doing (open tabs, recent files, settings),
 are readable by your account alone, whatever your umask, and parch makes
 ones an earlier version left open private again as it starts.
 
-A web or mail link you click in the preview opens in your browser or mail
-program; a link of any other kind asks first.
+Before you open a preview link that needs confirmation, the dialog shows
+the scheme and, for a link with a host, its full host name and port.
+International host names appear in their encoded form.
 
-Formulas and diagrams are drawn by helper programs that run on your
-computer, cut off from the network, each in a private temporary folder,
-with at most 2 GiB of memory and 30 seconds of processor time, and stopped
-after 15 seconds. Cutting a helper off from the network needs unprivileged
-user namespaces, which some hardened kernels turn off; there the helpers
-run with the network, and `parch check --json` says so with
-`"isolated": false` under `helpers`.
+Each formula or diagram helper draws in a private temporary folder, with
+at most 2 GiB of memory and 30 seconds of processor time. parch stops a
+drawing after 15 seconds. Under `helpers`, `parch check --json` reports
+which protections your kernel provides.
+
+- `confined` means Landlock limits the files helpers can open to their
+  program, runtime libraries, fonts and private working folder.
+  They can write only in that folder. Landlock version 4 and later also
+  blocks TCP connections and listening ports.
+- `isolated` means the helper also has a separate network namespace with
+  no route to the network. This requires unprivileged user namespaces.
+
+A `false` value means that protection is unavailable. Drawing still works
+with the protections the kernel provides.
 
 ## Troubleshooting
 
@@ -1663,7 +1684,10 @@ AUR package `parch` is installed; both have a `parch` command. See
 be: the reason is shown in its place, and **Check document** lists every one.
 A TeX command parch cannot draw is listed under [Math](#math), and a Mermaid
 syntax error is said as Merman reports it. If none is drawn at all, the
-helpers are missing from `/usr/lib/parch`: install the package again.
+packaged helpers should be in `/usr/lib/parch`. Reinstall the package if
+they are missing. A development build first looks in `helpers/<arch>`
+beside the executable and one folder above. If you set `PARCH_HELPERS`,
+only that folder is used. It should contain `render-svg` and `merman-cli`.
 
 **A table shows as Markdown, not as a grid.** To restore a grid you hid,
 put the caret in the table and choose **Show table as grid** in the command

@@ -1,4 +1,5 @@
 #include "clitests.h"
+#include "helperconfinement.h"
 #include <QElapsedTimer>
 
 #include "apppaths.h"
@@ -409,9 +410,9 @@ void launchFindsCommands()
     QCOMPARE(parseLaunch({"parch", "a.md", "check"}).files, (QStringList{"a.md", "check"}));
     QCOMPARE(parseLaunch({"parch", "--help", "check"}).kind, Launch::Help);
     QCOMPARE(parseLaunch({"parch", "check", "--help"}).kind, Launch::Command);
-    // Qt's own options stay Qt's, wherever they are.
-    QCOMPARE(parseLaunch({"parch", "-platform", "offscreen", "check", "a.md"}).commandArguments,
-             (QStringList{"parch", "check", "a.md"}));
+    const Launch refused = parseLaunch({"parch", "-platform", "offscreen", "check", "a.md"});
+    QCOMPARE(refused.kind, Launch::Invalid);
+    QVERIFY(refused.error.contains(QStringLiteral("-platform")));
     // Opening is as it was.
     QCOMPARE(parseLaunch({"parch", "open", "a.md", "b.md"}).files, (QStringList{"a.md", "b.md"}));
     QCOMPARE(parseLaunch({"parch", "notes.md"}).kind, Launch::Gui);
@@ -2403,31 +2404,50 @@ void keepsQtNamedFilesAfterDoubleDash()
     QCOMPARE(stats.json().value(QStringLiteral("file")).toString(), box.path(file));
 }
 
+void qtOptionsInFileArgumentsAreNotPassedToQt()
+{
+    Sandbox box;
+    box.write(QStringLiteral("-platformpluginpath"), QStringLiteral("# A document\n"));
+    const Ran refused = runProcess(box, {"-platformpluginpath", box.root(), "--version"});
+    QCOMPARE(refused.code, int(Cli::Usage));
+    QVERIFY(refused.err.contains(QStringLiteral("-platformpluginpath")));
+    const Ran kept = runProcess(box, {"stats", "--json", "--", "-platformpluginpath"});
+    QCOMPARE(kept.code, int(Cli::Ok));
+    QCOMPARE(kept.json().value(QStringLiteral("words")).toInt(), 2);
+}
+
+void checkReportsWhetherHelpersAreConfined()
+{
+    Sandbox box;
+    box.write(QStringLiteral("doc.md"), QStringLiteral("Words.\n"));
+    const Ran ran = box.run({"check", "--json", "doc.md"});
+    QCOMPARE(ran.code, int(Cli::Ok));
+    QCOMPARE(ran.json().value(QStringLiteral("helpers")).toObject().value(QStringLiteral("confined")),
+             QJsonValue(HelperConfinement::available()));
+}
+
 void qtOptionsBeforeDoubleDash()
 {
     Sandbox box;
     QVERIFY(box.isValid());
     box.write(QStringLiteral("-reverse"), QStringLiteral("# One\n"));
     box.write(QStringLiteral("-platform"), QStringLiteral("# Two\n"));
-    const Ran checked = runProcess(box, {"-style", "Basic", "check", "--json", "--", "-reverse", "-platform"});
+    for (const QStringList &args : QList<QStringList>{{"-style", "Basic", "check", "--", "-reverse"},
+             {"-platform", "offscreen", "export", "-o", "book.pdf", "--", "-platform"},
+             {"stats", "--json", "-style", "--", "-platform"}}) {
+        const Ran refused = runProcess(box, args);
+        QCOMPARE(refused.code, int(Cli::Usage));
+    }
+    const Ran checked = runProcess(box, {"check", "--json", "--", "-reverse", "-platform"});
     QVERIFY2(checked.code == Cli::Ok, qPrintable(checked.said()));
-    const QJsonArray documents = checked.json().value(QStringLiteral("documents")).toArray();
-    QCOMPARE(documents.size(), 2);
-    for (int i = 0; i < documents.size(); ++i)
-        QCOMPARE(documents.at(i).toObject().value(QStringLiteral("file")).toString(),
-                 box.path(i == 0 ? QStringLiteral("-reverse") : QStringLiteral("-platform")));
-    const Ran pdf = runProcess(box, {"-platform", "offscreen", "export", "--quiet", "-o", "book.pdf", "--", "-platform"});
+    QCOMPARE(checked.json().value(QStringLiteral("documents")).toArray().size(), 2);
+    const Ran pdf = runProcess(box, {"export", "--quiet", "-o", "book.pdf", "--", "-platform"});
     QVERIFY2(pdf.code == Cli::Ok, qPrintable(pdf.said()));
     QVERIFY(box.read(QStringLiteral("book.pdf")).startsWith("%PDF-"));
     QVERIFY(pdf.err.isEmpty());
-    const Launch gui = parseLaunch({"parch", "open", "-style", "Basic", "--", "-platform", "offscreen", "-reverse", "--help", "--"});
+    const Launch gui = parseLaunch({"parch", "open", "--", "-platform", "offscreen", "-reverse", "--help", "--"});
     QCOMPARE(gui.kind, Launch::Gui);
     QCOMPARE(gui.files, (QStringList{"-platform", "offscreen", "-reverse", "--help", "--"}));
-    const Launch missingQtValue = parseLaunch({"parch", "stats", "-style", "--", "-platform"});
-    QCOMPARE(missingQtValue.commandArguments, (QStringList{"parch", "stats", "--", "-platform"}));
-    const Ran kept = runProcess(box, {"stats", "--json", "-style", "--", "-platform"});
-    QVERIFY2(kept.code == Cli::Ok, qPrintable(kept.said()));
-    QCOMPARE(kept.json().value(QStringLiteral("words")).toInt(), 1);
 }
 
 void quietExportSwitchesDoNotLogWarnings_data()

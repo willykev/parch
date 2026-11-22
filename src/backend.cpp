@@ -1,5 +1,7 @@
 #include "backend.h"
 
+#include <QUrlQuery>
+
 #include "attachments.h"
 #include "autosave.h"
 #include "document.h"
@@ -1005,7 +1007,7 @@ void Backend::setRenderService(std::unique_ptr<RenderService> service) { m_rende
 void Backend::setLinkOpener(std::function<bool(const QUrl &url)> opener) { m_linkOpener = std::move(opener); }
 void Backend::setFolderShower(std::function<bool(const QString &path)> shower) { m_folderShower = std::move(shower); }
 
-Backend::LinkWay Backend::linkWay(const QUrl &url)
+Backend::LinkWay Backend::linkWay(const QUrl &url, QStringView written)
 {
     if (!url.isValid()) return LinkWay::Refused;
     const QString scheme = url.scheme().toLower();
@@ -1020,7 +1022,32 @@ Backend::LinkWay Backend::linkWay(const QUrl &url)
         const QString host = url.host().toLower();
         return host.isEmpty() || host == u"localhost" ? LinkWay::Local : LinkWay::Refused;
     }
-    if (scheme == u"http" || scheme == u"https" || scheme == u"mailto") return LinkWay::Open;
+    if (scheme == u"http" || scheme == u"https") {
+        if (url.host().isEmpty()) return LinkWay::Refused;
+        const QString authority = url.authority(QUrl::FullyEncoded);
+        if (authority.contains(u'@')) return LinkWay::Ask;
+        if (!written.isEmpty()) {
+            const qsizetype start = written.indexOf(u"://");
+            if (start < 0) return LinkWay::Ask;
+            auto name = written.sliced(start + 3);
+            const auto end = std::find_if(name.begin(), name.end(), [](QChar c) { return c == u'/' || c == u'?' || c == u'#'; });
+            name = name.first(end - name.begin());
+            const qsizetype port = name.indexOf(u':', name.startsWith(u'[') ? name.indexOf(u']') + 1 : 0);
+            if (port >= 0) name = name.first(port);
+            if (std::any_of(name.begin(), name.end(), [](QChar c) { return c.unicode() > 0x7f; }) ||
+                name.compare(url.adjusted(QUrl::RemovePort).authority(QUrl::FullyEncoded), Qt::CaseInsensitive) != 0)
+                return LinkWay::Ask;
+        }
+        return LinkWay::Open;
+    }
+    if (scheme == u"mailto") {
+        static const QStringList fields{QStringLiteral("to"), QStringLiteral("cc"), QStringLiteral("bcc"),
+                                        QStringLiteral("subject"), QStringLiteral("body"), QStringLiteral("in-reply-to")};
+        const auto items = QUrlQuery(url).queryItems(QUrl::FullyDecoded);
+        for (const auto &item : items)
+            if (!fields.contains(item.first, Qt::CaseInsensitive)) return LinkWay::Ask;
+        return LinkWay::Open;
+    }
     return LinkWay::Ask;
 }
 

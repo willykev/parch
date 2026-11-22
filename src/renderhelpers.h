@@ -25,9 +25,8 @@ struct HelperSet {
     // This machine's architecture as the helper folders name it: aarch64 or x86_64.
     static QString architecture();
     // Where helpers are looked for, in order: the folder PARCH_HELPERS names
-    // (and nowhere else when it is set), the executable's own folder, the
-    // package's /usr/lib/parch, then a development build's
-    // build/helpers/<arch>, beside or above the executable.
+    // (and nowhere else when set), a development build's helpers/<arch>
+    // beside or above the executable, then the package's /usr/lib/parch.
     static QStringList searchFolders();
     // The first of those folders that holds each helper; a helper found in
     // none of them stays empty.
@@ -69,6 +68,8 @@ struct HelperRun {
     QList<QPair<QString, QByteArray>> files;
     // When set, the input is made from what the run before wrote.
     std::function<QByteArray(const QByteArray &)> inputFromPrevious;
+    // RaTeX finds fallback glyphs, including colour emoji, in the system fonts.
+    bool readSystemFonts = false;
 };
 
 struct HelperOutcome {
@@ -98,8 +99,8 @@ struct HelperOutcome {
 // gets a new session (so that it and anything it starts are stopped
 // together), a private temporary home that is its working folder and is
 // removed afterwards, an environment holding only that home, a temporary
-// folder inside it and a UTF-8 locale, no core dumps, no network, and the
-// limits above. It is killed when its parent thread ends.
+// folder inside it and a UTF-8 locale, no core dumps, and the limits
+// above. Landlock and a network namespace apply where the kernel permits. It is killed when its parent thread ends.
 class HelperProcess : public QObject {
     Q_OBJECT
 
@@ -116,10 +117,13 @@ public:
 
     // Whether the kernel lets a helper have a network namespace of its own
     // without privileges (unprivileged user namespaces). Asked of the kernel
-    // once, by a child that tries; where it cannot, helpers run with the
-    // network, and `parch check --json` says so. A test may answer instead.
+    // once, by a child that tries. Landlock can independently restrict TCP.
+    // A test may answer instead.
     static bool canIsolate();
     static void setIsolationProbe(std::function<bool()> probe);
+    // A test can attach observation files in the private home before the helper starts.
+    using HomeObserver = void (*)(const HelperRun &, const QString &);
+    static void setHomeObserver(HomeObserver observer);
 
 signals:
     void finished(const HelperOutcome &outcome);
@@ -138,6 +142,7 @@ private:
     QString m_temporaryRoot;
     QTemporaryDir *m_home = nullptr;
     QProcess *m_process = nullptr;
+    int m_rules = -1;
     QTimer *m_deadline = nullptr;
     HelperOutcome m_outcome;
     HelperOutcome::Status m_stopReason = HelperOutcome::Finished;

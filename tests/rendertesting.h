@@ -32,6 +32,7 @@
 // The diagram stand-in draws an SVG with one label and, for PNG, copies
 // <folder>/picture.png (80 × 40); a source starting with "refuse" is refused.
 // Asked for --version, it says "merman-cli 0.0.7".
+void installDrawingFixture(const QString &program);
 void writeFakeHelpers(const QString &folder, const QString &log);
 
 // The development build's helpers, or empty paths when bin/fetch-helpers

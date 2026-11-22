@@ -89,6 +89,7 @@ HelperRun plan(const RenderRequest &request, const QString &program)
 {
     HelperRun run;
     run.program = program;
+    run.readSystemFonts = true;
     run.arguments = {QStringLiteral("--stdout"),       QStringLiteral("--font-size"), number(request.fontSize),
                      QStringLiteral("--padding"),      QStringLiteral("0"),           QStringLiteral("--color"),
                      rgba(request.colors.foreground),

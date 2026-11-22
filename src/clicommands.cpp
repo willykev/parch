@@ -1,4 +1,5 @@
 #include "clicommands.h"
+#include "helperconfinement.h"
 
 #include "citations.h"
 #include "cli.h"
@@ -395,30 +396,14 @@ bool loadDocument(const QString &path, const DialectFlags &flags, const Context 
 bool mayWrite(const QString &output, bool force, const md::Document &document, const Dialect::Choice &dialect,
               QString *error)
 {
-    const QFileInfo info(output);
     if (Exporters::isSource(document, dialect, output)) {
         *error = QStringLiteral("%1 is the document or a file it is made from (one it includes, its bibliography or "
                                 "style, or a picture it shows); parch never writes over it")
                      .arg(output);
         return false;
     }
-    if (const QString why = Exporters::linkRefusal(output); !why.isEmpty()) {
-        *error = why + QStringLiteral(", even with --force: export to another name, or remove the link");
-        return false;
-    }
-    if (info.isDir()) {
-        *error = QStringLiteral("%1 is a folder").arg(output);
-        return false;
-    }
-    if (!QFileInfo(info.absolutePath()).isDir()) {
-        *error = QStringLiteral("there is no folder %1").arg(info.absolutePath());
-        return false;
-    }
-    if (info.exists() && !force) {
-        *error = QStringLiteral("%1 is already there; give --force to replace it").arg(output);
-        return false;
-    }
-    return true;
+    *error = outputRefusal(output, force);
+    return error->isEmpty();
 }
 
 // The file a problem is in: one of the document's, or a bibliography or style.
@@ -599,6 +584,7 @@ int check(const QStringList &arguments, const Context &context)
             helperPaths.insert(QStringLiteral("merman-cli"), helpers.merman);
         }
         // Whether the helpers run cut off from the network, as the kernel allows.
+        helperPaths.insert(QStringLiteral("confined"), HelperConfinement::available());
         helperPaths.insert(QStringLiteral("isolated"), HelperProcess::canIsolate());
         result.insert(QStringLiteral("renderers"), used);
         result.insert(QStringLiteral("helpers"), helperPaths);
@@ -1120,6 +1106,17 @@ int runCommand(const QStringList &arguments, const Context &context)
 }
 
 } // namespace
+
+QString outputRefusal(const QString &output, bool force)
+{
+    const QFileInfo info(output);
+    if (const QString why = Exporters::linkRefusal(output); !why.isEmpty())
+        return why + QStringLiteral(", even with --force: choose another name, or remove the link");
+    if (info.isDir()) return QStringLiteral("%1 is a folder").arg(output);
+    if (!QFileInfo(info.absolutePath()).isDir()) return QStringLiteral("there is no folder %1").arg(info.absolutePath());
+    if (info.exists() && !force) return QStringLiteral("%1 is already there; give --force to replace it").arg(output);
+    return {};
+}
 
 bool isCommand(const QString &word)
 {

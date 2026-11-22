@@ -287,7 +287,7 @@ private slots:
     void initTestCase();
     void launchParsing();
     void launchMessages();
-    void launchLeavesQtOptionsToQt();
+    void launchRefusesQtOptions();
     void helpColumnsLineUp();
     void testsKeepToTestLocations();
     void desktopEntryOpensMarkdown();
@@ -420,6 +420,8 @@ private slots:
     void cliWritesThroughShortWrites() { CliTests::writesThroughShortWrites(); }
     void cliKeepsQtNamedFilesAfterDoubleDash_data() { CliTests::keepsQtNamedFilesAfterDoubleDash_data(); }
     void cliKeepsQtNamedFilesAfterDoubleDash() { CliTests::keepsQtNamedFilesAfterDoubleDash(); }
+    void qtOptionsInFileArgumentsAreNotPassedToQt() { CliTests::qtOptionsInFileArgumentsAreNotPassedToQt(); }
+    void checkReportsWhetherHelpersAreConfined() { CliTests::checkReportsWhetherHelpersAreConfined(); }
     void cliQtOptionsBeforeDoubleDash() { CliTests::qtOptionsBeforeDoubleDash(); }
     void cliQuietExportSwitchesDoNotLogWarnings_data() { CliTests::quietExportSwitchesDoNotLogWarnings_data(); }
     void cliQuietExportSwitchesDoNotLogWarnings() { CliTests::quietExportSwitchesDoNotLogWarnings(); }
@@ -430,6 +432,7 @@ private slots:
     void cliExportNeverWritesThroughALink() { CliTests::exportNeverWritesThroughALink(); }
     void cliCheckSaysWhetherHelpersAreIsolated() { CliTests::checkSaysWhetherHelpersAreIsolated(); }
     // Pictures of the window. The tests themselves are in screenshottests.cpp.
+    void screenshotRefusesAnExistingFile() { ScreenshotTests::screenshotRefusesAnExistingFile(); }
     void screenshotOptionsAreParsed() { ScreenshotTests::optionsAreParsed(); }
     void screenshotMalformedOptionsAreRefused() { ScreenshotTests::malformedOptionsAreRefused(); }
     void screenshotHelpNamesEveryOption() { ScreenshotTests::helpNamesEveryOption(); }
@@ -922,6 +925,13 @@ private slots:
         PreviewTests::drawnPicturesAreDecodedOffTheUiThreadAndKeptToScreenSize();
     }
     void headingLinksAreFoundInTheSharedParse() { PreviewTests::headingLinksAreFoundInTheSharedParse(); }
+    void aLinkHintShowsTheHostItOpens() { PreviewTests::aLinkHintShowsTheHostItOpens(); }
+    void aWebLinkWithUserInfoAsksFirst() { PreviewTests::aWebLinkWithUserInfoAsksFirst(); }
+    void theLinkDialogNeverElidesTheHost() { PreviewTests::theLinkDialogNeverElidesTheHost(); }
+    void aMailLinkWithAnAttachmentAsksFirst() { PreviewTests::aMailLinkWithAnAttachmentAsksFirst(); }
+    void showingWebPicturesApprovesTheirHosts() { PreviewTests::showingWebPicturesApprovesTheirHosts(); }
+    void aPictureFromANewHostAsksAgain() { PreviewTests::aPictureFromANewHostAsksAgain(); }
+    void anOlderShowThemSettingStillWorks() { PreviewTests::anOlderShowThemSettingStillWorks(); }
     void webPicturesWaitUntilAsked() { PreviewTests::webPicturesWaitUntilAsked(); }
     void pathologicalBlocksStayCheapToLayOut() { PreviewTests::pathologicalBlocksStayCheapToLayOut(); }
     // What a frame holds, written in frametests.cpp.
@@ -1076,6 +1086,10 @@ private slots:
     void webPicturesNeverComeFromThisComputersNetworks() { SecurityTests::webPicturesNeverComeFromThisComputersNetworks(); }
     void exportsAskBeforeReplacingALink() { SecurityTests::exportsAskBeforeReplacingALink(); }
     void parchKeepsItsFilesToItself() { SecurityTests::parchKeepsItsFilesToItself(); }
+    void aWebPictureRedirectChecksItsHostAndAddresses() { SecurityTests::aWebPictureRedirectChecksItsHostAndAddresses(); }
+    void webPicturesCheckTransitionAddresses() { SecurityTests::webPicturesCheckTransitionAddresses(); }
+    void aHelperCannotReadOutsideItsFolders() { SecurityTests::aHelperCannotReadOutsideItsFolders(); }
+    void helpersAreNotTakenFromTheProgramsOwnFolder() { SecurityTests::helpersAreNotTakenFromTheProgramsOwnFolder(); }
     void helpersRunWithinLimits() { SecurityTests::helpersRunWithinLimits(); }
     void aLinkedAssetsFolderIsNotFollowed() { SecurityTests::aLinkedAssetsFolderIsNotFollowed(); }
     void bigPastesConvertOffTheWindowThread() { SecurityTests::bigPastesConvertOffTheWindowThread(); }
@@ -1488,24 +1502,14 @@ void ParchTests::launchMessages()
     QVERIFY(missing.error.contains(QStringLiteral("--theme")));
 }
 
-void ParchTests::launchLeavesQtOptionsToQt()
+void ParchTests::launchRefusesQtOptions()
 {
-    // Qt takes its own options out of the arguments, with one dash or two,
-    // and the value of those that have one; what is left is parch's.
-    const Launch platform = parseLaunch({"parch", "-platform", "offscreen", "x.md"});
-    QCOMPARE(platform.kind, Launch::Gui);
-    QCOMPARE(platform.files, QStringList{"x.md"});
-    const Launch doubled = parseLaunch({"parch", "--platform", "offscreen", "open", "x.md"});
-    QCOMPARE(doubled.kind, Launch::Gui);
-    QCOMPARE(doubled.files, QStringList{"x.md"});
-    const Launch many = parseLaunch({"parch", "open", "-style", "Basic", "-qwindowgeometry", "800x600+0+0", "-reverse",
-                                     "-style=Fusion", "--platformtheme", "generic", "-qwindowtitle", "Notes", "a.md",
-                                     "--theme", "/t", "b.md"});
-    QCOMPARE(many.kind, Launch::Gui);
-    QCOMPARE(many.files, (QStringList{"a.md", "b.md"}));
-    QCOMPARE(many.themeDirectory, QStringLiteral("/t"));
-    // Anything else that looks like an option is still refused.
-    QCOMPARE(parseLaunch({"parch", "--platformz", "x"}).kind, Launch::Invalid);
+    for (const QStringList &args : QList<QStringList>{{"parch", "-platform", "offscreen", "x.md"},
+             {"parch", "--platform", "offscreen", "open", "x.md"}, {"parch", "open", "-style=Basic"},
+             {"parch", "a.md", "--qwindowtitle", "Notes"}, {"parch", "-reverse"}, {"parch", "--platformz", "x"}})
+        QCOMPARE(parseLaunch(args).kind, Launch::Invalid);
+    QCOMPARE(parseLaunch({"parch", "--", "-platform", "offscreen", "x.md"}).files,
+             (QStringList{"-platform", "offscreen", "x.md"}));
 }
 
 void ParchTests::helpColumnsLineUp()
@@ -23919,12 +23923,11 @@ void ParchTests::helpersAreFoundWhereTheyAreInstalled()
     qunsetenv("PARCH_HELPERS");
     const QString arch = HelperSet::architecture();
     QVERIFY(arch == QLatin1String("aarch64") || arch == QLatin1String("x86_64"));
-    // Beside the executable, then the package's folder, then a development build's.
+    // The development folders precede the installed package.
     const QString application = QCoreApplication::applicationDirPath();
     QCOMPARE(HelperSet::searchFolders(),
-             (QStringList{application, QStringLiteral("/usr/lib/parch"),
-                          QDir::cleanPath(application + QStringLiteral("/helpers/") + arch),
-                          QDir::cleanPath(application + QStringLiteral("/../helpers/") + arch)}));
+             (QStringList{QDir::cleanPath(application + QStringLiteral("/helpers/") + arch),
+                          QDir::cleanPath(application + QStringLiteral("/../helpers/") + arch), QStringLiteral("/usr/lib/parch")}));
     // PARCH_HELPERS takes the place of all of them.
     QTemporaryDir folder;
     writeFakeHelpers(folder.path(), folder.filePath(QStringLiteral("log")));
@@ -23961,6 +23964,11 @@ void ParchTests::helpersRunWithoutNetworkEnvironmentOrHome()
     RenderRequest request;
     request.source = QStringLiteral("environ");
     const quint64 ticket = service.render(request);
+    const QString folderLog = log + QStringLiteral(".folder");
+    QTRY_VERIFY(!readFile(folderLog).trimmed().isEmpty());
+    const auto pid = readFile(log).simplified().split(' ').value(1).toLongLong();
+    const QByteArray interfaces = readFile(QStringLiteral("/proc/%1/net/dev").arg(pid));
+    writeFile(QString::fromUtf8(readFile(folderLog)).trimmed() + QStringLiteral("/inspected"), {});
     QVERIFY(results.wait(ticket));
     QCOMPARE(results[ticket].status, RenderResult::Rendered);
     // Nothing of parch's own environment reaches the helper: only a home of
@@ -23980,10 +23988,10 @@ void ParchTests::helpersRunWithoutNetworkEnvironmentOrHome()
     QVERIFY(!QFileInfo::exists(home));
     QVERIFY(QDir(folder.filePath(QStringLiteral("tmp"))).isEmpty());
     if (!results[ticket].networkIsolated)
-        QSKIP("This kernel gives no unprivileged network namespace, so helpers run with the network");
+        QSKIP("This kernel gives no unprivileged network namespace");
     // In a network namespace of its own the helper has a loopback device and nothing else.
     QStringList devices;
-    for (const QString &line : QString::fromUtf8(readFile(log + QStringLiteral(".net"))).split(u'\n', Qt::SkipEmptyParts))
+    for (const QString &line : QString::fromUtf8(interfaces).split(u'\n', Qt::SkipEmptyParts))
         if (line.contains(u':')) devices << line.section(u':', 0, 0).trimmed();
     QCOMPARE(devices, QStringList{QStringLiteral("lo")});
 }
@@ -24048,7 +24056,7 @@ void ParchTests::cancelledRenderStopsItsHelper()
     RenderRequest request;
     request.source = QStringLiteral("sleep");
     const quint64 ticket = service.render(request);
-    QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+    QTRY_VERIFY(!readFile(log + QStringLiteral(".child")).isEmpty());
     const qint64 child = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
     const qint64 helper = QString::fromUtf8(readFile(log)).section(u'\n', 0, 0).section(u' ', 1).toLongLong();
     QVERIFY(child > 0 && helper > 0);
@@ -24071,7 +24079,7 @@ void ParchTests::cancelledRenderStopsItsHelper()
         RenderService closing(renderOptions(HelperSet::in(folder.path()), folder.path()));
         request.source = QStringLiteral("sleep again");
         closing.render(request);
-        QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+        QTRY_VERIFY(!readFile(log + QStringLiteral(".child")).isEmpty());
         orphan = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
         leader = QString::fromUtf8(readFile(log)).split(u'\n', Qt::SkipEmptyParts).last().section(u' ', 1).toLongLong();
         QVERIFY(orphan > 0 && leader > 0);
@@ -24268,7 +24276,7 @@ void ParchTests::supersededRendersAreNeverDelivered()
     RenderRequest old;
     old.source = QStringLiteral("sleep old");
     const quint64 stale = service.render(old, QStringLiteral("block-7"));
-    QTRY_VERIFY(QFile::exists(log + QStringLiteral(".child")));
+    QTRY_VERIFY(!readFile(log + QStringLiteral(".child")).isEmpty());
     const qint64 child = QString::fromUtf8(readFile(log + QStringLiteral(".child"))).trimmed().toLongLong();
     RenderRequest current;
     current.source = QStringLiteral("new");
